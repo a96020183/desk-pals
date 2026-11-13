@@ -1,0 +1,50 @@
+name: mac-build
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile (same command as spidey-desktop.sh)
+        run: |
+          set -o pipefail
+          xcrun swiftc -O SpideyDesktop.swift -o SpideyDesktop 2>&1 | tee build.log
+      - name: Shell syntax
+        run: bash -n spidey-desktop.sh
+      - name: Smoke run (start, talk over the socket, screenshot, quit)
+        run: |
+          set -x
+          mkdir -p "$HOME/Library/Application Support/SpideyDesktop"
+          SOCK="$HOME/Library/Application Support/SpideyDesktop/spidey.sock"
+          ./SpideyDesktop "$SOCK" > run.log 2>&1 &
+          PID=$!
+          sleep 8
+          kill -0 $PID && echo "ALIVE after 8s"
+          node -e '
+            const net=require("net");const s=net.connect(process.argv[1]);s.setEncoding("utf8");
+            s.on("data",d=>process.stdout.write("REPLY "+d));
+            s.on("error",e=>{console.log("SOCKET ERR",e.message);process.exit(1)});
+            const msgs=["hello","where","act hug","act ball","tag 1.0.0 prod","act nest","claude wait x","act bond","where"];
+            let i=0;const t=setInterval(()=>{if(i<msgs.length)s.write(msgs[i++]+"\n");else{clearInterval(t);setTimeout(()=>s.end(),800)}},700);
+          ' "$SOCK"
+          node claude-hook.js wait < /dev/null || true
+          sleep 2
+          screencapture -x shot.png || echo "screencapture failed"
+          kill -0 $PID && echo "STILL ALIVE"
+          node -e 'const s=require("net").connect(process.argv[1],()=>{s.write("quit\n");setTimeout(()=>process.exit(0),500)})' "$SOCK" || true
+          sleep 2
+          kill -0 $PID 2>/dev/null && echo "did not quit" && kill $PID || echo "quit ok"
+          cat run.log
+          cat "$HOME/Library/Logs/spidey-desktop.log" 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: result-${{ matrix.os }}
+          path: |
+            build.log
+            run.log
+            shot.png
