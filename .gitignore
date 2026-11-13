@@ -1,0 +1,7 @@
+*.vsix
+*.zip
+Spidey*安裝包*/
+extension/desktop/SpideyDesktop
+art/
+*.log
+!.github/**

@@ -1,0 +1,103 @@
+{
+	"name": "spidey-pet",
+	"displayName": "Spidey 小夥伴",
+	"description": "像素小蜘蛛人：側邊欄一隻，整個電腦螢幕也一隻。會散步、噴絲、抱抱、敲螢幕；存檔比讚、出錯有蜘蛛感應、提醒休息；平日下班後黑化催你下班",
+	"version": "0.3.3",
+	"publisher": "local",
+	"engines": {
+		"vscode": "^1.70.0"
+	},
+	"main": "./extension.js",
+	"activationEvents": [
+		"onStartupFinished"
+	],
+	"contributes": {
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "spideyPet",
+					"title": "Spidey",
+					"icon": "media/icon.svg"
+				}
+			]
+		},
+		"views": {
+			"spideyPet": [
+				{
+					"type": "webview",
+					"id": "spideyPet.view",
+					"name": "🕷 Spidey",
+					"visibility": "visible"
+				}
+			]
+		},
+		"commands": [
+			{
+				"command": "spideyPet.show",
+				"title": "Spidey：叫他出來（側邊欄）"
+			},
+			{
+				"command": "spideyPet.hi",
+				"title": "Spidey：打招呼"
+			},
+			{
+				"command": "spideyPet.hug",
+				"title": "Spidey：抱抱"
+			},
+			{
+				"command": "spideyPet.knock",
+				"title": "Spidey：敲敲螢幕"
+			},
+			{
+				"command": "spideyPet.ball",
+				"title": "Spidey：丟球給他"
+			},
+			{
+				"command": "spideyPet.hide",
+				"title": "Spidey：躲起來／出來（Ctrl+Alt+S）"
+			},
+			{
+				"command": "spideyPet.bond",
+				"title": "Spidey：我們的感情（好感度）"
+			},
+			{
+				"command": "spideyPet.desktopOn",
+				"title": "Spidey：放他到整個螢幕（開機自動出現）"
+			},
+			{
+				"command": "spideyPet.desktopOff",
+				"title": "Spidey：收工（關掉整個螢幕版）"
+			},
+			{
+				"command": "spideyPet.restNow",
+				"title": "Spidey：測試休息提醒"
+			}
+		],
+		"configuration": {
+			"title": "Spidey 小夥伴",
+			"properties": {
+				"spideyPet.desktop": {
+					"type": "boolean",
+					"default": true,
+					"description": "整個螢幕版：不限 VS Code，整台電腦都有他，開機自動出現（Windows／macOS）"
+				},
+				"spideyPet.birthday": {
+					"type": "string",
+					"default": "",
+					"pattern": "^(\\d{2}-\\d{2})?$",
+					"description": "你的生日（MM-DD，例如 03-15），當天 Spidey 會捧蛋糕"
+				},
+				"spideyPet.restMinutes": {
+					"type": "number",
+					"default": 50,
+					"description": "連續用幾分鐘後提醒休息"
+				},
+				"spideyPet.idleMinutes": {
+					"type": "number",
+					"default": 5,
+					"description": "幾分鐘沒動作，Spidey 就去睡覺（休息計時也會歸零）"
+				}
+			}
+		}
+	}
+}

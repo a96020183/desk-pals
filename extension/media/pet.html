@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' {{csp}}; script-src 'nonce-{{nonce}}';">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--vscode-sideBar-background); color: var(--vscode-sideBar-foreground, var(--vscode-foreground)); font-family: var(--vscode-font-family); font-size: 12px; display: flex; flex-direction: column; overflow: hidden; user-select: none; }
+  #zone { flex: 1; position: relative; min-height: 120px; cursor: crosshair; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; }
+  .bubble { position: absolute; z-index: 2; pointer-events: none; transform: translate(-50%, -100%); background: #FFFFFF; color: #2A2F45; border: 2px solid #2A2F45; border-radius: 8px; padding: 3px 8px; white-space: nowrap; max-width: 92vw; overflow: hidden; text-overflow: ellipsis; }
+  .bubble::after { content: ""; position: absolute; left: 50%; bottom: -7px; width: 8px; height: 8px; background: #FFFFFF; border-right: 2px solid #2A2F45; border-bottom: 2px solid #2A2F45; transform: translateX(-50%) rotate(45deg); }
+  .bubble.alert { border-color: #C95454; color: #A83232; font-weight: 700; }
+  .bubble.alert::after { border-color: #C95454; }
+  .bubble.dark { background: #16171F; color: #EEEBF8; border-color: #7B6BC4; }
+  .bubble.dark::after { background: #16171F; border-color: #7B6BC4; }
+  .bubble.dark.alert { color: #FF8A8A; border-color: #C95454; }
+  .btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 6px 8px 8px; }
+  button { font: inherit; cursor: pointer; border-radius: 4px; padding: 3px 0; background: var(--vscode-button-secondaryBackground, transparent); color: var(--vscode-button-secondaryForeground, inherit); border: 1px solid var(--vscode-widget-border, #8888); }
+  button:hover { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+  button:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+</style>
+</head>
+<body>
+<div id="zone"><canvas id="pet"></canvas><div class="bubble" id="bubble" hidden></div></div>
+<div class="btns">
+  <button type="button" data-act="hi">打招呼</button>
+  <button type="button" data-act="swing">擺盪</button>
+  <button type="button" data-act="hang">倒吊</button>
+  <button type="button" data-act="sleep">睡覺</button>
+</div>
+<script nonce="{{nonce}}">
+const vscodeApi = acquireVsCodeApi();
+const COL_N = { k:"#2A2F45", r:"#D84A4A", R:"#A83A3A", b:"#3D5FAE", w:"#FFFFFF" };
+const COL_D = { k:"#0B0B10", r:"#2C2E3B", R:"#1B1C26", b:"#3E4055", w:"#F6F6FA" };
+let COL = COL_N, dark = false;
+// 平日 18:00 之後到隔天 06:00 黑化（跟桌面版同一條規則）
+function isDarkTime(n) {
+  const wd = d => d >= 1 && d <= 5;
+  if (n.getHours() >= 18) return wd(n.getDay());
+  if (n.getHours() < 6) return wd((n.getDay() + 6) % 7);
+  return false;
+}
+function checkDark(announce) {
+  const d = isDarkTime(new Date());
+  if (d === dark) return;
+  dark = d; COL = d ? COL_D : COL_N;
+  if (announce) say(d ? "……下班時間到了。" : "早安，我又變回來了 ☀", 3, d);
+}
+const HEAD = ["...kkkkkk...","..krrrrrrk..",".krRrrrrRrk.",".krrrRRrrrk.",".kwwkrrkwwk.",".kwwwkkwwwk.",".krwwrrwwrk.","..krrRRrrk.."];
+const SLEEPY = [".krrrrrrrrk.", ".kkkkrrkkkk.", ".krrrrrrrrk."];
+const BODY = ["...kkkkkk...","..kbrrrrbk..",".kbbrkkrbbk.",".krbrrrrbrk.","..kbbbbbbk.."];
+const ARMS_UP = ["kr.kkkkkk.rk","kbkbrrrrbkbk",".kbbrkkrbbk.","..kbrrrrbk..","..kbbbbbbk.."];
+const LEGS_A = ["..kbbkkbbk..","..krrkkrrk..","..kkk..kkk.."];
+const LEGS_B = ["..kbbkkbbk..",".krrk..krrk.",".kkk....kkk."];
+function frame(o) {
+  const head = HEAD.slice();
+  if (o.sleep) { head[4] = SLEEPY[0]; head[5] = SLEEPY[1]; head[6] = SLEEPY[2]; }
+  const rows = head.concat(o.armsUp ? ARMS_UP : BODY, o.step ? LEGS_B : LEGS_A);
+  if (dark) rows[10] = rows[10].slice(0, 5) + "ww" + rows[10].slice(7); // 黑衣白蜘蛛
+  return rows;
+}
+const S = 3, SW = 36, SH = 48;
+
+const zone = document.getElementById("zone");
+const cv = document.getElementById("pet");
+const g = cv.getContext("2d");
+const bubble = document.getElementById("bubble");
+let W = 240, H = 200, dpr = 1;
+function resize() {
+  const r = zone.getBoundingClientRect(); dpr = window.devicePixelRatio || 1;
+  W = Math.max(80, r.width); H = Math.max(100, r.height);
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+}
+new ResizeObserver(resize).observe(zone); resize();
+const ground = () => H - 12 - SH;
+const pick = a => a[Math.floor(Math.random() * a.length)];
+
+const TALK = ["嗨！今天也一起寫 code 吧", "能力越強，bug 越少！", "蜘蛛感應：你存檔了嗎？", "要不要喝口水？", "我幫你盯著 console", "這段 code 好帥", "Thwip! 🕸"];
+const SAVE = ["存好了！👍", "存檔成功，帥！", "Thwip! 已存檔", "穩穩的 👍"];
+const TALK_D = ["都幾點了還不下班？", "老闆不會多給你加班費的。", "……你還在？", "這個 bug 明天還會在，你不用在。", "下班。現在。"];
+const SAVE_D = ["存了就快走。", "存好了。可以關機了吧？", "……存檔。然後下班。"];
+const T = (n, d) => pick(dark ? d : n);
+const PATS = ["你今天也很棒！", "累了就休息一下，我陪你", "有我在，bug 不敢來", "我一直都在喔 ♥", "你寫的 code 很帥", "辛苦了，摸摸頭", "不管怎樣我都站你這邊", "慢慢來，你可以的"];
+const PATS_D = ["……摸夠了就下班。", "我是擔心你才一直催你。", "你已經很努力了，剩下的明天再說。", "哼，就讓你摸一下。"];
+
+const saved = vscodeApi.getState() || {};
+const pet = { x: saved.x ?? 30, y: 0, vx: 0, vy: 0, dir: 1, state: "walk", t: 3, ax: 0, ay: 0, L: 80, th: 0, om: 0, anim: 0, bubble: "", bt: 0, alert: false, sense: 0, z: 0 };
+pet.y = ground();
+checkDark(false);
+setInterval(() => checkDark(true), 30000);
+
+function say(text, sec = 2.2, alert = false) { pet.bubble = text; pet.bt = sec; pet.alert = alert; }
+function setState(s, t) { pet.state = s; pet.t = t; }
+function jump(vx = 0, vy = -300) { pet.vx = vx; pet.vy = vy; setState("air", 0); }
+function grounded() { if (pet.state !== "walk" && pet.state !== "idle" && pet.state !== "sleep") return; pet.y = ground(); }
+function startSwing(ax, ay) {
+  const hx = pet.x + SW / 2, hy = pet.y;
+  pet.ax = ax; pet.ay = ay;
+  pet.L = Math.max(36, Math.hypot(hx - ax, hy - ay));
+  pet.th = Math.atan2(hx - ax, hy - ay);
+  if (Math.abs(pet.th) < 0.5) pet.th = 0.9 * (hx < ax ? -1 : 1);
+  pet.om = 0; setState("swing", 3.2);
+}
+function startHang() {
+  pet.ax = Math.min(W - SW / 2 - 4, Math.max(SW / 2 + 4, pet.x + SW / 2));
+  pet.L = 0; setState("hang", 5);
+}
+
+function update(dt) {
+  pet.anim += dt; pet.t -= dt; if (pet.bt > 0) pet.bt -= dt; if (pet.sense > 0) pet.sense -= dt;
+  const gy = ground();
+  switch (pet.state) {
+    case "walk":
+      pet.x += pet.dir * 28 * dt; pet.y = gy;
+      if (pet.x < 2) { pet.x = 2; pet.dir = 1; }
+      if (pet.x > W - SW - 2) { pet.x = W - SW - 2; pet.dir = -1; }
+      if (pet.t < 0) {
+        const r = Math.random();
+        if (r < .38) setState("idle", 1.5 + Math.random() * 2.5);
+        else if (r < .56) jump(pet.dir * 60, -260);
+        else if (r < .68 && H > 140) startSwing(Math.min(W - 24, Math.max(24, pet.x + pet.dir * 60)), 16 + Math.random() * 24);
+        else if (r < .73 && H > 140) startHang();
+        else { pet.dir = Math.random() < .5 ? -1 : 1; setState("walk", 3 + Math.random() * 3); }
+      }
+      break;
+    case "idle":
+      pet.y = gy; if (pet.t < 0) setState("walk", 3 + Math.random() * 3); break;
+    case "sleep":
+      pet.y = gy; pet.z += dt; if (pet.t < 0) setState("walk", 3); break;
+    case "air":
+      pet.vy += 900 * dt; pet.x += pet.vx * dt; pet.y += pet.vy * dt;
+      if (pet.x < 0) { pet.x = 0; pet.vx = -pet.vx * .5; }
+      if (pet.x > W - SW) { pet.x = W - SW; pet.vx = -pet.vx * .5; }
+      if (pet.y < 0) { pet.y = 0; pet.vy = 0; }
+      if (Math.abs(pet.vx) > 1) pet.dir = pet.vx > 0 ? 1 : -1;
+      if (pet.y >= gy) { pet.y = gy; pet.vx = 0; pet.vy = 0; setState("walk", 2 + Math.random() * 3); }
+      break;
+    case "swing": {
+      pet.om = (pet.om - (900 / pet.L) * Math.sin(pet.th) * dt) * 0.997; pet.th += pet.om * dt;
+      const hx = pet.ax + pet.L * Math.sin(pet.th), hy = pet.ay + pet.L * Math.cos(pet.th);
+      pet.x = hx - SW / 2; pet.y = Math.min(hy, gy);
+      const vxs = pet.L * Math.cos(pet.th) * pet.om;
+      if (Math.abs(vxs) > 5) pet.dir = vxs > 0 ? 1 : -1;
+      if (pet.t < 0 || hy > gy + 1) jump(vxs * .8, -pet.L * Math.sin(pet.th) * pet.om * .8);
+      break;
+    }
+    case "hang":
+      pet.L = Math.min(Math.min(gy - 24, H * .45), pet.L + 160 * dt);
+      pet.x = pet.ax - SW / 2; pet.y = pet.L + Math.sin(pet.anim * 2.4) * 4;
+      if (pet.t < 0) { pet.vx = 0; pet.vy = 0; setState("air", 0); }
+      break;
+  }
+}
+
+function sprite(rows, x, y, fx, fy) {
+  g.save();
+  g.translate(Math.round(x + (fx ? SW : 0)), Math.round(y + (fy ? SH : 0)));
+  g.scale(fx ? -1 : 1, fy ? -1 : 1);
+  if (dark) { // 黑化時加一圈淡紫外框，深色主題才看得到
+    g.fillStyle = "#C8C0EC";
+    rows.forEach((row, ry) => { for (let rx = 0; rx < row.length; rx++) if (row[rx] !== ".") g.fillRect(rx * S - 1, ry * S - 1, S + 2, S + 2); });
+  }
+  rows.forEach((row, ry) => { for (let rx = 0; rx < row.length; rx++) { const c = row[rx]; if (c !== ".") { g.fillStyle = COL[c]; g.fillRect(rx * S, ry * S, S, S); } } });
+  g.restore();
+}
+
+function draw() {
+  const theme = document.body.classList.contains("vscode-dark") || document.body.classList.contains("vscode-high-contrast");
+  const city = theme ? "#2A3146" : "#DDE2EE", gnd = theme ? "#222839" : "#D2D8E6", web = dark ? "#7B6BC4" : (theme ? "#C9D1E6" : "#8E97B0"), ink = theme ? "#E9ECF3" : "#2E3550";
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, W, H);
+  g.fillStyle = city;
+  let bx = 0, seed = 7;
+  while (bx < W) {
+    seed = (seed * 9301 + 49297) % 233280; const bw = 20 + (seed % 26);
+    seed = (seed * 9301 + 49297) % 233280; const bh = 30 + (seed % Math.max(20, Math.min(90, H * .45)));
+    g.fillRect(bx, H - 12 - bh, bw - 3, bh); bx += bw;
+  }
+  g.fillStyle = gnd; g.fillRect(0, H - 12, W, 12);
+
+  g.strokeStyle = web; g.lineWidth = 1.5;
+  if (pet.state === "swing") {
+    g.beginPath(); g.moveTo(pet.ax, pet.ay); g.lineTo(pet.x + SW / 2, pet.y + 2); g.stroke();
+    g.fillStyle = web; g.beginPath(); g.arc(pet.ax, pet.ay, 3, 0, 7); g.fill();
+  }
+  if (pet.state === "hang") { g.beginPath(); g.moveTo(pet.ax, 0); g.lineTo(pet.ax, pet.y + 3); g.stroke(); }
+
+  sprite(frame({
+    step: pet.state === "walk" && Math.floor(pet.anim * 6) % 2 === 1,
+    armsUp: pet.state === "swing" || pet.state === "air" || (pet.bt > 0 && pet.state === "idle"),
+    sleep: pet.state === "sleep",
+  }), pet.x, pet.y, pet.dir < 0, pet.state === "hang");
+
+  if (pet.sense > 0 && pet.state !== "hang") {
+    // 蜘蛛感應：頭兩側的波紋
+    g.strokeStyle = "#C95454"; g.lineWidth = 2;
+    const cx = pet.x + SW / 2, cy = pet.y + 10, wob = Math.sin(pet.anim * 30) * 1.5;
+    for (const s of [-1, 1]) {
+      for (let i = 0; i < 3; i++) {
+        g.beginPath();
+        g.moveTo(cx + s * (22 + i * 5 + wob), cy - 10 + i * 6);
+        g.lineTo(cx + s * (30 + i * 5 + wob), cy - 16 + i * 8);
+        g.stroke();
+      }
+    }
+  }
+  if (pet.state === "sleep") {
+    g.fillStyle = ink; g.font = "bold 12px monospace";
+    for (let i = 0; i < 3; i++) {
+      const p = (pet.z * .6 + i / 3) % 1;
+      g.globalAlpha = 1 - p; g.fillText("z", pet.x + SW - 4 + p * 16, pet.y + 4 - p * 30);
+    }
+    g.globalAlpha = 1;
+  }
+  if (pet.bubble && pet.bt > 0) {
+    bubble.hidden = false; bubble.textContent = pet.bubble; bubble.classList.toggle("alert", pet.alert); bubble.classList.toggle("dark", dark);
+    const bw = bubble.offsetWidth;
+    const bxp = Math.min(W - bw / 2 - 4, Math.max(bw / 2 + 4, pet.x + SW / 2));
+    const byp = pet.state === "hang" ? pet.y + SH + 34 : pet.y - 8;
+    bubble.style.left = bxp + "px"; bubble.style.top = Math.max(30, byp) + "px";
+  } else bubble.hidden = true;
+}
+
+let last = performance.now(), saveT = 0;
+function loop(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  update(dt); draw();
+  saveT += dt; if (saveT > 5) { saveT = 0; vscodeApi.setState({ x: pet.x }); }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+zone.addEventListener("pointerdown", e => {
+  const r = zone.getBoundingClientRect(); const x = e.clientX - r.left, y = e.clientY - r.top;
+  if (x > pet.x - 6 && x < pet.x + SW + 6 && y > pet.y - 6 && y < pet.y + SH + 6) {
+    if (pet.state === "sleep") { setState("walk", 2); say("嗯？我醒了！", 1.8); return; }
+    say(T(PATS, PATS_D), 2.4); if (pet.state === "walk" || pet.state === "idle") jump(0, -260);
+    return;
+  }
+  if (pet.state === "hang" || pet.state === "sleep") { setState("walk", 1); grounded(); }
+  if (y < ground() - 20) { startSwing(x, y); say("Thwip!", .8); }
+  else { jump((x - pet.x - SW / 2) / 0.6, -260); say("Thwip!", .8); }
+});
+
+function act(a) {
+  if (a === "hi") { grounded(); setState("idle", 2.4); say(dark ? "……嗨。下班了嗎？" : "嗨！我是你的 Spidey 👋", 2.4); }
+  if (a === "swing") { grounded(); startSwing(pet.x + SW / 2 > W / 2 ? W * .25 : W * .75, 20); say("Thwip!", 1); }
+  if (a === "hang") { grounded(); startHang(); say("倒吊看世界～", 2); }
+  if (a === "sleep") { pet.z = 0; pet.y = ground(); setState("sleep", 8); say("晚安…", 1.2); }
+}
+document.querySelectorAll("button").forEach(b => b.addEventListener("click", () => act(b.dataset.act)));
+
+window.addEventListener("message", e => {
+  const m = e.data || {};
+  if (m.type === "save") {
+    if (pet.state === "sleep") setState("walk", 2);
+    grounded(); say(T(SAVE, SAVE_D), 2); jump(0, -300);
+  } else if (m.type === "errors") {
+    if (m.count > m.prev) {
+      if (pet.state === "sleep") setState("walk", 2);
+      pet.sense = 2.8; say(dark ? `${m.count} 個錯誤……明天再修，回家。` : `蜘蛛感應！有 ${m.count} 個錯誤`, 3, true);
+      if (pet.state === "walk") setState("idle", 3);
+    } else if (m.count === 0) {
+      say(dark ? "錯誤清完了。那就可以下班了吧。" : "錯誤都清光了，讚！", 2.4); grounded(); jump(0, -300);
+    }
+  } else if (m.type === "rest") {
+    if (pet.state === "sleep") setState("walk", 1);
+    grounded(); startSwing(W / 2, 18);
+    setTimeout(() => say(dark ? "寫很久了。站起來。然後下班。" : "寫很久了，起來喝水伸展一下吧 🥤", 7), 600);
+  } else if (m.type === "idle") {
+    pet.z = 0; grounded(); setState("sleep", 1e9);
+  } else if (m.type === "wake") {
+    if (pet.state === "sleep") { setState("walk", 2); say(dark ? "……你回來了。是要來關機的吧？" : "你回來啦！", 1.8); }
+  } else if (m.type === "hi") act("hi");
+});
+</script>
+</body>
+</html>
