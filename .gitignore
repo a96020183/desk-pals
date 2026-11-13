@@ -5,3 +5,5 @@ extension/desktop/SpideyDesktop
 art/
 *.log
 !.github/**
+/extension.vsixmanifest
+/[[]Content_Types].xml
