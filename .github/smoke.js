@@ -13,6 +13,9 @@ const msgs = [
 	"remind " + (Date.now() + 60000) + " CI reminder",
 	"ticket " + (Date.now() + 3 * 3600e3) + " 120 https://example.com CI ticket",
 	"wait", "snap " + out + "/shot.png", "where",
+	// 天線寶寶一櫃：當場換櫃、全部出來、吐司時間
+	"lineup teletubbies", "wait", "wait", "act all", "wait", "wait", "wait", "act scene toast", "wait", "wait", "wait", "wait", "wait",
+	"snap " + out + "/shot-teletubbies.png", "where",
 ];
 let i = 0;
 const t = setInterval(() => {

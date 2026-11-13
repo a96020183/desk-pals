@@ -1,4 +1,5 @@
-// 公仔櫃 Desk Pals：右下角一個公仔櫃（Spidey／小波／史迪仔／人魚漢頓），選一隻出來在整個螢幕陪你
+// 公仔櫃 Desk Pals：右下角一個公仔櫃，選一隻出來在整個螢幕陪你
+// 兩櫃：經典（Spidey／小波／史迪仔／人魚漢頓）、天線寶寶（丁丁／迪西／拉拉／小波，大格是小波）
 // Windows：多角色桌面版（DeskPals.cs）；macOS：只有 Spidey（SpideyDesktop.swift）
 const vscode = require("vscode");
 const fs = require("fs");
@@ -7,13 +8,22 @@ const net = require("net");
 const cp = require("child_process");
 const path = require("path");
 
-// 各角色在狀態列／通知用的圖示和名字
+// 各角色在狀態列／通知用的圖示和名字；lineup＝在哪一櫃（小波兩櫃都有）
 const CHARS = {
-	spidey: { emoji: "🕷", name: "Spidey" },
-	po: { emoji: "🛴", name: "小波" },
-	stitch: { emoji: "👽", name: "史迪仔" },
-	hangyodon: { emoji: "🐟", name: "人魚漢頓" },
+	spidey: { emoji: "🕷", name: "Spidey", lineup: "classic" },
+	po: { emoji: "🛴", name: "小波", lineup: "both" },
+	stitch: { emoji: "👽", name: "史迪仔", lineup: "classic" },
+	hangyodon: { emoji: "🐟", name: "人魚漢頓", lineup: "classic" },
+	tinky: { emoji: "👜", name: "丁丁", lineup: "teletubbies" },
+	dipsy: { emoji: "🎩", name: "迪西", lineup: "teletubbies" },
+	laalaa: { emoji: "🟠", name: "拉拉", lineup: "teletubbies" },
 };
+const LINEUPS = {
+	classic: { name: "經典一櫃", desc: "Spidey、小波、史迪仔、人魚漢頓", ids: ["spidey", "po", "stitch", "hangyodon"] },
+	teletubbies: { name: "天線寶寶一櫃", desc: "丁丁、迪西、拉拉、小波（大格是小波）", ids: ["tinky", "dipsy", "laalaa", "po"] },
+};
+const lineupSetting = () => (vscode.workspace.getConfiguration("deskPals").get("lineup", "classic") === "teletubbies" ? "teletubbies" : "classic");
+const inLineup = (id, lu) => !!CHARS[id] && (CHARS[id].lineup === "both" || CHARS[id].lineup === lu);
 let current = "spidey";
 const E = () => (CHARS[current] || CHARS.spidey).emoji;
 const N = () => (CHARS[current] || CHARS.spidey).name;
@@ -57,7 +67,7 @@ function activate(context) {
 		const dark = isDarkTime(new Date());
 		const e = E();
 		if (msg.type === "save") flash(dark ? `${e} 存了就快走。` : `${e}👍 存好了！`);
-		else if (msg.type === "errors" && msg.count > msg.prev) flash(current === "spidey" ? `${e}❗ 蜘蛛感應：${msg.count} 個錯誤` : current === "hangyodon" ? `${e}❗ 交給我這個英雄！${msg.count} 個錯誤` : `${e}❗ 有 ${msg.count} 個錯誤`, 5000);
+		else if (msg.type === "errors" && msg.count > msg.prev) flash(current === "spidey" ? `${e}❗ 蜘蛛感應：${msg.count} 個錯誤` : current === "hangyodon" ? `${e}❗ 交給我這個英雄！${msg.count} 個錯誤` : current === "tinky" ? `${e}❗ 哎喲！${msg.count} 個錯誤` : `${e}❗ 有 ${msg.count} 個錯誤`, 5000);
 		else if (msg.type === "errors" && msg.count === 0) flash(dark ? `${e} 錯誤清完了，下班吧` : `${e}✨ 錯誤清光了！`);
 		else if (msg.type === "idle") flash(`${e}💤`, 1e12);
 		else if (msg.type === "wake") flash(`${e} 你回來啦！`, 2500);
@@ -174,6 +184,7 @@ function activate(context) {
 		vscode.commands.registerCommand("deskPals.hide", () => desktop.send("act hide")),
 		vscode.commands.registerCommand("deskPals.bond", () => desktop.send("act bond")),
 		vscode.commands.registerCommand("deskPals.pick", () => pickCharacter(context, desktop, provider, false)),
+		vscode.commands.registerCommand("deskPals.lineup", () => pickLineup(desktop)),
 		vscode.commands.registerCommand("deskPals.all", () => desktop.send("act all")),
 		vscode.commands.registerCommand("deskPals.home", () => desktop.send("act home")),
 		vscode.commands.registerCommand("deskPals.focus", () => desktop.send(`act focus ${Math.max(1, vscode.workspace.getConfiguration("deskPals").get("focusMinutes", 25))}`)),
@@ -183,6 +194,13 @@ function activate(context) {
 		vscode.commands.registerCommand("deskPals.quietOff", () => desktop.send("act quiet 0")),
 		vscode.workspace.onDidChangeConfiguration((e) => {
 			if (e.affectsConfiguration("deskPals.restMinutes") || e.affectsConfiguration("deskPals.idleMinutes") || e.affectsConfiguration("deskPals.birthday") || e.affectsConfiguration("deskPals.companyHost")) desktop.sendConfig();
+			// 換一櫃（設定頁直接改也算）：桌面版當場換，不用重開
+			if (e.affectsConfiguration("deskPals.lineup")) {
+				const lu = lineupSetting();
+				if (desktop.skipLineup === lu) { desktop.skipLineup = null; return; }
+				desktop.setLineup(lu);
+				flash(`${E()} 換成${LINEUPS[lu].name}囉！`, 3000);
+			}
 		})
 	);
 
@@ -198,26 +216,58 @@ function activate(context) {
 	}
 }
 
+// 挑公仔：兩櫃的公仔都列出來；挑到另一櫃的公仔就順便換櫃（小波兩櫃都有，選現在這一櫃的小波就不換）
 async function pickCharacter(context, desktop, provider, first) {
 	if (process.platform !== "win32") {
 		vscode.window.showInformationMessage("Mac 版目前只有 Spidey。");
 		return;
 	}
-	const items = Object.keys(CHARS).map((id) => ({
-		label: `${CHARS[id].emoji} ${CHARS[id].name}`,
-		description: id === current ? "現在出來的是他" : "",
-		id,
-	}));
+	const now = lineupSetting();
+	const items = [];
+	for (const lu of [now, now === "classic" ? "teletubbies" : "classic"]) {
+		items.push({ label: `${LINEUPS[lu].name}${lu === now ? "（現在這一櫃）" : ""}`, kind: vscode.QuickPickItemKind.Separator });
+		for (const id of LINEUPS[lu].ids) {
+			items.push({
+				label: `${CHARS[id].emoji} ${CHARS[id].name}`,
+				description: lu === now && id === current ? "現在出來的是他" : (lu !== now ? `換成${LINEUPS[lu].name}` : ""),
+				id, lineup: lu,
+			});
+		}
+	}
 	const pick = await vscode.window.showQuickPick(items, {
 		title: first ? "公仔櫃：挑你的第一個公仔（之後點右下角的公仔櫃就能換）" : "公仔櫃：換誰出來？",
-		placeHolder: "選一隻",
+		placeHolder: "選一隻（選天線寶寶就會換成天線寶寶一櫃）",
 	});
 	if (first) context.globalState.update("picked", true);
-	if (!pick) return;
-	await vscode.workspace.getConfiguration("deskPals").update("character", pick.id, vscode.ConfigurationTarget.Global);
-	if (desktop.connected()) desktop.send(`act select ${pick.id}`);
+	if (!pick || !pick.id) return;
+	const cfg = vscode.workspace.getConfiguration("deskPals");
+	await cfg.update("character", pick.id, vscode.ConfigurationTarget.Global);
+	if (pick.lineup !== now) {
+		// 換櫃＋指定這隻出來：一行告訴桌面版（設定改變的通知就不要再送一次）
+		desktop.skipLineup = pick.lineup;
+		await cfg.update("lineup", pick.lineup, vscode.ConfigurationTarget.Global);
+		desktop.setLineup(pick.lineup, pick.id);
+	} else if (desktop.connected()) desktop.send(`act select ${pick.id}`);
 	else desktop.sendLater(`act select ${pick.id}`);
 	desktop.onActive(pick.id);
+}
+
+// 換一櫃：經典／天線寶寶
+async function pickLineup(desktop) {
+	if (process.platform !== "win32") {
+		vscode.window.showInformationMessage("Mac 版目前只有 Spidey。");
+		return;
+	}
+	const now = lineupSetting();
+	const items = ["classic", "teletubbies"].map((lu) => ({
+		label: `${lu === "classic" ? "🕷" : "☀"} ${LINEUPS[lu].name}`,
+		description: LINEUPS[lu].desc,
+		detail: lu === now ? "現在是這一櫃" : undefined,
+		lineup: lu,
+	}));
+	const pick = await vscode.window.showQuickPick(items, { title: "公仔櫃：換一櫃", placeHolder: "選一櫃" });
+	if (!pick || pick.lineup === now) return;
+	await vscode.workspace.getConfiguration("deskPals").update("lineup", pick.lineup, vscode.ConfigurationTarget.Global);   // 設定改變 → 送 lineup 給桌面版
 }
 
 function countErrors() {
@@ -259,6 +309,10 @@ class Desktop {
 		this.ps1 = "desk-pals.ps1";
 		this.lnkName = "公仔櫃 Desk Pals.lnk";
 		this.onActive = () => {};
+		this.skipLineup = null;
+		this.lineupAck = null;
+		this.restartedOnce = false;
+		this.restarting = false;
 		this.onFocus = () => {};
 		this.onQuiet = () => {};
 		// macOS 的 socket 放固定位置（開機由 launchd 啟動時 TMPDIR 不一定相同）
@@ -285,9 +339,25 @@ class Desktop {
 	}
 
 	send(line) { if (this.sock) this.sock.write(line + "\n"); }
+	// 換櫃（可指定哪隻出來）。桌面版會回「lineup <櫃>」；沒回＝還在跑更新前的舊版程式，
+	// 要天線寶寶一櫃時就重開一次桌面版，載入新版（每次啟動 VS Code 最多一次）
+	setLineup(lu, pet) {
+		const line = pet ? `lineup ${lu} ${pet}` : `lineup ${lu}`;
+		if (!this.connected()) { this.sendLater(line); return; }
+		this.lineupAck = null;
+		this.send(line);
+		if (lu === "classic" || this.restartedOnce) return;
+		setTimeout(() => {
+			if (this.connected() && this.lineupAck !== lu && !this.restartedOnce) {
+				this.restartedOnce = true; this.restarting = true;
+				this.send("quit");   // 關掉後 connect() 會自動重開（帶 -Lineup）
+			}
+		}, 3000);
+	}
 	sendLater(line) { this.pending = line; }
 	sendConfig() {
 		const cfg = vscode.workspace.getConfiguration("deskPals");
+		if (this.win) this.setLineup(lineupSetting());   // 跟設定對齊（桌面版已經是這一櫃就什麼都不做）
 		this.send(`config ${cfg.get("restMinutes", 50)} ${cfg.get("idleMinutes", 5)}`);
 		const bd = String(cfg.get("birthday", "") || "").trim();
 		this.send(`birthday ${/^\d{2}-\d{2}$/.test(bd) ? bd : ""}`);
@@ -320,7 +390,9 @@ class Desktop {
 			while ((i = buf.indexOf("\n")) >= 0) {
 				const line = buf.slice(0, i).trim();
 				buf = buf.slice(i + 1);
-				if (line === "bye") this.want = false; // 使用者從桌面右鍵「收工」
+				if (line === "bye") { if (this.restarting) this.restarting = false; else this.want = false; } // 使用者從桌面右鍵「收工」（換櫃重開不算）
+				const lu = /^lineup (\w+)$/.exec(line);
+				if (lu) this.lineupAck = lu[1];
 				const m = /^active (\w+)$/.exec(line);
 				if (m) this.onActive(m[1]);
 				const f = /^focus (on|off)(?: (\d+))?$/.exec(line);
@@ -421,8 +493,9 @@ class Desktop {
 			let p;
 			if (process.platform === "win32") {
 				// detached 的 powershell 沒有主控台會直接結束；改由短命的 powershell 用 Start-Process 叫一支獨立的起來
+				const lu = lineupSetting();
 				const pet = vscode.workspace.getConfiguration("deskPals").get("character", "spidey");
-				const args = `-NoProfile -WindowStyle Hidden -File "${path.join(this.home, this.ps1)}" -PipeName ${this.name} -Pet ${CHARS[pet] ? pet : "spidey"}`;
+				const args = `-NoProfile -WindowStyle Hidden -File "${path.join(this.home, this.ps1)}" -PipeName ${this.name} -Pet ${inLineup(pet, lu) ? pet : (lu === "teletubbies" ? "po" : "spidey")} -Lineup ${lu}`;
 				p = cp.spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList $env:SPIDEY_ARGS"],
 					{ stdio: "ignore", windowsHide: true, env: Object.assign({}, process.env, { SPIDEY_ARGS: args }) });
 			} else {

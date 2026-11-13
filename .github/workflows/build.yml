@@ -75,3 +75,4 @@ jobs:
           path: |
             dist/*.vsix
             shot.png
+            shot-teletubbies.png

@@ -24,6 +24,8 @@ namespace DeskPals
         static int logged;
         // 測試用：DESKPALS_OFFSCREEN=1 時所有視窗都不顯示，畫面改畫進虛擬螢幕（pipe 的 snap 指令存成 PNG）
         public static readonly bool Offscreen = Environment.GetEnvironmentVariable("DESKPALS_OFFSCREEN") == "1";
+        // 測試用：離屏＋DESKPALS_ISOLATED=1 時不看真的視窗（不跳上你的視窗、你全螢幕也不會躲起來），截圖比較乾淨
+        public static readonly bool Isolated = Offscreen && Environment.GetEnvironmentVariable("DESKPALS_ISOLATED") == "1";
 
         // 診斷用：不受行數上限限制
         public static void LogAlways(string s)
@@ -39,7 +41,9 @@ namespace DeskPals
             catch { }
         }
 
-        public static void Run(string pipeName, string pet)
+        public static void Run(string pipeName, string pet) { Run(pipeName, pet, ""); }
+        // lineup：classic（經典一櫃）／teletubbies（天線寶寶一櫃）；空白＝照上次的
+        public static void Run(string pipeName, string pet, string lineup)
         {
             bool created;
             using (Mutex mtx = new Mutex(true, "Local\\" + pipeName, out created))
@@ -51,7 +55,7 @@ namespace DeskPals
                     try { Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException); } catch { }
                     Application.ThreadException += delegate(object s, ThreadExceptionEventArgs e) { Log("ui: " + e.Exception); };
                     Application.EnableVisualStyles();
-                    World w = new World(pipeName, pet);
+                    World w = new World(pipeName, pet, lineup);
                     w.Start();
                     Application.Run(new ApplicationContext());
                 }
@@ -67,6 +71,11 @@ namespace DeskPals
         public static void PreviewShelf(string path, bool night)
         {
             Pet.PreviewShelf(path, night);
+        }
+        // 開發用：天線寶寶一櫃的各種姿勢
+        public static void PreviewTubbies(string path, bool night)
+        {
+            Pet.PreviewTubbySheet(path, night);
         }
     }
 
@@ -363,11 +372,13 @@ namespace DeskPals
         string kind = "tennis";
         static readonly string[] TENNIS = { "..kkkk..", ".kTTTTk.", "kTTWTTTk", "kTWTTTTk", "kTTTTWTk", "kTTTWTTk", ".kTTTTk.", "..kkkk.." };
         static readonly string[] BASEBALL = { "..gggg..", ".gWWWWg.", "gRWWWWRg", "gWRWWRWg", "gWRWWRWg", "gRWWWWRg", ".gWWWWg.", "..gggg.." };
+        static readonly string[] TUBBYBALL = { "..kkkk..", ".kOOYOk.", "kOYOOOOk", "kOOOOOok", "kOOOOOok", "kOOOOook", ".kooook.", "..kkkk.." };   // 天線寶寶的大橘球
         readonly SolidBrush bk = new SolidBrush(Color.FromArgb(0x2A, 0x2F, 0x45)), bt = new SolidBrush(Color.FromArgb(0xD9, 0xE8, 0x4A)), bw = new SolidBrush(Color.White),
-            bg = new SolidBrush(Color.FromArgb(0x8A, 0x90, 0xA0)), brd = new SolidBrush(Color.FromArgb(0xE0, 0x3A, 0x3A));
+            bg = new SolidBrush(Color.FromArgb(0x8A, 0x90, 0xA0)), brd = new SolidBrush(Color.FromArgb(0xE0, 0x3A, 0x3A)),
+            bo = new SolidBrush(Color.FromArgb(0xF2, 0x85, 0x2A)), bod = new SolidBrush(Color.FromArgb(0xC2, 0x5E, 0x14)), byl = new SolidBrush(Color.FromArgb(0xFF, 0xD8, 0x4A));
         public BallForm(int ps) : base(false) { this.ps = ps; Size = new Size(8 * ps, 8 * ps); }
         public string Kind { get { return kind; } set { if (kind != value) { kind = value; Invalidate(); } } }
-        public static string[] Art(string kind) { return kind == "baseball" ? BASEBALL : TENNIS; }
+        public static string[] Art(string kind) { return kind == "baseball" ? BASEBALL : (kind == "tubby" ? TUBBYBALL : TENNIS); }
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
@@ -378,7 +389,7 @@ namespace DeskPals
                 {
                     char c = art[r][i];
                     if (c == '.') continue;
-                    SolidBrush b = c == 'k' ? bk : (c == 'T' ? bt : (c == 'g' ? bg : (c == 'R' ? brd : bw)));
+                    SolidBrush b = c == 'k' ? bk : (c == 'T' ? bt : (c == 'g' ? bg : (c == 'R' ? brd : (c == 'O' ? bo : (c == 'o' ? bod : (c == 'Y' ? byl : bw))))));
                     g.FillRectangle(b, i * ps, r * ps, ps, ps);
                 }
         }
@@ -584,18 +595,41 @@ namespace DeskPals
         public bool KeepAntenna;                      // 帽子戴上後把天線重畫在帽子上面（小波）
         public int TopRows;
         public bool NoGlasses;                        // 眼睛太開，眼鏡戴不上（史迪仔）                           // 頭頂超出 16 格框的列數（小波的天線）
+        // 天線寶寶一櫃（丁丁、迪西、拉拉）用的；經典一櫃的角色都是預設值
+        public bool Tubby;                            // 丁丁／迪西／拉拉（小波另外寫）
+        public double TummyRow = 10.5;                // 肚子電視的中心在第幾列
+        public int AntRows = -1;                      // 戴帽子時露在帽子上面的天線列數（-1＝TopRows-1，小波）
+        public bool AntThrough;                       // 天線從帽子中間穿出來（不墊高；丁丁太高了）
+        public int HeadTop = -1;                      // 頭頂外框那一列在 16 格框的第幾列
+        public int BodyTop = 8;                       // 身體第一列在 16 格框的第幾列
 
         static Color C(int rgb) { return Color.FromArgb((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255); }
         void Col(char c, int day, int night) { Day[c] = C(day); Night[c] = C(night); }
         void Say(string key, params string[] lines) { Lines[key] = lines; }
 
         static List<Pal> all;
-        public static List<Pal> All { get { if (all == null) all = new List<Pal>(new Pal[] { Spidey(), Po(), Stitch(), Hangyodon() }); return all; } }
+        public static List<Pal> All { get { if (all == null) all = new List<Pal>(new Pal[] { Spidey(), Po(), Stitch(), Hangyodon(), Tinky(), Dipsy(), LaaLaa() }); return all; } }
         public static Pal Get(string id)
         {
             foreach (Pal p in All) if (p.Id == id) return p;
             return null;
         }
+
+        // ---- 兩櫃：經典（Spidey、小波、史迪仔、人魚漢頓）／天線寶寶（丁丁、迪西、拉拉、小波；大格是小波）----
+        public const string Classic = "classic", Teletubbies = "teletubbies";
+        public static string NormLineup(string s) { return s != null && s.Trim().ToLowerInvariant() == Teletubbies ? Teletubbies : Classic; }
+        public static string[] LineupIds(string lineup)
+        {
+            return NormLineup(lineup) == Teletubbies ? new string[] { "tinky", "dipsy", "laalaa", "po" } : new string[] { "spidey", "po", "stitch", "hangyodon" };
+        }
+        public static List<Pal> Lineup(string lineup)
+        {
+            List<Pal> l = new List<Pal>();
+            foreach (string id in LineupIds(lineup)) l.Add(Get(id));
+            return l;
+        }
+        // 這一櫃預設放在大格的（經典一櫃照用最久的那隻）
+        public static string LineupFav(string lineup) { return NormLineup(lineup) == Teletubbies ? "po" : null; }
 
         void Shared()
         {
@@ -1259,6 +1293,278 @@ namespace DeskPals
             p.Shared();
             return p;
         }
+
+        // ================= 天線寶寶一櫃：丁丁、迪西、拉拉（同人像素）=================
+        // 完全用小波核准過的母版（頭、臉、身體、腿、字元都一樣），只換顏色、換天線；丁丁多一列身體、一列腿（最高）。
+        static string[] Taller(string[] rows, int dup, int extra)
+        {
+            List<string> l = new List<string>(rows);
+            for (int i = 0; i < extra; i++) l.Insert(dup, rows[dup]);
+            return l.ToArray();
+        }
+
+        static Pal TubbyBase(string id, string name, string[] ant, int extraBody, int extraLeg)
+        {
+            Pal po = Po();
+            Pal p = new Pal();
+            p.Id = id; p.Name = name; p.Tubby = true; p.BallKind = "tubby"; p.NightStyle = "sunset"; p.NightBubble = 2;
+            p.Halo = Color.White; p.HaloNight = C(0xFFC58F);
+            List<string> head = new List<string>(ant);
+            string[] ph = po.Art["HEAD"];
+            for (int i = 4; i < ph.Length; i++) head.Add(ph[i]);    // 小波的頭（去掉她的圓圈天線）
+            p.Art["HEAD"] = head.ToArray();
+            foreach (string f in new string[] { "SLEEPY", "HAPPY", "DIZZY", "SQUISH", "LEGS_SIT" }) p.Art[f] = po.Art[f];
+            // 「哎喲！」：眼睛擠成一條線、嘴巴張開
+            p.Art["OUCH"] = new string[] {
+                "kehrffffffffrRek",
+                "kehrkkffffkkrRek",
+                "kehrffffffffrRek",
+                "kehrpffmmffprRek",
+                ".kkhrffmmffrRkk." };
+            foreach (string b in new string[] { "BODY", "ARMS_UP", "ARMS_HUG" }) p.Art[b] = Taller(po.Art[b], 3, extraBody);
+            foreach (string l in new string[] { "LEGS_A", "LEGS_B", "LEGS_RIDE" }) p.Art[l] = Taller(po.Art[l], 0, extraLeg);
+            // 道具：迪西的乳牛紋高帽、丁丁的魔法袋、拉拉的大橘球、吐司、嘟嘟糊
+            p.Art["HAT"] = new string[] {
+                "....kkkkkkkk....",
+                "....kWWWWKKk....",
+                "....kKKWWWKk....",
+                "....kKWWWWWk....",
+                "....kWWWKKWk....",
+                "..kkkkkkkkkkkk..",
+                "..kWWWKKWWWWWk..",
+                "...kkkkkkkkkk..." };
+            p.Art["HAT_HAND"] = new string[] { ".kkkkkk.", ".kWKKWk.", ".kKWWWk.", ".kWWKKk.", "kkkkkkkk", "kWKWWKWk", ".kkkkkk." };
+            p.Art["BAG"] = new string[] { "..kkkk..", ".k....k.", "kkkkkkkk", "kaWaaaAk", "kaaaaaAk", "kaaaaAAk", ".kAAAAk." };
+            p.Art["BAG_OPEN"] = new string[] { "k......k", "kk....kk", "kAkkkkAk", "kaaaaaAk", "kaWaaaAk", "kaaaaAAk", ".kAAAAk." };
+            p.Art["BALL"] = new string[] { "..kkkk..", ".kcYccck", "kcYccccC", "kccccccC", "kcccccCk", ".kcCCCk.", "..kkkk.." };
+            p.Art["DUDU"] = new string[] { "..2.....", ".P2PPP..", "PPPPPPP.", "khhhhhk.", ".khhhk.." };
+            p.Art["DUDU_CUP"] = new string[] { "PPPP", "kWWk", ".kk." };
+            p.FaceRow = ant.Length + 3; p.EyeRow = -1; p.KeepAntenna = true; p.AntRows = 4;
+            int total = head.Count + p.Art["BODY"].Length + p.Art["LEGS_A"].Length;
+            p.TopRows = total - 16;
+            p.HeadTop = 16 - total + ant.Length;
+            p.BodyTop = 16 - p.Art["LEGS_A"].Length - p.Art["BODY"].Length;
+            p.TummyRow = p.BodyTop + 2.5 + extraBody * 0.5;
+            p.HatRow = p.HeadTop + 1; p.HatCol = 0; p.ScarfRow = p.HeadTop + 8; p.GlassRow = p.HeadTop + 4;
+            p.BadgeRow = p.BodyTop + 4 + extraBody; p.BadgeCol = 5; p.SideRow = p.BodyTop + 1;
+            // 共用色：膚色、嘴、肚子螢幕、滑板車（借騎時用）、帽子黑、袋子紅、球橘、吸吸藍
+            p.Col('e', 0xF4CDBE, 0xD3A79C); p.Col('f', 0xF6D2B0, 0xD9AE92); p.Col('F', 0xE8B892, 0xBF907A); p.Col('m', 0xB8323C, 0x8E2E40); p.Col('p', 0xF29A9A, 0xC97A84);
+            p.Col('g', 0xC9CDD3, 0x8F8CA6); p.Col('G', 0x8E949C, 0x5F5C78); p.Col('w', 0xFFFFFF, 0xFFE4CC); p.Col('y', 0xFFD84A, 0xFFB45E);
+            p.Col('s', 0x55C7BE, 0x3F8F95); p.Col('q', 0x2F8F88, 0x266A70); p.Col('o', 0x6B6F7A, 0x4E4A5E);
+            p.Col('K', 0x222222, 0x1A1A1A); p.Col('a', 0xD8323A, 0xAB313F); p.Col('A', 0x9E1F27, 0x761C2F); p.Col('c', 0xF2852A, 0xE07541); p.Col('C', 0xC25E14, 0xAE522D);
+            p.Col('v', 0x7FD3E0, 0x649AA9); p.Col('V', 0x4A9FB8, 0x2F6D8A); p.Col('O', 0x4E4A5E, 0x2E304E);
+            return p;
+        }
+
+        // 天線寶寶共用的台詞（每隻再蓋掉自己的）
+        void TubbyLines(string me)
+        {
+            Say("rest", "已經 {n} 分鐘了，起來動一動、喝口可樂 🥤", "{n} 分鐘了！可樂時間～咕嚕咕嚕 🥤"); Say("rest_d", "{n} 分鐘了…喝完可樂，太陽寶寶下山了，回家吧");
+            Say("night_on", "太陽寶寶下山了…" + me + "說再見囉"); Say("night_off", "太陽寶寶起床了！Eh-oh! ☀");
+            Say("wait", "{who} 在等你回答喔 👋"); Say("wait_d", "{who} 在等你…回完就回家喔");
+            Say("ask", "{who} 有問題要問你喔 🙋"); Say("ask_d", "{who} 在問你問題…回完就回家");
+            Say("stuck_tool", "{who} 停在「{tool}」{n} 分鐘了，要你按按看嗎？"); Say("stuck_tool_d", "{who} 停了 {n} 分鐘…按一下就回家");
+            Say("stuck", "{who} 不動了…{n} 分鐘了耶，去看看？"); Say("stuck_d", "{who} 卡住 {n} 分鐘了…看完就說再見囉");
+            Say("unstuck", "{who} 又動了！好棒棒 👏"); Say("unstuck_d", "{who} 動了…");
+            Say("late23", "好晚了…" + me + "想睡覺覺 🌙"); Say("late12", "吃飯飯了沒？吐司要不要？"); Say("late15", "點心時間～嘟嘟糊！");
+            Say("late_d", "太陽寶寶早就下山了喔"); Say("late_dd", "好晚好晚了…晚安，回家吧");
+            Say("app_browser", "在看什麼？" + me + "也要看～"); Say("app_code", "寫 code 時間！" + me + "陪你"); Say("app_excel", "好多格子喔～");
+            Say("app_ppt", "做簡報～要畫太陽寶寶嗎？"); Say("app_word", "寫字字～慢慢來"); Say("app_chat", "有人找你玩嗎？"); Say("app_files", "在找東西嗎？");
+            Say("app_other", "Eh-oh! 這是什麼？");
+            Say("app_code_d", "還在寫…太陽寶寶下山了啦"); Say("app_chat_d", "天黑了，明天再回嘛"); Say("app_office_d", "明天再做好不好～"); Say("app_other_d", "該說再見囉～");
+            Say("s_newyear", "新年快樂！Eh-oh! ✨");
+            Say("react", "Eh-oh?", "咦？", "怎麼了怎麼了？");
+            Say("pat10", "今天第 {n} 次摸摸了！" + me + "好開心 ♥"); Say("pat10_d", "第 {n} 次了…摸完就回家喔");
+            Say("levelup", "好感度 Lv{n}！" + me + "拿到「{u}」了 ♥"); Say("levelup_d", "Lv{n}…拿到「{u}」…明天再戴給你看");
+            Say("missed", "你好久沒摸摸" + me + "了…🥺"); Say("missed_d", "好久沒摸摸了…明天要記得喔");
+            Say("hover", "Eh-oh? 你在摸摸" + me + "嗎～");
+            Say("share_end", "分享完了～Eh-oh!");
+            Say("back", "Eh-oh! " + me + "回來了"); Say("back_d", me + "回來了…");
+            Say("welcome", "Eh-oh! 你回來了！大抱抱！"); Say("welcome_d", "你回來了…是要回家了嗎？");
+            Say("hugs_d", "大抱抱…然後回家睡覺覺", "晚安大抱抱 ♥", "抱完就說再見囉");
+        }
+
+        // ---------------- 丁丁（紫色、最高、倒三角天線、紅色魔法袋）----------------
+        static Pal Tinky()
+        {
+            Pal p = TubbyBase("tinky", "丁丁", new string[] {
+                "....rrrrrrrr....",
+                ".....r....r.....",
+                "......r..r......",
+                ".......rr.......",
+                ".......rr......." }, 1, 1);
+            p.Move = "bag"; p.Accent = C(0x7A52B0); p.Panel = C(0xE6DCF5);
+            p.Col('k', 0x2E1A3A, 0x1E1028); p.Col('r', 0x8A5CC2, 0x6A4A9E); p.Col('R', 0x5E3A92, 0x45296E); p.Col('h', 0xA884DA, 0x8A6CB8);
+            p.Speed = 30; p.AntThrough = true;
+            p.TubbyLines("丁丁");
+            p.Say("talk", "Eh-oh!", "丁丁的魔法袋裡有什麼呢？", "大抱抱時間到了沒？", "丁丁想跳舞～", "今天天氣好好喔 ☀", "要喝可樂嗎？丁丁袋子裡有 🥤", "慢慢走，慢慢走～");
+            p.Say("talk_d", "太陽寶寶下山了，丁丁說再見囉", "丁丁抱著袋袋想睡覺…你也回家好不好", "天黑黑了，明天再玩", "晚安晚安～該回家囉");
+            p.Say("save", "存好了！放進魔法袋 👜", "存起來了～好棒棒！", "Eh-oh! 存檔成功", "丁丁幫你收好囉");
+            p.Save_d();
+            p.Say("pats", "嘻嘻，好舒服", "丁丁喜歡你 ♥", "摸摸頭～你也辛苦了", "Eh-oh! 再摸一下", "有丁丁陪你喔", "慢慢來，丁丁等你", "大大的丁丁給你靠 ♥");
+            p.Say("pats_d", "嗯…丁丁想睡覺覺了", "摸摸…然後我們回家好不好", "太陽寶寶下山了，你也該休息囉");
+            p.Say("pats_hi", "丁丁最最最喜歡你了", "我們是好朋友！", "能遇到你真好 ♥", "每天都要一起跳舞喔");
+            p.Say("hugs", "大抱抱！", "丁丁的大大抱抱 ♥", "Eh-oh! 大抱抱！", "(つ´ω`)つ 大抱抱");
+            p.Say("knock", "叩叩！Eh-oh! 👀", "丁丁可以出去玩嗎？", "肚肚貼玻璃～嘿嘿", "魔法袋敲敲～叩叩");
+            p.Say("knock_d", "叩叩…太陽寶寶下山了喔", "該說再見囉，回家吧～", "丁丁看到你還在加班…");
+            p.Say("newwin", "Eh-oh!", "Eh-oh! 新視窗！", "丁丁慢慢走過去看～");
+            p.Say("newwin_d", "Eh-oh…又開新的了？明天再看嘛", "天黑黑了，不要再開了啦");
+            p.Say("hi", "Eh-oh! 我是丁丁 👋"); p.Say("hi_d", "Eh-oh…太陽寶寶下山了耶");
+            p.Say("wake", "嗯…Eh-oh? 是你呀 ♥"); p.Say("wake_d", "嗯…丁丁在睡覺覺…你也去睡嘛");
+            p.Say("dizzy", "轉圈圈～頭暈暈 @@"); p.Say("dizzy_d", "暈暈…丁丁要睡覺覺了…");
+            p.Say("dizzy_ok", "好了！再來一次！"); p.Say("dizzy_ok_d", "好了…該回家囉");
+            p.Say("tickle", "哎喲！", "哎喲！（又跌倒了）", "哎喲～嘻嘻嘻"); p.Say("tickle_d", "哎喲…最後一次喔");
+            p.Say("seek", "咦？那是什麼？"); p.Say("seek_lost", "跑掉了…"); p.Say("seek_got", "抓到滑鼠了！放進魔法袋～");
+            p.Say("drag", "哇～丁丁好重喔！"); p.Say("throw", "哎——喲——");
+            p.Say("shelf_in", "丁丁回家家囉，掰掰 👋"); p.Say("shelf_in_d", "太陽寶寶下山了，丁丁說再見");
+            p.Say("shelf_out", "Eh-oh! 丁丁出來玩囉！"); p.Say("shelf_out_d", "Eh-oh…天黑黑了耶，你怎麼還在？");
+            p.Say("ball_go", "球！丁丁來了！", "魔法袋準備好了！", "慢慢來～我接我接"); p.Say("ball_go_d", "最後一球喔…");
+            p.Say("ball_catch", "收進魔法袋！", "接到了！在袋子裡～", "嘿嘿，袋子好厲害"); p.Say("ball_catch_d", "收好了…還你，該回家囉");
+            p.Say("ball_end", "不玩了嗎？下次再來一次！"); p.Say("ball_end_d", "不玩了…那我們回家吧");
+            p.Say("ball_far", "球球跑好遠喔～丁丁走不快");
+            p.Say("sleep", "抱著袋袋睡覺覺…晚安"); p.Say("sleep_d", "晚安晚安…你也去睡覺覺");
+            p.Say("jump", "嘿咻～"); p.Say("nojump", "附近沒有可以跳的地方耶");
+            p.Say("errors", "哎喲！有 {n} 個錯誤"); p.Say("errors_d", "{n} 個錯誤…明天再修啦，回家");
+            p.Say("errors_ok", "錯誤都不見了！大抱抱！"); p.Say("errors_ok_d", "都修好了！那我們回家吧");
+            p.Say("typing", "打好快喔！丁丁跳舞給你看～", "加油加油！", "手指在跳舞耶 ♪"); p.Say("typing_d", "打好快…是想快點回家吧");
+            p.Say("done", "Eh-oh! {who} 做完了！丁丁跳舞！"); p.Say("done_d", "{who} 做完了～太陽寶寶下山了，回家吧");
+            p.Say("tag", "上版成功！魔法袋變出星星了 ✨"); p.Say("tag_dev", "測試機成功！丁丁跳舞～"); p.Say("tag_prod", "正式機成功！大抱抱 🎉"); p.Say("tag_d", "上完了…丁丁說再見，回家吧");
+            p.Say("g_late", "這麼晚了…丁丁陪你一下下 🌙"); p.Say("g_morning", "Eh-oh! 早安！丁丁來了 ☀"); p.Say("g_noon", "Eh-oh! 午安～吃吐司了沒？");
+            p.Say("g_evening", "Eh-oh～晚上了，辛苦了"); p.Say("g_day", "Eh-oh! 丁丁來玩囉！"); p.Say("g_d", "太陽寶寶下山了…你怎麼還在？");
+            p.Say("s_birthday", "生日快樂！丁丁從魔法袋變出蛋糕 🎂", "今天你最大！大抱抱！");
+            p.Say("s_cny", "新年快樂！恭喜恭喜 🧧", "紅包…放進魔法袋！");
+            p.Say("s_xmas", "聖誕快樂！🎄", "丁丁的魔法袋要裝禮物～");
+            p.Say("s_halloween", "不給糖就搗蛋！🎃", "丁丁扮成…大茄子！");
+            p.Say("s_friday", "星期五了！丁丁跳舞！", "快放假了～大抱抱！");
+            p.Say("morning", "丁丁！", "丁丁！Eh-oh!");
+            p.Say("goodnight", "丁丁說再見！👋", "晚安晚安～大抱抱");
+            p.Say("nag", "太陽寶寶下山了，該說再見囉", "回家家囉～", "丁丁想睡覺覺了…");
+            p.Shared();
+            return p;
+        }
+
+        // ---------------- 迪西（綠色、直直的天線、黑白乳牛紋高帽、有點酷）----------------
+        static Pal Dipsy()
+        {
+            Pal p = TubbyBase("dipsy", "迪西", new string[] {
+                ".......rr.......",
+                ".......rr.......",
+                ".......rr.......",
+                ".......rr.......",
+                ".......rr......." }, 0, 0);
+            p.Move = "groove"; p.Accent = C(0x4F8A27); p.Panel = C(0xE0F2D2);
+            p.Col('k', 0x22301A, 0x141E10); p.Col('r', 0x7DC242, 0x66984A); p.Col('R', 0x4F8A27, 0x3E6A2E); p.Col('h', 0xA2D86C, 0x88B266);
+            p.Col('f', 0xD9A77C, 0xBC8A68); p.Col('F', 0xC08D63, 0xA27254); p.Col('e', 0xE2B08E, 0xC29076); p.Col('p', 0xE28A78, 0xB8707A);   // 迪西的臉比較深
+            p.Speed = 60;
+            p.TopRows = 6 - p.HeadTop;   // 算到帽子頂（頭頂外框上面 6 列）
+            p.TubbyLines("迪西");
+            p.Say("talk", "Eh-oh.", "這頂帽子是我的。", "嘿～（扶帽子）", "酷。", "跳舞嗎？我很會。", "要喝可樂嗎？冰的比較酷 🥤", "帽子不能借喔。");
+            p.Say("talk_d", "太陽寶寶下山了…帽子拉低，睡覺", "迪西說再見囉…你也回家吧", "天黑了，酷的人都回家了", "晚安。帽子我戴著睡。");
+            p.Say("save", "存好了。酷。", "存檔成功，嘿～", "Eh-oh. 存好了", "存了，帥。");
+            p.Save_d();
+            p.Say("pats", "嘿嘿…別碰帽子就好", "酷。再一下。", "迪西也喜歡你啦", "摸摸頭…欸，是摸帽子", "嘿～你很酷", "有迪西在，不用怕");
+            p.Say("pats_d", "嗯…迪西想睡了", "摸完就回家吧", "太陽寶寶下山了，你也該休息");
+            p.Say("pats_hi", "你是最酷的", "迪西最喜歡你了（小聲）", "我們是好朋友。", "帽子…可以給你摸一下");
+            p.Say("hugs", "大抱抱。", "大抱抱！（帽子扶好）", "Eh-oh! 大抱抱", "(つ´ω`)つ 酷酷的抱抱");
+            p.Say("knock", "叩叩。Eh-oh. 👀", "嘿～螢幕外面的你", "迪西可以出去跳舞嗎？", "（帽子敲玻璃）叩叩");
+            p.Say("knock_d", "叩叩…太陽寶寶下山了", "該說再見了，回家吧", "還在加班？不酷。");
+            p.Say("newwin", "Eh-oh.", "嘿～新視窗", "迪西去看看，酷。");
+            p.Say("newwin_d", "又開新的？明天再看", "天黑了，關掉吧");
+            p.Say("hi", "Eh-oh. 我是迪西 🎩"); p.Say("hi_d", "Eh-oh…太陽寶寶下山了");
+            p.Say("wake", "嗯…（推帽子）是你啊"); p.Say("wake_d", "嗯…迪西在睡覺…你也去睡");
+            p.Say("dizzy", "頭暈了…帽子還在吧？@@"); p.Say("dizzy_d", "暈…睡覺…");
+            p.Say("dizzy_ok", "好了。帽子還在。酷。"); p.Say("dizzy_ok_d", "好了…該回家了");
+            p.Say("tickle", "嘿～嘿～（跳起來）", "帽子不能摸啦！", "嘻…好啦好啦"); p.Say("tickle_d", "嘿…最後一次");
+            p.Say("seek", "嗯？那是什麼？"); p.Say("seek_lost", "跑了…不酷"); p.Say("seek_got", "抓到滑鼠了。大抱抱。");
+            p.Say("drag", "欸欸，帽子要掉了！"); p.Say("throw", "嘿——（扶帽子）");
+            p.Say("shelf_in", "迪西回去了，掰。 👋"); p.Say("shelf_in_d", "太陽寶寶下山了，迪西說再見");
+            p.Say("shelf_out", "Eh-oh. 迪西出來了。"); p.Say("shelf_out_d", "Eh-oh…天黑了，你怎麼還在？");
+            p.Say("ball_go", "球！用帽子頂！", "看我的！", "嘿～來了"); p.Say("ball_go_d", "最後一球。");
+            p.Say("ball_catch", "帽子頂！", "頂回去～酷。", "帽子是最好的球拍"); p.Say("ball_catch_d", "頂回去…然後回家");
+            p.Say("ball_end", "不玩了？下次再頂給你看"); p.Say("ball_end_d", "不玩了…回家吧");
+            p.Say("ball_far", "球跑太遠了，帽子頂不到");
+            p.Say("sleep", "帽子拉低…晚安"); p.Say("sleep_d", "晚安…你也去睡");
+            p.Say("jump", "嘿！"); p.Say("nojump", "附近沒有可以跳的地方");
+            p.Say("errors", "有 {n} 個錯誤…不看不看（拉帽子）"); p.Say("errors_d", "{n} 個錯誤…明天再修，回家");
+            p.Say("errors_ok", "錯誤都清光了。酷。"); p.Say("errors_ok_d", "修好了…那就回家吧");
+            p.Say("typing", "打好快！迪西跳舞～嘿～", "節奏不錯喔", "嘿～嘿～手指在跳舞"); p.Say("typing_d", "打快一點，早點回家");
+            p.Say("done", "{who} 做完了。酷。"); p.Say("done_d", "{who} 做完了～回家吧");
+            p.Say("tag", "上版成功！帽子丟起來 🎩"); p.Say("tag_dev", "測試機成功。嘿～"); p.Say("tag_prod", "正式機成功！酷斃了 🎉"); p.Say("tag_d", "上完了…迪西說再見，回家吧");
+            p.Say("g_late", "這麼晚…迪西陪你一下 🌙"); p.Say("g_morning", "Eh-oh. 早安。帽子戴好了 ☀"); p.Say("g_noon", "Eh-oh. 午安，吃了沒？");
+            p.Say("g_evening", "晚上了，辛苦了。"); p.Say("g_day", "Eh-oh. 迪西來了，酷。"); p.Say("g_d", "太陽寶寶下山了…你怎麼還在？");
+            p.Say("s_birthday", "生日快樂！迪西跳舞給你看 🎂", "今天你最酷！");
+            p.Say("s_cny", "新年快樂 🧧", "紅包…放帽子裡。");
+            p.Say("s_xmas", "聖誕快樂 🎄", "聖誕帽？不用，我有帽子了。");
+            p.Say("s_halloween", "不給糖就搗蛋 🎃", "我扮成…戴帽子的迪西。");
+            p.Say("s_friday", "星期五了。跳舞吧。", "快放假了～嘿～");
+            p.Say("morning", "迪西！", "迪西！Eh-oh.");
+            p.Say("goodnight", "迪西說再見！👋", "晚安。帽子我戴著睡。");
+            p.Say("nag", "太陽寶寶下山了，該說再見了", "回家吧。", "迪西想睡了…");
+            p.Say("react", "嗯？", "Eh-oh?", "（扶帽子）怎麼了？");
+            p.Shared();
+            return p;
+        }
+
+        // ---------------- 拉拉（黃色、捲捲天線、大橘球、愛唱歌）----------------
+        static Pal LaaLaa()
+        {
+            Pal p = TubbyBase("laalaa", "拉拉", new string[] {
+                "......rrr.......",
+                ".....r...r......",
+                ".......r.r......",
+                "........rr......",
+                ".......rr......." }, 0, 0);
+            p.Move = "skip"; p.Accent = C(0xD9A116); p.Panel = C(0xFFF4C8);
+            p.Col('k', 0x3E2A10, 0x2A1A0C); p.Col('r', 0xF7D23A, 0xD9A84A); p.Col('R', 0xC9A116, 0xA27A2C); p.Col('h', 0xFFE67A, 0xE8C46E);
+            p.Speed = 80;
+            p.TubbyLines("拉拉");
+            p.Say("talk", "啦啦啦～", "Eh-oh!", "拉拉的球圓圓的～", "我們來唱歌！", "今天天氣好好喔 ☀", "要喝可樂嗎？啦～ 🥤", "轉圈圈～轉圈圈～");
+            p.Say("talk_d", "太陽寶寶下山了…啦…", "拉拉抱著球想睡覺…你也回家好不好", "天黑黑了，明天再唱", "晚安晚安～該回家囉");
+            p.Save_d();
+            p.Say("save", "存好了！啦啦啦～", "存起來了～好棒棒！", "Eh-oh! 存檔成功", "拉拉幫你收好囉 ♪");
+            p.Say("pats", "嘻嘻，好舒服～", "拉拉喜歡你 ♥", "啦啦～再摸一下", "你好棒棒！", "有拉拉陪你喔 ♪", "摸摸頭～你也辛苦了");
+            p.Say("pats_d", "嗯…拉拉想睡覺覺了", "摸摸…然後回家好不好", "太陽寶寶下山了，你也該休息囉");
+            p.Say("pats_hi", "拉拉最最最喜歡你了 ♪", "我們是好朋友！", "能遇到你真好 ♥", "每天都要一起唱歌喔");
+            p.Say("hugs", "大抱抱！", "啦啦～大抱抱 ♥", "Eh-oh! 大抱抱！", "(つ´ω`)つ 大抱抱");
+            p.Say("knock", "叩叩！Eh-oh! 👀", "啦啦啦～有人在嗎？", "拉拉可以出去玩球嗎？", "肚肚貼玻璃～嘻嘻");
+            p.Say("knock_d", "叩叩…太陽寶寶下山了喔", "該說再見囉，回家吧～", "拉拉看到你還在加班…");
+            p.Say("newwin", "Eh-oh!", "啦啦～新視窗！", "拉拉跳過去看～");
+            p.Say("newwin_d", "Eh-oh…又開新的了？明天再看嘛", "天黑黑了，不要再開了啦");
+            p.Say("hi", "Eh-oh! 我是拉拉 👋"); p.Say("hi_d", "Eh-oh…太陽寶寶下山了耶");
+            p.Say("wake", "嗯…啦？是你呀 ♥"); p.Say("wake_d", "嗯…拉拉在睡覺覺…你也去睡嘛");
+            p.Say("dizzy", "轉太多圈了～頭暈暈 @@"); p.Say("dizzy_d", "暈暈…拉拉要睡覺覺了…");
+            p.Say("dizzy_ok", "好了！再來一次！"); p.Say("dizzy_ok_d", "好了…該回家囉");
+            p.Say("tickle", "啦啦啦～轉圈圈！", "再來一次！再來一次！", "嘻嘻嘻～好癢"); p.Say("tickle_d", "嘻…最後一次喔");
+            p.Say("seek", "咦？那是什麼？"); p.Say("seek_lost", "跑掉了…"); p.Say("seek_got", "抓到滑鼠了！大抱抱！");
+            p.Say("drag", "哇～飛高高！啦～"); p.Say("throw", "啦～～～");
+            p.Say("shelf_in", "拉拉回家家囉，掰掰 👋"); p.Say("shelf_in_d", "太陽寶寶下山了，拉拉說再見");
+            p.Say("shelf_out", "Eh-oh! 拉拉出來玩囉！"); p.Say("shelf_out_d", "Eh-oh…天黑黑了耶，你怎麼還在？");
+            p.Say("ball_go", "球！拉拉來踢！", "啦～我來了！", "看我的腳！"); p.Say("ball_go_d", "最後一球喔…");
+            p.Say("ball_catch", "踢回去！啦～", "好球！", "嘿嘿，拉拉很會踢吧"); p.Say("ball_catch_d", "踢回去…該回家囉");
+            p.Say("ball_end", "不玩了嗎？下次再來一次！"); p.Say("ball_end_d", "不玩了…那我們回家吧");
+            p.Say("ball_far", "球球跑好遠喔～");
+            p.Say("sleep", "抱著球球睡覺覺…晚安"); p.Say("sleep_d", "晚安晚安…你也去睡覺覺");
+            p.Say("jump", "啦～跳！"); p.Say("nojump", "附近沒有可以跳的地方耶");
+            p.Say("errors", "哎呀…有 {n} 個錯誤，拉拉躲起來"); p.Say("errors_d", "{n} 個錯誤…明天再修啦，回家");
+            p.Say("errors_ok", "錯誤都不見了！啦啦啦～"); p.Say("errors_ok_d", "都修好了！那我們回家吧");
+            p.Say("typing", "打好快喔！啦啦啦～", "加油加油！拉拉唱歌給你聽 ♪", "手指在跳舞耶 ♪"); p.Say("typing_d", "打好快…是想快點回家吧");
+            p.Say("done", "啦啦啦～{who} 做完了！"); p.Say("done_d", "{who} 做完了～太陽寶寶下山了，回家吧");
+            p.Say("tag", "上版成功！啦啦啦～ 🎉"); p.Say("tag_dev", "測試機成功！轉圈圈～"); p.Say("tag_prod", "正式機成功！再來一次！🎉"); p.Say("tag_d", "上完了…拉拉說再見，回家吧");
+            p.Say("g_late", "這麼晚了…拉拉輕輕唱歌陪你 🌙"); p.Say("g_morning", "Eh-oh! 早安！啦啦啦～ ☀"); p.Say("g_noon", "Eh-oh! 午安～吃飯飯了沒？");
+            p.Say("g_evening", "Eh-oh～晚上了，辛苦了"); p.Say("g_day", "Eh-oh! 拉拉來玩球囉！"); p.Say("g_d", "太陽寶寶下山了…你怎麼還在？");
+            p.Say("s_birthday", "生日快樂！拉拉唱歌給你聽 🎂 啦啦～", "今天你最大！大抱抱！");
+            p.Say("s_cny", "新年快樂！恭喜恭喜 🧧", "紅包…拉拉可以拿嗎？");
+            p.Say("s_xmas", "聖誕快樂！🎄 叮叮噹～啦啦啦～", "拉拉想要新球球");
+            p.Say("s_halloween", "不給糖就搗蛋！🎃", "拉拉扮成…南瓜球！");
+            p.Say("s_friday", "星期五了！唱歌跳舞！", "快放假了～啦啦啦！");
+            p.Say("morning", "拉拉！", "拉拉！Eh-oh!");
+            p.Say("goodnight", "拉拉說再見！👋", "晚安晚安～啦～");
+            p.Say("nag", "太陽寶寶下山了，該說再見囉", "回家家囉～啦～", "拉拉想睡覺覺了…");
+            p.Shared();
+            return p;
+        }
+
+        void Save_d() { Say("save_d", "存好了…那我們回家好不好", "存好了，太陽寶寶也下山囉", "收好了～該說再見囉"); }
     }
 
     // ================= 一隻公仔（狀態＋行為）=================
@@ -1342,7 +1648,8 @@ namespace DeskPals
         }
 
         bool Night { get { return w.Night; } }
-        public bool Grounded() { return state == "walk" || state == "idle" || state == "sleep" || state == "hug" || state == "seek" || state == "dizzy" || state == "fetch" || state == "dance" || state == "kick" || state == "wave" || state == "pose" || state == "bat" || state == "catch" || state == "header" || state == "capetrip" || state == "elvis" || state == "chomp" || state == "think" || state == "hide" || state == "nudge" || state == "spin" || state == "goto"; }
+        public bool Grounded() { return state == "walk" || state == "idle" || state == "sleep" || state == "hug" || state == "seek" || state == "dizzy" || state == "fetch" || state == "dance" || state == "kick" || state == "wave" || state == "pose" || state == "bat" || state == "catch" || state == "header" || state == "capetrip" || state == "elvis" || state == "chomp" || state == "think" || state == "hide" || state == "nudge" || state == "spin" || state == "goto"
+            || state == "plop" || state == "twirl" || state == "hattoss" || state == "juggle" || state == "bagdig"; }
         public bool Free() { return Out && !InScene && !dragging && Grounded() && state != "sleep" && state != "hug" && !(Bt > 0 && bubblePri > 0); }
         void SetState(string s, double dur) { state = s; t = dur; }
         public void Say(string s, double sec) { Say(s, sec, false); }
@@ -1506,6 +1813,18 @@ namespace DeskPals
                     if (Grounded() && state != "dizzy") { poseKind = "silly"; SetState("pose", 1.8); }
                     Say(L("tickle"), 1.8);
                     break;
+                case "tinky":  // 跌坐在地上「哎喲！」
+                    Say(L("tickle"), 1.8);
+                    if (Grounded() && state != "dizzy") Plop(null);
+                    break;
+                case "dipsy":  // 帽子不准摸：把帽子丟起來接住，或酷酷地跳一段
+                    Say(L("tickle"), 1.8);
+                    if (Grounded() && state != "dizzy") { if (rnd.NextDouble() < 0.5) HatToss(true); else SetState("dance", 1.8); }
+                    break;
+                case "laalaa": // 啦啦啦～轉圈圈
+                    Say(L("tickle"), 1.8);
+                    if (Grounded() && state != "dizzy") SetState("twirl", 1.3);
+                    break;
                 default:
                     Say(L("tickle"), 1.6);
                     if (Grounded() && state != "dizzy") Jump(dir * 40 * k, -330 * k);
@@ -1660,7 +1979,7 @@ namespace DeskPals
                 Hug(L("seek_got"), 3); return;
             }
             dir = seekX > Cx ? 1 : -1;
-            if (MoveOnGround(dt, (Is("hangyodon") ? 60 : 95) * k)) return;
+            if (MoveOnGround(dt, (Is("hangyodon") || Is("tinky") ? 60 : 95) * k)) return;
             double ncx = Cx;
             if ((dir > 0 && ncx > seekX) || (dir < 0 && ncx < seekX)) x = seekX - SW / 2.0;
             if (t < 0) SetState("walk", 2);
@@ -1725,7 +2044,7 @@ namespace DeskPals
             cx = Cx;
             if (y < wa.Top) { y = wa.Top; if (vy < 0) vy = 0; }
             if (Math.Abs(vx) > 1) dir = vx > 0 ? 1 : -1;
-            if (vy > 1100 * k && (Is("po") || Is("stitch"))) rolling = true; // 摔很快 → 滾
+            if (vy > 1100 * k && (Is("po") || Is("stitch") || Is("laalaa"))) rolling = true; // 摔很快 → 滾
             if (vy <= 0) return;
             double best = wa.Bottom; Plat bp = null;
             foreach (Plat p in w.Plats)
@@ -1734,6 +2053,7 @@ namespace DeskPals
             {
                 y = best - SH;
                 double landVx = vx;
+                lastLandVy = vy;
                 vx = 0; vy = 0;
                 if (bp != null) SetSupport(bp); else supH = IntPtr.Zero;
                 bool wasRolling = rolling; rolling = false;
@@ -1743,6 +2063,7 @@ namespace DeskPals
                 else if (dizzyOnLand) { dizzyOnLand = false; SetState("dizzy", 1.6); }
                 else if (fetching && w.BallOn) SetState("fetch", 15);
                 else if (afterLand != "") LandAction();
+                else if (InScene && w.TubbyLineup) SetState("idle", 30);   // 天線寶寶串場：跳一下落地就站好，不要走掉
                 else SetState("walk", R(2, 5));
             }
         }
@@ -1912,7 +2233,7 @@ namespace DeskPals
             if (speed > 900 * k)
             {
                 Say(L("throw"), 0.9);
-                if (Is("po") || Is("stitch")) rolling = true;
+                if (Is("po") || Is("stitch") || Is("laalaa")) rolling = true;
             }
         }
 
@@ -1925,7 +2246,7 @@ namespace DeskPals
             fx1 = tfx - SW / 2.0; fy1 = tfy - SH;
             vx = tvx; vy = tvy; flyT = 0;
             supH = IntPtr.Zero; sc = 1; fetching = false; InScene = false;
-            rolling = Is("po") || Is("stitch");
+            rolling = Is("po") || Is("stitch") || Is("laalaa");
             SetState("fling", 99);
         }
 
@@ -1954,6 +2275,9 @@ namespace DeskPals
                 case "po": line = "進球！🏀 再來一次！"; break;
                 case "stitch": line = "嘻嘻嘻～進球！🏀"; break;
                 case "hangyodon": line = "英雄……降落成功 🏀"; break;
+                case "tinky": line = "進球！🏀 丁丁回家家～"; break;
+                case "dipsy": line = "進球。🏀 帽子還在，酷。"; break;
+                case "laalaa": line = "進球！🏀 啦啦啦～"; break;
                 default: line = "進球！🏀 Thwip!"; break;
             }
             Say(line, 2.4);
@@ -1971,6 +2295,9 @@ namespace DeskPals
                 case "po": line = "Eh-oh! 進了！"; break;
                 case "stitch": line = "ih-ih! 嘻嘻嘻"; break;
                 case "hangyodon": line = "好、好厲害！"; break;
+                case "tinky": line = "好棒棒！大抱抱！"; break;
+                case "dipsy": line = "酷！"; break;
+                case "laalaa": line = "啦啦～進了！"; break;
                 default: line = "好球！"; break;
             }
             Say(line, 1.4);
@@ -1985,6 +2312,9 @@ namespace DeskPals
                 case "po": return "差一點點！再來一次！";
                 case "stitch": return "ih! 沒進！嘻嘻";
                 case "hangyodon": return "偏、偏了…英雄也會失手";
+                case "tinky": return "哎喲，差一點點…";
+                case "dipsy": return "沒進…但帽子很帥";
+                case "laalaa": return "差一點！再來一次！";
             }
             return "差一點！再一次？";
         }
@@ -2052,6 +2382,9 @@ namespace DeskPals
             if (Is("hangyodon")) { StartSwim(tx, wa.Bottom, false); return; }
             BallisticTo(tx, wa.Bottom);
             if (Is("stitch")) rolling = true;
+            if (Is("tinky") && rnd.NextDouble() < 0.3) afterLand = "plop";          // 丁丁跳出來常常跌坐
+            else if (Is("laalaa") && rnd.NextDouble() < 0.4) afterLand = "twirl";   // 拉拉落地轉一圈
+            else if (Is("dipsy") && rnd.NextDouble() < 0.4) afterLand = "hattip";   // 迪西落地扶帽子
         }
 
         // ---------- 走到指定位置（串場、大合照用）----------
@@ -2096,7 +2429,7 @@ namespace DeskPals
             bool resting = w.Bvy == 0 && Math.Abs(w.Bvx) < 30 * k;
             bool sameLevel = Math.Abs(w.By + r - foot) < 40 * k;
             if (resting && !sameLevel) { BallisticTo(w.Bx, w.By + r); return; }
-            double sp = (Is("hangyodon") ? 70 : (Is("stitch") ? 170 : (Is("po") ? 150 : 125))) * k;
+            double sp = (P.Tubby ? (Is("tinky") ? 90 : (Is("laalaa") ? 150 : 125)) : (Is("hangyodon") ? 70 : (Is("stitch") ? 170 : (Is("po") ? 150 : 125)))) * k;
             if (Math.Abs(dxb) > 6) { dir = dxb > 0 ? 1 : -1; if (MoveOnGround(dt, sp)) return; }
             else if (w.By < y && w.Bvy > 0 && w.By > y - 160 * k) { Jump(0, -380 * k); return; }
             if (t < 0) { fetching = false; SetState("idle", 1); Say(L("ball_far"), 1.6); }
@@ -2114,6 +2447,9 @@ namespace DeskPals
                 case "po": PoBall(); return true;
                 case "stitch": StitchBall(); return true;
                 case "hangyodon": HangyodonBall(); return true;
+                case "tinky": TinkyBall(); return true;
+                case "dipsy": DipsyBall(); return true;
+                case "laalaa": LaaLaaBall(); return true;
             }
             // Spidey：踢回滑鼠的方向（多人時用絲接住）
             if (w.OutCount() > 1 && rnd.NextDouble() < 0.6) { WebCatch(); return true; }
@@ -2151,6 +2487,9 @@ namespace DeskPals
                 if (Is("hangyodon") && Grounded()) { capeT = 0; SetState("capetrip", 2.6); }
                 else if (Is("stitch") && Grounded()) { Jump(0, -360 * k); Mark(1); }
                 else if (Is("po") && hideFrom != null && Grounded()) HideBehindPet(hideFrom);
+                else if (Is("tinky") && Grounded()) Plop(null);
+                else if (Is("dipsy") && Grounded()) { poseKind = "hatdown"; SetState("pose", 2.6); }
+                else if (Is("laalaa") && hideFrom != null && Grounded()) HideBehindPet(hideFrom);
                 else if (state == "walk") SetState("idle", 3);
                 Say(line, 3, true);
             }
@@ -2161,6 +2500,7 @@ namespace DeskPals
         {
             if (!Grounded() || state == "hug" || state == "sleep" || InScene || Quiet) return;
             if (Is("stitch")) { SetState("elvis", 4); }
+            else if (Is("laalaa")) { SetState("dance", 4); Mark(0); Mark(0); }
             else SetState("dance", 4);
             Say(L("typing"), 2.5);
         }
@@ -2272,7 +2612,7 @@ namespace DeskPals
             switch (a)
             {
                 case "hi":
-                    if (Out && Grounded()) { if (Is("po")) SetState("wave", 1.6); else if (Is("hangyodon")) { poseKind = "hero"; SetState("pose", 1.4); } else Jump(0, -260 * k); }
+                    if (Out && Grounded()) { if (Is("po")) SetState("wave", 1.6); else if (Is("hangyodon")) { poseKind = "hero"; SetState("pose", 1.4); } else if (Is("dipsy")) { poseKind = "hattip"; SetState("pose", 1.6); } else if (P.Tubby) SetState("wave", 1.6); else Jump(0, -260 * k); }
                     Say(L("hi"), 2.4);
                     break;
                 case "hug": Hug(L("hugs"), 2.4); break;
@@ -2305,6 +2645,9 @@ namespace DeskPals
                 case "po": HomeRun(line, lead); break;
                 case "stitch": if (Grounded()) SetState("elvis", 4.5); Say(line, 4); for (int i = 0; i < 3; i++) Mark(0); break;
                 case "hangyodon": if (Grounded()) { poseKind = "hero"; SetState("pose", 3.4); } Say(line, 4); for (int i = 0; i < 6; i++) Mark(5); Burst(6); break;
+                case "tinky": if (Grounded()) TinkyBag("star", true); Say(line, 4); Burst(10); break;
+                case "dipsy": if (Grounded()) HatToss(true); Say(line, 4); Burst(8); break;
+                case "laalaa": if (Grounded()) SetState("twirl", 2.4); Say(line, 4); for (int i = 0; i < 4; i++) Mark(0); Burst(8); break;
                 default:
                     if (lead) w.Fireworks(w.WA(Cx, y + SH / 2.0), 10, -1);
                     if (Grounded()) SetState("dance", 3.5);
@@ -2362,8 +2705,14 @@ namespace DeskPals
         // 角色專屬狀態：回傳 true＝處理掉了
         bool StepSpecial(double dt, Rectangle wa)
         {
+            if (HoldToast && rnd.NextDouble() < dt * 2.5 && notes.Count < 10) notes.Add(new double[] { R(-8, 8) * k, 0, 7 });   // 吐司屑屑
+            if (P.Tubby && TubbyStep(dt)) return true;
             switch (state)
             {
+                case "plop":
+                    sT += dt;
+                    if (t < 0) SetState("idle", InScene ? 30 : 1);
+                    return true;
                 // ---- Spidey ----
                 case "swing": Swing(dt, wa); return true;
                 case "hang": Hang(dt, wa); return true;
@@ -2441,6 +2790,23 @@ namespace DeskPals
                         if (o != null) { Say(L("jump"), 1.4); StartSwim(o[0], o[1], false); return 2; }
                     }
                     dir = -dir; return 1;
+                case "tinky":
+                    // 丁丁走路很小心：多半回頭；跳下去常常跌坐
+                    if (rnd.NextDouble() < 0.7) { dir = -dir; if (rnd.NextDouble() < 0.3) Say("小心小心…", 1.2); return 1; }
+                    x += dir * 4 * k; Jump(dir * P.Speed * k * 2, -200 * k); afterLand = "plop"; Say("哎…", 0.8);
+                    return 2;
+                case "dipsy":
+                    if (rnd.NextDouble() < 0.4) { dir = -dir; return 1; }
+                    x += dir * 4 * k; Jump(dir * 130 * k, -320 * k); afterLand = rnd.NextDouble() < 0.5 ? "hattip" : ""; Say("嘿！", 0.8);
+                    return 2;
+                case "laalaa":
+                    if (rnd.NextDouble() < 0.35) { dir = -dir; return 1; }
+                    {
+                        double[] o = PickPlatform(60 * k, 700 * k);
+                        if (o != null && (o[0] > Cx) == (dir > 0)) { BallisticTo(o[0], o[1]); afterLand = "twirl"; Say(L("jump"), 0.9); return 2; }
+                    }
+                    x += dir * 4 * k; Jump(dir * 150 * k, -360 * k); afterLand = "twirl"; Say(L("jump"), 0.8);
+                    return 2;
             }
             return 0;
         }
@@ -2463,6 +2829,8 @@ namespace DeskPals
             if (Is("stitch") && wasRolling) { vx = landVx * 0.8; if (Math.Abs(vx) < 60 * k) vx = dir * 120 * k; SetState("curl", R(0.8, 1.4)); return true; }
             if (Is("po") && wasRolling && state != "spin") { SetState("dizzy", 0.8); Say(Pick(new string[] { "轉圈圈～", "再來一次！" }), 1.2); return true; }
             if (Is("po") && state == "spin") { SetState("spin", 0.4); return true; }
+            if (Is("tinky") && lastLandVy > 650 * k && state != "plop") { afterLand = ""; Plop(Pick(new string[] { "哎喲！", "哎喲…屁股好痛", "哎喲！（跌坐）" })); return true; }
+            if (Is("laalaa") && wasRolling) { afterLand = ""; SetState("twirl", 0.9); Say(Pick(new string[] { "轉圈圈～", "再來一次！" }), 1.2); return true; }
             return false;
         }
 
@@ -2474,6 +2842,9 @@ namespace DeskPals
                 case "wave": SetState("wave", 1.8); Say("Eh-oh!", 1.6); break;
                 case "sniff": poseKind = "grin"; SetState("pose", 1.6); Mark(2); Say(Pick(new string[] { "（聞聞）ih?", "嘻嘻，這個好玩", "ih-ih! 史迪仔的！" }), 1.6); break;
                 case "bubbles": SetState("idle", 1.6); for (int i = 0; i < 4; i++) Mark(5); break;
+                case "plop": Plop(Pick(new string[] { "哎喲！", "哎喲！（跌坐）" })); break;
+                case "hattip": poseKind = "hattip"; SetState("pose", 1.6); Say(Pick(new string[] { "Eh-oh.", "嘿。", "（扶帽子）酷。" }), 1.4); break;
+                case "twirl": SetState("twirl", 1.2); Say(Pick(new string[] { "啦啦啦～", "轉圈圈～" }), 1.4); break;
                 default: SetState("idle", R(1, 2)); break;
             }
         }
@@ -2548,6 +2919,49 @@ namespace DeskPals
                     else if (r < .93) { SetState("idle", 2.5); Say(L("talk"), 2.6); }
                     else { dir = -dir; SetState("walk", R(3, 6)); }
                     break;
+                case "tinky":   // 慢慢走、提著魔法袋、偶爾跌坐、喜歡跳舞
+                    if (r < .22) SetState("idle", R(2, 4.5));
+                    else if (r < .48) { dir = rnd.NextDouble() < .5 ? -1 : 1; SetState("walk", R(3, 7)); if (rnd.NextDouble() < .2) Say(Pick(new string[] { "慢慢走～", "提著袋袋去散步～" }), 1.2); }
+                    else if (r < .54) { if (!JumpToPlatform()) Hop(); }
+                    else if (r < .63) TinkyBag(null, false);
+                    else if (r < .68) { SetState("dance", 3.2); Say(Pick(new string[] { "丁丁跳舞～", "嘿～轉一圈～", "跳舞時間！" }), 1.6); }
+                    else if (r < .72) Plop(Pick(new string[] { "哎喲！", "哎喲…（又跌倒了）" }));
+                    else if (r < .77) Hug(L("hugs"), 2.2);
+                    else if (r < (Night ? .82 : .80)) Knock(L("knock"), "ambient");
+                    else if (r < .84 && lateCd <= 0 && LateLine() != null) LateTick();
+                    else if (r < .87 && SeasonLine() != null) { Say(SeasonLine(), 3); SetState("idle", 3); }
+                    else if (r < .93) { SetState("idle", 2.5); Say(L("talk"), 2.4); }
+                    else { dir = -dir; SetState("walk", R(3, 6)); }
+                    break;
+                case "dipsy":   // 酷酷的、跟著節奏走、帽子是他的招牌
+                    if (r < .18) SetState("idle", R(1.5, 3.5));
+                    else if (r < .42) { dir = rnd.NextDouble() < .5 ? -1 : 1; SetState("walk", R(3, 6)); }
+                    else if (r < .52) { if (!JumpToPlatform()) Hop(); }
+                    else if (r < .58) { poseKind = "hattip"; SetState("pose", 1.8); Say(L("talk"), 2.2); }
+                    else if (r < .63) HatToss(false);
+                    else if (r < .67) { poseKind = "hatwave"; SetState("pose", 2.2); Say(Pick(new string[] { "（摘帽子揮一揮）Eh-oh!", "嘿～（揮帽子）" }), 1.8); }
+                    else if (r < .73) { SetState("dance", 3.4); Say(Pick(new string[] { "嘿～嘿～", "跟著節奏～", "迪西的舞步，酷。" }), 1.8); }
+                    else if (r < .77) Hug(L("hugs"), 2.2);
+                    else if (r < (Night ? .82 : .80)) Knock(L("knock"), "ambient");
+                    else if (r < .84 && lateCd <= 0 && LateLine() != null) LateTick();
+                    else if (r < .87 && SeasonLine() != null) { Say(SeasonLine(), 3); SetState("idle", 3); }
+                    else if (r < .93) { SetState("idle", 2.5); Say(L("talk"), 2.4); }
+                    else { dir = -dir; SetState("walk", R(3, 6)); }
+                    break;
+                case "laalaa":  // 蹦蹦跳跳、帶著球、愛唱歌轉圈圈
+                    if (r < .14) SetState("idle", R(1.2, 3));
+                    else if (r < .40) { dir = rnd.NextDouble() < .5 ? -1 : 1; SetState("walk", R(3, 6)); if (rnd.NextDouble() < .25) Say(Pick(new string[] { "啦～啦～", "蹦蹦跳～", "踢球球～" }), 1); }
+                    else if (r < .52) { if (!JumpToPlatform()) Hop(); }
+                    else if (r < .60) Juggle();
+                    else if (r < .66) { SetState("twirl", 1.6); Say(Pick(new string[] { "轉圈圈～", "啦啦啦～轉～" }), 1.4); }
+                    else if (r < .72) { poseKind = "sing"; SetState("pose", 3.2); Say(Pick(new string[] { "啦啦啦～♪", "啦～啦啦～啦～♪", "拉拉唱歌給你聽～♪" }), 2.6); }
+                    else if (r < .76) Hug(L("hugs"), 2.2);
+                    else if (r < (Night ? .81 : .79)) Knock(L("knock"), "ambient");
+                    else if (r < .83 && lateCd <= 0 && LateLine() != null) LateTick();
+                    else if (r < .86 && SeasonLine() != null) { Say(SeasonLine(), 3); SetState("idle", 3); }
+                    else if (r < .93) { SetState("idle", 2.5); Say(L("talk"), 2.4); }
+                    else { dir = -dir; SetState("walk", R(3, 6)); }
+                    break;
                 default:
                     if (r < .3) SetState("idle", R(1.5, 4));
                     else if (r < .6) { if (!JumpToPlatform()) Hop(); }
@@ -2606,6 +3020,9 @@ namespace DeskPals
                         Say(Pick(new string[] { "英雄漢頓，出發！", "看我的披風！咻～", "這次一定要帥帥地飛！" }), 1.8);
                     }
                     break;
+                case "tinky": TinkyBag(null, false); break;
+                case "dipsy": HatToss(false); break;
+                case "laalaa": Juggle(); break;
             }
         }
 
@@ -2625,6 +3042,17 @@ namespace DeskPals
                 case "cape": Signature(); break;
                 case "joke": if (Grounded()) { SetState("idle", 2.8); } Say(L("pats"), 2.4); jokeT = 2.6; break;
                 case "bubble": SetState("idle", 1.6); for (int i = 0; i < 5; i++) Mark(5); Say("噗嚕噗嚕～", 1.2); break;
+                // ---- 天線寶寶 ----
+                case "bag": TinkyBag(null, false); break;
+                case "dance":
+                    if (Grounded()) { SetState("dance", 3.5); Say(Is("dipsy") ? "嘿～嘿～（帽子跟著晃）" : (Is("laalaa") ? "啦啦啦～跳舞！" : "丁丁跳舞～轉一圈～"), 1.8); }
+                    break;
+                case "plop": if (Grounded()) Plop("哎喲！"); break;
+                case "hatwave": if (Grounded() && Is("dipsy") && !hatLost) { poseKind = "hatwave"; SetState("pose", 2.2); Say("Eh-oh!（揮帽子）", 1.8); } break;
+                case "hattoss": HatToss(false); break;
+                case "juggle": Juggle(); break;
+                case "sing": if (Grounded()) { poseKind = "sing"; SetState("pose", 3.2); Say("啦啦啦～啦啦～♪", 2.6); } break;
+                case "twirl": if (Grounded()) { SetState("twirl", 1.6); Say("轉圈圈～啦啦啦！", 1.6); } break;
             }
         }
 
@@ -2636,7 +3064,7 @@ namespace DeskPals
             {
                 case "spidey": if (!ZipToWindow(win, L("newwin"))) Say("有新視窗！👀", 1.5); break;
                 default:
-                    if (!GoToWindow(win, L("newwin"), Is("po") ? "wave" : (Is("hangyodon") ? "bubbles" : "sniff"))) Say(L("newwin"), 1.5);
+                    if (!GoToWindow(win, L("newwin"), Is("po") || Is("tinky") ? "wave" : (Is("hangyodon") ? "bubbles" : (Is("dipsy") ? "hattip" : (Is("laalaa") ? "twirl" : "sniff"))))) Say(L("newwin"), 1.5);
                     break;
             }
         }
@@ -3092,7 +3520,7 @@ namespace DeskPals
         {
             if (!Out || InScene) return;
             Say(s, 1.6);
-            if (Grounded() && state != "header") { poseKind = "hero"; SetState("pose", 0.9); }
+            if (Grounded() && state != "header") { poseKind = Is("dipsy") ? "hattip" : "hero"; SetState("pose", 0.9); }
         }
 
         // 串場用：直接設狀態／姿勢
@@ -3113,6 +3541,14 @@ namespace DeskPals
                 case "idle": SetState("idle", dur); break;
                 case "dizzy": SetState("dizzy", dur); break;
                 case "lick": poseKind = "lick"; SetState("pose", dur); break;
+                // ---- 天線寶寶 ----
+                case "plop": SetState("plop", dur); sT = 0; Burst(4); Mark(4); break;
+                case "hattip": case "hatwave": case "hatdown": case "sing": poseKind = kind; SetState("pose", dur); break;
+                case "twirl": case "dance": case "kick": case "catch": case "spin": SetState(kind, dur); break;
+                case "juggle": juggles = 0; sT = 0; SetState("juggle", dur); break;
+                case "hattoss": sT = 0; SetState("hattoss", dur); break;
+                case "bat": StartBat(false); break;
+                default: if (kind.StartsWith("bag")) TinkyBag(kind.Length > 4 ? kind.Substring(4) : "", true, dur); break;
             }
         }
         public void FaceTo(Pet o) { dir = o.Cx > Cx ? 1 : -1; }
@@ -3121,7 +3557,7 @@ namespace DeskPals
         // 走到／跳到另一隻旁邊（串場前先湊在一起）；回傳大概要幾秒
         public double ComeNear(Pet o)
         {
-            double tx = o.Cx + (Cx > o.Cx ? 1 : -1) * o.SW * 1.35;
+            double tx = o.Cx + (Cx > o.Cx ? 1 : -1) * o.SW * (P.Tubby || o.P.Tubby ? 2.0 : 1.35);   // 天線寶寶比較寬（16 格＋道具）
             Rectangle wa = w.WA(o.Cx, o.Foot - 4);
             tx = Clamp(tx, wa.Left + SW, wa.Right - SW);
             if (supH == o.supH && Math.Abs(Foot - o.Foot) < 3)
@@ -3138,6 +3574,407 @@ namespace DeskPals
         public void ClimbRace(int side) { if (Is("spidey")) StartClimb(side); else if (Is("stitch")) StartWallUp(side); }
         public double Foot { get { return y + SH; } }
         public bool OnFloor { get { return supH == IntPtr.Zero; } }
+    }
+
+    // ================= 天線寶寶：丁丁（魔法袋）、迪西（乳牛紋帽子）、拉拉（大橘球）=================
+    partial class Pet
+    {
+        bool hatLost;                   // 迪西：帽子借給丁丁戴了（串場）
+        public bool WearHat;            // 戴著迪西的帽子（串場）
+        bool ballLost;                  // 拉拉：球不見了（滾進丁丁的魔法袋、踢給小波）
+        public bool RidingPo;           // 丁丁騎小波的滑板車（串場）
+        public bool HoldToast;          // 吐司時間：手上拿著吐司（串場）
+        bool lentScooter;               // 小波：滑板車借出去了（串場結束一定還回來）
+        string bagItem = "";            // 魔法袋這次拿出來的東西
+        double sT, lastLandVy;          // 專屬動作計時、落地前的速度
+        int juggles;
+        bool lastArmsUp;
+        bool HasTv { get { return Is("po") || P.Tubby; } }
+
+        static readonly string[] TOAST = { ".2222.", "211112", "2k11k2", "211112", "21kk12", ".2222." };
+        static readonly string[] STAR5 = { "..y..", ".yyy.", "yyyyy", ".yyy.", ".y.y." };
+
+        // 串場要用的小開關
+        public void LendHat(bool lent) { hatLost = lent; }
+        public void LoseBall(bool lost) { ballLost = lost; }
+        public void LendScooter(bool lent) { lentScooter = lent; LoseScooter(lent); }
+        public void ResetSceneProps()
+        {
+            if (lentScooter) { lentScooter = false; LoseScooter(false); }
+            hatLost = false; WearHat = false; ballLost = false; RidingPo = false; HoldToast = false;
+            if (state == "bagdig") bagItem = "";
+        }
+        // 頭頂（帽子中間）的螢幕座標：串場丟帽子、丟球用
+        public PointF HatPoint() { return new PointF((float)Cx, (float)(Foot - SH + (P.HeadTop - 3) * S)); }
+        public PointF HandPoint() { return new PointF((float)(Cx + dir * 5 * S), (float)(Foot - SH + (P.BodyTop + 2) * S)); }
+        public PointF FootPoint() { return new PointF((float)(Cx + dir * 4 * S), (float)(Foot - 3 * S)); }
+        public PointF BagPoint() { return new PointF((float)(Cx + dir * 9 * S), (float)(Foot - SH + (P.BodyTop + 3) * S)); }   // 打開的袋口（提在身體旁邊）
+        public void ClearCrumbs() { notes.RemoveAll(delegate(double[] n) { return n[2] == 7; }); }
+
+        bool HatOnHead() { return Is("dipsy") && !hatLost && state != "hattoss" && !(state == "pose" && poseKind == "hatwave"); }
+
+        // 丁丁：跌坐在地上「哎喲！」（小波在大家一起跌倒的串場也會）
+        public void Plop(string text)
+        {
+            SetState("plop", 1.5); sT = 0;
+            Burst(4); Mark(4);
+            if (text != null) Say(text, 1.4);
+        }
+
+        // 丁丁的魔法袋：打開、翻一翻、拿出東西（catch＝剛接住的球）
+        bool bagQuiet;
+        void TinkyBag(string item, bool quiet) { TinkyBag(item, quiet, 2.4); }
+        void TinkyBag(string item, bool quiet, double dur)
+        {
+            if (!Is("tinky") || !Grounded()) return;
+            if (item == null)
+            {
+                string[] items = { "toast", "heart", "star", "toast", "ball" };
+                item = items[rnd.Next(items.Length)];
+                if (item == "ball" && (w.Get("laalaa") == null || !w.Get("laalaa").Out)) item = "heart";
+            }
+            bagItem = item; bagQuiet = quiet; sT = 0;
+            SetState("bagdig", Math.Max(1.4, dur));
+            if (!quiet) Say(Pick(new string[] { "魔法袋裡有什麼呢？", "丁丁找一找…", "（翻翻袋子）嗯…" }), 1.2);
+        }
+
+        void BagReveal()
+        {
+            switch (bagItem)
+            {
+                case "catch":
+                    if (w.Holder == this) { w.ReleaseBall(Cx + dir * 8 * k, y + 6 * k, 0, 0); KickBallToCursor(0.9); }
+                    if (!bagQuiet) Say(Pick(new string[] { "找到了！還你～", "從魔法袋拿出來囉！" }), 1.6);
+                    break;
+                case "toast": if (!bagQuiet) Say(Pick(new string[] { "是吐司！", "吐司！要吃嗎？" }), 1.6); break;
+                case "heart": AddHeart(); AddHeart(); if (!bagQuiet) Say("是愛心！送給你 ♥", 1.8); break;
+                case "star": Burst(10); if (!bagQuiet) Say("是星星！✨", 1.6); break;
+                case "ball": if (!bagQuiet) Say("咦？拉拉的球怎麼在這裡？", 2); break;
+            }
+        }
+
+        // 迪西：帽子丟上去轉一圈、接回頭上
+        void HatToss(bool quiet)
+        {
+            if (!Is("dipsy") || !Grounded() || hatLost) return;
+            sT = 0; SetState("hattoss", 1.6);
+            if (!quiet) Say(Pick(new string[] { "看我的帽子！", "帽子戲法！", "嘿～" }), 1.2);
+        }
+
+        // 拉拉：顛球（球在腳和頭頂之間跳）
+        void Juggle()
+        {
+            if (!Is("laalaa") || !Grounded() || ballLost) return;
+            juggles = 0; sT = 0;
+            SetState("juggle", R(2.6, 3.6));
+            Say(Pick(new string[] { "看我的球！啦～", "顛球！1、2、3～", "球球跳跳～" }), 1.2);
+        }
+        double JugglePhase() { return (sT * 1.5) % 1; }
+
+        bool TubbyStep(double dt)
+        {
+            if (state == "pose" && poseKind == "sing" && rnd.NextDouble() < dt * 3) Mark(0);
+            if (state == "dance" && Is("laalaa") && rnd.NextDouble() < dt * 2) Mark(0);
+            switch (state)
+            {
+                case "twirl":
+                    sT += dt;
+                    if (Math.Floor(anim * 9) != Math.Floor((anim - dt) * 9)) dir = -dir;
+                    if (rnd.NextDouble() < dt * 3) Mark(0);
+                    if (t < 0) { SetState("idle", InScene ? 30 : 1); if (!InScene && Is("laalaa") && rnd.NextDouble() < 0.5) Say("啦啦啦～", 1.2); }
+                    return true;
+                case "hattoss":
+                    {
+                        double prev = sT; sT += dt;
+                        if (prev < 1.25 && sT >= 1.25) { Burst(6); if (!InScene) Say(Pick(new string[] { "帥！", "接到了。酷。", "嘿～" }), 1.4); }
+                        if (t < 0) SetState("idle", InScene ? 30 : 1);
+                    }
+                    return true;
+                case "juggle":
+                    {
+                        double prev = JugglePhase(); sT += dt;
+                        if (JugglePhase() < prev) { juggles++; Mark(0); if (!InScene) Say(juggles + "！", 0.6); }
+                        if (t < 0) { SetState("idle", InScene ? 30 : 1); if (!InScene) Say(juggles >= 3 ? "啦～！" + juggles + " 下！" : "再來一次！", 1.4); }
+                    }
+                    return true;
+                case "bagdig":
+                    {
+                        double prev = sT; sT += dt;
+                        if (prev < 0.9 && sT >= 0.9) BagReveal();
+                        if (t < 0) { if (bagItem == "catch" && w.Holder == this) BagReveal(); bagItem = ""; SetState("idle", InScene ? 30 : 1); }
+                    }
+                    return true;
+            }
+            return false;
+        }
+
+        // ---------- 球（大家的球；小波在的話是棒球）----------
+        void TinkyBall()
+        {
+            w.HoldBall(this);
+            TinkyBag("catch", true, 1.8);
+            if (state != "bagdig") { w.ReleaseBall(Cx, y, 0, 0); KickBallToCursor(0.9); }   // 在空中接到：直接丟回去
+            Say(L("ball_catch"), 1.6);
+            w.Umpire("好球！");
+        }
+
+        // 迪西：用帽子頂球（偶爾連頂幾下）
+        void DipsyBall()
+        {
+            SetState("header", 0.45);
+            w.By = y + SH - 16 * S + (P.HeadTop - 7) * S; w.Bx = Cx;
+            headers++;
+            if (headers < 3 && rnd.NextDouble() < 0.4)
+            {
+                w.Bvx = R(-60, 60) * k; w.Bvy = -R(520, 620) * k; w.CatchCd = 0.5;
+                fetching = true;
+                Say(Pick(new string[] { "帽子頂！", "嘿！再一下", "酷～" }), 0.9);
+                return;
+            }
+            headers = 0;
+            Point c = Cursor.Position;
+            w.Bvx = Clamp((c.X - w.Bx) * 0.9, -800 * k, 800 * k); w.Bvy = -R(600, 760) * k; w.CatchCd = 1.0; w.BallIdle = 0;
+            Say(L("ball_catch"), 1.6);
+        }
+
+        // 拉拉：用腳踢（偶爾先顛幾下）
+        void LaaLaaBall()
+        {
+            SetState("kick", 0.45);
+            w.By = y + SH - w.BallR() - 2 * k; w.Bx = Cx + dir * 4 * k;
+            headers++;
+            if (headers < 3 && rnd.NextDouble() < 0.45)
+            {
+                w.Bvx = R(-40, 40) * k; w.Bvy = -R(480, 600) * k; w.CatchCd = 0.5;
+                fetching = true;
+                Say(Pick(new string[] { "1、2…", "啦～顛球！", "嘿咻！" }), 0.9);
+                return;
+            }
+            headers = 0;
+            Point c = Cursor.Position;
+            w.Bvx = Clamp((c.X - w.Bx) * 1.1, -950 * k, 950 * k); w.Bvy = -R(500, 700) * k; w.CatchCd = 1.0; w.BallIdle = 0;
+            Say(L("ball_catch"), 1.6);
+            w.Umpire("好球！");
+        }
+
+        // ---------- 畫 ----------
+        Fr FrameTubby()
+        {
+            bool hug = state == "hug", sleep = state == "sleep", plop = state == "plop";
+            bool nightIdle = Night && state == "idle" && !InScene && !HoldingFood();
+            bool sit = sleep || plop || (Is("laalaa") && nightIdle);
+            bool yawn = Night && state == "idle" && (anim % 6) < 1.4;
+            string face;
+            if (plop) face = sT < 0.55 ? "OUCH" : "HAPPY";
+            else if (sleep || yawn || (Is("dipsy") && nightIdle) || (state == "pose" && poseKind == "hatdown")) face = "SLEEPY";
+            else if (hug || state == "twirl" || state == "juggle" || (state == "dance" && Step2(2)) || (state == "bagdig" && sT > 0.9)
+                || (state == "pose" && (poseKind == "photo" || poseKind == "sing" || poseKind == "hatwave"))) face = "HAPPY";
+            else if (state == "dizzy") face = "DIZZY";
+            else if (state == "glass") face = "SQUISH";
+            else face = null;
+            bool armsUp = state == "glass" || state == "catch" || state == "drag" || state == "air" || state == "fling" || state == "kick" || state == "header" || (state == "throw" && t > 0.15)
+                || (state == "wave" && Step2(4)) || (state == "dance" && Step2(4)) || state == "twirl" || (state == "hattoss" && (sT < 0.3 || (sT > 1.1 && sT < 1.5)))
+                || (state == "pose" && (poseKind == "photo" || poseKind == "hatwave" || poseKind == "hattip" || (poseKind == "sing" && Step2(3))))
+                || (state == "bagdig" && sT > 0.9 && sT < 1.7);
+            if (RidingPo) armsUp = state == "air" || state == "drag";
+            lastArmsUp = armsUp;
+            string bodyName = hug || (nightIdle && !Is("dipsy")) ? "ARMS_HUG" : (armsUp ? "ARMS_UP" : "BODY");
+            string legs;
+            bool ride = RidingPo && !rolling;
+            if (ride) legs = "LEGS_RIDE";
+            else if (sit) legs = "LEGS_SIT";
+            else
+            {
+                bool moving = state == "walk" || state == "seek" || state == "fetch" || state == "hide" || state == "goto";
+                bool step = (moving && Step2(Is("tinky") ? 5 : (Is("laalaa") ? 9 : 7))) || (state == "dance" && Step2(4))
+                    || (state == "juggle" && JugglePhase() < 0.2) || (state == "kick" && t > 0.15);
+                legs = step ? "LEGS_B" : "LEGS_A";
+            }
+            Fr f = F(Pal.Stack(HeadRows(face), A(bodyName), A(legs)));
+            if (ride) { f.Top = -4; f.AccDy = -4; }
+            else if (sit) f.AccDy = A("LEGS_A").Length - A("LEGS_SIT").Length;
+            f.Tummy = !hug;
+            if (rolling) { f.Rot = (int)Math.Floor(anim * 14) % 4; f.Acc = false; f.Tummy = false; }
+            return f;
+        }
+
+        double TubbyBob()
+        {
+            if (state == "dance" || state == "elvis") return Math.Abs(Math.Sin(anim * (Is("dipsy") ? 6 : 8))) * 6 * k;
+            bool moving = state == "walk" || state == "goto" || state == "seek" || state == "fetch";
+            if (moving && !RidingPo)
+            {
+                if (Is("laalaa")) return Math.Abs(Math.Sin(anim * 7)) * 5 * k;      // 蹦蹦跳跳
+                if (Is("dipsy")) return Math.Abs(Math.Sin(anim * 5)) * 2.5 * k;     // 跟著節奏
+            }
+            if (Is("dipsy") && state == "idle" && !Night) return (Math.Floor(anim * 2) % 2) * k;   // 點頭打拍子
+            return 0;
+        }
+
+        // 拉拉的球現在在哪裡：none／floor（腳邊）／dribble（往前帶）／juggle／hold（抱著）／raised（舉高高）
+        string BallSpot(Fr f)
+        {
+            if (!Is("laalaa") || ballLost || w.BallOn || f.Rot != 0 || f.Fy) return "none";
+            if (w.Lunch && HoldingFood() && state != "sleep") return "none";
+            if (state == "juggle") return "juggle";
+            if (state == "pose" && poseKind == "photo") return "raised";
+            if (Night && state == "idle" && !InScene) return "hold";
+            if (state == "air" || state == "fling" || state == "drag" || state == "stowfly") return "hold";
+            if (state == "walk" || state == "goto" || state == "seek" || state == "hide") return "dribble";
+            return "floor";
+        }
+
+        // 丁丁的袋子在哪裡：floor（放地上）／hand（提著）／up（舉起來）／hug（抱著）／open（打開翻找）
+        string BagSpot(Fr f)
+        {
+            if (!Is("tinky") || f.Rot != 0 || f.Fy) return "none";
+            if (state == "bagdig") return "open";
+            if (state == "hug" || state == "sleep" || state == "plop" || RidingPo || HoldToast || (w.Lunch && HoldingFood())) return "floor";
+            if (Night && state == "idle" && !InScene) return "hug";
+            return lastArmsUp ? "up" : "hand";
+        }
+
+        void DrawTubbyBehind(Graphics g, Fr f, int bx, int by, int ps, bool fx)
+        {
+            if (RidingPo && !rolling)
+            {
+                Pal po = Pal.Get("po");
+                if (po != null) DrawPixPal(g, po, po.Art["SCOOTER"], bx + (fx ? 12 - (-1) - 14 : -1) * ps, by + 7 * ps, ps, fx);
+            }
+            if (BagSpot(f) == "floor") DrawAt(g, A("BAG"), HoldToast || w.Lunch ? -8.5 : 12.5, 9, bx, by, ps, fx, false, true);   // 手上拿吃的：袋子放另一邊
+            if (BallSpot(f) == "floor") DrawAt(g, A("BALL"), 12, 9, bx, by, ps, fx, false, true);
+        }
+
+        void DrawTubbyFront(Graphics g, Fr f, int bx, int by, int ps, bool fx)
+        {
+            if (f.Rot != 0 || f.Fy) return;
+            int dy = f.AccDy;
+            // 迪西的帽子
+            if (Is("dipsy") && !hatLost)
+            {
+                string[] hat = A("HAT");
+                double row = P.HeadTop - 6 + dy, col = -2;
+                if (state == "hattoss" && sT < 1.25)
+                {
+                    double ff = Clamp(sT / 1.25, 0, 1);
+                    row -= Math.Sin(Math.PI * ff) * 11;
+                    bool side = Math.Floor(sT * 10) % 2 == 1;                       // 轉呀轉：正面、側面輪流
+                    DrawAt(g, side ? A("HAT_HAND") : hat, side ? 2 : col, row, bx, by, ps, fx ^ (Math.Floor(sT * 5) % 2 == 1), false, true);
+                }
+                else if (state == "pose" && poseKind == "hatwave")
+                    DrawAt(g, A("HAT_HAND"), 11 + (Step2(4) ? 1 : 0), P.BodyTop - 8 + dy, bx, by, ps, fx, false, true);
+                else
+                {
+                    if (state == "pose" && poseKind == "hattip") { row -= 2; col += 1; }
+                    else if (state == "header") row -= 1;
+                    else if ((state == "pose" && poseKind == "hatdown") || state == "sleep" || (Night && state == "idle" && !InScene)) row += 3;   // 帽子拉低蓋住眼睛
+                    DrawAt(g, hat, col, row, bx, by, ps, fx, false, true);
+                }
+            }
+            // 借戴迪西的帽子（串場）
+            if (WearHat) DrawAt(g, A("HAT"), -2, P.HeadTop - 6 + dy, bx, by, ps, fx, false, true);
+            // 丁丁的魔法袋
+            switch (BagSpot(f))
+            {
+                case "hand": DrawAt(g, A("BAG"), 12 + (state == "walk" && Step2(5) ? 0.5 : 0), P.BodyTop + 1 + dy, bx, by, ps, fx, false, true); break;
+                case "up": DrawAt(g, A("BAG"), 12.5, P.BodyTop - 5 + dy, bx, by, ps, fx, false, true); break;
+                case "hug": DrawAt(g, A("BAG"), 2, P.BodyTop + 2 + dy, bx, by, ps, fx, false, true); break;
+                case "open":
+                    {
+                        // 袋子打開提在身體旁邊，東西從袋口冒出來（不擋到臉）
+                        double bagRow = P.BodyTop + 2 + dy;
+                        string[] item = BagItemArt();
+                        if (item != null && sT > 0.9)
+                        {
+                            double rise = Clamp((sT - 0.9) / 0.35, 0, 1) * (item.Length + 2);
+                            if (!(bagItem == "catch" && w.Holder != this && sT > 1.3))
+                                DrawAt(g, item, 15 - item[0].Length / 2.0, bagRow + 2 - rise, bx, by, ps, fx, false, true);
+                        }
+                        DrawAt(g, A("BAG_OPEN"), 11, bagRow, bx, by, ps, fx, false, true);
+                    }
+                    break;
+            }
+            // 拉拉的球
+            string[] ball = A("BALL");
+            switch (BallSpot(f))
+            {
+                case "juggle":
+                    {
+                        double h = Math.Sin(Math.PI * JugglePhase()) * 12;
+                        DrawAt(g, ball, 10, 9 - h, bx, by, ps, fx, false, true);   // 在身體前側顛，不擋臉
+                    }
+                    break;
+                case "dribble": DrawAt(g, ball, 11.5, 9 - Math.Abs(Math.Sin(anim * 8)) * 2, bx, by, ps, fx, false, true); break;
+                case "hold": DrawAt(g, ball, 2, P.BodyTop + 2 + dy, bx, by, ps, fx, false, true); break;
+                case "raised": DrawAt(g, ball, 2, P.HeadTop - 8 + dy, bx, by, ps, fx, false, true); break;
+            }
+        }
+
+        string[] BagItemArt()
+        {
+            switch (bagItem)
+            {
+                case "toast": return TOAST;
+                case "heart": return HEART;
+                case "star": return STAR5;
+                case "ball": return A("BALL");
+                case "catch": return w.BallKind == "baseball" ? BALLART : (w.BallKind == "tubby" ? A("BALL") : TBALL);
+            }
+            return null;
+        }
+
+        // ---------- 櫃子裡：丁丁翻魔法袋、迪西抬帽子打拍子、拉拉拍球；晚上抱著自己的東西睡 ----------
+        void DrawTubbyShelf(Graphics g, string[] head, int fx, int bx, int by, int ps, bool flip, double tt, bool blink)
+        {
+            string body = "BODY", legs = "LEGS_A";
+            bool normalFace = true, sit = false;
+            int groove = 0;
+            if (Is("tinky"))
+            {
+                if (Night) { body = "ARMS_HUG"; if ((tt % 5) < 3) { ReplaceFace(head, "SLEEPY"); normalFace = false; } }
+                else if ((tt % 8) < 2.4 && !w.Lunch && (tt % 8) > 0.9) { ReplaceFace(head, "HAPPY"); normalFace = false; }
+                else if (blink) { ReplaceFace(head, "SLEEPY"); normalFace = false; }
+            }
+            else if (Is("dipsy"))
+            {
+                if (Night) { ReplaceFace(head, "SLEEPY"); normalFace = false; }
+                else
+                {
+                    groove = Math.Floor(tt * 2.2) % 2 == 0 ? 0 : 1;
+                    if ((tt % 5) < 0.9) { ReplaceFace(head, "HAPPY"); normalFace = false; }
+                    else if (blink) { ReplaceFace(head, "SLEEPY"); normalFace = false; }
+                }
+            }
+            else
+            {
+                if (Night) { sit = true; body = "ARMS_HUG"; legs = "LEGS_SIT"; if ((tt % 6) < 4) { ReplaceFace(head, "SLEEPY"); normalFace = false; } }
+                else if (Math.Abs(Math.Sin(tt * 3.2)) > 0.8) { ReplaceFace(head, "HAPPY"); normalFace = false; }
+                else if (blink) { ReplaceFace(head, "SLEEPY"); normalFace = false; }
+            }
+            by += groove;
+            int dy = sit ? A("LEGS_A").Length - A("LEGS_SIT").Length : 0;
+            string[] rows = Pal.Stack(head, A(body), A(legs));
+            if (Is("tinky") && w.Lunch) DrawAt(g, A("BAG"), 9.5, 9, bx, by, ps, flip, false, true);
+            DrawPix(g, rows, bx - (rows[0].Length - 12) / 2 * ps, by + (16 - rows.Length) * ps, ps, flip, false, true);
+            DrawAccessories(g, bx, by, ps, flip, dy, normalFace);
+            DrawStatusIcon(g, TummyStatus(), bx + 6 * ps, by + (int)((P.TummyRow + dy) * ps), Math.Max(1, ps / 2), true);
+            if (Is("tinky") && !w.Lunch)
+            {
+                if (Night) DrawAt(g, A("BAG"), 2, P.BodyTop + 2, bx, by, ps, flip, false, true);
+                else if ((tt % 8) < 2.4)
+                {
+                    double ph = tt % 8;
+                    string[][] items = { TOAST, HEART, STAR5 };
+                    string[] item = items[(int)Math.Floor(tt / 8) % 3];
+                    if (ph > 0.9) DrawAt(g, item, 13.5 - item[0].Length / 2.0, P.BodyTop + 5 - Clamp((ph - 0.9) / 0.35, 0, 1) * (item.Length + 2), bx, by, ps, flip, false, true);
+                    DrawAt(g, A("BAG_OPEN"), 9.5, P.BodyTop + 3, bx, by, ps, flip, false, true);
+                }
+                else DrawAt(g, A("BAG"), 9, P.BodyTop + 3, bx, by, ps, flip, false, true);
+            }
+            if (Is("dipsy")) DrawAt(g, A("HAT"), -2, P.HeadTop - 6 + (Night ? 3 : ((tt % 5) < 0.9 ? -1 : 0)), bx, by, ps, flip, false, true);
+            if (Is("laalaa") && Night) DrawAt(g, A("BALL"), 2, P.BodyTop + 2 + dy, bx, by, ps, flip, false, true);
+            else if (Is("laalaa") && !w.Lunch) DrawAt(g, A("BALL"), 9.5, 9 - Math.Abs(Math.Sin(tt * 3.2)) * 4, bx, by, ps, flip, false, true);   // 在旁邊拍球（格子窄，靠近一點）
+        }
     }
 
     // ================= 畫（每個角色的姿勢、配件、特效）=================
@@ -3210,6 +4047,7 @@ namespace DeskPals
                 case "po": return FramePo();
                 case "stitch": return FrameStitch();
                 case "hangyodon": return FrameHangyodon();
+                case "tinky": case "dipsy": case "laalaa": return FrameTubby();
             }
             return FrameSpidey();
         }
@@ -3246,6 +4084,7 @@ namespace DeskPals
         // ---- 小波 ----
         Fr FramePo()
         {
+            if (state == "plop") { Fr pf = F(Pal.Stack(HeadRows(sT < 0.55 ? "DIZZY" : "HAPPY"), A("ARMS_UP"), A("LEGS_SIT"))); pf.Tummy = true; return pf; }
             bool hug = state == "hug", sleep = state == "sleep";
             bool yawn = Night && state == "idle" && (anim % 6) < 1.4;
             string face = sleep || yawn ? "SLEEPY" : (hug || state == "spin" || (state == "pose" && poseKind == "homerun") ? "HAPPY" : (state == "dizzy" ? "DIZZY" : (state == "glass" ? "SQUISH" : null)));
@@ -3387,13 +4226,22 @@ namespace DeskPals
             if (lv >= 4 && normalFace && !P.NoGlasses) DrawAt(g, GLASSES, P.HatCol, P.GlassRow + dy, bx0, by0, ps, fx, false, false);
             if (lv >= 5 && !Is("spidey")) DrawAt(g, BADGE, P.BadgeCol, P.BadgeRow + dy, bx0, by0, ps, fx, false, false);
             string[] hat = w.SeasonNow == "xmas" ? SANTA : (lv >= 6 ? CROWN : (lv >= 3 ? BEANIE : null));
+            if (HatOnHead() || WearHat) hat = null;      // 迪西：自己的帽子不換（借戴迪西帽子時也一樣）
             if (hat != null)
             {
                 DrawAt(g, hat, P.HatCol, P.HatRow + dy - hat.Length, bx0, by0, ps, fx, false, true);
-                if (P.KeepAntenna)
+                if (P.KeepAntenna && P.AntThrough)
+                {
+                    // 丁丁：天線從帽子中間穿出來（照原位置重畫，不墊高，櫃子格子才放得下）
+                    string[] head = A("HEAD"); int n = head.Length - 9;
+                    string[] ant = new string[n];
+                    for (int i = 0; i < n; i++) ant[i] = head[i];
+                    DrawAt(g, ant, (12 - ant[0].Length) / 2.0, P.HeadTop - n + dy, bx0, by0, ps, fx, false, true);
+                }
+                else if (P.KeepAntenna)
                 {
                     // 小波的天線（圓圈）要露在帽子上面
-                    string[] head = A("HEAD"), ant = new string[P.TopRows - 1];
+                    string[] head = A("HEAD"), ant = new string[P.AntRows >= 0 ? P.AntRows : P.TopRows - 1];
                     for (int i = 0; i < ant.Length; i++) ant[i] = head[i];
                     DrawAt(g, ant, (12 - ant[0].Length) / 2.0, P.HatRow + dy - hat.Length - ant.Length + 1, bx0, by0, ps, fx, false, true);
                 }
@@ -3457,7 +4305,7 @@ namespace DeskPals
             if (Is("po") && !scooterLost)
             {
                 if (OnScooter() && !rolling) DrawAt(g, A("SCOOTER"), -1, 7, bx, by, ps, fx, false, true);
-                else if (state == "idle" || state == "hug" || state == "wave" || state == "pose" || state == "dizzy" || state == "sleep" || state == "spin" || state == "think")
+                else if (state == "idle" || state == "hug" || state == "wave" || state == "pose" || state == "dizzy" || state == "sleep" || state == "spin" || state == "think" || state == "plop")
                     DrawAt(g, A("SCOOTER"), 7, 7, bx, by, ps, !fx, false, true); // 停在旁邊（車頭朝外）
             }
             if (Is("stitch") && RidingStolen)
@@ -3472,6 +4320,7 @@ namespace DeskPals
                 DrawAt(g, A("CAPE"), flap ? -4 : -3.5, 7, bx, by, ps, fx, false, true);
             }
             if (Is("hangyodon") && state == "sleep") DrawSleepBubble(g, bx, by, ps, false);
+            if (P.Tubby) DrawTubbyBehind(g, f, bx, by, ps, fx);
         }
 
         // 人魚漢頓睡在泡泡裡（先畫泡泡底，身體畫完再畫亮面）
@@ -3530,6 +4379,8 @@ namespace DeskPals
             }
             if (Is("hangyodon") && state == "sleep") DrawSleepBubble(g, bx, by, ps, true);
             if (Is("spidey") && w.Holder == this) DrawAt(g, w.BallKind == "baseball" ? BALLART : TBALL, 9, 4, bx, by, ps, fx, false, true);
+            if (P.Tubby) DrawTubbyFront(g, f, bx, by, ps, fx);
+            if (HoldToast && f.Rot == 0 && !f.Fy) DrawAt(g, TOAST, Is("po") ? 9.5 : 10.5, P.BodyTop + 1 + f.AccDy, bx, by, ps, fx, false, true);
         }
 
         // ================= 一格一格畫到 layered window =================
@@ -3539,7 +4390,7 @@ namespace DeskPals
             l = Math.Min(l, px); r = Math.Max(r, px); tp = Math.Min(tp, py); b = Math.Max(b, py);
         }
         bool SilkVisible() { return state == "swing" || state == "hang" || state == "zip" || state == "shoot" || state == "webcatch" || state == "sling"; }
-        double Bob() { return state == "dance" || state == "elvis" ? Math.Abs(Math.Sin(anim * 8)) * 6 * k : (Is("hangyodon") && state == "walk" ? (Step2(4) ? k : 0) : 0); }
+        double Bob() { if (P.Tubby) return TubbyBob(); return state == "dance" || state == "elvis" ? Math.Abs(Math.Sin(anim * 8)) * 6 * k : (Is("hangyodon") && state == "walk" ? (Step2(4) ? k : 0) : 0); }
 
         public void Render()
         {
@@ -3554,6 +4405,7 @@ namespace DeskPals
             foreach (double[] sp in sparks) Grow(ref l, ref tp, ref r, ref b, sp[0], sp[1]);
             foreach (double[] f in flakes) Grow(ref l, ref tp, ref r, ref b, f[0], f[1]);
             if (w.Lead() == this && w.TicketCountdown() != null) { tp = Math.Min(tp, y - (P.TopRows + 16) * S); l = Math.Min(l, Cx - 60 * k); r = Math.Max(r, Cx + 60 * k); }
+            if (P.Tubby || WearHat || HoldToast) tp = Math.Min(tp, y - (P.TopRows + (state == "juggle" || state == "hattoss" || state == "bagdig" ? 16 : 9)) * S);
             int pad = 6 + (int)(5 * k);
             Rectangle nb = Rectangle.FromLTRB((int)Math.Floor(l) - pad, (int)Math.Floor(tp) - pad, (int)Math.Ceiling(r) + pad, (int)Math.Ceiling(b) + pad);
             if (frameBmp == null || frameBmp.Width != nb.Width || frameBmp.Height != nb.Height)
@@ -3580,7 +4432,7 @@ namespace DeskPals
             if (Out)
             {
                 ancX = Cx;
-                above = y + SH - SH * sc - P.TopRows * S * sc - (state == "sleep" ? 30 * k : 0) - (hearts.Count > 0 ? 24 * k : 0) - (Is("po") && OnScooter() ? 4 * S : 0);
+                above = y + SH - SH * sc - P.TopRows * S * sc - (state == "sleep" ? 30 * k : 0) - (hearts.Count > 0 ? 24 * k : 0) - ((Is("po") && OnScooter()) || RidingPo ? 4 * S : 0);
                 if (w.Lead() == this && w.TicketCountdown() != null) above -= 11 * S;   // 讓出搶票倒數徽章的位置
             }
             else
@@ -3655,11 +4507,12 @@ namespace DeskPals
             // 第四面牆：小波臉貼玻璃起霧、史迪仔舔玻璃
             if (state == "glass" && sc > 2)
             {
-                if (Is("po"))
+                if (HasTv)
                     using (SolidBrush fog = new SolidBrush(Color.FromArgb(70, 255, 255, 255)))
                     {
-                        g.FillEllipse(fog, sbx + 3 * sps, sby + 7 * sps, 6 * sps, 3 * sps);
-                        g.FillEllipse(fog, sbx + 2 * sps, sby + 9 * sps, 8 * sps, 3 * sps);
+                        int fo = (P.HeadTop + 1) * sps;   // 小波 0；丁丁頭比較高
+                        g.FillEllipse(fog, sbx + 3 * sps, sby + 7 * sps + fo, 6 * sps, 3 * sps);
+                        g.FillEllipse(fog, sbx + 2 * sps, sby + 9 * sps + fo, 8 * sps, 3 * sps);
                     }
                 if (Is("stitch") && gt > 0.8)
                     using (SolidBrush wet = new SolidBrush(Color.FromArgb(55, 190, 225, 255)))
@@ -3673,7 +4526,7 @@ namespace DeskPals
             }
 
             // Codex／Claude 狀態小圖示（小波在肚子上，其他人在頭旁邊）
-            if (!Is("po") && Math.Abs(sc - 1) < 0.001 && w.Lead() == this)
+            if (!HasTv && Math.Abs(sc - 1) < 0.001 && w.Lead() == this)
             {
                 string st = w.Status();
                 if (st != "") DrawStatusIcon(g, st, (int)(x + SW + 2 * S) - ox, (int)(y - 1 * S) - oy, Math.Max(1, S / 2), false);
@@ -3766,7 +4619,7 @@ namespace DeskPals
             if (f.Tummy && f.Rot == 0)
             {
                 int u = Math.Max(1, sps / 2);
-                int scx = sbx + 6 * sps, scy = sby + (int)((10.5 + f.AccDy) * sps);
+                int scx = sbx + 6 * sps, scy = sby + (int)((P.TummyRow + f.AccDy) * sps);
                 DrawStatusIcon(g, TummyStatus(), scx, scy, u, true);
             }
             if (extras) { DrawFront(g, f, sbx, sby, sps, fx); DrawLunch(g, f, sbx, sby, sps, fx); }
@@ -3781,6 +4634,7 @@ namespace DeskPals
         public readonly int U, TU;           // 小格、高格的像素大小
         readonly double k;
         public bool Hot, Over, Night;
+        public bool Tubby;                   // 天線寶寶一櫃：格子裡是藍天綠山丘，大格有太陽寶寶
         int hover = -1;
         Bitmap bmp, bg;
         string bgKey = "";
@@ -3972,6 +4826,7 @@ namespace DeskPals
                     if (Night) panel = Mix(panel, C(0x2A2238), 0.55);
                     RectangleF inner = new RectangleF(c.X, c.Y, c.Width, c.Height - plateH);
                     using (LinearGradientBrush lb = new LinearGradientBrush(inner, Mix(panel, Color.White, 0.35), Mix(panel, C(0x6B4A30), 0.25), 90f)) g.FillRectangle(lb, inner);
+                    if (Tubby) DrawHills(g, inner, i == 0);
                     // 頂上的展示燈
                     using (GraphicsPath gp = new GraphicsPath())
                     {
@@ -4026,6 +4881,73 @@ namespace DeskPals
         }
 
 
+        // ---- 天線寶寶一櫃的格子：藍天、綠色小山丘、小花；大格有太陽寶寶（晚上下山）----
+        float HillTop(RectangleF inner, bool tall) { return inner.Bottom - inner.Height * (tall ? 0.30f : 0.27f); }
+        void DrawHills(Graphics g, RectangleF inner, bool tall)
+        {
+            GraphicsState st = g.Save();
+            g.SetClip(inner);
+            Color sky1 = Night ? C(0x4A3A6A) : C(0xB8E0FF), sky2 = Night ? C(0xA8707A) : C(0xEEF8FF);
+            using (LinearGradientBrush sb = new LinearGradientBrush(inner, sky1, sky2, 90f)) g.FillRectangle(sb, inner);
+            float hy = HillTop(inner, tall);
+            Color h1 = Night ? C(0x557E4C) : C(0x92D46C), h2 = Night ? C(0x3A5C36) : C(0x66B248), rim = Night ? C(0x74A066) : C(0xC0EC98);
+            // 後面一座淡淡的
+            using (SolidBrush b = new SolidBrush(Mix(h1, sky2, 0.5))) g.FillEllipse(b, inner.X - inner.Width * 0.55f, hy - inner.Height * 0.07f, inner.Width * 1.25f, inner.Height * 0.5f);
+            RectangleF hill = new RectangleF(inner.X - inner.Width * 0.25f, hy, inner.Width * 1.5f, inner.Height * 0.62f);
+            using (LinearGradientBrush hb = new LinearGradientBrush(new RectangleF(hill.X, hill.Y - 1, hill.Width, hill.Height + 2), h1, h2, 90f)) g.FillEllipse(hb, hill);
+            using (Pen rp = new Pen(rim, Math.Max(1f, U * 0.5f))) g.DrawArc(rp, hill, 215, 110);
+            // 小花（像素點）
+            Random r = new Random(tall ? 3 : 11);
+            Color[] fl = { Color.White, C(0xFFD84A), C(0xFF8FB0), C(0xE8E0FF) };
+            float u = Math.Max(1f, U * 0.6f), a = hill.Width / 2, bb = hill.Height / 2, cxh = hill.X + a, cyh = hill.Y + bb;
+            int n = tall ? 7 : 4;
+            for (int i = 0; i < n; i++)
+            {
+                float fx = inner.X + (float)(0.08 + 0.84 * (i + r.NextDouble() * 0.8) / n) * inner.Width;
+                double q = (fx - cxh) / a; if (Math.Abs(q) >= 1) continue;
+                float top = cyh - bb * (float)Math.Sqrt(1 - q * q);
+                float fy = top + (float)(0.25 + r.NextDouble() * 0.55) * (inner.Bottom - top);
+                Color c0 = fl[r.Next(fl.Length)];
+                using (SolidBrush pb = new SolidBrush(Night ? Mix(c0, C(0x3A3050), 0.45) : c0))
+                {
+                    g.FillRectangle(pb, fx - u, fy, u, u); g.FillRectangle(pb, fx + u, fy, u, u);
+                    g.FillRectangle(pb, fx, fy - u, u, u); g.FillRectangle(pb, fx, fy + u, u, u);
+                }
+                using (SolidBrush cb = new SolidBrush(Night ? C(0xB08A3C) : C(0xF5A623))) g.FillRectangle(cb, fx, fy, u, u);
+            }
+            g.Restore(st);
+        }
+
+        // 太陽寶寶：白天在天上笑，晚上一半沉到山丘後面
+        void DrawSunBaby(Graphics g, Rectangle c, float cx, float sy, float sr)
+        {
+            RectangleF inner = new RectangleF(c.X, c.Y, c.Width, c.Height - plateH);
+            float hy = HillTop(inner, true);
+            float r = sr * 0.5f, y0 = Night ? hy - r * 0.15f : sy;
+            if (Night) cx -= c.Width * 0.24f;   // 晚上在山丘邊慢慢下山（不要躲在圓台後面）
+            GraphicsState st = g.Save();
+            g.SetClip(new RectangleF(inner.X, inner.Y, inner.Width, hy + 1 - inner.Y));
+            Color ray = Night ? Color.FromArgb(150, 255, 150, 90) : Color.FromArgb(170, 255, 214, 74);
+            using (Pen rp = new Pen(ray, Math.Max(1.5f, U * 0.9f)))
+                for (int i = 0; i < 12; i++)
+                {
+                    double ang = i * Math.PI / 6 + 0.13;
+                    g.DrawLine(rp, cx + (float)Math.Cos(ang) * r * 1.25f, y0 + (float)Math.Sin(ang) * r * 1.25f, cx + (float)Math.Cos(ang) * r * 1.65f, y0 + (float)Math.Sin(ang) * r * 1.65f);
+                }
+            using (SolidBrush sb = new SolidBrush(Night ? C(0xF0965A) : C(0xFFD84A))) g.FillEllipse(sb, cx - r, y0 - r, 2 * r, 2 * r);
+            float fr = r * 0.66f;
+            using (SolidBrush fb = new SolidBrush(Night ? C(0xE8B892) : C(0xFBE3C6))) g.FillEllipse(fb, cx - fr, y0 - fr, 2 * fr, 2 * fr);
+            float e = Math.Max(1.5f, fr * 0.16f);
+            using (SolidBrush kb = new SolidBrush(C(0x5A3A2A)))
+            {
+                if (Night) using (Pen sp = new Pen(C(0x5A3A2A), Math.Max(1f, e * 0.6f))) { g.DrawLine(sp, cx - fr * 0.5f, y0 - fr * 0.15f, cx - fr * 0.2f, y0 - fr * 0.15f); g.DrawLine(sp, cx + fr * 0.2f, y0 - fr * 0.15f, cx + fr * 0.5f, y0 - fr * 0.15f); }
+                else { g.FillEllipse(kb, cx - fr * 0.42f - e / 2, y0 - fr * 0.25f, e, e * 1.2f); g.FillEllipse(kb, cx + fr * 0.42f - e / 2, y0 - fr * 0.25f, e, e * 1.2f); }
+            }
+            using (Pen mp = new Pen(C(0xC0504A), Math.Max(1f, e * 0.6f))) g.DrawArc(mp, cx - fr * 0.35f, y0 - fr * 0.05f, fr * 0.7f, fr * 0.55f, 20, 140);
+            using (SolidBrush pk = new SolidBrush(Color.FromArgb(110, 255, 130, 130))) { g.FillEllipse(pk, cx - fr * 0.78f, y0 + fr * 0.1f, fr * 0.3f, fr * 0.2f); g.FillEllipse(pk, cx + fr * 0.48f, y0 + fr * 0.1f, fr * 0.3f, fr * 0.2f); }
+            g.Restore(st);
+        }
+
         // 高格：最愛站的小圓台＋背板上淡淡的大星星
         void DrawPedestal(Graphics g, Rectangle c, Color panel)
         {
@@ -4039,7 +4961,9 @@ namespace DeskPals
                 double a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 == 0 ? sr : sr * 0.45;
                 star[i] = new PointF(cx + (float)(Math.Cos(a) * rr), sy + (float)(Math.Sin(a) * rr));
             }
-            using (SolidBrush sb = new SolidBrush(Night ? Color.FromArgb(40, 255, 220, 150) : Color.FromArgb(70, 255, 236, 180))) g.FillPolygon(sb, star);
+            if (Tubby) DrawSunBaby(g, c, cx, sy, sr);
+            else
+                using (SolidBrush sb = new SolidBrush(Night ? Color.FromArgb(40, 255, 220, 150) : Color.FromArgb(70, 255, 236, 180))) g.FillPolygon(sb, star);
             // 圓台
             Color m1 = Night ? C(0x8A7A70) : C(0xFFF6E8), m2 = Night ? C(0x4E443F) : C(0xD9C7AE);
             RectangleF bodyR = new RectangleF(cx - pw / 2, top, pw, ph - U * 0.5f);
@@ -4195,7 +5119,7 @@ namespace DeskPals
 
         Bitmap Cabinet(Pet[] who, bool[] outNow, double t)
         {
-            string key = Night + "|" + Area.Size;
+            string key = Night + "|" + Tubby + "|" + Area.Size;
             for (int i = 0; i < 4; i++) key += "|" + (who[i] == null ? "-" : who[i].P.Id);
             if (key != bgKey || bg == null) { bgKey = key; BuildBg(who, outNow); }
             if (bmp == null || bmp.Width != bg.Width || bmp.Height != bg.Height) { if (bmp != null) bmp.Dispose(); bmp = new Bitmap(bg.Width, bg.Height, PixelFormat.Format32bppArgb); }
@@ -4412,6 +5336,9 @@ namespace DeskPals
                             }
                     }
                     break;
+                case "tinky": case "dipsy": case "laalaa":
+                    DrawTubbyShelf(g, head, fx, bx, by, ps, flip, tt, blink);
+                    break;
                 default:
                     if (blink) ReplaceFace(head, "SLEEPY");
                     { string[] rows = Pal.Stack(head, A("BODY"), A("LEGS_A")); DrawPix(g, rows, bx - (rows[0].Length - 12) / 2 * ps, by + (16 - rows.Length) * ps, ps, flip, false, true); }
@@ -4487,7 +5414,10 @@ namespace DeskPals
             return d;
         }
 
-        readonly string pipeName, defaultPet;
+        readonly string pipeName;
+        string defaultPet;
+        string lineup = Pal.Classic;                  // 現在是哪一櫃
+        public bool TubbyLineup { get { return lineup == Pal.Teletubbies; } }
         public readonly int S;
         public readonly double k;
         readonly Random rnd = new Random();
@@ -4528,25 +5458,86 @@ namespace DeskPals
         string favPin = "";
         readonly Dictionary<string, double> usage = new Dictionary<string, double>();
 
-        public World(string pipeName, string pet)
+        public World(string pipeName, string pet, string lineupArg)
         {
             this.pipeName = pipeName;
-            defaultPet = Pal.Get(pet) != null ? pet : "spidey";
+            // 哪一櫃：有傳就用（並記住），沒傳（開機捷徑）就照上次的
+            lineup = Pal.NormLineup(string.IsNullOrEmpty(lineupArg) ? ReadText("lineup.txt") : lineupArg);
+            if (!string.IsNullOrEmpty(lineupArg)) WriteText("lineup.txt", lineup);
+            defaultPet = DefaultPetFor(pet);
             ShowInTaskbar = false;
             float dpi = 96;
             using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) dpi = g.DpiX;
             S = Math.Max(3, (int)Math.Round(4 * dpi / 96.0));
             k = S / 3.0;
             int seed = Environment.TickCount;
-            foreach (Pal p in Pal.All) Pets.Add(new Pet(this, p, S, seed++));
+            foreach (Pal p in Pal.Lineup(lineup)) Pets.Add(new Pet(this, p, S, seed++));
+        }
+
+        string DefaultPetFor(string pet)
+        {
+            foreach (string id in Pal.LineupIds(lineup)) if (id == pet) return pet;
+            return lineup == Pal.Teletubbies ? "po" : "spidey";
+        }
+
+        // 每一櫃各自記：誰在外面、最近一隻、最愛（經典一櫃沿用原本的檔名）
+        string LF(string name) { return lineup == Pal.Classic ? name : Path.GetFileNameWithoutExtension(name) + "-" + lineup + Path.GetExtension(name); }
+
+        // 換一櫃：大家先收起來（不吵）、換成另一櫃的公仔，照那一櫃上次的狀態放出來（或指定的那隻）
+        public void SwitchLineup(string id, string pet)
+        {
+            id = Pal.NormLineup(id);
+            if (id == lineup)
+            {
+                Pet want = Get(pet);
+                if (want != null) SelectOnly(want);
+                return;
+            }
+            AbortScene();
+            ClearProps();
+            if (BallOn) { BallOn = false; Holder = null; if (ballF != null) ballF.Hide(); }
+            SaveUsage(); SaveOut();
+            current = null;
+            foreach (Pet p in Pets) { p.Out = false; p.CloseForms(); }
+            foreach (CobwebForm f in webs) f.Close();
+            webs.Clear();
+            Pets.Clear(); outOrder.Clear(); active = null; lastBroadcast = "";
+            lineup = id;
+            WriteText("lineup.txt", lineup);
+            defaultPet = DefaultPetFor(pet);
+            usage.Clear();
+            LoadState();
+            int seed = Environment.TickCount;
+            foreach (Pal p in Pal.Lineup(lineup)) Pets.Add(new Pet(this, p, S, seed++));
+            RenderShelf();
+            List<string> ids = Get(pet) != null ? new List<string>(new string[] { pet }) : LoadOutIds();
+            double delay = 0.35;
+            foreach (string oid in ids)
+            {
+                Pet pp = Get(oid);
+                if (pp == null) continue;
+                Later(delay, delegate { BringOut(pp, true); });
+                delay += 0.5;
+            }
+            active = Get(ids.Count > 0 ? ids[ids.Count - 1] : defaultPet) ?? Get(defaultPet);
+            if (ids.Count == 0 && active != null) active.Say(TubbyLineup ? "Eh-oh! 天線寶寶一櫃 ☀" : "經典一櫃回來囉！", 2.4);
+            Broadcast();
+            App.Log("lineup " + lineup);
         }
 
         // 只給預覽用：不開任何視窗
+        public World(int S, string lineupId)
+        {
+            pipeName = ""; lineup = Pal.NormLineup(lineupId); defaultPet = "po"; this.S = S; k = S / 3.0;
+            int seed = 1;
+            foreach (Pal p in Pal.Lineup(lineup)) Pets.Add(new Pet(this, p, S, seed++));
+        }
+
         public World(int S)
         {
             pipeName = ""; defaultPet = "spidey"; this.S = S; k = S / 3.0;
             int seed = 1;
-            foreach (Pal p in Pal.All) Pets.Add(new Pet(this, p, S, seed++));
+            foreach (Pal p in Pal.Lineup(Pal.Classic)) Pets.Add(new Pet(this, p, S, seed++));
         }
 
         public Pet Get(string id) { foreach (Pet p in Pets) if (p.P.Id == id) return p; return null; }
@@ -4590,7 +5581,7 @@ namespace DeskPals
                     delay += 0.6;
                 }
             }
-            string act = ReadText("active.txt");
+            string act = ReadText(LF("active.txt"));
             if (Get(act) != null) active = Get(act);
             if (active == null) active = Get(outIds.Count > 0 ? outIds[outIds.Count - 1] : defaultPet) ?? Get(defaultPet);
 
@@ -4604,7 +5595,7 @@ namespace DeskPals
             timer.Interval = 30;
             timer.Tick += delegate { Tick(); };
             timer.Start();
-            App.Log("started pipe=" + pipeName + " out=" + string.Join(",", outIds.ToArray()) + " data=" + DataDir);
+            App.Log("started pipe=" + pipeName + " lineup=" + lineup + " out=" + string.Join(",", outIds.ToArray()) + " data=" + DataDir);
         }
 
         protected override void SetVisibleCore(bool value) { base.SetVisibleCore(false); }
@@ -4635,8 +5626,8 @@ namespace DeskPals
 
         void LoadState()
         {
-            favPin = ReadText("fav.txt");
-            foreach (string line in ReadText("usage.txt").Split('\n'))
+            favPin = ReadText(LF("fav.txt"));
+            foreach (string line in ReadText(LF("usage.txt")).Split('\n'))
             {
                 string[] a = line.Trim().Split(' ');
                 double v;
@@ -4647,9 +5638,9 @@ namespace DeskPals
         List<string> LoadOutIds()
         {
             List<string> ids = new List<string>();
-            if (File.Exists(FilePath("out.txt")))
+            if (File.Exists(FilePath(LF("out.txt"))))
             {
-                foreach (string s in ReadText("out.txt").Split(new char[] { ' ', ',', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
+                foreach (string s in ReadText(LF("out.txt")).Split(new char[] { ' ', ',', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
                     if (Get(s) != null && !ids.Contains(s)) ids.Add(s);
             }
             else ids.Add(defaultPet);
@@ -4660,21 +5651,23 @@ namespace DeskPals
         {
             List<string> ids = new List<string>();
             foreach (Pet p in outOrder) if (p.Out && p.state != "stowfly" && p.state != "enter") ids.Add(p.P.Id);
-            WriteText("out.txt", string.Join(" ", ids.ToArray()));
-            if (active != null) WriteText("active.txt", active.P.Id);
+            WriteText(LF("out.txt"), string.Join(" ", ids.ToArray()));
+            if (active != null) WriteText(LF("active.txt"), active.P.Id);
         }
 
         void SaveUsage()
         {
             StringBuilder sb = new StringBuilder();
             foreach (KeyValuePair<string, double> kv in usage) sb.Append(kv.Key + " " + kv.Value.ToString("0", System.Globalization.CultureInfo.InvariantCulture) + "\n");
-            WriteText("usage.txt", sb.ToString());
+            WriteText(LF("usage.txt"), sb.ToString());   // 每一櫃各自算誰用最久（小波在天線寶寶一櫃的時間不算進經典一櫃）
         }
 
         // ---------- 櫃子的格子：最愛（釘選 > 用最久）在高格，其他照順序 ----------
         public string FavId()
         {
             if (Get(favPin) != null) return favPin;
+            string lf = Pal.LineupFav(lineup);
+            if (lf != null && Get(lf) != null) return lf;                 // 天線寶寶一櫃：大格是小波
             string best = Pets[0].P.Id; double bv = -1;
             foreach (Pet p in Pets) { double v; usage.TryGetValue(p.P.Id, out v); if (v > bv + 0.5) { bv = v; best = p.P.Id; } }
             return best;
@@ -4735,7 +5728,7 @@ namespace DeskPals
             for (int i = 0; i < 4; i++) o[i] = c[i] != null && c[i].Out;
             bool hot = false, over = false;
             foreach (Pet p in Pets) if (p.Out && p.Dragging) { hot = true; if (InShelf(p.Cx, p.y + p.SH / 2.0)) over = true; }
-            shelf.Hot = hot; shelf.Over = over; shelf.Night = Night; shelf.Lunch = Lunch; shelf.Attention = EggAttention();
+            shelf.Hot = hot; shelf.Over = over; shelf.Night = Night; shelf.Tubby = TubbyLineup; shelf.Lunch = Lunch; shelf.Attention = EggAttention();
             shelf.Render(c, o, Now);
             if (!W.Shown(shelf)) { shelf.Show(); Zorder(); }
         }
@@ -4743,6 +5736,7 @@ namespace DeskPals
         // ---------- 放出來／收回去 ----------
         public void BringOut(Pet p, bool say)
         {
+            if (!Pets.Contains(p)) return;          // 換櫃之前排好的延遲動作
             if (p.Out) { active = p; Broadcast(); return; }
             p.ComeOut(say);
             if (shelf.Collapsed) shelf.Gulp();
@@ -4796,7 +5790,7 @@ namespace DeskPals
         public void SetFav(Pet p)
         {
             favPin = favPin == p.P.Id ? "" : p.P.Id;
-            WriteText("fav.txt", favPin);
+            WriteText(LF("fav.txt"), favPin);
             p.Say(favPin == "" ? "好～不當最愛也沒關係" : "我是最愛！★ 謝謝你 ♥", 2);
         }
 
@@ -4867,6 +5861,7 @@ namespace DeskPals
                     if (p.Out && !sysIdle) { double v; usage.TryGetValue(p.P.Id, out v); usage[p.P.Id] = v + dt; }
                 }
                 UpdateBall(dt);
+                StepProps(dt);
                 if (fx != null) fx.Step(dt);
                 StepScene(dt);
                 proxT -= dt;
@@ -4889,6 +5884,7 @@ namespace DeskPals
             foreach (CobwebForm f in webs) W.KeepOnTop(f);
             foreach (Pet p in Pets) if (p.Form != null) W.KeepOnTop(p.Form);
             W.KeepOnTop(ballF);
+            foreach (Prop pr in props) W.KeepOnTop(pr.F);
             if (fx != null && fx.Active) W.KeepOnTop(fx);
             foreach (Pet p in Pets) if (p.Bub != null) W.KeepOnTop(p.Bub);
         }
@@ -4905,6 +5901,7 @@ namespace DeskPals
             if (ballF != null && ballF.IsHandleCreated) own.Add(ballF.Handle);
             if (fx != null && fx.IsHandleCreated) own.Add(fx.Handle);
             if (flash != null && flash.IsHandleCreated) own.Add(flash.Handle);
+            foreach (Prop pr in props) if (pr.F.IsHandleCreated) own.Add(pr.F.Handle);
 
             List<WinInfo> nw = new List<WinInfo>();
             Dictionary<IntPtr, WinInfo> nc = new Dictionary<IntPtr, WinInfo>();
@@ -4912,7 +5909,7 @@ namespace DeskPals
             StringBuilder title = new StringBuilder(256);
             W.EnumWindows(delegate(IntPtr h, IntPtr l)
             {
-                if (own.Contains(h) || !W.IsWindowVisible(h) || W.IsIconic(h)) return true;
+                if (App.Isolated || own.Contains(h) || !W.IsWindowVisible(h) || W.IsIconic(h)) return true;
                 int cloaked;
                 if (W.DwmGetWindowAttribute(h, 14, out cloaked, 4) == 0 && cloaked != 0) return true;
                 W.RECT r;
@@ -5112,6 +6109,7 @@ namespace DeskPals
                 foreach (CobwebForm f in webs) f.Hide();
                 if (shelf != null) shelf.Hide();
                 if (ballF != null) ballF.Hide();
+                foreach (Prop pr in props) pr.F.Hide();
                 if (fx != null && fx.Active) fx.Stop();
             }
             else RenderShelf();
@@ -5129,7 +6127,7 @@ namespace DeskPals
 
         void FullscreenCheck(HashSet<IntPtr> own)
         {
-            IntPtr fg = W.GetForegroundWindow();
+            IntPtr fg = App.Isolated ? IntPtr.Zero : W.GetForegroundWindow();
             bool fs = false;
             if (fg != IntPtr.Zero && !own.Contains(fg))
             {
@@ -5281,7 +6279,7 @@ namespace DeskPals
         public void Umpire(string call)
         {
             if (OutCount() < 2 || umpCd > 0) return;
-            Pet mm = Get("hangyodon");
+            Pet mm = Get("hangyodon") ?? Get("dipsy");   // 天線寶寶一櫃：迪西扶帽子當裁判
             if (mm == null || !mm.Out || Holder == mm) return;
             umpCd = 1.5;
             mm.Call(call);
@@ -5354,6 +6352,18 @@ namespace DeskPals
                     items = new string[][] { new string[] { "抱抱 ♥", "hug" }, new string[] { "打招呼", "hi" }, new string[] { "講個笑話", "joke" }, new string[] { "敲敲螢幕（啵～）", "knock" },
                         new string[] { "披風英雄飛行", "sig" }, new string[] { "吐泡泡", "bubble" }, new string[] { "在泡泡裡睡覺", "sleep" }, new string[] { "丟球給他 ⚾", "ball" } };
                     break;
+                case "tinky":
+                    items = new string[][] { new string[] { "大抱抱 ♥", "hug" }, new string[] { "打招呼 Eh-oh!", "hi" }, new string[] { "敲敲螢幕", "knock" }, new string[] { "翻翻魔法袋", "bag" },
+                        new string[] { "跳舞", "dance" }, new string[] { "跌一跤（哎喲！）", "plop" }, new string[] { "抱著袋袋睡覺", "sleep" }, new string[] { "丟球給他 ⚾", "ball" } };
+                    break;
+                case "dipsy":
+                    items = new string[][] { new string[] { "大抱抱 ♥", "hug" }, new string[] { "打招呼 Eh-oh.", "hi" }, new string[] { "敲敲螢幕", "knock" }, new string[] { "帽子戲法", "sig" },
+                        new string[] { "摘帽子揮一揮", "hatwave" }, new string[] { "酷酷地跳舞", "dance" }, new string[] { "帽子拉低睡覺", "sleep" }, new string[] { "丟球給他 ⚾", "ball" } };
+                    break;
+                case "laalaa":
+                    items = new string[][] { new string[] { "大抱抱 ♥", "hug" }, new string[] { "打招呼 Eh-oh!", "hi" }, new string[] { "敲敲螢幕", "knock" }, new string[] { "顛球", "sig" },
+                        new string[] { "唱歌 啦啦啦 ♪", "sing" }, new string[] { "轉圈圈", "twirl" }, new string[] { "抱著球睡覺", "sleep" }, new string[] { "丟球給她 ⚾", "ball" } };
+                    break;
                 default:
                     items = new string[][] { new string[] { "抱抱 ♥", "hug" }, new string[] { "打招呼", "hi" }, new string[] { "敲敲螢幕", "knock" }, new string[] { "噴絲擺盪", "swing" },
                         new string[] { "倒吊", "hang" }, new string[] { "跳到別的視窗上", "jump" }, new string[] { "去爬牆", "climb" }, new string[] { "睡覺", "sleep" }, new string[] { "丟球給他 ⚾", "ball" } };
@@ -5372,6 +6382,14 @@ namespace DeskPals
             AddReminderMenus(m);
             AddTicketMenus(m);
             m.Items.Add("今天的小結", null, delegate { DailyWrap(true); });
+            if (TubbyLineup)
+            {
+                ToolStripMenuItem grp = new ToolStripMenuItem("天線寶寶一起…");
+                string[][] gs = { new string[] { "大抱抱 ♥", "bighug" }, new string[] { "啦啦啦一起唱", "sing" }, new string[] { "一起跌倒（哎喲！）", "fall" },
+                    new string[] { "吐司時間 🍞", "toast" }, new string[] { "大合照 📷", "photo" }, new string[] { "天線寶寶說再見", "byebye" } };
+                foreach (string[] gi in gs) { string key = gi[1]; grp.DropDownItems.Add(gi[0], null, delegate { PlayScene(key); }); }
+                m.Items.Add(grp);
+            }
             ToolStripMenuItem sw = new ToolStripMenuItem("換角色");
             foreach (Pet o in Pets)
             {
@@ -5641,7 +6659,7 @@ namespace DeskPals
                         int n = 0, prev = 0;
                         if (p.Length >= 3) { int.TryParse(p[1], out n); int.TryParse(p[2], out prev); }
                         if (n <= prev && n != 0) break;
-                        foreach (Pet x in outs) x.OnErrors(n, prev, x.P.Id == "po" ? Nearest(x) : null);
+                        foreach (Pet x in outs) x.OnErrors(n, prev, x.P.Id == "po" || x.P.Id == "laalaa" ? Nearest(x) : null);
                         if (outs.Count == 0) l.OnErrors(n, prev, null);
                     }
                     break;
@@ -5712,6 +6730,7 @@ namespace DeskPals
                         if (long.TryParse(p[1], out ms) && int.TryParse(p[2], out lead)) AddTicket(ms, lead, p[3], i4 > 0 ? t.Substring(i4 + 1) : "");
                     }
                     break;
+                case "lineup": SwitchLineup(p.Length >= 2 ? p[1] : "", p.Length >= 3 ? p[2] : ""); Send(c, "lineup " + lineup + "\n"); break;   // 回報現在是哪一櫃（VS Code 用來判斷桌面版是不是舊版）
                 case "config-host": companyHost = p.Length >= 2 ? p[1].Trim() : ""; break;
                 case "snap": if (p.Length >= 2) Snap(p[1], ParseRect(p, 2)); Send(c, "snapped\n"); break;
                 case "snaps":
@@ -5792,6 +6811,7 @@ namespace DeskPals
             if (ballF != null) ballF.Close();
             if (fx != null) fx.Close();
             if (flash != null) flash.Close();
+            ClearProps();
             Application.ExitThread();
         }
     }
@@ -6186,7 +7206,8 @@ namespace DeskPals
         public void AbortScene()
         {
             scene = null;
-            foreach (Pet p in cast) p.InScene = false;
+            foreach (Pet p in cast) { p.InScene = false; p.ResetSceneProps(); }
+            ClearProps();
             cast.Clear();
         }
 
@@ -6218,7 +7239,7 @@ namespace DeskPals
             if (outs.Count < 2) return;
             List<Pet> free = new List<Pet>();
             foreach (Pet p in outs) if (p.Free()) free.Add(p);
-            if (free.Count >= 3 && groupCd <= 0 && rnd.NextDouble() < 0.02) { groupCd = 600; if (rnd.NextDouble() < 0.6) GroupPhoto(); else GroupHug(); return; }
+            if (free.Count >= 3 && groupCd <= 0 && rnd.NextDouble() < (TubbyLineup && free.Count >= 4 ? 0.04 : 0.02)) { groupCd = 600; if (TubbyLineup) TubbyGroup(free.Count); else if (rnd.NextDouble() < 0.6) GroupPhoto(); else GroupHug(); return; }
             for (int i = 0; i < free.Count; i++)
                 for (int j = i + 1; j < free.Count; j++)
                 {
@@ -6244,6 +7265,18 @@ namespace DeskPals
         {
             string[] ids = key.Split('-');
             if (ids.Length == 1 && (key == "photo" || key == "group")) { GroupPhoto(); return; }
+            if (ids.Length == 1)
+            {
+                switch (key)
+                {
+                    case "bighug": SceneBigHug(); return;
+                    case "sing": SceneSing(); return;
+                    case "fall": SceneFall(); return;
+                    case "toast": SceneToast(); return;
+                    case "byebye": SceneByeBye(false); return;
+                }
+                return;
+            }
             if (ids.Length != 2) return;
             Array.Sort(ids, string.CompareOrdinal);
             Pet a = Get(ids[0]), b = Get(ids[1]);
@@ -6254,14 +7287,34 @@ namespace DeskPals
             pairCd[k2] = Now + 180 + rnd.NextDouble() * 120;
             double d0 = a.Out && b.Out && a.state != "exit" && b.state != "exit" ? 0 : 1.6;
             // 離太遠：先湊到一起再演
+            if (TubbyLineup) { Later(d0, delegate { GatherPair(k2, a, b, 0); }); return; }
             Later(d0, delegate
             {
+                if (!Pets.Contains(a) || !Pets.Contains(b)) return;   // 中間換櫃了
                 AbortScene();
                 double wait = b.ComeNear(a);
                 b.InScene = true; a.InScene = true; cast.Add(a); cast.Add(b);
                 if (a.Grounded()) a.ScenePose("idle", 30);
                 Later(wait + 0.3, delegate { RunScene(k2, a, b); });
             });
+        }
+
+        // 天線寶寶一櫃：等兩隻都站穩了才湊過去（剛出櫃還在空中時，算出來的位置會疊在一起），站好後再開演
+        void GatherPair(string key, Pet a, Pet b, int tries)
+        {
+            if (!Pets.Contains(a) || !Pets.Contains(b) || !a.Out || !b.Out) return;
+            if ((!a.Grounded() || !b.Grounded()) && tries < 12) { Later(0.35, delegate { GatherPair(key, a, b, tries + 1); }); return; }
+            AbortScene();
+            b.InScene = true; a.InScene = true; cast.Add(a); cast.Add(b);
+            if (a.Grounded()) a.ScenePose("idle", 30);
+            double wait = b.ComeNear(a);
+            Later(wait + 0.3, delegate { WaitStill(key, a, b, 0); });
+        }
+        void WaitStill(string key, Pet a, Pet b, int tries)
+        {
+            if (!Pets.Contains(a) || !Pets.Contains(b) || !a.Out || !b.Out) return;
+            if ((!a.Grounded() || !b.Grounded() || b.state == "goto") && tries < 10) { Later(0.3, delegate { WaitStill(key, a, b, tries + 1); }); return; }
+            RunScene(key, a, b);
         }
 
         void RunScene(string key, Pet a, Pet b)
@@ -6274,6 +7327,13 @@ namespace DeskPals
                 case "po-stitch": SceneScooterThief(Get("stitch"), Get("po")); break;
                 case "hangyodon-stitch": SceneBlueBrothers(Get("stitch"), Get("hangyodon")); break;
                 case "hangyodon-po": SceneJoke(Get("po"), Get("hangyodon")); break;
+                // 天線寶寶一櫃
+                case "dipsy-tinky": SceneHatSwap(Get("tinky"), Get("dipsy")); break;
+                case "laalaa-tinky": SceneBallBag(Get("tinky"), Get("laalaa")); break;
+                case "dipsy-laalaa": SceneDanceOff(Get("dipsy"), Get("laalaa")); break;
+                case "po-tinky": SceneScooterRide(Get("po"), Get("tinky")); break;
+                case "dipsy-po": SceneHatBaseball(Get("po"), Get("dipsy")); break;
+                case "laalaa-po": SceneBallFetch(Get("laalaa"), Get("po")); break;
             }
         }
 
@@ -6375,7 +7435,8 @@ namespace DeskPals
             if (outs.Count < 2) { AllOut(); Later(2.5, GroupPhoto); return; }
             Pet l = Lead();
             Begin(outs.ToArray());
-            double foot = l.Foot, left = l.Cx - (outs.Count - 1) * l.SW * 0.8, right = left + (outs.Count - 1) * l.SW * 1.6;
+            double gap = TubbyLineup ? 1.9 : 1.6;   // 天線寶寶比較寬（帽子、袋子、球）
+            double foot = l.Foot, left = l.Cx - (outs.Count - 1) * l.SW * gap / 2, right = left + (outs.Count - 1) * l.SW * gap;
             if (!l.OnFloor) foreach (Plat p in Plats) if (p.H == l.supH) { left = Math.Max(left, p.Left + l.SW / 2.0); right = Math.Min(right, p.Right - l.SW / 2.0); }
             Rectangle wa = WA(l.Cx, foot - 4);
             left = Math.Max(left, wa.Left + l.SW); right = Math.Min(Math.Max(right, left), wa.Right - l.SW);
@@ -6396,11 +7457,25 @@ namespace DeskPals
                 foreach (Pet p in outs)
                 {
                     p.dir = p.Cx < (left + right) / 2 ? 1 : -1;
-                    if (p.P.Id == "hangyodon") p.ScenePose("cape", 3); else if (p.P.Id == "stitch") p.ScenePose("grin", 3); else p.ScenePose("photo", 3);
+                    if (p.P.Id == "hangyodon") p.ScenePose("cape", 3); else if (p.P.Id == "stitch") p.ScenePose("grin", 3); else if (p.P.Id == "dipsy") p.ScenePose("hattip", 3); else p.ScenePose("photo", 3);
                 }
                 l.Say("笑一個～ 3、2、1！", 1.6);
             });
             At(6.6, delegate { Flash(Rectangle.FromLTRB((int)(left - 120 * k), (int)(foot - 200 * k), (int)(right + 120 * k), (int)(foot + 20 * k))); });
+            if (TubbyLineup)
+            {
+                // 天線寶寶一櫃：一隻一隻講（站很近，同時講泡泡會疊在一起）
+                double d = 7.4;
+                foreach (Pet p in ShowOrder(outs))
+                {
+                    Pet pp = p;
+                    string line = pp.P.Id == "tinky" ? "魔法袋有拍進去嗎？" : (pp.P.Id == "dipsy" ? "帽子有拍到吧？酷。" : (pp.P.Id == "laalaa" ? "啦啦～好好看！" : "再拍一次！"));
+                    At(d, delegate { pp.Say(line, 1.15); });
+                    d += 1.2;
+                }
+                At(d + 0.4, delegate { });
+                return;
+            }
             At(7.4, delegate
             {
                 foreach (Pet p in outs)
@@ -6439,6 +7514,7 @@ namespace DeskPals
         // 早上第一次：一隻一隻從櫃子跳出來點名
         void StartRollCall(List<string> ids)
         {
+            if (TubbyLineup) { TubbyRollCall(ids); return; }
             double d = 0.4;
             foreach (string id in ids)
             {
@@ -6454,6 +7530,7 @@ namespace DeskPals
         // 下班了：輪流催你回家，然後一隻一隻回櫃子（人魚漢頓先在泡泡裡睡著）
         void NightRitual()
         {
+            if (TubbyLineup) { SceneByeBye(true); return; }
             List<Pet> outs = OutPets();
             outs.Sort(delegate(Pet a, Pet b) { return (a.P.Id == "hangyodon" ? 0 : 1).CompareTo(b.P.Id == "hangyodon" ? 0 : 1); });
             Begin(outs.ToArray());
@@ -6469,6 +7546,482 @@ namespace DeskPals
                 d += 2.6;
             }
             At(d + 0.5, delegate { });
+        }
+    }
+
+    // 串場用的小道具（丟來丟去的帽子、球、吐司）和小幫手「吸吸」：一張像素圖，點得穿
+    class SpriteForm : OverlayForm
+    {
+        string[] art; Dictionary<char, Color> pal; int ps; bool flip;
+        public SpriteForm() : base(true) { }
+        int Halo { get { return Math.Max(1, ps / 3); } }
+        public void Set(string[] a, Dictionary<char, Color> p, int pixel, bool fx)
+        {
+            if (a == art && p == pal && pixel == ps && fx == flip) return;
+            bool resize = art == null || a.Length != art.Length || a[0].Length != art[0].Length || pixel != ps;
+            art = a; pal = p; ps = pixel; flip = fx;
+            if (resize) Size = new Size(a[0].Length * ps + 2 * Halo, a.Length * ps + 2 * Halo);
+            Invalidate();
+        }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.Clear(KEY);
+            if (art == null) return;
+            int hw = Halo;
+            using (SolidBrush hb = new SolidBrush(Color.White))
+                for (int pass = 0; pass < 2; pass++)
+                    for (int ry = 0; ry < art.Length; ry++)
+                        for (int rx = 0; rx < art[ry].Length; rx++)
+                        {
+                            char c = art[ry][rx];
+                            if (c == '.') continue;
+                            int px = hw + (flip ? art[ry].Length - 1 - rx : rx) * ps, py = hw + ry * ps;
+                            if (pass == 0) { g.FillRectangle(hb, px - hw, py - hw, ps + 2 * hw, ps + 2 * hw); continue; }
+                            Color col;
+                            if (!pal.TryGetValue(c, out col)) col = Color.Magenta;
+                            using (SolidBrush b = new SolidBrush(col)) g.FillRectangle(b, px, py, ps, ps);
+                        }
+        }
+    }
+
+    // ================= 天線寶寶一櫃的串場（兩隻、大家一起）、點名、說再見 =================
+    partial class World
+    {
+        class Prop
+        {
+            public SpriteForm F; public string[] A, A2; public Pal Owner; public int Ps; public bool Spin, Fx;
+            public double X0, Y0, X, Y, T, Hold;
+            public readonly List<double[]> Legs = new List<double[]>();     // 目標 x、y、秒數、拋物線高度
+            public readonly List<Action> Then = new List<Action>();
+            public Prop Go(double x1, double y1, double dur, double arc, Action then) { Legs.Add(new double[] { x1, y1, Math.Max(0.05, dur), arc }); Then.Add(then); return this; }
+        }
+        readonly List<Prop> props = new List<Prop>();
+        static readonly string[] BASEBALL_ART = { ".33.", "3433", "3343", ".33." };
+        static readonly string[] TOAST_ART = { ".2222.", "211112", "2k11k2", "211112", "21kk12", ".2222." };
+        // 吸吸：原創的圓圓掃地小機器人（前面一根短短的吸管鼻子），兩格輪流＝輪子在轉
+        static readonly string[] BOT_A = { "....kkkkkk......", "..kkvvvvvvkk....", ".kvvWvvvvvvvk...", ".kvkWvvkWvvvkkkk", "kvvkkvvkkvvvkvVk", "kvvvvvvvvvvvkkkk", "kVVVVVVVVVVVk...", ".kkkkkkkkkkkk...", "..kOk....kOk...." };
+        static readonly string[] BOT_B = { "....kkkkkk......", "..kkvvvvvvkk....", ".kvvWvvvvvvvk...", ".kvkWvvkWvvvk...", "kvvkkvvkkvvvkkkk", "kvvvvvvvvvvvkvVk", "kVVVVVVVVVVVkkkk", ".kkkkkkkkkkkk...", "...kOk..kOk....." };
+
+        Prop NewProp(string[] a, string[] a2, Pal owner, int ps, double x, double y, bool spin)
+        {
+            Prop p = new Prop();
+            p.F = new SpriteForm(); p.A = a; p.A2 = a2; p.Owner = owner; p.Ps = ps; p.Spin = spin;
+            p.X0 = p.X = x; p.Y0 = p.Y = y;
+            props.Add(p);
+            PlaceProp(p);
+            return p;
+        }
+
+        // 丟一個小道具：從 a 拋物線飛到 b（中心點），到了做 done，停 hold 秒再消失
+        Prop Toss(string[] art, Pal owner, PointF a, PointF b, double dur, double arc, bool spin, double hold, Action done)
+        {
+            if (owner == null || Hidden) { if (done != null) done(); return null; }
+            Prop p = NewProp(art, null, owner, S, a.X, a.Y, spin);
+            p.Go(b.X, b.Y, dur, arc, done);
+            p.Hold = hold;
+            return p;
+        }
+
+        void RemoveProp(Prop p) { if (p == null) return; props.Remove(p); p.F.Close(); }
+        void ClearProps() { foreach (Prop p in props) p.F.Close(); props.Clear(); }
+
+        void PlaceProp(Prop p)
+        {
+            bool alt = p.A2 != null && Math.Floor(p.T * 7) % 2 == 1;
+            bool fx = p.Spin ? Math.Floor(p.T * 8) % 2 == 1 : p.Fx;
+            p.F.Set(alt ? p.A2 : p.A, Night ? p.Owner.Night : p.Owner.Day, p.Ps, fx);
+            p.F.Location = new Point((int)Math.Round(p.X - p.F.Width / 2.0), (int)Math.Round(p.Y - p.F.Height / 2.0));
+            if (Hidden) { if (W.Shown(p.F)) p.F.Hide(); }
+            else if (!W.Shown(p.F)) { p.F.Show(); W.KeepOnTop(p.F); }
+        }
+
+        void StepProps(double dt)
+        {
+            for (int i = props.Count - 1; i >= 0; i--)
+            {
+                if (i >= props.Count) continue;
+                Prop p = props[i];
+                if (p.Legs.Count > 0)
+                {
+                    double[] leg = p.Legs[0];
+                    p.T += dt;
+                    double f = Math.Min(1, p.T / leg[2]);
+                    if (Math.Abs(leg[0] - p.X0) > 1) p.Fx = leg[0] < p.X0;
+                    p.X = p.X0 + (leg[0] - p.X0) * f;
+                    p.Y = p.Y0 + (leg[1] - p.Y0) * f - Math.Sin(Math.PI * f) * leg[3];
+                    PlaceProp(p);
+                    if (f >= 1)
+                    {
+                        p.X0 = leg[0]; p.Y0 = leg[1]; p.T = 0;
+                        p.Legs.RemoveAt(0);
+                        Action then = p.Then[0]; p.Then.RemoveAt(0);
+                        if (then != null) { try { then(); } catch (Exception ex) { App.Log("prop: " + ex.Message); } }
+                    }
+                    continue;
+                }
+                p.Hold -= dt;
+                if (p.Hold <= 0) { props.Remove(p); p.F.Close(); }
+                else PlaceProp(p);
+            }
+        }
+
+        static double Mid(double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+        // 大家排成一排（走過去或跳過去）：回傳 {左, 右, 腳}
+        double[] LineUp(List<Pet> outs, Pet l, double spacing)
+        {
+            double foot = l.Foot, left = l.Cx - (outs.Count - 1) * l.SW * spacing / 2, right = left + (outs.Count - 1) * l.SW * spacing;
+            if (!l.OnFloor) foreach (Plat p in Plats) if (p.H == l.supH) { left = Math.Max(left, p.Left + l.SW / 2.0); right = Math.Min(right, p.Right - l.SW / 2.0); }
+            Rectangle wa = WA(l.Cx, foot - 4);
+            left = Math.Max(left, wa.Left + l.SW); right = Math.Min(Math.Max(right, left), wa.Right - l.SW);
+            for (int i = 0; i < outs.Count; i++)
+            {
+                Pet p = outs[i];
+                double tx = outs.Count == 1 ? left : left + (right - left) * i / (outs.Count - 1);
+                At(0.4 + i * 0.35, delegate
+                {
+                    if (Math.Abs(p.Foot - foot) < 3 && p.supH == l.supH && Math.Abs(tx - p.Cx) < 600 * k) p.WalkTo(tx, 10);
+                    else p.JumpTo(tx, foot);
+                });
+            }
+            return new double[] { left, right, foot };
+        }
+
+        // 照節目的順序：丁丁、迪西、拉拉、小波
+        List<Pet> ShowOrder(List<Pet> l)
+        {
+            List<Pet> o = new List<Pet>();
+            foreach (string id in Pal.LineupIds(Pal.Teletubbies)) foreach (Pet p in l) if (p.P.Id == id) o.Add(p);
+            foreach (Pet p in l) if (!o.Contains(p)) o.Add(p);
+            return o;
+        }
+
+        void TubbyGroup(int n)
+        {
+            double r = rnd.NextDouble();
+            if (n >= 4)
+            {
+                if (r < .30) SceneBigHug(); else if (r < .50) SceneSing(); else if (r < .70) SceneToast(); else if (r < .85) SceneFall(); else GroupPhoto();
+            }
+            else
+            {
+                if (r < .25) SceneSing(); else if (r < .50) SceneToast(); else if (r < .70) SceneFall(); else if (r < .90) GroupPhoto(); else SceneBigHug();
+            }
+        }
+
+        // ---------- 丁丁 × 迪西：帽子借我戴 ----------
+        void SceneHatSwap(Pet ti, Pet di)
+        {
+            Begin(ti, di);
+            At(0, delegate { Face(ti, di); ti.ScenePose("idle", 30); di.ScenePose("hattip", 1.8); ti.Say("迪西，你的帽子好好看喔…", 2.2); });
+            At(2.3, delegate { ti.Say("可以借丁丁戴一下嗎？", 2); ti.AddHeart(); });
+            At(4.4, delegate { di.ScenePose("idle", 30); di.Say("不行。這是我的帽子。", 2); });
+            At(6.5, delegate { ti.ScenePose("hug", 1.8); ti.Say("拜託～一下下就好", 1.8); });
+            At(8.5, delegate
+            {
+                di.Say("……好啦，一下下喔。", 1.8);
+                di.LendHat(true);
+                Toss(Pal.Get("dipsy").Art["HAT"], Pal.Get("dipsy"), di.HatPoint(), ti.HatPoint(), 0.7, 70 * k, true, 0, delegate { ti.WearHat = true; ti.Burst(6); });
+            });
+            At(9.6, delegate { ti.ScenePose("dance", 3); ti.Say("我是迪西！嘿～嘿～", 2.4); });
+            At(10.4, delegate { di.Say("（頭頂涼涼的）", 1.8); di.Mark(2); });
+            At(12.7, delegate
+            {
+                ti.ScenePose("plop", 1.8); ti.Say("哎喲！", 1.4);
+                ti.WearHat = false;
+                Toss(Pal.Get("dipsy").Art["HAT"], Pal.Get("dipsy"), ti.HatPoint(), di.HatPoint(), 0.75, 90 * k, true, 0, delegate { di.LendHat(false); });
+            });
+            At(14.2, delegate { di.ScenePose("hattip", 2); di.Say("還是我戴最帥。", 2); });
+            At(16.4, delegate { Face(ti, di); ti.ScenePose("hug", 2.4); di.ScenePose("hug", 2.4); ti.Say("大抱抱！", 2.2); di.Say("…大抱抱。", 2.2); });
+            At(19, delegate { });
+        }
+
+        // ---------- 丁丁 × 拉拉：球滾進魔法袋 ----------
+        void SceneBallBag(Pet ti, Pet la)
+        {
+            Begin(ti, la);
+            string[] ball = la.P.Art["BALL"];
+            At(0, delegate { Face(ti, la); ti.ScenePose("idle", 30); la.ScenePose("juggle", 2.6); la.Say("丁丁看！拉拉的球～啦啦啦", 2.4); });
+            At(2.8, delegate
+            {
+                la.ScenePose("kick", 0.5); la.Say("踢～！", 1); la.LoseBall(true);
+                ti.ScenePose("bag:", 3.4);
+                Toss(ball, la.P, la.FootPoint(), ti.BagPoint(), 0.8, 90 * k, false, 0, delegate { ti.Say("喔？（咕嘟）", 1.2); ti.Mark(2); });
+            });
+            At(5.0, delegate { la.ScenePose("idle", 30); la.Say("咦？我的球呢？", 1.8); la.Mark(2); });
+            At(7.0, delegate { ti.ScenePose("bag:toast", 2.4); ti.Say("丁丁找找看…", 1.2); });
+            At(8.2, delegate { ti.Say("是吐司！", 1.6); });
+            At(9.8, delegate { la.Say("不是這個啦～", 1.8); });
+            At(11.6, delegate { ti.ScenePose("bag:ball", 2.2); ti.Say("再找找…", 1.2); });
+            At(12.8, delegate { ti.Say("找到了！", 1.4); });
+            At(13.85, delegate
+            {
+                PointF a = ti.BagPoint(); a.Y -= 6 * S;
+                Toss(ball, la.P, a, la.HandPoint(), 0.7, 70 * k, false, 0, delegate { la.LoseBall(false); la.ScenePose("twirl", 1.6); la.Say("再來一次！再來一次！", 2); });
+            });
+            At(16.6, delegate { Face(ti, la); ti.ScenePose("hug", 2.4); la.ScenePose("hug", 2.4); ti.Say("大抱抱！", 2.2); la.Say("大抱抱！", 2.2); });
+            At(19.2, delegate { });
+        }
+
+        // ---------- 迪西 × 拉拉：跳舞比賽，最後一起唱 ----------
+        void SceneDanceOff(Pet di, Pet la)
+        {
+            Begin(di, la);
+            At(0, delegate { Face(di, la); di.ScenePose("idle", 30); la.ScenePose("idle", 30); di.Say("拉拉，來比跳舞。", 2); });
+            At(2.2, delegate { di.ScenePose("dance", 2.6); di.Say("嘿～嘿～（帽子跟著晃）", 2.4); });
+            At(5.0, delegate { di.ScenePose("idle", 30); la.ScenePose("twirl", 2.2); la.Say("換我！啦啦啦～", 2.2); });
+            At(7.5, delegate { la.ScenePose("idle", 30); di.ScenePose("hattoss", 1.6); di.Say("帽子戲法！", 1.6); });
+            At(9.4, delegate { la.ScenePose("juggle", 2.7); la.Say("球球戲法！1、2、3～", 2.4); });
+            At(12.3, delegate { di.ScenePose("dance", 3); la.ScenePose("dance", 3); la.Say("一起跳！啦啦啦～♪", 2.6); di.Say("嘿～♪", 1.6); di.Mark(0); la.Mark(0); });
+            At(15.5, delegate { Face(di, la); di.ScenePose("wave", 1.8); la.ScenePose("wave", 1.8); di.Say("Eh-oh.", 1.6); la.Say("Eh-oh!", 1.6); });
+            At(17.6, delegate { });
+        }
+
+        // ---------- 小波 × 丁丁：借騎滑板車，太大了跌坐 ----------
+        void SceneScooterRide(Pet po, Pet ti)
+        {
+            Begin(po, ti);
+            At(0, delegate { Face(po, ti); po.ScenePose("idle", 30); ti.ScenePose("idle", 30); ti.Say("小波，丁丁可以騎你的滑板車嗎？", 2.4); });
+            At(2.5, delegate { po.ScenePose("wave", 1.2); po.Say("好啊！Eh-oh!", 1.6); });
+            At(4.0, delegate
+            {
+                po.LendScooter(true); ti.RidingPo = true;
+                double away = ti.Cx > po.Cx ? 1 : -1;
+                Rectangle wa = WA(ti.Cx, ti.Foot - 4);
+                ti.RaceTo(Mid(ti.Cx + away * 200 * k, wa.Left + ti.SW, wa.Right - ti.SW));
+                ti.Say("嘟嘟～丁丁騎車車！", 1.8);
+            });
+            At(6.4, delegate { ti.Say("哎…哎…好晃…", 1.4); ti.Mark(4); });
+            At(7.8, delegate { ti.RidingPo = false; po.LendScooter(false); ti.ScenePose("plop", 1.8); ti.Say("哎喲！", 1.4); });
+            At(9.2, delegate { po.ScenePose("hop", 0); po.Say("再來一次！再來一次！", 2); });
+            At(11.4, delegate { ti.Say("…丁丁太大了啦，嘻嘻", 2); });
+            At(13.2, delegate { po.WalkTo(ti.Cx + (po.Cx < ti.Cx ? -1 : 1) * ti.SW * 0.9, 1.5); });
+            At(15.2, delegate { Face(po, ti); po.ScenePose("hug", 2.4); ti.ScenePose("hug", 2.4); po.Say("大抱抱！", 2.2); ti.Say("大抱抱！", 2.2); });
+            At(17.8, delegate { });
+        }
+
+        // ---------- 小波 × 迪西：棒球用帽子頂、用帽子接 ----------
+        void SceneHatBaseball(Pet po, Pet di)
+        {
+            Begin(po, di);
+            At(0, delegate { Face(po, di); po.ScenePose("idle", 30); di.ScenePose("idle", 30); po.Say("迪西，接球！", 1.6); });
+            At(1.6, delegate { po.ScenePose("bat", 0); });
+            At(1.85, delegate
+            {
+                PointF top = di.HatPoint(); top.Y -= 4 * S;
+                Toss(BASEBALL_ART, po.P, po.HandPoint(), top, 0.7, 60 * k, false, 0, delegate
+                {
+                    di.ScenePose("header", 0.6); di.Say("帽子頂！", 1.2);
+                    PointF t2 = di.HatPoint(); t2.Y -= 4 * S;
+                    Toss(BASEBALL_ART, po.P, t2, po.HandPoint(), 0.8, 80 * k, false, 0, delegate { po.ScenePose("catch", 0.7); po.Say("好球！", 1.4); });
+                });
+            });
+            At(5.4, delegate { po.Say("這次全壘打！", 1.4); });
+            At(6.6, delegate { po.ScenePose("bat", 0); di.ScenePose("hatwave", 3.2); });
+            At(6.85, delegate
+            {
+                PointF hand = new PointF((float)(di.Cx + di.dir * 5 * S), (float)(di.Foot - di.SH + (di.P.BodyTop - 5) * S));
+                Toss(BASEBALL_ART, po.P, po.HandPoint(), hand, 1.1, 170 * k, false, 0, delegate { di.Say("（用帽子接住）酷。", 2); di.Burst(6); });
+            });
+            At(10.4, delegate { po.ScenePose("hop", 0); po.Say("再來一次！再來一次！", 2); });
+            At(12.6, delegate { di.ScenePose("hattip", 1.8); di.Say("好啦，明天再來一次。", 2); });
+            At(14.8, delegate { Face(po, di); po.ScenePose("wave", 1.8); di.ScenePose("wave", 1.8); po.Say("Eh-oh!", 1.6); di.Say("Eh-oh.", 1.6); });
+            At(16.8, delegate { });
+        }
+
+        // ---------- 拉拉 × 小波：踢球、小波騎車去撿 ----------
+        void SceneBallFetch(Pet la, Pet po)
+        {
+            Begin(la, po);
+            string[] ball = la.P.Art["BALL"];
+            double tx = po.Cx;
+            Prop lying = null;
+            At(0, delegate { Face(la, po); la.ScenePose("idle", 30); po.ScenePose("idle", 30); la.Say("小波！我們來踢球！", 2); });
+            At(2.0, delegate { po.ScenePose("wave", 1.0); po.Say("好！Eh-oh!", 1.4); });
+            At(3.4, delegate
+            {
+                la.ScenePose("kick", 0.5); la.Say("踢～！", 1); la.LoseBall(true);
+                Rectangle wa = WA(la.Cx, la.Foot - 4);
+                double side = po.Cx >= la.Cx ? 1 : -1;
+                tx = Mid(po.Cx + side * 220 * k, wa.Left + po.SW, wa.Right - po.SW);
+                lying = Toss(ball, la.P, la.FootPoint(), new PointF((float)tx, (float)(la.Foot - 3.5 * S)), 1.0, 130 * k, false, 30, null);
+            });
+            At(3.9, delegate { po.RaceTo(tx); po.Say("我去撿！嘟嘟～", 1.6); });
+            At(6.4, delegate { RemoveProp(lying); po.FaceTo(la); po.Say("找到了！", 1.4); });
+            At(7.2, delegate { Toss(ball, la.P, po.HandPoint(), la.HandPoint(), 0.9, 110 * k, false, 0, delegate { la.LoseBall(false); la.ScenePose("twirl", 1.6); la.Say("再來一次！", 1.6); po.Say("再來一次！", 1.6); }); });
+            At(9.8, delegate { po.WalkTo(la.Cx + (po.Cx < la.Cx ? -1 : 1) * la.SW * 1.0, 1.5); });
+            At(12.0, delegate { Face(la, po); la.ScenePose("hug", 2.4); po.ScenePose("hug", 2.4); la.Say("大抱抱！", 2.2); po.Say("大抱抱！", 2.2); });
+            At(14.6, delegate { });
+        }
+
+        // ---------- 大家：大抱抱 ----------
+        void SceneBigHug()
+        {
+            List<Pet> outs = OutPets();
+            if (outs.Count < 2) { AllOut(); Later(2.5, SceneBigHug); return; }
+            Pet l = Lead();
+            Begin(outs.ToArray());
+            double[] lr = LineUp(ShowOrder(outs), l, 1.05);
+            bool all4 = outs.Count >= 4;
+            At(0, delegate { l.Say(all4 ? "大家都到齊了！" : "大家過來～", 1.8); });
+            At(4.8, delegate
+            {
+                foreach (Pet p in outs) { p.dir = p.Cx < (lr[0] + lr[1]) / 2 ? 1 : -1; p.ScenePose("hug", 3.4); p.Burst(5); }
+                l.Say(all4 ? "四個一起，大～抱抱！" : "大抱抱！", 2.6);
+            });
+            At(8.6, delegate { foreach (Pet p in outs) p.ScenePose("wave", 1.6); l.Say("Eh-oh! ♥", 1.6); });
+            At(10.4, delegate { });
+        }
+
+        static string SingLine(Pet p)
+        {
+            switch (p.P.Id)
+            {
+                case "tinky": return "啦～啦～（丁丁跳舞）";
+                case "dipsy": return "嘿～嘿～（打拍子）";
+                case "laalaa": return "啦啦啦～♪";
+                case "po": return "啦啦！再來一次！";
+            }
+            return "♪～";
+        }
+
+        // ---------- 大家：拉拉起頭，一隻一隻加入唱歌跳舞 ----------
+        void SceneSing()
+        {
+            List<Pet> outs = OutPets();
+            if (outs.Count < 2) { AllOut(); Later(2.5, SceneSing); return; }
+            Pet la = Get("laalaa");
+            Pet starter = la != null && la.Out && outs.Contains(la) ? la : Lead();
+            Begin(outs.ToArray());
+            LineUp(ShowOrder(outs), Lead(), 1.8);
+            At(0, delegate { starter.Say("大家過來～我們來唱歌！", 2); });
+            At(4.6, delegate { foreach (Pet p in outs) { p.FaceTo(starter); p.ScenePose("idle", 30); } starter.ScenePose("sing", 30); starter.Say("啦啦啦～大家一起唱！♪", 2.4); });
+            double d = 7.2;
+            foreach (Pet p in ShowOrder(outs))
+            {
+                if (p == starter) continue;
+                Pet pp = p;
+                At(d, delegate { pp.ScenePose(pp.P.Id == "po" ? "spin" : "dance", 30); pp.Say(SingLine(pp), 2); pp.Mark(0); });
+                d += 1.9;
+            }
+            At(d + 0.4, delegate { foreach (Pet p in outs) { p.ScenePose(p.P.Id == "laalaa" ? "twirl" : "dance", 2.6); p.Mark(0); p.Mark(0); } starter.Say("啦啦啦～大家一起～♪", 2.4); });
+            At(d + 3.2, delegate { foreach (Pet p in outs) p.ScenePose("wave", 1.6); starter.Say("再來一次！", 1.6); });
+            At(d + 5.0, delegate { });
+        }
+
+        // ---------- 大家：一、二、三，一起跌倒「哎喲！」 ----------
+        void SceneFall()
+        {
+            List<Pet> outs = OutPets();
+            if (outs.Count < 2) { AllOut(); Later(2.5, SceneFall); return; }
+            Pet l = Lead();
+            Begin(outs.ToArray());
+            LineUp(ShowOrder(outs), l, 1.6);
+            At(0, delegate { l.Say("大家排好～", 1.6); });
+            At(4.6, delegate { foreach (Pet p in outs) p.ScenePose("idle", 30); l.Say("大家一起…一、二、三！", 2); });
+            At(6.6, delegate { foreach (Pet p in outs) p.ScenePose("hop", 0); });
+            At(7.3, delegate { foreach (Pet p in outs) { p.ScenePose("plop", 2.2); p.Mark(4); } l.Say("哎喲！", 1.4); });
+            At(9.5, delegate { foreach (Pet p in outs) p.ScenePose("idle", 30); l.Say("嘻嘻嘻～大家都跌倒了", 1.8); });
+            At(11.4, delegate { l.Say("再來一次！", 1.6); foreach (Pet p in outs) p.ScenePose("hop", 0); });
+            At(12.8, delegate { });
+        }
+
+        // ---------- 大家：吐司時間（吐司彈出來，屑屑掉滿地，吸吸來打掃）----------
+        void SceneToast()
+        {
+            List<Pet> outs = OutPets();
+            if (outs.Count < 2) { AllOut(); Later(2.5, SceneToast); return; }
+            Pet l = Lead();
+            Begin(outs.ToArray());
+            List<Pet> order = ShowOrder(outs);
+            double[] lr = LineUp(order, l, 1.75);
+            double cx = (lr[0] + lr[1]) / 2, foot = lr[2];
+            At(0, delegate { l.Say("吐司時間！🍞", 1.8); });
+            At(4.2, delegate { foreach (Pet p in outs) { p.FaceTo(l); p.ScenePose("idle", 30); } l.Say("吐司！吐司！吐司！", 2); });
+            double d = 4.6;
+            foreach (Pet p in order)
+            {
+                Pet pp = p;
+                At(d, delegate
+                {
+                    Toss(TOAST_ART, pp.P, new PointF((float)cx, (float)(foot - 2 * S)), pp.HandPoint(), 0.75, 170 * k, true, 0, delegate { pp.HoldToast = true; pp.Say("吐司！", 0.65); });
+                });
+                d += 0.7;
+            }
+            At(d + 0.8, delegate { l.Say("好好吃～屑屑掉滿地了", 2); });
+            At(d + 3.0, delegate { order[order.Count - 1].Say("糟糕…要打掃了！", 1.8); });
+            At(d + 3.6, delegate { StartBot(cx, foot); });
+            At(d + 4.6, delegate { order[0].Say("吸吸來了！", 1.6); foreach (Pet p in outs) p.Mark(1); });
+            At(d + 6.8, delegate { foreach (Pet p in outs) { p.HoldToast = false; p.ClearCrumbs(); } l.Say("吸～吸～好乾淨！", 2); });
+            At(d + 9.4, delegate { foreach (Pet p in outs) p.ScenePose("wave", 1.6); l.Say("吸吸，謝謝你！Eh-oh!", 2); });
+            At(d + 11.6, delegate { });
+        }
+
+        // 吸吸：從比較近的螢幕邊滾進來，在大家腳邊來回吸，再滾出去
+        void StartBot(double cx, double foot)
+        {
+            if (Hidden) return;
+            Rectangle wa = WA(cx, foot - 4);
+            int ps = Math.Max(2, S * 3 / 4);
+            bool fromLeft = cx - wa.Left < wa.Right - cx;
+            double sx = fromLeft ? wa.Left - 8 * ps : wa.Right + 8 * ps, ex = fromLeft ? wa.Right + 10 * ps : wa.Left - 10 * ps;
+            double by = foot - 4.5 * ps - Math.Max(1, ps / 3);
+            Pal owner = Pal.Get("tinky");
+            Prop b = NewProp(BOT_A, BOT_B, owner, ps, sx, by, false);
+            double sweep = 90 * k, side = fromLeft ? 1 : -1;
+            double t1 = Math.Min(3.0, Math.Abs(cx - sx) / (260 * k) + 0.6);
+            b.Go(cx - side * sweep, by, t1, 0, null)
+             .Go(cx + side * sweep, by, 1.4, 0, null)
+             .Go(cx - side * sweep * 0.5, by, 1.0, 0, null)
+             .Go(cx + side * sweep * 0.3, by, 0.7, 0, null)
+             .Go(ex, by, Math.Min(3.0, Math.Abs(ex - cx) / (260 * k) + 0.6), 0, null);
+            b.Hold = 0;
+        }
+
+        // ---------- 早上點名：丁丁！迪西！拉拉！小波！天線寶寶，Eh-oh! ----------
+        void TubbyRollCall(List<string> ids)
+        {
+            List<Pet> order = new List<Pet>();
+            foreach (string id in Pal.LineupIds(lineup)) if (ids.Contains(id) && Get(id) != null) order.Add(Get(id));
+            double d = 0.4;
+            foreach (Pet p in order)
+            {
+                Pet pp = p;
+                Later(d, delegate { if (!pp.Out) BringOut(pp, false); });
+                Later(d + 0.7, delegate { pp.Say(pp.P.Name + "！", 1.8); });
+                d += 1.5;
+            }
+            Later(d + 0.8, delegate
+            {
+                foreach (Pet p in order) if (p.Out && p.Grounded()) { p.ScenePose("wave", 1.8); p.Say("Eh-oh!", 2); }
+                if (order.Count > 0) Lead().Say("天線寶寶，Eh-oh! ☀", 2.6);
+            });
+        }
+
+        // ---------- 天線寶寶說再見：一隻一隻揮手回櫃子；最後從櫃子裡再說一次再見 ----------
+        void SceneByeBye(bool night)
+        {
+            List<Pet> outs = ShowOrder(OutPets());
+            if (outs.Count == 0) { Pet l0 = Lead(); l0.Say("天線寶寶說再見！再見～", 3); return; }
+            Pet lead = Lead();
+            Begin(outs.ToArray());
+            foreach (Pet p in outs) if (p.Grounded()) p.ScenePose("idle", 60);
+            double d = 0.2;
+            if (night) foreach (Pet p in outs) { Pet pp = p; At(d, delegate { pp.Say(pp.L("nag"), 2.6); }); d += 2.8; }
+            At(d, delegate { lead.Say("天線寶寶，說再見的時間到了～", 2.6); });
+            d += 2.8;
+            foreach (Pet p in outs)
+            {
+                Pet pp = p;
+                At(d, delegate { pp.ScenePose("wave", 2.2); pp.Say(pp.P.Name + "說再見！👋", 2.2); });
+                At(d + 1.7, delegate { pp.InScene = false; if (pp.Out) pp.StowToShelf(false); });
+                d += 2.6;
+            }
+            Pet last = outs[outs.Count - 1];
+            At(d + 0.4, delegate { last.Say("天線寶寶說再見！再見～", 3); });
+            At(d + 3.8, delegate { Pet po = Get("po") ?? last; po.Say("……再見～（偷偷揮手）", 2.2); });
+            At(d + 6.2, delegate { });
         }
     }
 
@@ -6507,6 +8060,7 @@ namespace DeskPals
                 if (shelf != null && shelf.VVisible && shelf.VBmp != null) g.DrawImageUnscaled(shelf.VBmp, shelf.VPos);
                 foreach (CobwebForm f in webs) if (f.VVisible) f.PaintTo(g);
                 foreach (Pet p in Pets) if (p.Form != null && p.Form.VVisible && p.Form.VBmp != null) g.DrawImageUnscaled(p.Form.VBmp, p.Form.VPos);
+                foreach (Prop pr in props) if (pr.F.VVisible) pr.F.PaintTo(g);
                 if (ballF != null && ballF.VVisible) ballF.PaintTo(g);
                 if (fx != null && fx.VVisible) fx.PaintTo(g);
                 foreach (Pet p in Pets) if (p.Bub != null && p.Bub.VVisible) p.Bub.PaintTo(g);
@@ -6624,6 +8178,9 @@ namespace DeskPals
                     case "po": return "日誌好了…太陽寶寶下山了，回家吧：";
                     case "stitch": return "日誌好了…Ohana 在家等你：";
                     case "hangyodon": return "日誌好了…大家都回家了，你也回家吧：";
+                    case "tinky": return "日誌好了…太陽寶寶下山了，丁丁說再見：";
+                    case "dipsy": return "日誌好了…帽子戴好，回家吧：";
+                    case "laalaa": return "日誌好了…啦…該回家囉：";
                     default: return "日誌好了。然後下班：";
                 }
             string[] keys = { "ci-run", "ci-ok", "ci-fail", "cmd-ok", "cmd-fail", "meeting", "meeting-now", "jira", "worklog" };
@@ -6631,9 +8188,12 @@ namespace DeskPals
             string[] po = { "嘟嘟～CI 出發：", "全壘打！", "嗚…CI 摔倒了：", "好棒棒，跑完了：", "咦？沒成功：", "等一下要開會會喔：", "要開會了！快快：", "有新任務喔：", "今天的日誌寫好了～" };
             string[] st = { "ih! CI 在跑：", "CI 過了！嘻嘻嘻", "ih-ih-ih! CI 壞掉了：", "跑完了！", "失敗！史迪仔去咬它：", "等等開會！", "開會！快去！", "新的 Jira！", "日誌好了，Aloha：" };
             string[] hg = { "英雄報告：CI 出發了", "英雄報告：", "交給我這個英雄…CI 失敗了：", "英雄報告：指令跑完", "嗚，指令失敗了：", "等一下有會議喔：", "會議開始了！快去吧：", "有新的 Jira 喔：", "今天的日誌好了，辛苦了：" };
+            string[] ti = { "丁丁的魔法袋：CI 出發囉：", "CI 過了！丁丁跳舞～", "哎喲！CI 跌倒了：", "跑完了，好棒棒：", "哎喲，指令失敗了：", "等一下要開會喔：", "開會了！丁丁陪你去：", "魔法袋裡有新的 Jira：", "今天的日誌寫好了～" };
+            string[] di = { "CI 跑起來了，酷：", "CI 過了。酷。", "CI 掛了…帽子先扶好：", "跑完了，嘿～", "指令失敗了，別慌：", "等等要開會：", "開會了，走吧：", "新的 Jira：", "日誌好了：" };
+            string[] la = { "啦啦～CI 出發：", "CI 過了！啦啦啦～", "哎呀，CI 摔倒了：", "跑完了！啦～", "咦？指令沒成功：", "等一下要開會喔：", "開會了！快快快：", "有新的 Jira 喔：", "今天的日誌好了～啦啦：" };
             int i = Array.IndexOf(keys, kind);
             if (i < 0) return "";
-            switch (id) { case "po": return po[i]; case "stitch": return st[i]; case "hangyodon": return hg[i]; }
+            switch (id) { case "po": return po[i]; case "stitch": return st[i]; case "hangyodon": return hg[i]; case "tinky": return ti[i]; case "dipsy": return di[i]; case "laalaa": return la[i]; }
             return sp[i];
         }
 
@@ -6740,6 +8300,9 @@ namespace DeskPals
                     case "po": line = "噓～小波安靜陪你 🤫"; break;
                     case "stitch": line = "噓…史迪仔乖乖的"; break;
                     case "hangyodon": line = "好，我安靜待著…有事再叫我"; break;
+                    case "tinky": line = "噓～丁丁抱著袋袋安靜陪你 🤫"; break;
+                    case "dipsy": line = "噓。帽子拉低，安靜。"; break;
+                    case "laalaa": line = "噓～拉拉小小聲 🤫"; break;
                     default: line = "好，我安靜待著。"; break;
                 }
                 l.Say(line, 2.2);
@@ -6760,6 +8323,9 @@ namespace DeskPals
                 case "po": line = "安靜時間結束～Eh-oh!"; break;
                 case "stitch": line = "安靜結束！ih-ih!（小聲）"; break;
                 case "hangyodon": line = "安靜時間結束了…我好想講笑話"; break;
+                case "tinky": line = "安靜時間結束～Eh-oh!"; break;
+                case "dipsy": line = "安靜結束。嘿～"; break;
+                case "laalaa": line = "安靜時間結束～啦啦啦！"; break;
                 default: line = "安靜時間結束～"; break;
             }
             if (heldQuiet.Count == 0) { l.Say(line, 2.4); return; }
@@ -6841,6 +8407,9 @@ namespace DeskPals
                 case "po": end = "專注結束！休息 5 分鐘 ☕ 好棒棒！"; break;
                 case "stitch": end = "專注結束！休息 5 分鐘 ☕ 嘻嘻嘻，史迪仔有乖乖"; break;
                 case "hangyodon": end = "專注結束！休息 5 分鐘 ☕ 你才是真正的英雄"; break;
+                case "tinky": end = "專注結束！休息 5 分鐘 ☕ 丁丁跳舞給你看"; break;
+                case "dipsy": end = "專注結束。休息 5 分鐘 ☕ 你很酷"; break;
+                case "laalaa": end = "專注結束！休息 5 分鐘 ☕ 啦啦啦～好棒棒"; break;
                 default: end = "專注結束！休息 5 分鐘 ☕ 你超強的"; break;
             }
             l.Knock(end + "　今天第 " + n + " 顆 🍅", "high");
@@ -6943,9 +8512,12 @@ namespace DeskPals
             string[] po = { "⏰ 小波提醒你：", "電腦好忙好熱喔：", "記憶體要滿滿了：", "硬碟快塞滿了：", "網路斷掉了！嗚…", "網路回來了！Eh-oh!", "連不到公司網路耶（VPN 斷了？）", "下載好了！" };
             string[] st = { "⏰ ih! 提醒你：", "ih-ih! 電腦在冒煙：", "記憶體快爆了：", "硬碟要滿了：", "網路斷了！史迪仔去咬線！", "網路回來了！嘻嘻嘻", "公司網路連不到（VPN 斷了？）", "下載好了！ih!" };
             string[] hg = { "⏰ 英雄提醒你：", "電腦好像很累了：", "記憶體快滿了喔：", "硬碟快滿了：", "網路斷了…交給我這個英雄！", "網路回來了～太好了", "連不到公司網路（VPN 斷了嗎？）", "下載好了喔：" };
+            string[] ti = { "⏰ 丁丁提醒你：", "電腦好燙…丁丁幫你扇扇：", "記憶體要滿了，跟魔法袋一樣：", "硬碟快塞滿了：", "網路斷了！哎喲…", "網路回來了！Eh-oh!", "連不到公司網路耶（VPN 斷了？）", "下載好了！放進魔法袋～" };
+            string[] di = { "⏰ 迪西提醒你：", "電腦很燙，酷不起來：", "記憶體快滿了：", "硬碟快滿了：", "網路斷了，冷靜：", "網路回來了，酷。", "連不到公司網路（VPN 斷了？）", "下載好了，嘿：" };
+            string[] la = { "⏰ 拉拉提醒你：", "電腦好熱喔：", "記憶體快滿滿了：", "硬碟快塞滿了：", "網路斷掉了！嗚…", "網路回來了！啦啦啦～", "連不到公司網路耶（VPN 斷了？）", "下載好了！啦～" };
             int i = Array.IndexOf(keys, kind);
             if (i < 0) return null;
-            switch (id) { case "po": return po[i]; case "stitch": return st[i]; case "hangyodon": return hg[i]; }
+            switch (id) { case "po": return po[i]; case "stitch": return st[i]; case "hangyodon": return hg[i]; case "tinky": return ti[i]; case "dipsy": return di[i]; case "laalaa": return la[i]; }
             return sp[i];
         }
 
@@ -7301,6 +8873,9 @@ namespace DeskPals
                 case "po": intro = "Eh-oh! 今天的我們："; break;
                 case "stitch": intro = "Aloha～今天的 Ohana 紀錄："; break;
                 case "hangyodon": intro = "英雄報告：今天的我們"; break;
+                case "tinky": intro = "Eh-oh! 丁丁的魔法袋裝了今天的我們："; break;
+                case "dipsy": intro = "嘿，今天的我們："; break;
+                case "laalaa": intro = "啦啦～今天的我們："; break;
                 default: intro = "今天的我們："; break;
             }
             if (outs.Count >= 2 && !quietOn)
@@ -7441,7 +9016,10 @@ namespace DeskPals
             string[] po = { "🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款喔", "🎫 " + n + " 再 30 分鐘！小波陪你等", "🎫 " + n + " 剩 10 分鐘！好緊張～", "🎫 準備！深呼吸～", "🎫 開搶！！衝衝衝！" };
             string[] st = { "🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款！ih!", "🎫 " + n + " 30 分鐘！史迪仔幫你顧著", "🎫 " + n + " 10 分鐘！ih-ih-ih!", "🎫 準備！史迪仔也準備好了", "🎫 開搶！！衝啊！" };
             string[] hg = { "🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款", "🎫 " + n + " 30 分鐘後開賣，英雄陪你等", "🎫 " + n + " 剩 10 分鐘！英雄出動準備", "🎫 準備！這次一定搶到！", "🎫 開搶！！祝你搶到！" };
-            switch (id) { case "po": return po[stage]; case "stitch": return st[stage]; case "hangyodon": return hg[stage]; }
+            string[] ti = { "🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款喔", "🎫 " + n + " 再 30 分鐘！丁丁陪你等", "🎫 " + n + " 剩 10 分鐘！魔法袋準備好了", "🎫 準備！深呼吸～", "🎫 開搶！！衝衝衝！" };
+            string[] di = { "🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款", "🎫 " + n + " 30 分鐘後開賣，網頁先開好", "🎫 " + n + " 剩 10 分鐘！帽子戴好", "🎫 準備。冷靜，酷。", "🎫 開搶！！嘿！" };
+            string[] la = { "🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款喔", "🎫 " + n + " 再 30 分鐘！拉拉唱歌陪你等", "🎫 " + n + " 剩 10 分鐘！好緊張～", "🎫 準備！啦…啦…", "🎫 開搶！！衝啊～啦！" };
+            switch (id) { case "po": return po[stage]; case "stitch": return st[stage]; case "hangyodon": return hg[stage]; case "tinky": return ti[stage]; case "dipsy": return di[stage]; case "laalaa": return la[stage]; }
             return sp[stage];
         }
 
@@ -7771,6 +9349,21 @@ namespace DeskPals
                     if (phase == "nap") return "吃飽了…在泡泡裡睡一下";
                     if (phase == "end") return "回來工作！英雄也要上班";
                     return Pick(new string[] { "奶茶要走冰…我自己就很冰了（魚嘛）", "菠蘿油的牛油要厚切！", "茶走、少甜，謝謝老闆～" });
+                case "tinky":
+                    if (phase == "start") return "吐司時間！丁丁從魔法袋拿出吐司 🔔";
+                    if (phase == "nap") return "吃飽飽…丁丁抱著袋袋睡覺覺";
+                    if (phase == "end") return "Eh-oh! 回來工作囉！";
+                    return Pick(new string[] { "吐司！好香～", "吐司屑屑掉進袋子了", "再一片！再來一次！" });
+                case "dipsy":
+                    if (phase == "start") return "嘟嘟糊時間！帽子不用拿下來 🔔";
+                    if (phase == "nap") return "吃飽了…帽子拉低睡一下";
+                    if (phase == "end") return "Eh-oh. 回來工作。";
+                    return Pick(new string[] { "嘟嘟糊，酷。", "（帽子沾到嘟嘟糊了）…沒事。", "再一碗。" });
+                case "laalaa":
+                    if (phase == "start") return "午餐時間！吐司沾嘟嘟糊～啦啦啦 🔔";
+                    if (phase == "nap") return "吃飽飽…拉拉抱著球球睡覺覺";
+                    if (phase == "end") return "Eh-oh! 回來工作囉！啦～";
+                    return Pick(new string[] { "吐司沾嘟嘟糊～好好吃！", "啦啦啦～吃飯飯～", "嘟嘟糊黏在臉上了嘻嘻" });
             }
             if (phase == "start") return "Pizza time! 🍕 午餐時間！";
             if (phase == "nap") return "吃飽了…蜘蛛也要午睡 zZ";
@@ -7833,6 +9426,12 @@ namespace DeskPals
                     DrawAt(g, MILKTEA, 10.5, 8 + f.AccDy, bx, by, ps, fx, false, true);
                     DrawAt(g, BUN, -2.5, 8 + bite + f.AccDy, bx, by, ps, fx, false, true);
                     break;
+                case "tinky": DrawAt(g, TOAST, 10.5, P.BodyTop + 1 + bite + f.AccDy, bx, by, ps, fx, false, true); break;
+                case "dipsy": DrawAt(g, A("DUDU"), 9, P.BodyTop + bite + f.AccDy, bx, by, ps, fx, false, true); break;
+                case "laalaa":
+                    DrawAt(g, TOAST, -1.5, P.BodyTop + 1 + bite + f.AccDy, bx, by, ps, fx, false, true);
+                    DrawAt(g, A("DUDU_CUP"), 11, P.BodyTop + 2 + f.AccDy, bx, by, ps, fx, false, true);
+                    break;
                 default:
                     DrawAt(g, PIZZA, 10, 7 + bite, bx, by, ps, fx, false, true);
                     break;
@@ -7849,6 +9448,9 @@ namespace DeskPals
                 case "po": food = CUSTARD; col = 9; row = 8; break;
                 case "stitch": food = SANDWICH; col = 3; row = 6; break;
                 case "hangyodon": food = MILKTEA; col = 10.5; row = 8; break;
+                case "tinky": food = TOAST; col = 10.5; row = P.BodyTop + 1; break;
+                case "dipsy": food = A("DUDU"); col = 9; row = P.BodyTop; break;
+                case "laalaa": food = TOAST; col = -1.5; row = P.BodyTop + 1; break;
                 default: food = PIZZA; col = 10; row = 7; break;
             }
             DrawAt(g, food, col, row, bx, by, ps, flip, false, true);
@@ -7878,6 +9480,9 @@ namespace DeskPals
                 case "po": return 16 + P.TopRows + 1;                             // 扶著停在旁邊的滑板車
                 case "stitch": return 16 + Math.Max(P.TopRows, hat > 0 ? 3 : 0) + 1;
                 case "hangyodon": return 16 + (hat > 0 ? 2 : 0) + 1;
+                case "tinky": return 16 + P.TopRows + 1;                           // 天線從帽子穿出來，不會更高
+                case "dipsy": return 16 + P.TopRows + 2;                           // 高帽子＋偶爾抬一下
+                case "laalaa": return 16 + Math.Max(P.TopRows, hat > 0 ? 7 : 0) + 1;
             }
             return 16 + hat + 1;
         }
@@ -7922,6 +9527,51 @@ namespace DeskPals
                         g.DrawString(s, f, night ? Brushes.White : Brushes.Black, (c - 1) * cw + 4, r * ch + 2);
                         p.PaintPet(g, 0, 0);
                         p.notes.Clear();
+                    }
+                }
+                b.Save(path, ImageFormat.Png);
+            }
+        }
+
+        public static void PreviewTubbySheet(string path, bool night)
+        {
+            World w = new World(6, Pal.Teletubbies);
+            w.Night = night;
+            string[] ids = { "tinky", "dipsy", "laalaa", "po" };
+            string[] poses = { "idle", "walk", "hug", "glass", "sleep", "plop", "dance", "wave", "photo", "special1", "special2", "special3", "ride", "wearhat", "toast", "lunch", "nightidle" };
+            int cw = 30 * 6, ch = 40 * 6;
+            using (Bitmap b = new Bitmap(cw * poses.Length, ch * ids.Length))
+            using (Graphics g = Graphics.FromImage(b))
+            using (Font f = new Font("Arial", 10))
+            {
+                g.Clear(night ? Color.FromArgb(0x30, 0x34, 0x44) : Color.FromArgb(0xE6, 0xEA, 0xF0));
+                for (int r = 0; r < ids.Length; r++)
+                {
+                    Pet p = w.Get(ids[r]);
+                    p.Out = true;
+                    for (int c = 0; c < poses.Length; c++)
+                    {
+                        string s = poses[c];
+                        p.state = s; p.anim = 0.3; p.t = 1; p.Bt = 0; p.rolling = false; p.poseKind = ""; p.dir = 1; p.sT = 0; p.bagItem = "";
+                        p.RidingPo = false; p.WearHat = false; p.HoldToast = false; p.InScene = false; w.LunchState = "";
+                        bool nightIdle = false;
+                        if (s == "walk") p.anim = 0.05;
+                        if (s == "plop") p.sT = 0.2;
+                        if (s == "photo") { p.state = "pose"; p.poseKind = "photo"; }
+                        if (s == "special1") { if (ids[r] == "tinky") { p.state = "bagdig"; p.bagItem = "toast"; p.sT = 1.5; } else if (ids[r] == "dipsy") { p.state = "hattoss"; p.sT = 0.6; } else if (ids[r] == "laalaa") { p.state = "juggle"; p.sT = 0.33; } else p.state = "spin"; }
+                        if (s == "special2") { if (ids[r] == "dipsy") { p.state = "pose"; p.poseKind = "hatwave"; } else if (ids[r] == "laalaa") { p.state = "twirl"; } else if (ids[r] == "tinky") { p.state = "bagdig"; p.bagItem = ""; p.sT = 0.4; } else p.state = "catch"; }
+                        if (s == "special3") { if (ids[r] == "dipsy") { p.state = "pose"; p.poseKind = "hattip"; } else if (ids[r] == "laalaa") { p.state = "kick"; p.t = 0.3; } else if (ids[r] == "tinky") { p.state = "pose"; p.poseKind = "sing"; } else p.state = "dizzy"; }
+                        if (s == "ride") { p.state = "walk"; p.RidingPo = ids[r] == "tinky"; }
+                        if (s == "wearhat") { p.state = "idle"; p.WearHat = ids[r] == "tinky"; }
+                        if (s == "toast") { p.state = "idle"; p.HoldToast = true; }
+                        if (s == "lunch") { p.state = "idle"; w.LunchState = "eat"; }
+                        if (s == "nightidle") { p.state = "idle"; nightIdle = true; p.anim = 2; }
+                        bool wasNight = w.Night; if (nightIdle) w.Night = true;
+                        p.x = c * cw + 9 * 6; p.y = r * ch + 20 * 6;
+                        g.DrawString(s, f, night ? Brushes.White : Brushes.Black, c * cw + 4, r * ch + 2);
+                        p.PaintPet(g, 0, 0);
+                        p.notes.Clear(); p.sparks.Clear(); p.hearts.Clear();
+                        w.Night = wasNight;
                     }
                 }
                 b.Save(path, ImageFormat.Png);
