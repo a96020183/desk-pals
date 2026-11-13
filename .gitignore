@@ -1,9 +1,10 @@
 *.vsix
 *.zip
 Spidey*安裝包*/
-extension/desktop/SpideyDesktop
+**/desktop/SpideyDesktop
 art/
 *.log
 !.github/**
 /extension.vsixmanifest
 /[[]Content_Types].xml
+dist/

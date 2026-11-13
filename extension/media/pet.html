@@ -16,6 +16,12 @@
   .bubble.dark { background: #16171F; color: #EEEBF8; border-color: #7B6BC4; }
   .bubble.dark::after { background: #16171F; border-color: #7B6BC4; }
   .bubble.dark.alert { color: #FF8A8A; border-color: #C95454; }
+  .bubble.dusk { background: #3B2335; color: #FFEBD9; border-color: #E8935A; }
+  .bubble.dusk::after { background: #3B2335; border-color: #E8935A; }
+  .bubble.deep { background: #14203A; color: #E4F0FF; border-color: #6FA8E8; }
+  .bubble.deep::after { background: #14203A; border-color: #6FA8E8; }
+  .bubble.lonely { background: #12303A; color: #E6F6F8; border-color: #5FC3CF; }
+  .bubble.lonely::after { background: #12303A; border-color: #5FC3CF; }
   .btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 6px 8px 8px; }
   button { font: inherit; cursor: pointer; border-radius: 4px; padding: 3px 0; background: var(--vscode-button-secondaryBackground, transparent); color: var(--vscode-button-secondaryForeground, inherit); border: 1px solid var(--vscode-widget-border, #8888); }
   button:hover { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
@@ -46,7 +52,10 @@ function checkDark(announce) {
   const d = isDarkTime(new Date());
   if (d === dark) return;
   dark = d; COL = d ? COL_D : COL_N;
-  if (announce) say(d ? "……下班時間到了。" : "早安，我又變回來了 ☀", 3, d);
+  if (announce) {
+    if (isOther()) say(d ? LINES[charId].night_on : LINES[charId].night_off, 3);
+    else say(d ? "……下班時間到了。" : "早安，我又變回來了 ☀", 3, d);
+  }
 }
 const HEAD = ["...kkkkkk...","..krrrrrrk..",".krRrrrrRrk.",".krrrRRrrrk.",".kwwkrrkwwk.",".kwwwkkwwwk.",".krwwrrwwrk.","..krrRRrrk.."];
 const SLEEPY = [".krrrrrrrrk.", ".kkkkrrkkkk.", ".krrrrrrrrk."];
@@ -61,7 +70,76 @@ function frame(o) {
   if (dark) rows[10] = rows[10].slice(0, 5) + "ww" + rows[10].slice(7); // 黑衣白蜘蛛
   return rows;
 }
-const S = 3, SW = 36, SH = 48;
+const S = 3;
+let SW = 36, SH = 48;
+// ---- 其他角色（Desk Pals 公仔櫃）：小波、史迪仔、人魚漢頓。Spidey 走上面原本的那一套，完全不變 ----
+const ART = {"po":{"HEAD":[".......rr.......","......r..r......",".......rr.......",".......rr.......",".....kkkkkk.....","...kkrrrrrrkk...",".kkhrffffffrRkk.","kehrffffffffrRek","kehrfkffffkfrRek","kehrfkffffkfrRek","kehrpfmffmfprRek",".kkhrffmmffrRkk.","...kkrrrrrrkk..."],"SLEEPY":["kehrffffffffrRek","kehrffffffffrRek","kehrkkffffkkrRek","kehrpffffffprRek",".kkhrffmmffrRkk."],"HAPPY":["kehrffffffffrRek","kehrfkffffkfrRek","kehrkfkffkfkrRek","kehrpmffffmprRek",".kkhrfmmmmfrRkk."],"BODY":["..khGGGGGGGGRk..","rkhrGwggggggGRkr","rkhrGggggggGrRkr",".khrGggggggGrRk.","..khGGGGGGGGRk..","...kRrrrrrrrRk.."],"ARMS_UP":["rkkhGGGGGGGGRkkr",".khrGwgggggGrRk.",".khrGggggggGrRk.",".khrGggggggGrRk.","..khGGGGGGGGRk..","...kRrrrrrrrRk.."],"LEGS_A":["...krrk..krrk...","...kkkk..kkkk..."],"LEGS_B":["..krrk....krrk..","..kkkk....kkkk.."],"LEGS_RIDE":["....krrkkrrk....","....kkkkkkkk...."],"SCOOTER":["...........kk.","...........ks.","...........ks.","...........ks.","...........ks.",".kkkkkkkkkkks.",".kssssssssssk.",".kooq....kooq.","..oo......oo.."]},"stitch":{"HEAD":["..kkkk..........kkkk..","..bppk..........kppbk.",".kpppbk........kbpppk.",".kpppbk........kbpppk.",".kpppk.....k....kpppk.",".kpppk....kk....kpppk.",".kppbk.kkkbbkkk.kbppk.","..kbbbkbbbbbbbbkbbbk..","...kbbbllbbbbllbbbk...","...kbbllwebblewlbbk...","....kbleeennleeebk....","....kbleenhnneeebk....","....kbllennnneelbk....",".....kbmbbbbbbmbk.....","......kmmqmmqmmk......",".....kbbbbttbbbbk....."],"SLEEPY":["...kbbllllbbllllbbk...","....kbllllnnllllbk....","....kbleenhnnleebk....","....kblllnnnnlllbk....",".....kbmbbbbbbmbk.....","......kmmqmmqmmk......"],"HAPPY":["...kbbllllbbllllbbk...","....kbllelnnllelbk....","....kblelnhnnelebk....","....kblllnnnnlllbk....",".....kbmbbbbbbmbk.....","......kmmqmmqmmk......"],"BODY":[".....kbdbbllbbdbk.....",".....kbdlllllldbk.....","....kbbdlllllldbbk....","....kbbdlllllldbbk....","....kkbbllllllbbkk....",".....kbbbkkkkbbbk....."],"ARMS_UP":[".....kbbbbllbbbbk.....","..kkkbbbllllllbbbkkk..","..kbbkbllllllllbkbbk..","..kkkbbllllllllbbkkk..","....kbbllllllllbbk....","....kkbbllllllbbkk...."],"LEGS_A":[".....kbbk....kbbk.....","......kk......kk......"],"LEGS_B":[".....kbbk.....kbbk....","......kk.......kk....."],"CRAWL_A":[".....kbbbllllbbbk.....","....kbbk.kkkk.kbbk....","....kkk........kkk...."],"CRAWL_B":[".....kbbbllllbbbk.....",".....kbbkkkkkkbbk.....",".....kkk......kkk....."]},"hangyodon":{"HEAD":["...fff........","..fFfFkkkk....","..kfkbbbbbkk..",".kbwwbbbbwwbk.","fkwwwKbbKwwwkf","fkwwwKbbKwwwkf","fkbwwbbbbwwbkf","kmmmmmmmmmmmmk"],"SLEEPY":[".kbbbbbbbbbbk.","fkbbbbbbbbbbkf","fkbkkkbbkkkbkf","fkbbbbbbbbbbkf"],"HAPPY":[".kbbbbbbbbbbk.","fkbbkbbbbkbbkf","fkbkbkbbkbkbkf","fkbbbbbbbbbbkf"],"BODY":["kmMMMMMMMMMMmk",".kmmmmmmmmmmk.","kbkbbbbbbbbkbk",".kbdbbdbbdbbk.",".kbbbbbbbbbbk."],"ARMS_UP":["bmMMMMMMMMMMmb","bkmmmmmmmmmmkb",".kbbbbbbbbbbk.",".kbdbbdbbdbbk.",".kbbbbbbbbbbk."],"LEGS_A":[".kbkbbbbbbkbk.","..kbbk..kbbk..","..kkkk..kkkk.."],"LEGS_B":[".kbkbbbbbbkbk.",".kbbk....kbbk.",".kkkk....kkkk."]}};
+const PAL = {
+  po: { n: { k:"#3A1A1A", r:"#E3262B", R:"#A8161C", h:"#FF5A5E", e:"#F4CDBE", f:"#F6D2B0", F:"#E8B892", m:"#B8323C", p:"#F29A9A", g:"#C9CDD3", G:"#8E949C", w:"#FFFFFF", s:"#55C7BE", q:"#2F8F88", o:"#6B6F7A" },
+        d: { k:"#2A1220", r:"#B4303A", R:"#7E1A2A", h:"#D8505A", e:"#D3A79C", f:"#D9AE92", F:"#BF907A", m:"#8E2E40", p:"#C97A84", g:"#8F8CA6", G:"#5F5C78", w:"#FFE4CC", s:"#3F8F95", q:"#266A70", o:"#4E4A5E" }, halo: "#FFC58F" },
+  stitch: { n: { k:"#1B2A4A", b:"#3D6BB3", d:"#2B4F86", l:"#8FB6E6", p:"#E58FB8", e:"#0A0A14", w:"#FFFFFF", n:"#1C2A55", h:"#5B6FA8", m:"#5A1A2A", t:"#E86A8A", q:"#F4EFD8" },
+            d: { k:"#111A30", b:"#33598F", d:"#22406C", l:"#7092BE", p:"#B57090", e:"#0A0A14", w:"#DDEBFF", n:"#151F40", h:"#46588A", m:"#441420", t:"#B85670", q:"#CFCAB4" }, halo: "#A9C8F5" },
+  hangyodon: { n: { k:"#1B1F24", b:"#25B3BA", d:"#137F87", w:"#FFFFFF", K:"#111111", m:"#F5A9C0", M:"#D8708F", f:"#2D9BE3", F:"#1E74B5" },
+               d: { k:"#101318", b:"#1E8F9C", d:"#10666F", w:"#E6F2F8", K:"#111111", m:"#D08AA4", M:"#A95A76", f:"#2678B8", F:"#1A5C90" }, halo: "#A6E3F0" },
+};
+const FACE_ROW = { po: 7, stitch: 9, hangyodon: 3 };
+const LINES = {
+  po: {
+    save: ["存好了！好棒棒 👏", "存起來了～再來一次！", "Eh-oh! 存檔成功", "小波幫你收好囉"], save_d: ["存好了…那我們回家好不好", "存好了，太陽寶寶也下山囉"],
+    pats: ["嘻嘻，好舒服", "你好棒棒！", "小波喜歡你 ♥", "Eh-oh! 再摸一下", "有小波陪你喔"], pats_d: ["嗯…小波想睡覺覺了", "太陽寶寶下山了，你也該休息囉"],
+    combo: ["再來一次！", "再來一次！再來一次！"], hi: "Eh-oh! 我是小波 👋", hi_d: "Eh-oh…太陽寶寶下山了耶",
+    err: n => `嗚…有 ${n} 個錯誤，好可怕`, err_d: n => `${n} 個錯誤…明天再修啦，回家`, ok: "錯誤都不見了！大抱抱！", ok_d: "都修好了！那我們回家吧",
+    rest: "好久了，起來動一動、喝可樂樂 🥤", rest_d: "太陽寶寶都下山了，回家吧", wake: "Eh-oh! 你回來了！", wake_d: "你回來了…是要回家了嗎？",
+    sleep: "睡覺覺…晚安", night_on: "太陽寶寶下山了…該說再見囉", night_off: "太陽寶寶起床了！Eh-oh! ☀", sig: "咻～～", trick: "騎車車兜風～嘟嘟！",
+    btn: ["打招呼", "騎車", "飛跳", "睡覺"] },
+  stitch: {
+    save: ["ih! 存好了！", "存檔～嘻嘻嘻", "好孩子！存好了 👍"], save_d: ["存好了…回家，Ohana 在等"],
+    pats: ["嘻嘻嘻～", "ih-ih-ih!", "好孩子！史迪仔是好孩子！", "Ohana ♥"], pats_d: ["呼啊…好舒服…", "Ohana 在家等你喔"],
+    combo: ["ih-ih-ih! 好癢！", "嘻嘻嘻嘻嘻！"], hi: "Aloha! 史迪仔 👋", hi_d: "Aloha…呼啊～",
+    err: n => `ih-ih-ih! 有 ${n} 個錯誤！史迪仔去咬它！`, err_d: n => `${n} 個錯誤…明天咬，回家`, ok: "錯誤吃光光了！嘻嘻嘻", ok_d: "吃光了…回家",
+    rest: "好久了！起來喝可樂！ih-ih! 🥤", rest_d: "Ohana 在家等你喔", wake: "你回來了！Ohana！", wake_d: "回來了…要回家了嗎？",
+    sleep: "呼…呼…", night_on: "呼啊～天黑了…Ohana 在家等你喔", night_off: "Aloha! 早安！", sig: "嘿咻！", trick: "嘻嘻嘻…（搗蛋）",
+    btn: ["Aloha", "搗蛋", "跳跳", "睡覺"] },
+  hangyodon: {
+    save: ["存好了！英雄任務完成～", "存起來了，『魚』快！"], save_d: ["存好了…那就回家吧"],
+    pats: ["為什麼魚不打網球？因為怕碰到網子！", "我游泳不累，『魚』刃有餘！", "這個 bug 真是『鯊』很大", "我們是『鰻』好的朋友～", "年年有『魚』，天天有你！"],
+    pats_d: ["大家都回家了……摸完你也回家吧", "謝謝你陪我…但你也要休息喔"],
+    combo: ["（扮鬼臉）噗嚕嚕嚕～", "看我的鬼臉！好笑嗎？"], hi: "嗨～我是漢頓，今天也要『魚』快喔！👋", hi_d: "嗨…你還在呀",
+    err: n => `交給我這個英雄！有 ${n} 個錯誤！`, err_d: n => `${n} 個錯誤…明天再修，回家吧`, ok: "錯誤都不見了！我有幫到忙嗎？", ok_d: "都修好了…回家吧",
+    rest: "起來喝口可樂、伸伸鰭…啊，伸伸手 🥤", rest_d: "大家都回家了，你也回家吧", wake: "你回來了！我一個人好寂寞喔 ♥", wake_d: "你回來了…是要回家了嗎？",
+    sleep: "我去泡泡裡睡一下…", night_on: "天黑了…大家都回家了，你也回家吧", night_off: "早安！今天也要『魚』快喔 ☀", sig: "咕嚕咕嚕～游過去！", trick: "要聽笑話嗎？",
+    btn: ["打招呼", "講笑話", "游泳", "睡覺"] },
+};
+let charId = "spidey";
+function isOther() { return charId !== "spidey"; }
+function sizeFor(id) {
+  if (id === "po") return [48, 63];
+  if (id === "stitch") return [66, 72];
+  if (id === "hangyodon") return [42, 48];
+  return [36, 48];
+}
+function faceRows(head, face, id) {
+  const h = head.slice(), f = ART[id][face], r0 = FACE_ROW[id];
+  if (f) for (let i = 0; i < f.length; i++) h[r0 + i] = f[i];
+  return h;
+}
+function frameOther(o) {
+  const A = ART[charId];
+  const head = faceRows(A.HEAD, o.sleep ? "SLEEPY" : (o.happy ? "HAPPY" : null), charId);
+  if (charId === "stitch" && o.moving) return head.concat(o.step ? A.CRAWL_B : A.CRAWL_A);
+  if (charId === "po" && o.moving) return head.concat(o.armsUp ? A.ARMS_UP : A.BODY, A.LEGS_RIDE);
+  return head.concat(o.armsUp ? A.ARMS_UP : A.BODY, o.step ? A.LEGS_B : A.LEGS_A);
+}
+// 畫任意寬度的像素圖，貼齊 SW×SH 框的底、左右置中
+function spriteAny(rows, x, y, fx, colors, halo) {
+  const w = Math.max(...rows.map(r => r.length)), h = rows.length;
+  const ox = Math.round(x + SW / 2 - w * S / 2), oy = Math.round(y + SH - h * S);
+  const px = (rx, len) => fx ? ox + (w - 1 - rx - (w - len) / 2) * S : ox + (rx + (w - len) / 2) * S;
+  g.fillStyle = halo;
+  rows.forEach((row, ry) => { for (let rx = 0; rx < row.length; rx++) if (row[rx] !== ".") g.fillRect(px(rx, row.length) - 1, oy + ry * S - 1, S + 2, S + 2); });
+  rows.forEach((row, ry) => { for (let rx = 0; rx < row.length; rx++) { const c = row[rx]; if (c !== ".") { g.fillStyle = colors[c] || "#F0F"; g.fillRect(px(rx, row.length), oy + ry * S, S, S); } } });
+}
+
 
 const zone = document.getElementById("zone");
 const cv = document.getElementById("pet");
@@ -77,15 +155,17 @@ new ResizeObserver(resize).observe(zone); resize();
 const ground = () => H - 12 - SH;
 const pick = a => a[Math.floor(Math.random() * a.length)];
 
-const TALK = ["嗨！今天也一起寫 code 吧", "能力越強，bug 越少！", "蜘蛛感應：你存檔了嗎？", "要不要喝口水？", "我幫你盯著 console", "這段 code 好帥", "Thwip! 🕸"];
+const TALK = ["嗨！今天也一起寫 code 吧", "能力越強，bug 越少！", "蜘蛛感應：你存檔了嗎？", "要不要喝口可樂？", "我幫你盯著 console", "這段 code 好帥", "Thwip! 🕸"];
 const SAVE = ["存好了！👍", "存檔成功，帥！", "Thwip! 已存檔", "穩穩的 👍"];
 const TALK_D = ["都幾點了還不下班？", "老闆不會多給你加班費的。", "……你還在？", "這個 bug 明天還會在，你不用在。", "下班。現在。"];
 const SAVE_D = ["存了就快走。", "存好了。可以關機了吧？", "……存檔。然後下班。"];
 const T = (n, d) => pick(dark ? d : n);
+const LT = (k) => { const L = LINES[charId]; if (!L) return ""; const v = dark && L[k + "_d"] !== undefined ? L[k + "_d"] : L[k]; return Array.isArray(v) ? pick(v) : v; };
 const PATS = ["你今天也很棒！", "累了就休息一下，我陪你", "有我在，bug 不敢來", "我一直都在喔 ♥", "你寫的 code 很帥", "辛苦了，摸摸頭", "不管怎樣我都站你這邊", "慢慢來，你可以的"];
 const PATS_D = ["……摸夠了就下班。", "我是擔心你才一直催你。", "你已經很努力了，剩下的明天再說。", "哼，就讓你摸一下。"];
 
 const saved = vscodeApi.getState() || {};
+if (saved.char && ART[saved.char]) { charId = saved.char; [SW, SH] = sizeFor(charId); }
 const pet = { x: saved.x ?? 30, y: 0, vx: 0, vy: 0, dir: 1, state: "walk", t: 3, ax: 0, ay: 0, L: 80, th: 0, om: 0, anim: 0, bubble: "", bt: 0, alert: false, sense: 0, z: 0 };
 pet.y = ground();
 checkDark(false);
@@ -113,13 +193,14 @@ function update(dt) {
   const gy = ground();
   switch (pet.state) {
     case "walk":
-      pet.x += pet.dir * 28 * dt; pet.y = gy;
+      pet.x += pet.dir * (charId === "po" ? 70 : charId === "stitch" ? 60 : charId === "hangyodon" ? 22 : 28) * dt; pet.y = gy;
       if (pet.x < 2) { pet.x = 2; pet.dir = 1; }
       if (pet.x > W - SW - 2) { pet.x = W - SW - 2; pet.dir = -1; }
       if (pet.t < 0) {
         const r = Math.random();
         if (r < .38) setState("idle", 1.5 + Math.random() * 2.5);
         else if (r < .56) jump(pet.dir * 60, -260);
+        else if (isOther()) { if (r < .7) jump(pet.dir * (charId === "po" ? 140 : 80), charId === "hangyodon" ? -220 : -320); else { pet.dir = Math.random() < .5 ? -1 : 1; setState("walk", 3 + Math.random() * 3); } }
         else if (r < .68 && H > 140) startSwing(Math.min(W - 24, Math.max(24, pet.x + pet.dir * 60)), 16 + Math.random() * 24);
         else if (r < .73 && H > 140) startHang();
         else { pet.dir = Math.random() < .5 ? -1 : 1; setState("walk", 3 + Math.random() * 3); }
@@ -130,7 +211,7 @@ function update(dt) {
     case "sleep":
       pet.y = gy; pet.z += dt; if (pet.t < 0) setState("walk", 3); break;
     case "air":
-      pet.vy += 900 * dt; pet.x += pet.vx * dt; pet.y += pet.vy * dt;
+      pet.vy += (charId === "hangyodon" ? 520 : 900) * dt;   // 人魚漢頓像在水裡一樣慢慢落下 pet.x += pet.vx * dt; pet.y += pet.vy * dt;
       if (pet.x < 0) { pet.x = 0; pet.vx = -pet.vx * .5; }
       if (pet.x > W - SW) { pet.x = W - SW; pet.vx = -pet.vx * .5; }
       if (pet.y < 0) { pet.y = 0; pet.vy = 0; }
@@ -166,6 +247,23 @@ function sprite(rows, x, y, fx, fy) {
   g.restore();
 }
 
+function drawOther() {
+  const P = PAL[charId], colors = dark ? P.d : P.n, moving = pet.state === "walk";
+  if (dark && charId === "po") { // 太陽寶寶下山：夕陽色
+    const gr = g.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, "rgba(255,140,70,0.10)"); gr.addColorStop(1, "rgba(120,60,140,0.18)");
+    g.fillStyle = gr; g.fillRect(0, 0, W, H);
+  }
+  const rows = frameOther({ moving, step: Math.floor(pet.anim * (charId === "stitch" ? 12 : 6)) % 2 === 1 && moving,
+    armsUp: pet.state === "air" || (pet.bt > 0 && pet.state === "idle"), sleep: pet.state === "sleep", happy: pet.happy > 0 });
+  const lift = charId === "po" && moving ? 4 * S : 0;
+  if (charId === "po" && moving) spriteAny(ART.po.SCOOTER, pet.x, pet.y, pet.dir < 0, colors, dark ? P.halo : "#FFFFFF");
+  spriteAny(rows, pet.x, pet.y - lift, pet.dir < 0, colors, dark ? P.halo : "#FFFFFF");
+  if (charId === "hangyodon" && (pet.state === "idle" || pet.state === "air")) { // 吐泡泡
+    g.strokeStyle = "rgba(150,215,255,0.9)"; g.lineWidth = 1.2;
+    for (let i = 0; i < 3; i++) { const p = (pet.anim * 0.5 + i / 3) % 1; g.beginPath(); g.arc(pet.x + SW / 2 + (pet.dir < 0 ? -12 : 12) + Math.sin(p * 9 + i) * 3, pet.y + 20 - p * 40, 1.5 + p * 2.5, 0, 7); g.stroke(); }
+  }
+}
+
 function draw() {
   const theme = document.body.classList.contains("vscode-dark") || document.body.classList.contains("vscode-high-contrast");
   const city = theme ? "#2A3146" : "#DDE2EE", gnd = theme ? "#222839" : "#D2D8E6", web = dark ? "#7B6BC4" : (theme ? "#C9D1E6" : "#8E97B0"), ink = theme ? "#E9ECF3" : "#2E3550";
@@ -187,7 +285,8 @@ function draw() {
   }
   if (pet.state === "hang") { g.beginPath(); g.moveTo(pet.ax, 0); g.lineTo(pet.ax, pet.y + 3); g.stroke(); }
 
-  sprite(frame({
+  if (isOther()) drawOther();
+  else sprite(frame({
     step: pet.state === "walk" && Math.floor(pet.anim * 6) % 2 === 1,
     armsUp: pet.state === "swing" || pet.state === "air" || (pet.bt > 0 && pet.state === "idle"),
     sleep: pet.state === "sleep",
@@ -215,10 +314,12 @@ function draw() {
     g.globalAlpha = 1;
   }
   if (pet.bubble && pet.bt > 0) {
-    bubble.hidden = false; bubble.textContent = pet.bubble; bubble.classList.toggle("alert", pet.alert); bubble.classList.toggle("dark", dark);
+    bubble.hidden = false; bubble.textContent = pet.bubble; bubble.classList.toggle("alert", pet.alert);
+    bubble.classList.toggle("dark", dark && charId === "spidey"); bubble.classList.toggle("dusk", dark && charId === "po");
+    bubble.classList.toggle("deep", dark && charId === "stitch"); bubble.classList.toggle("lonely", dark && charId === "hangyodon");
     const bw = bubble.offsetWidth;
     const bxp = Math.min(W - bw / 2 - 4, Math.max(bw / 2 + 4, pet.x + SW / 2));
-    const byp = pet.state === "hang" ? pet.y + SH + 34 : pet.y - 8;
+    const byp = pet.state === "hang" ? pet.y + SH + 34 : pet.y - 8 - (charId === "po" ? 12 : 0);
     bubble.style.left = bxp + "px"; bubble.style.top = Math.max(30, byp) + "px";
   } else bubble.hidden = true;
 }
@@ -227,24 +328,60 @@ let last = performance.now(), saveT = 0;
 function loop(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
   update(dt); draw();
-  saveT += dt; if (saveT > 5) { saveT = 0; vscodeApi.setState({ x: pet.x }); }
+  if (pet.happy > 0) pet.happy -= dt;
+  if (pet.joke > 0) { pet.joke -= dt; if (pet.joke <= 0) say("好笑嗎？好笑嗎？", 1.8); }
+  saveT += dt; if (saveT > 5) { saveT = 0; vscodeApi.setState({ x: pet.x, char: charId }); }
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
+if (charId !== "spidey") setChar(charId, false);
 
 zone.addEventListener("pointerdown", e => {
   const r = zone.getBoundingClientRect(); const x = e.clientX - r.left, y = e.clientY - r.top;
   if (x > pet.x - 6 && x < pet.x + SW + 6 && y > pet.y - 6 && y < pet.y + SH + 6) {
-    if (pet.state === "sleep") { setState("walk", 2); say("嗯？我醒了！", 1.8); return; }
+    if (pet.state === "sleep") { setState("walk", 2); say(isOther() ? LT("wake") : "嗯？我醒了！", 1.8); return; }
+    if (isOther()) {
+      const now = performance.now(); pet.clicks = (pet.clicks || []).filter(t => now - t < 1300); pet.clicks.push(now);
+      pet.happy = 1.5;
+      if (pet.clicks.length >= 3) say(pick(LINES[charId].combo), 1.8);
+      else { const l = LT("pats"); say(l, 2.4); if (charId === "hangyodon" && !dark) pet.joke = 2.6; }
+      if (pet.state === "walk" || pet.state === "idle") jump(0, pet.clicks.length >= 3 ? -340 : -260);
+      return;
+    }
     say(T(PATS, PATS_D), 2.4); if (pet.state === "walk" || pet.state === "idle") jump(0, -260);
     return;
   }
+  if (isOther()) { if (pet.state === "sleep") setState("walk", 1); grounded(); jump((x - pet.x - SW / 2) / 0.6, charId === "hangyodon" ? -200 : -300); say(LINES[charId].sig, .8); return; }
   if (pet.state === "hang" || pet.state === "sleep") { setState("walk", 1); grounded(); }
   if (y < ground() - 20) { startSwing(x, y); say("Thwip!", .8); }
   else { jump((x - pet.x - SW / 2) / 0.6, -260); say("Thwip!", .8); }
 });
 
+function actOther(a) {
+  const L = LINES[charId];
+  if (a === "hi") { grounded(); setState("idle", 2.4); pet.happy = 2; say(LT("hi"), 2.4); }
+  if (a === "swing") { // 招牌：小波騎車、史迪仔搗蛋、人魚漢頓講笑話
+    grounded();
+    if (charId === "po") { setState("walk", 6); say(L.trick, 1.6); }
+    else if (charId === "stitch") { setState("idle", 2); pet.happy = 2; say(L.trick, 1.6); jump(pet.dir * 160, -200); }
+    else { setState("idle", 3); say(pick(L.pats), 2.4); if (!dark) pet.joke = 2.6; }
+  }
+  if (a === "hang") { grounded(); jump((pet.x + SW / 2 > W / 2 ? -1 : 1) * 160, charId === "hangyodon" ? -260 : -420); say(L.sig, 1); }
+  if (a === "sleep") { pet.z = 0; pet.y = ground(); setState("sleep", 8); say(L.sleep, 1.2); }
+}
+const BTN_SPIDEY = ["打招呼", "擺盪", "倒吊", "睡覺"];
+function setChar(id, announce) {
+  if (!(id === "spidey" || ART[id])) return;
+  charId = id; [SW, SH] = sizeFor(id);
+  pet.x = Math.min(Math.max(2, pet.x), Math.max(2, W - SW - 2)); pet.y = ground(); setState("walk", 2);
+  const labels = id === "spidey" ? BTN_SPIDEY : LINES[id].btn;
+  document.querySelectorAll("button").forEach((b, i) => { b.textContent = labels[i]; });
+  vscodeApi.setState({ x: pet.x, char: charId });
+  if (announce) act("hi");
+}
+
 function act(a) {
+  if (isOther()) { actOther(a); return; }
   if (a === "hi") { grounded(); setState("idle", 2.4); say(dark ? "……嗨。下班了嗎？" : "嗨！我是你的 Spidey 👋", 2.4); }
   if (a === "swing") { grounded(); startSwing(pet.x + SW / 2 > W / 2 ? W * .25 : W * .75, 20); say("Thwip!", 1); }
   if (a === "hang") { grounded(); startHang(); say("倒吊看世界～", 2); }
@@ -254,6 +391,18 @@ document.querySelectorAll("button").forEach(b => b.addEventListener("click", () 
 
 window.addEventListener("message", e => {
   const m = e.data || {};
+  if (m.type === "character") { setChar(m.id, true); return; }
+  if (isOther()) {
+    if (m.type === "save") { if (pet.state === "sleep") setState("walk", 2); grounded(); say(LT("save"), 2); jump(0, -300); }
+    else if (m.type === "errors") {
+      if (m.count > m.prev) { if (pet.state === "sleep") setState("walk", 2); say(dark ? LINES[charId].err_d(m.count) : LINES[charId].err(m.count), 3, true); if (pet.state === "walk") setState("idle", 3); }
+      else if (m.count === 0) { say(LT("ok"), 2.4); grounded(); pet.happy = 2; jump(0, -300); }
+    } else if (m.type === "rest") { if (pet.state === "sleep") setState("walk", 1); grounded(); jump(0, -300); setTimeout(() => { if (isOther()) say(LT("rest"), 7); }, 600); }
+    else if (m.type === "idle") { pet.z = 0; grounded(); setState("sleep", 1e9); }
+    else if (m.type === "wake") { if (pet.state === "sleep") { setState("walk", 2); say(LT("wake"), 1.8); } }
+    else if (m.type === "hi") act("hi");
+    return;
+  }
   if (m.type === "save") {
     if (pet.state === "sleep") setState("walk", 2);
     grounded(); say(T(SAVE, SAVE_D), 2); jump(0, -300);
@@ -268,7 +417,7 @@ window.addEventListener("message", e => {
   } else if (m.type === "rest") {
     if (pet.state === "sleep") setState("walk", 1);
     grounded(); startSwing(W / 2, 18);
-    setTimeout(() => say(dark ? "寫很久了。站起來。然後下班。" : "寫很久了，起來喝水伸展一下吧 🥤", 7), 600);
+    setTimeout(() => say(dark ? "……喝完可樂就下班。" : "寫很久了，起來喝口可樂、伸展一下！🥤", 7), 600);
   } else if (m.type === "idle") {
     pet.z = 0; grounded(); setState("sleep", 1e9);
   } else if (m.type === "wake") {

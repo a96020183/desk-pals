@@ -1,5 +1,5 @@
-"""打包 Spidey 小夥伴成 .vsix（不需要 vsce / npm）。
-用法：python -I build_vsix.py   → 產出 spidey-pet-<版號>.vsix
+"""把一隻小夥伴打包成 .vsix（不需要 vsce / npm）。
+用法：python -I build_vsix.py   → dist/<name>-<版號>.vsix
 """
 import json
 import os
@@ -43,7 +43,8 @@ manifest = f"""<?xml version="1.0" encoding="utf-8"?>
 </PackageManifest>
 """
 
-out = os.path.join(ROOT, f"spidey-pet-{ver}.vsix")
+os.makedirs(os.path.join(ROOT, "dist"), exist_ok=True)
+out = os.path.join(ROOT, "dist", f"{pkg['name']}-{ver}.vsix")
 with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
     z.writestr("[Content_Types].xml", content_types)
     z.writestr("extension.vsixmanifest", manifest)

@@ -48,15 +48,30 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Compile (same as spidey-desktop.ps1)
+      - name: Compile DeskPals (same as desk-pals.ps1)
         shell: powershell
         run: |
-          $src = [System.IO.File]::ReadAllText("extension\desktop\SpideyDesktop.cs", [System.Text.Encoding]::UTF8)
+          $src = [System.IO.File]::ReadAllText("extension\desktop\DeskPals.cs", [System.Text.Encoding]::UTF8)
           Add-Type -TypeDefinition $src -ReferencedAssemblies System.Windows.Forms, System.Drawing, System.Web.Extensions -ErrorAction Stop
           "COMPILED OK"
+      - name: Smoke run (offscreen, all four pets, snapshot, quit)
+        shell: powershell
+        run: |
+          $env:DESKPALS_OFFSCREEN = "1"
+          $env:DESKPALS_DATA_DIR = "$env:RUNNER_TEMP\dp-data"
+          $ps1 = (Resolve-Path "extension\desktop\desk-pals.ps1").Path
+          Start-Process powershell.exe -ArgumentList "-NoProfile -File `"$ps1`" -PipeName desk-pals-ci -Pet po"
+          Start-Sleep -Seconds 12
+          node .github/smoke.js
+          Start-Sleep -Seconds 3
+          if (Test-Path "$env:TEMP\desk-pals.log") { Get-Content "$env:TEMP\desk-pals.log" }
+          if (-not (Test-Path shot.png)) { throw "no snapshot" }
       - name: Build vsix
         run: python build_vsix.py
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: spidey-pet-vsix
-          path: "*.vsix"
+          name: desk-pals-vsix
+          path: |
+            dist/*.vsix
+            shot.png

@@ -1,8 +1,8 @@
 {
-	"name": "spidey-pet",
-	"displayName": "Spidey 小夥伴",
-	"description": "像素小蜘蛛人：側邊欄一隻，整個電腦螢幕也一隻。會散步、噴絲、抱抱、敲螢幕；存檔比讚、出錯有蜘蛛感應、提醒休息；平日下班後黑化催你下班",
-	"version": "0.3.3",
+	"name": "desk-pals",
+	"displayName": "公仔櫃 Desk Pals",
+	"description": "右下角一個公仔櫃，裡面有 Spidey、小波、史迪仔、人魚漢頓。選一隻出來，他就在整個螢幕陪你：散步、抱抱、敲螢幕、存檔比讚、Claude／Codex 卡住提醒你；平日下班後催你下班。",
+	"version": "0.4.2",
 	"publisher": "local",
 	"engines": {
 		"vscode": "^1.70.0"
@@ -15,87 +15,206 @@
 		"viewsContainers": {
 			"activitybar": [
 				{
-					"id": "spideyPet",
-					"title": "Spidey",
+					"id": "deskPals",
+					"title": "公仔櫃",
 					"icon": "media/icon.svg"
 				}
 			]
 		},
 		"views": {
-			"spideyPet": [
+			"deskPals": [
 				{
 					"type": "webview",
-					"id": "spideyPet.view",
-					"name": "🕷 Spidey",
+					"id": "deskPals.view",
+					"name": "公仔櫃",
 					"visibility": "visible"
 				}
 			]
 		},
 		"commands": [
 			{
-				"command": "spideyPet.show",
-				"title": "Spidey：叫他出來（側邊欄）"
+				"command": "deskPals.pick",
+				"title": "公仔櫃：換角色"
 			},
 			{
-				"command": "spideyPet.hi",
-				"title": "Spidey：打招呼"
+				"command": "deskPals.remind",
+				"title": "公仔櫃：提醒我…"
 			},
 			{
-				"command": "spideyPet.hug",
-				"title": "Spidey：抱抱"
+				"command": "deskPals.ticket",
+				"title": "公仔櫃：搶票提醒 🎫"
 			},
 			{
-				"command": "spideyPet.knock",
-				"title": "Spidey：敲敲螢幕"
+				"command": "deskPals.all",
+				"title": "公仔櫃：全部放出來（會串門子）"
 			},
 			{
-				"command": "spideyPet.ball",
-				"title": "Spidey：丟球給他"
+				"command": "deskPals.home",
+				"title": "公仔櫃：全部回櫃子"
 			},
 			{
-				"command": "spideyPet.hide",
-				"title": "Spidey：躲起來／出來（Ctrl+Alt+S）"
+				"command": "deskPals.show",
+				"title": "公仔櫃：叫他出來（側邊欄）"
 			},
 			{
-				"command": "spideyPet.bond",
-				"title": "Spidey：我們的感情（好感度）"
+				"command": "deskPals.hi",
+				"title": "公仔櫃：打招呼"
 			},
 			{
-				"command": "spideyPet.desktopOn",
-				"title": "Spidey：放他到整個螢幕（開機自動出現）"
+				"command": "deskPals.hug",
+				"title": "公仔櫃：抱抱"
 			},
 			{
-				"command": "spideyPet.desktopOff",
-				"title": "Spidey：收工（關掉整個螢幕版）"
+				"command": "deskPals.knock",
+				"title": "公仔櫃：敲敲螢幕"
 			},
 			{
-				"command": "spideyPet.restNow",
-				"title": "Spidey：測試休息提醒"
+				"command": "deskPals.ball",
+				"title": "公仔櫃：丟球給他"
+			},
+			{
+				"command": "deskPals.hide",
+				"title": "公仔櫃：躲起來／出來（Ctrl+Alt+S）"
+			},
+			{
+				"command": "deskPals.bond",
+				"title": "公仔櫃：我們的感情（好感度）"
+			},
+			{
+				"command": "deskPals.desktopOn",
+				"title": "公仔櫃：放他到整個螢幕（開機自動出現）"
+			},
+			{
+				"command": "deskPals.desktopOff",
+				"title": "公仔櫃：收工（關掉整個螢幕版）"
+			},
+			{
+				"command": "deskPals.restNow",
+				"title": "公仔櫃：測試休息提醒"
+			},
+			{
+				"command": "deskPals.focus",
+				"title": "公仔櫃：專注 25 分鐘 🍅"
+			},
+			{
+				"command": "deskPals.focusStop",
+				"title": "公仔櫃：結束專注"
+			},
+			{
+				"command": "deskPals.jiraSetup",
+				"title": "公仔櫃：設定 Jira（新單指派給你時通知）"
+			},
+			{
+				"command": "deskPals.quiet30",
+				"title": "公仔櫃：安靜 30 分鐘"
+			},
+			{
+				"command": "deskPals.quiet120",
+				"title": "公仔櫃：安靜 2 小時"
+			},
+			{
+				"command": "deskPals.quietOff",
+				"title": "公仔櫃：結束安靜"
 			}
 		],
 		"configuration": {
-			"title": "Spidey 小夥伴",
+			"title": "公仔櫃 Desk Pals",
 			"properties": {
-				"spideyPet.desktop": {
+				"deskPals.character": {
+					"type": "string",
+					"default": "spidey",
+					"enum": [
+						"spidey",
+						"po",
+						"stitch",
+						"hangyodon"
+					],
+					"enumDescriptions": [
+						"Spidey（像素小蜘蛛人）",
+						"小波（騎滑板車）",
+						"史迪仔",
+						"人魚漢頓"
+					],
+					"description": "第一次放出來的公仔（之後在桌面點公仔櫃換角色，會記住你上次選的；Mac 版只有 Spidey）"
+				},
+				"deskPals.desktop": {
 					"type": "boolean",
 					"default": true,
 					"description": "整個螢幕版：不限 VS Code，整台電腦都有他，開機自動出現（Windows／macOS）"
 				},
-				"spideyPet.birthday": {
+				"deskPals.birthday": {
 					"type": "string",
 					"default": "",
 					"pattern": "^(\\d{2}-\\d{2})?$",
-					"description": "你的生日（MM-DD，例如 03-15），當天 Spidey 會捧蛋糕"
+					"description": "你的生日（MM-DD，例如 03-15），當天 公仔 會捧蛋糕"
 				},
-				"spideyPet.restMinutes": {
+				"deskPals.restMinutes": {
 					"type": "number",
 					"default": 50,
 					"description": "連續用幾分鐘後提醒休息"
 				},
-				"spideyPet.idleMinutes": {
+				"deskPals.idleMinutes": {
 					"type": "number",
 					"default": 5,
-					"description": "幾分鐘沒動作，Spidey 就去睡覺（休息計時也會歸零）"
+					"description": "幾分鐘沒動作，公仔 就去睡覺（休息計時也會歸零）"
+				},
+				"deskPals.focusMinutes": {
+					"type": "number",
+					"default": 25,
+					"description": "番茄鐘專注幾分鐘"
+				},
+				"deskPals.calendarIcsUrl": {
+					"type": "string",
+					"default": "",
+					"description": "行事曆的 ICS 私人網址（Google 日曆：設定 → 你的日曆 → 「iCal 格式的私人網址」；Outlook：發佈行事曆的 ICS 連結）。填了就會在開會前提醒你。"
+				},
+				"deskPals.meetingRemindMinutes": {
+					"type": "number",
+					"default": 5,
+					"description": "開會前幾分鐘提醒"
+				},
+				"deskPals.jira.site": {
+					"type": "string",
+					"default": "",
+					"description": "Jira 網站（例如 yourteam.atlassian.net）；建議用「公仔櫃：設定 Jira」指令設定"
+				},
+				"deskPals.jira.email": {
+					"type": "string",
+					"default": "",
+					"description": "Jira 登入信箱"
+				},
+				"deskPals.jira.credentialsFile": {
+					"type": "string",
+					"default": "",
+					"description": "（進階）改從這個 JSON 檔讀 Jira 憑證：{\"site\",\"email\",\"api_token\"}"
+				},
+				"deskPals.worklogDir": {
+					"type": "string",
+					"default": "",
+					"description": "工作日誌資料夾：裡面出現今天的新檔時，公仔會通知你（點他就打開）"
+				},
+				"deskPals.meetingAutoQuiet": {
+					"type": "boolean",
+					"default": true,
+					"description": "開會時自動安靜到會議結束（要先填行事曆網址）"
+				},
+				"deskPals.weatherLocation": {
+					"type": "string",
+					"default": "",
+					"description": "下雨提醒的地點（城市名，例如「台北」，或「緯度,經度」）。平日 17:30 會看等一下下班和明天會不會下雨（Open-Meteo 免費天氣資料）。"
+				},
+				"deskPals.gitlabHosts": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"default": [],
+					"description": "要看 GitLab 待辦的主機（需要先用 glab 登入），例如 gitlab.com。有人請你 review、指派 MR、@你、pipeline 失敗時通知你。"
+				},
+				"deskPals.companyHost": {
+					"type": "string",
+					"default": "",
+					"description": "公司內部主機（例如公司 GitLab 的網域）：網路正常但連不到它時，公仔會提醒你「連不到公司網路（VPN 斷了？）」"
 				}
 			}
 		}

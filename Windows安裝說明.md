@@ -1,6 +1,8 @@
-# Spidey 小夥伴：Windows 安裝說明
+# 公仔櫃 Desk Pals：Windows 安裝說明
 
-一隻像素小蜘蛛人，會在整個螢幕上走來走去、跳到視窗上、噴絲擺盪。點他會撒嬌；平日 18:00 以後會黑化，催你下班。
+螢幕右下角會出現一個小小的木頭公仔櫃，裡面住著四隻像素公仔：**Spidey、小波、史迪仔、人魚漢頓**。挑一隻出來，他就在整個螢幕陪你：在視窗上散步、抱抱、敲螢幕，工作上有事會來提醒你，平日下班時間還會催你回家。
+
+> 個人粉絲作品，非商業用途，與各角色的版權方無關。
 
 ## 需要先有
 
@@ -11,40 +13,75 @@
 
 ## 安裝
 
-1. 把 `spidey-pet-0.3.3.vsix` 放到任意資料夾。
+1. 把 `desk-pals-<版號>.vsix` 放到任意資料夾。
 2. VS Code → 左邊「延伸模組」→ 右上角「⋯」→「從 VSIX 安裝…」→ 選這個檔。
-3. 重新開啟 VS Code。
+3. 重新開啟 VS Code，會請你**挑第一個公仔**。
 
-幾秒後他就會出現在螢幕上。以後開機會自動出現，不用開 VS Code。
+幾秒後公仔櫃和你挑的公仔就會出現。以後開機會自動出現，不用開 VS Code。
 
 ## 怎麼玩
 
-- **點他**：抱抱、講好話；連點會好癢、頭暈。
+**公仔櫃**
+- **點櫃子裡的公仔**：叫他出來，或收回去。可以同時放好幾隻出來，他們碰到會串門子、聊天、一起玩。
+- **把公仔拖回櫃子**：他就回格子裡乖乖待著。
+- 右邊的大格子放你**最常用的那隻**。右鍵選「設為最愛」可以自己指定。
+- **往右下角一甩**：在螢幕任何地方抓起公仔往櫃子丟，他會自己飛進格子。
+- **收合成蛋**：按櫃子頂端的「－」或右鍵「收合成蛋」，櫃子變成一顆蛋；點蛋就打開。
+- **午餐時間**（平日 12:00–13:30）：公仔會換上午餐造型邊吃邊聊，吃飽睡午覺，13:30 一起回來工作。
+
+**跟公仔互動**
+- **點他**：每隻有自己的反應。連點會有驚喜。
 - **按住拖曳**：把他丟出去。
-- **按右鍵**：選單，可以抱抱、敲螢幕、擺盪、倒吊、丟球給他、看你們的感情等級、收工。
-- **右下角的蜘蛛網是他的窩**：把他拖進去會被網子鎖住、乖乖待著；拖出來就自由了。
-- **Ctrl＋Alt＋S**：叫他躲起來／出來。分享螢幕開會時他會自己躲起來。
-- **越常互動感情越好**：等級升上去會戴圍巾、毛帽、愛心眼鏡、皇冠。
-- **節日**：聖誕節、農曆新年、你的生日（VS Code 設定 `spideyPet.birthday`，格式 `MM-DD`）會換造型。
-- **VS Code 裡**：側邊欄也有一隻；存檔會比讚、程式出錯會有蜘蛛感應、打字很快會跳舞加油、在終端機 `git push` tag 成功會放煙火。
+- **右鍵**：選單，有換角色、全部放出來、丟球、大合照、提醒我、搶票提醒、專注、安靜一下、今天的小結、收工。
+- **Ctrl＋Alt＋S**：全部躲起來／出來。分享螢幕開會時會自己躲起來。
 
-## 跟 Claude Code 一起用
+**每隻的個性**
+- **Spidey**：噴絲擺盪、倒吊、爬牆；下班時間會黑化。
+- **小波**：騎滑板車在視窗間飛來飛去；肚子上的電視會顯示 Codex／Claude 的狀態；丟棒球給她，她會用手套接、偶爾揮棒打全壘打。
+- **史迪仔**：爬牆、倒掛在視窗底下、縮成球滾；會彈烏克麗麗。
+- **人魚漢頓**：在空中像在水裡游泳、吐泡泡；夢想當英雄，會披著披風飛；很愛講冷笑話。
 
-- **卡住提醒（不用設定）**：Claude Code 在問你問題 90 秒、停在某個工具 3 分鐘（多半在等你按允許）、或 5 分鐘沒回應時，他會跳出來敲螢幕提醒你。VS Code 裡的 Claude 和終端機的 Claude CLI 都算。
-- **做完通知（選用）**：把下面這段加進 `C:\Users\你的帳號\.claude\settings.json` 最外層的 `{ }`，`你的帳號` 換成自己的 Windows 帳號名稱。已經有 `hooks` 的話，把裡面四項併進去。
-  ```json
-  "hooks": {
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"C:/Users/你的帳號/AppData/Local/SpideyDesktop/claude-hook.js\" start", "timeout": 3 }] }],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "node \"C:/Users/你的帳號/AppData/Local/SpideyDesktop/claude-hook.js\" done", "timeout": 3 }] }],
-    "Notification": [{ "hooks": [{ "type": "command", "command": "node \"C:/Users/你的帳號/AppData/Local/SpideyDesktop/claude-hook.js\" wait", "timeout": 3 }] }],
-    "PostToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "node \"C:/Users/你的帳號/AppData/Local/SpideyDesktop/claude-hook.js\" post", "timeout": 3 }] }]
-  }
-  ```
+**越常互動感情越好**：等級升上去會戴上配件。節日（聖誕節、農曆新年、你的生日）會換造型。生日在 VS Code 設定 `deskPals.birthday` 填，格式 `MM-DD`。
+
+## 工作上的提醒（都在你電腦上跑，不花錢）
+
+| 功能 | 說明 | 要設定嗎 |
+|---|---|---|
+| Codex／Claude 卡住 | 在問你問題、在等你按允許、或很久沒回應時，公仔會跳出來提醒；做完一件比較久的工作也會告訴你 | 不用 |
+| 終端機長指令 | VS Code 終端機的指令跑超過 30 秒，跑完告訴你成功或失敗 | 不用 |
+| 上版結果 | 終端機 `git push` tag 後盯著 CI，部署成功或失敗都告訴你（GitHub 公開 repo，或已用 glab 登入的 GitLab） | 不用 |
+| 提醒我… | 右鍵或 VS Code 指令，打一句話選時間，時間到他來叫你 | 不用 |
+| 搶票提醒 🎫 | 輸入開賣日期、時間、售票網址，開賣前 1–2 小時、30 分、10 分、1 分和開搶時各叫一次，最後 10 分鐘有倒數，點他直接打開售票頁 | 不用 |
+| 專注 25 分鐘 🍅 | 番茄鐘：專注時公仔安靜陪你，時間到才提醒休息 | 不用 |
+| 安靜一下 | 30 分鐘／2 小時／到下班，期間的通知先存著，結束時一次告訴你 | 不用 |
+| 電腦狀況 | CPU、記憶體一直滿載、硬碟快滿、網路斷線時告訴你 | 不用 |
+| 下載完成 | 下載資料夾有新檔案下載好時通知，點他打開 | 不用 |
+| 今天的小結 | 下班時告訴你今天專注了幾輪、上了幾次版、Codex／Claude 做完幾件事 | 不用 |
+| 開會提醒 | 會前 5 分鐘和開始時提醒，點他進會議；開會中自動安靜 | 在設定 `deskPals.calendarIcsUrl` 填行事曆的 ICS 私人網址 |
+| 下雨提醒 | 平日 17:30 看等一下下班和明天會不會下雨 | 在設定 `deskPals.weatherLocation` 填城市，例如「台北」 |
+| Jira 新單／到期／被 @ | 有新單指派給你、單子快到期、有人在留言 @你 | 執行指令「公仔櫃：設定 Jira」 |
+| GitLab 待辦 | 有人請你 review、MR 指派給你、@你、pipeline 失敗 | 先用 glab 登入，再在設定 `deskPals.gitlabHosts` 加上主機 |
+| 工作日誌 | 指定資料夾出現今天的新檔時通知你 | 在設定 `deskPals.worklogDir` 填資料夾 |
+
+VS Code 設定：`Ctrl+,` → 搜尋 `deskPals`。
+
+### 用 Claude Code 的話（選用）
+
+Codex 不用設定。Claude Code 想要「做完通知」的話，把下面這段加進 `C:\Users\你的帳號\.claude\settings.json` 最外層的 `{ }`（`你的帳號` 換成自己的 Windows 帳號名稱）：
+
+```json
+"hooks": {
+  "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"C:/Users/你的帳號/AppData/Local/DeskPals/claude-hook.js\" start", "timeout": 3 }] }],
+  "Stop": [{ "hooks": [{ "type": "command", "command": "node \"C:/Users/你的帳號/AppData/Local/DeskPals/claude-hook.js\" done", "timeout": 3 }] }],
+  "Notification": [{ "hooks": [{ "type": "command", "command": "node \"C:/Users/你的帳號/AppData/Local/DeskPals/claude-hook.js\" wait", "timeout": 3 }] }],
+  "PostToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "node \"C:/Users/你的帳號/AppData/Local/DeskPals/claude-hook.js\" post", "timeout": 3 }] }]
+}
+```
 
 ## 不想要了
 
-在 VS Code 按 `Ctrl+Shift+P`，執行「Spidey：收工（關掉整個螢幕版）」。他會離開，下次開機也不會再自動出現。
+在 VS Code 按 `Ctrl+Shift+P`，執行「公仔櫃：收工（關掉整個螢幕版）」。公仔和櫃子會離開，下次開機也不會再出現。
 
 ## 沒出現怎麼辦
 
-看這個檔有沒有錯誤訊息：`%TEMP%\spidey-desktop.log`（在檔案總管網址列貼上就能打開）。
+看這個檔有沒有錯誤訊息：`%TEMP%\desk-pals.log`（在檔案總管網址列貼上就能打開）。

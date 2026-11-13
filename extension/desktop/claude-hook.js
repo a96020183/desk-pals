@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Claude Code hook → 通知桌面上的 Spidey。
+// Claude Code hook → 通知桌面上的公仔（Windows：公仔櫃；macOS：Spidey）。
 // 用法（settings.json 的 hooks）：node claude-hook.js start|done|wait|post
 //   start＝UserPromptSubmit、done＝Stop、wait＝Notification、post＝PostToolUse(Bash)：偵測 git push tag 成功 → 放煙火
 // 桌面版沒開或任何錯誤都安靜結束（exit 0），絕不擋 Claude。
@@ -9,17 +9,20 @@ const path = require("path");
 
 const ev = process.argv[2] || "";
 const user = (os.userInfo().username || "me").replace(/[^A-Za-z0-9_.-]/g, "_");
-const endpoint = process.platform === "win32"
-	? "\\\\.\\pipe\\spidey-pet-" + user
-	: path.join(os.homedir(), "Library", "Application Support", "SpideyDesktop", "spidey.sock");
+// Windows 先找公仔櫃，找不到再找舊版 Spidey 小夥伴
+const endpoints = process.platform === "win32"
+	? ["\\\\.\\pipe\\desk-pals-" + user, "\\\\.\\pipe\\spidey-pet-" + user]
+	: [path.join(os.homedir(), "Library", "Application Support", "SpideyDesktop", "spidey.sock")];
 
 const bail = setTimeout(() => process.exit(0), 1500);
 
-function send(line) {
-	const s = net.connect(endpoint);
-	s.on("connect", () => s.end(line + "\n"));
-	s.on("error", () => process.exit(0));
-	s.on("close", () => process.exit(0));
+function send(line, i = 0) {
+	if (i >= endpoints.length) process.exit(0);
+	const s = net.connect(endpoints[i]);
+	let ok = false;
+	s.on("connect", () => { ok = true; s.end(line + "\n"); });
+	s.on("error", () => { if (!ok) send(line, i + 1); else process.exit(0); });
+	s.on("close", () => { if (ok) process.exit(0); });
 }
 
 // git push 帶 tag 而且成功 → 回傳 [tag, env]；否則 null
@@ -55,7 +58,19 @@ function handle(j) {
 		const r = j.tool_response || {};
 		const out = typeof r === "string" ? r : [r.stdout, r.stderr, r.output].filter(Boolean).join("\n");
 		const hit = tagPush(cmd, out);
-		if (hit) return send(`tag ${hit[0]} ${hit[1]}`);
+		if (hit) {
+			// 另外叫一支背景的 ci-watch 盯部署結果（hook 本身馬上結束，不擋 Claude）
+			const cwd = (/(?:^|&&|;)\s*cd\s+("([^"]+)"|(\S+))/.exec(cmd) || [])[2] || (/(?:^|&&|;)\s*cd\s+(\S+)/.exec(cmd) || [])[1] || j.cwd;
+			const dirArg = (/git\s+-C\s+("([^"]+)"|(\S+))/.exec(cmd) || []);
+			const repo = dirArg[2] || dirArg[3] || cwd;
+			if (repo && hit[0] !== "tag") {
+				try {
+					require("child_process").spawn(process.execPath, [path.join(__dirname, "ci-watch.js"), repo, hit[0], hit[1]],
+						{ detached: true, stdio: "ignore", windowsHide: true }).unref();
+				} catch (e) {}
+			}
+			return send(`tag ${hit[0]} ${hit[1]}`);
+		}
 	}
 	clearTimeout(bail);
 	process.exit(0);
