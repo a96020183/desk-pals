@@ -2,7 +2,7 @@
 	"name": "desk-pals",
 	"displayName": "公仔櫃 Desk Pals",
 	"description": "右下角一個公仔櫃，裡面有 Spidey、小波、史迪仔、人魚漢頓；也可以換成天線寶寶一櫃（丁丁、迪西、拉拉、小波）。選一隻出來，他就在整個螢幕陪你：散步、抱抱、敲螢幕、存檔比讚、Claude／Codex 卡住提醒你；平日下班後催你下班。",
-	"version": "0.5.0",
+	"version": "0.6.0",
 	"publisher": "local",
 	"engines": {
 		"vscode": "^1.70.0"
@@ -38,7 +38,7 @@
 			},
 			{
 				"command": "deskPals.lineup",
-				"title": "公仔櫃：換一櫃（經典／天線寶寶）"
+				"title": "公仔櫃：換一櫃（經典／天線寶寶／皮克敏）"
 			},
 			{
 				"command": "deskPals.remind",
@@ -134,7 +134,10 @@
 						"hangyodon",
 						"tinky",
 						"dipsy",
-						"laalaa"
+						"laalaa",
+						"pkred",
+						"pkyellow",
+						"pkblue"
 					],
 					"enumDescriptions": [
 						"Spidey（像素小蜘蛛人）",
@@ -143,7 +146,10 @@
 						"人魚漢頓",
 						"丁丁（天線寶寶一櫃）",
 						"迪西（天線寶寶一櫃）",
-						"拉拉（天線寶寶一櫃）"
+						"拉拉（天線寶寶一櫃）",
+						"紅皮克敏（皮克敏一櫃）",
+						"黃皮克敏（皮克敏一櫃）",
+						"藍皮克敏（皮克敏一櫃）"
 					],
 					"description": "第一次放出來的公仔（之後在桌面點公仔櫃換角色，會記住你上次選的；Mac 版只有 Spidey）"
 				},
@@ -152,11 +158,13 @@
 					"default": "classic",
 					"enum": [
 						"classic",
-						"teletubbies"
+						"teletubbies",
+						"pikmin"
 					],
 					"enumDescriptions": [
 						"經典一櫃：Spidey、小波、史迪仔、人魚漢頓",
-						"天線寶寶一櫃：丁丁、迪西、拉拉、小波（大格是小波）"
+						"天線寶寶一櫃：丁丁、迪西、拉拉、小波（大格是小波）",
+						"皮克敏一櫃：紅、黃、藍皮克敏（大格是休息花：用電腦太久花會枯，休息回來才開）"
 					],
 					"description": "公仔櫃裡放哪一櫃公仔（Windows）。改了會當場換；也可以用指令「公仔櫃：換一櫃」"
 				},

@@ -52,6 +52,7 @@ jobs:
         shell: powershell
         run: |
           $src = [System.IO.File]::ReadAllText("extension\desktop\DeskPals.cs", [System.Text.Encoding]::UTF8)
+          foreach ($f in (Get-ChildItem -Path "extension\desktop" -Filter "DeskPals.*.cs" | Sort-Object Name)) { $src += "`n" + [System.IO.File]::ReadAllText($f.FullName, [System.Text.Encoding]::UTF8) }
           Add-Type -TypeDefinition $src -ReferencedAssemblies System.Windows.Forms, System.Drawing, System.Web.Extensions -ErrorAction Stop
           "COMPILED OK"
       - name: Smoke run (offscreen, all four pets, snapshot, quit)
