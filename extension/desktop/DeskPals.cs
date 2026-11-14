@@ -564,17 +564,6 @@ namespace DeskPals
         }
     }
 
-    // 選單的「宿主」：一個看不見、但可以變成前景的小視窗（不然從背景程式叫出來的選單會馬上關掉）
-    class MenuHost : Form
-    {
-        public MenuHost()
-        {
-            FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; StartPosition = FormStartPosition.Manual;
-            Location = new Point(-32000, -32000); Size = new Size(1, 1); Opacity = 0;
-        }
-        protected override CreateParams CreateParams { get { CreateParams cp = base.CreateParams; cp.ExStyle |= 0x80; return cp; } } // TOOLWINDOW：不進 Alt+Tab
-    }
-
     // ================= 角色資料（Pal）=================
     // 每個角色：id、名字、調色盤（白天／夜晚）、像素圖零件、台詞、移動風格、夜晚風格、球種、配件錨點。
     // 像素圖是 12 格寬（也可以更寬，會置中）× 16 格高的字元格；'.' 是透明。
@@ -630,6 +619,9 @@ namespace DeskPals
         }
         // 這一櫃預設放在大格的（經典一櫃照用最久的那隻）
         public static string LineupFav(string lineup) { return NormLineup(lineup) == Teletubbies ? "po" : null; }
+        // 設定視窗、小屋「換一櫃」列出來的櫃子（之後新增一櫃：這裡加一個 id、LineupIds／LineupName 加一行）
+        public static readonly string[] Lineups = { Classic, Teletubbies };
+        public static string LineupName(string lineup) { return NormLineup(lineup) == Teletubbies ? "天線寶寶一櫃" : "經典一櫃"; }
 
         void Shared()
         {
@@ -1653,7 +1645,8 @@ namespace DeskPals
         public bool Free() { return Out && !InScene && !dragging && Grounded() && state != "sleep" && state != "hug" && !(Bt > 0 && bubblePri > 0); }
         void SetState(string s, double dur) { state = s; t = dur; }
         public void Say(string s, double sec) { Say(s, sec, false); }
-        public void Say(string s, double sec, bool alert) { if (string.IsNullOrEmpty(s)) return; bubble = s; Bt = sec; bubbleAlert = alert; bubbleHint = null; bubblePri = 0; }
+        bool muteChat;
+        public void Say(string s, double sec, bool alert) { if (string.IsNullOrEmpty(s) || muteChat) return; bubble = s; Bt = sec; bubbleAlert = alert; bubbleHint = null; bubblePri = 0; }
         int bubblePri;                  // 通知的泡泡（>0）不會被閒聊蓋掉
         string Pick(string[] a) { return a[rnd.Next(a.Length)]; }
         double R(double a, double b) { return a + rnd.NextDouble() * (b - a); }
@@ -1897,7 +1890,7 @@ namespace DeskPals
                 case "walk":
                     if (sleepMode) { GoSleep(); break; }
                     if (MoveOnGround(dt, P.Speed * k)) break;
-                    if (t < 0) Decide(wa);
+                    if (t < 0) { muteChat = !w.Feat("chatter"); Decide(wa); muteChat = false; }   // 小屋關掉「閒聊泡泡」：自己閒晃時不講話
                     break;
                 case "seek": Seek(dt); break;
                 case "idle":
@@ -2005,6 +1998,7 @@ namespace DeskPals
         {
             double cx = Cx, foot = y + SH;
             List<double[]> opts = new List<double[]>();
+            if (w.Feat("windows"))                    // 小屋關掉「跳上視窗」：只在螢幕底走
             foreach (Plat p in w.Plats)
             {
                 if (p.H == supH && Math.Abs(p.Top - foot) < 2) continue;
@@ -2163,7 +2157,7 @@ namespace DeskPals
         public void MouseUp(MouseEventArgs e)
         {
             if (e.Button == MouseButtons.Left && dragging) EndDrag();
-            else if (e.Button == MouseButtons.Right && Menu != null) { w.FillMenu(this, Menu); w.ShowMenu(Menu); }
+            else if (e.Button == MouseButtons.Right && Menu != null) { w.FillMenu(this, Menu); w.ShowMenu(Menu, P.Name, false); }
         }
 
         public bool Dragging { get { return dragging && state == "drag"; } }
@@ -4647,7 +4641,7 @@ namespace DeskPals
         double fold, gulp, wobT, nextWob = 4;    // fold：0 櫃子 → 1 蛋
         public int Attention;                     // 蛋上的小紅點（存著的通知、快到的提醒）
         public bool Lunch;
-        static readonly string[] EGG = {
+        public static readonly string[] EGG = {
             "......kkkkkk......",
             ".....kccccssk.....",
             "....kchhYccssk....",
@@ -4789,7 +4783,8 @@ namespace DeskPals
             if (Collapsed)
             {
                 if (!EggLocal().Contains(p)) return;
-                if (b == MouseButtons.Left) w.ToggleEgg(false); else if (b == MouseButtons.Right) w.ShelfMenu(-1, this);
+                if (b == MouseButtons.Left) { if (w.Single) w.EggClick(); else w.ToggleEgg(false); }
+                else if (b == MouseButtons.Right) w.HouseMenu();   // 蛋＝公仔小屋：開關、設定
                 return;
             }
             if (b == MouseButtons.Left && TabLocal().Contains(p)) { w.ToggleEgg(true); return; }
@@ -5573,6 +5568,7 @@ namespace DeskPals
             active = Get(ids.Count > 0 ? ids[ids.Count - 1] : defaultPet) ?? Get(defaultPet);
             if (ids.Count == 0 && active != null) active.Say(TubbyLineup ? "Eh-oh! 天線寶寶一櫃 ☀" : "經典一櫃回來囉！", 2.4);
             Broadcast();
+            lock (clients) foreach (Client c in clients) Send(c, "lineup " + lineup + "\n");   // 在桌面換櫃（小屋、設定）：VS Code 跟著改設定
             App.Log("lineup " + lineup);
         }
 
@@ -5601,12 +5597,14 @@ namespace DeskPals
             try { Directory.CreateDirectory(DataDir); } catch { }
             Migrate();
             LoadState();
+            LoadFeatures();
+            LoadMode();
             SeasonNow = Season();
             Night = NightNow();
             nightChecked = DateTime.Now.Minute;
             shelf = new ShelfForm(this, S);
             shelf.Night = Night;
-            shelf.Collapsed = ReadText("shelf-state.txt") == "egg";
+            shelf.Collapsed = Single || ReadText("shelf-state.txt") == "egg";   // 只要一隻：沒有櫃子，蛋就是家
             if (shelf.Collapsed) shelf.SnapFold();
             shelf.Place(ShelfWA());
             lastT = clock.Elapsed.TotalSeconds; Now = lastT;
@@ -5618,7 +5616,7 @@ namespace DeskPals
             // 一開始誰在外面：out.txt，沒有就用 -Pet
             List<string> outIds = LoadOutIds();
             string today = DateTime.Now.ToString("yyyy-MM-dd");
-            bool rollCall = outIds.Count >= 2 && !Night && ReadText("rollcall.txt") != today;
+            bool rollCall = outIds.Count >= 2 && !Night && Feat("rollcall") && ReadText("rollcall.txt") != today;
             if (rollCall) { WriteText("rollcall.txt", today); StartRollCall(outIds); }
             else
             {
@@ -5646,6 +5644,7 @@ namespace DeskPals
             timer.Interval = 30;
             timer.Tick += delegate { Tick(); };
             timer.Start();
+            if (!File.Exists(FilePath("profile.txt"))) Later(1.2, delegate { ShowSetup(true); });   // 第一次：設定視窗（你是？選一櫃、擺法）
             App.Log("started pipe=" + pipeName + " lineup=" + lineup + " out=" + string.Join(",", outIds.ToArray()) + " data=" + DataDir);
         }
 
@@ -5694,7 +5693,8 @@ namespace DeskPals
                 foreach (string s in ReadText(LF("out.txt")).Split(new char[] { ' ', ',', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries))
                     if (Get(s) != null && !ids.Contains(s)) ids.Add(s);
             }
-            else ids.Add(defaultPet);
+            else ids.Add(Single ? SinglePet() : defaultPet);
+            if (Single) ids.RemoveAll(delegate(string x) { return x != SinglePet(); });   // 只要一隻：其他隻都不出來
             return ids;
         }
 
@@ -5789,6 +5789,7 @@ namespace DeskPals
         public void BringOut(Pet p, bool say)
         {
             if (!Pets.Contains(p)) return;          // 換櫃之前排好的延遲動作
+            if (Single && p.P.Id != SinglePet()) return;   // 只要一隻：其他隻待在家
             if (p.Out) { active = p; Broadcast(); return; }
             p.ComeOut(say);
             if (shelf.Collapsed) shelf.Gulp();
@@ -5904,6 +5905,7 @@ namespace DeskPals
                 TicketTick();
                 DownloadTick(dt);
                 ExpireNotice();
+                MenuWatch();
                 if (Hidden) return;
                 foreach (Pet p in Pets)
                 {
@@ -6010,7 +6012,7 @@ namespace DeskPals
                 WinInfo fresh = null;
                 foreach (KeyValuePair<IntPtr, WinInfo> kv in nc) if (!known.Contains(kv.Key)) { known.Add(kv.Key); fresh = kv.Value; }
                 known.RemoveWhere(delegate(IntPtr h) { return !nc.ContainsKey(h); });
-                if (fresh != null && newWinCd <= 0 && !Hidden && !focusOn && !quietOn)
+                if (fresh != null && newWinCd <= 0 && !Hidden && !focusOn && !quietOn && Feat("windows"))
                 {
                     Pet p = PickFree();
                     if (p != null) { newWinCd = 6; fgCd = Math.Max(fgCd, 6); p.ReactNewWindow(fresh); }
@@ -6023,7 +6025,7 @@ namespace DeskPals
             {
                 lastFg = fgw;
                 WinInfo fw;
-                if (fgCd <= 0 && !Hidden && !focusOn && !quietOn && Cands.TryGetValue(fgw, out fw) && rnd.NextDouble() < 0.55)
+                if (fgCd <= 0 && !Hidden && !focusOn && !quietOn && Feat("windows") && Cands.TryGetValue(fgw, out fw) && rnd.NextDouble() < 0.55)
                 {
                     Pet p = PickFree();
                     if (p != null && p.FollowWindow(fw, p.AppLine(fgw))) fgCd = 20 + rnd.NextDouble() * 20;
@@ -6135,7 +6137,7 @@ namespace DeskPals
         // ---------- 煙火 ----------
         public void Fireworks(Rectangle area, int n, int focusX)
         {
-            if (Hidden) return;
+            if (Hidden || !Feat("fireworks")) return;   // 小屋可以關掉煙火
             if (fx == null) fx = new FxForm(k);
             fx.Start(area, n, focusX);
             Zorder();
@@ -6229,7 +6231,7 @@ namespace DeskPals
             if (n.Hour < 6) { DayOfWeek y = n.AddDays(-1).DayOfWeek; return y >= DayOfWeek.Monday && y <= DayOfWeek.Friday; }
             return false;
         }
-        bool NightNow() { return forceNight >= 0 ? forceNight == 1 : IsNightTime(DateTime.Now); }
+        bool NightNow() { return forceNight >= 0 ? forceNight == 1 : Feat("night") && IsNightTime(DateTime.Now); }   // 小屋可以關掉「下班時間」
 
         void CheckNight()
         {
@@ -6243,7 +6245,7 @@ namespace DeskPals
             if (quietOn) return;   // 安靜中：只換夜晚的樣子，不催
             if (d && n.DayOfWeek >= DayOfWeek.Monday && n.DayOfWeek <= DayOfWeek.Friday && n.Hour == 18) Later(OutCount() >= 2 ? 30 : 8, delegate { DailyWrap(false); });
             List<Pet> outs = OutPets();
-            if (d && outs.Count >= 2) { NightRitual(); return; }
+            if (d && outs.Count >= 2 && Feat("rollcall")) { NightRitual(); return; }
             Pet l = Lead();
             foreach (Pet p in outs) if (p == l) p.NightChanged(d); else if (!d) p.Say(p.L("night_off"), 3);
             if (outs.Count == 0) l.Say(l.L(d ? "night_on" : "night_off"), 3);
@@ -6253,6 +6255,7 @@ namespace DeskPals
         string Season()
         {
             DateTime n = DateTime.Now;
+            if (!Feat("season")) return "";          // 小屋關掉「節日造型」
             if (birthday.Length == 5 && n.ToString("MM-dd") == birthday) return "birthday";
             foreach (string c in CNY)
             {
@@ -6421,6 +6424,7 @@ namespace DeskPals
                         new string[] { "倒吊", "hang" }, new string[] { "跳到別的視窗上", "jump" }, new string[] { "去爬牆", "climb" }, new string[] { "睡覺", "sleep" }, new string[] { "丟球給他 ⚾", "ball" } };
                     break;
             }
+            m.Items.Add(new ToolStripLabel("一起玩"));
             foreach (string[] it in items)
             {
                 string a = it[1];
@@ -6428,13 +6432,13 @@ namespace DeskPals
             }
             m.Items.Add(p.P.Name + " 的好感度 ♥", null, delegate { p.ShowBond(); });
             m.Items.Add(new ToolStripSeparator());
-            if (focusOn) m.Items.Add("結束專注（還剩 " + FocusLeft() + " 分）", null, delegate { StopFocus(false); });
-            else m.Items.Add("專注 25 分鐘 🍅", null, delegate { StartFocus(25); });
-            AddQuietMenu(m);
-            AddReminderMenus(m);
-            AddTicketMenus(m);
-            m.Items.Add("今天的小結", null, delegate { DailyWrap(true); });
-            if (TubbyLineup)
+            ToolStripMenuItem help = new ToolStripMenuItem("小幫手（專注、安靜、提醒）");
+            AddHelpers(help.DropDownItems);
+            m.Items.Add(help);
+            m.Items.Add("公仔小屋（開關、設定）…", null, delegate { HouseMenu(); });
+            m.Items.Add(new ToolStripSeparator());
+            m.Items.Add(new ToolStripLabel(Single ? "我的公仔" : "公仔們"));
+            if (TubbyLineup && !Single)
             {
                 ToolStripMenuItem grp = new ToolStripMenuItem("天線寶寶一起…");
                 string[][] gs = { new string[] { "大抱抱 ♥", "bighug" }, new string[] { "啦啦啦一起唱", "sing" }, new string[] { "一起跌倒（哎喲！）", "fall" },
@@ -6442,39 +6446,54 @@ namespace DeskPals
                 foreach (string[] gi in gs) { string key = gi[1]; grp.DropDownItems.Add(gi[0], null, delegate { PlayScene(key); }); }
                 m.Items.Add(grp);
             }
-            ToolStripMenuItem sw = new ToolStripMenuItem("換角色");
-            foreach (Pet o in Pets)
+            if (!Single)
             {
-                Pet oo = o;
-                ToolStripMenuItem mi = new ToolStripMenuItem(o.P.Name + (o.Out ? "（在外面）" : ""), null, delegate { SelectOnly(oo); });
-                mi.Checked = o == p;
-                sw.DropDownItems.Add(mi);
+                ToolStripMenuItem sw = new ToolStripMenuItem("換角色");
+                foreach (Pet o in Pets)
+                {
+                    Pet oo = o;
+                    ToolStripMenuItem mi = new ToolStripMenuItem(o.P.Name + (o.Out ? "（在外面）" : ""), null, delegate { SelectOnly(oo); });
+                    mi.Checked = o == p;
+                    sw.DropDownItems.Add(mi);
+                }
+                m.Items.Add(sw);
+                m.Items.Add("只留" + p.P.Name, null, delegate { SelectOnly(p); });
+                m.Items.Add("全部放出來", null, delegate { AllOut(); });
+                m.Items.Add("全部回櫃子", null, delegate { AllHome(); });
+                m.Items.Add(favPin == p.P.Id ? "取消最愛" : "設為最愛 ★", null, delegate { SetFav(p); });
             }
-            m.Items.Add(sw);
-            m.Items.Add("只留" + p.P.Name, null, delegate { SelectOnly(p); });
-            m.Items.Add("全部放出來", null, delegate { AllOut(); });
-            m.Items.Add("全部回櫃子", null, delegate { AllHome(); });
-            m.Items.Add(favPin == p.P.Id ? "取消最愛" : "設為最愛 ★", null, delegate { SetFav(p); });
-            m.Items.Add("回櫃子裡待著", null, delegate { p.StowToShelf(true); });
+            m.Items.Add(Single ? "回蛋裡待著" : "回櫃子裡待著", null, delegate { p.StowToShelf(true); });
             m.Items.Add("躲起來（Ctrl+Alt+S）", null, delegate { ToggleHide(); });
             m.Items.Add(new ToolStripSeparator());
             m.Items.Add("收工（關掉 Desk Pals）", null, delegate { QuitAll(); });
         }
 
-        void AddQuietMenu(ContextMenuStrip m)
+        // 專注、安靜、提醒、搶票、今天的小結（公仔、櫃子、小屋的選單都有）
+        void AddHelpers(ToolStripItemCollection items)
         {
-            if (quietOn) { m.Items.Add("結束安靜（還剩 " + QuietLeft() + " 分）", null, delegate { StopQuiet(); }); return; }
+            if (focusOn) items.Add("結束專注（還剩 " + FocusLeft() + " 分）", null, delegate { StopFocus(false); });
+            else items.Add("專注 25 分鐘 🍅", null, delegate { StartFocus(25); });
+            AddQuietMenu(items);
+            AddReminderMenus(items);
+            AddTicketMenus(items);
+            items.Add("今天的小結", null, delegate { DailyWrap(true); });
+        }
+
+        void AddQuietMenu(ToolStripItemCollection items)
+        {
+            if (quietOn) { items.Add("結束安靜（還剩 " + QuietLeft() + " 分）", null, delegate { StopQuiet(); }); return; }
             ToolStripMenuItem q = new ToolStripMenuItem("安靜一下");
             q.DropDownItems.Add("30 分鐘", null, delegate { StartQuiet(30); });
             q.DropDownItems.Add("2 小時", null, delegate { StartQuiet(120); });
             q.DropDownItems.Add("到今天下班", null, delegate { StartQuiet(MinutesToOffWork()); });
-            m.Items.Add(q);
+            items.Add(q);
         }
 
         // 收合成蛋／打開公仔櫃
         public void ToggleEgg(bool collapse)
         {
             if (shelf.Collapsed == collapse) return;
+            if (Single && !collapse) { Lead().Say("現在是「只要一隻」，蛋就是我家～（小屋 → 重新設定 可以換）", 3); return; }
             shelf.Collapsed = collapse;
             WriteText("shelf-state.txt", collapse ? "egg" : "open");
             Pet l = Lead();
@@ -6494,64 +6513,48 @@ namespace DeskPals
             return n;
         }
 
-        // ---------- 選單：先把宿主小視窗拉到前景再顯示 ----------
-        MenuHost menuHost;
+        // ---------- 選單：自己畫的像素選單（PixelMenu），開在游標旁邊 ----------
+        PixelMenu pmenu;
         IntPtr menuPrevFg;
-        public void HookMenu(ContextMenuStrip m)
+        // 以前要幫原生選單善後（宿主視窗、還焦點）；像素選單自己會處理，留著給公仔的 Menu 用
+        public void HookMenu(ContextMenuStrip m) { }
+        public void ShowMenu(ContextMenuStrip m) { ShowMenu(m, "", false, Cursor.Position); }
+        public void ShowMenu(ContextMenuStrip m, string title, bool house) { ShowMenu(m, title, house, Cursor.Position); }
+        // 選單內容還是用 ToolStrip 項目寫，這裡畫成像素選單，按下後呼叫原本的 Click
+        public void ShowMenu(ContextMenuStrip m, string title, bool house, Point at)
         {
-            m.Closed += delegate
-            {
-                if (menuHost == null || !menuHost.IsHandleCreated) return;
-                W.PostMessage(menuHost.Handle, 0, IntPtr.Zero, IntPtr.Zero); // WM_NULL
-                // 選單關掉後把焦點還給原本的視窗（沒有開新的輸入框時）
-                if (W.GetForegroundWindow() == menuHost.Handle && menuPrevFg != IntPtr.Zero) W.SetForegroundWindow(menuPrevFg);
-            };
-        }
-        // 選單一律用原生的 TrackPopupMenuEx 顯示（工具列圖示那一套，背景程式也穩）；
-        // 選單內容還是用 ToolStrip 項目寫，這裡照樣轉成原生選單，按下後呼叫原本的 Click。
-        public void ShowMenu(ContextMenuStrip m)
-        {
-            App.LogAlways("menu: requested, items=" + m.Items.Count);
-            if (App.Offscreen) return;
-            IntPtr hm = IntPtr.Zero;
+            App.LogAlways("menu: requested, items=" + m.Items.Count + " house=" + house);
             try
             {
-                if (menuHost == null || menuHost.IsDisposed) { menuHost = new MenuHost(); menuHost.Show(); }
-                App.LogAlways("menu: helper bounds=" + menuHost.Bounds + " visible=" + menuHost.Visible + " handle=" + menuHost.Handle.ToString("X"));
-                IntPtr fg = W.GetForegroundWindow();
-                if (fg != menuHost.Handle) menuPrevFg = fg;
-                Dictionary<int, ToolStripItem> map = new Dictionary<int, ToolStripItem>();
-                int next = 1000;
-                hm = BuildNative(m.Items, map, ref next);
-                W.ForceForeground(menuHost.Handle);
-                Point c = Cursor.Position;
-                // 在螢幕右半／下半就往左／往上開（避開右下角的櫃子）
-                Rectangle wa = Screen.FromPoint(c).WorkingArea;
-                uint align = 0;
-                if (c.X > wa.Left + wa.Width / 2) align |= 0x0008;    // TPM_RIGHTALIGN
-                if (c.Y > wa.Top + wa.Height / 2) align |= 0x0020;    // TPM_BOTTOMALIGN
-                W.SuspendZ = true;
-                int cmd;
-                try { cmd = W.TrackPopupMenuEx(hm, 0x0100 | 0x0002 | 0x0080 | 0x4000 | align, c.X, c.Y, menuHost.Handle, IntPtr.Zero); } // RETURNCMD | RIGHTBUTTON | NONOTIFY | NOANIMATION
-                finally { W.SuspendZ = false; }
-                int err = Marshal.GetLastWin32Error();
-                W.PostMessage(menuHost.Handle, 0, IntPtr.Zero, IntPtr.Zero); // WM_NULL
-                App.LogAlways("menu: closed cmd=" + cmd + (cmd == 0 ? " err=" + err : ""));
-                ToolStripItem it;
-                if (cmd != 0 && map.TryGetValue(cmd, out it))
-                {
-                    App.LogAlways("menu: picked \"" + it.Text + "\"");
-                    ToolStripItem pick = it;
-                    BeginInvoke((Action)delegate { pick.PerformClick(); });   // 等選單完全關掉再做（開輸入框才拿得到焦點）
-                }
-                else if (W.GetForegroundWindow() == menuHost.Handle && menuPrevFg != IntPtr.Zero) W.SetForegroundWindow(menuPrevFg);
+                if (pmenu != null) pmenu.CloseMenu();
+                if (!App.Offscreen) menuPrevFg = W.GetForegroundWindow();
+                PixelMenu pm = new PixelMenu(this, m, title, house);
+                pmenu = pm;
+                W.SuspendZ = true;                    // 開著時不要把公仔、櫃子拉到選單上面
+                pm.Popup(at);
+                if (!App.Offscreen) { W.ForceForeground(pm.Handle); pm.Activate(); }
             }
-            catch (Exception ex) { App.LogAlways("menu: error " + ex); }
-            finally { if (hm != IntPtr.Zero) W.DestroyMenu(hm); }
+            catch (Exception ex) { App.LogAlways("menu: error " + ex); W.SuspendZ = false; }
+        }
+        // 選單關掉了（選了、Esc、點外面、失去焦點）：焦點還給原本的視窗
+        public void MenuClosed(PixelMenu pm)
+        {
+            if (pm != pmenu) return;
+            pmenu = null;
+            W.SuspendZ = false;
+            if (!App.Offscreen && pm.IsHandleCreated && W.GetForegroundWindow() == pm.Handle && menuPrevFg != IntPtr.Zero) W.SetForegroundWindow(menuPrevFg);
+        }
+        // 點到選單外面就關：直接看滑鼠按鍵（我們是背景程式，點別的程式也看得到）；選單開了之後要先放開過一次
+        void MenuWatch()
+        {
+            PixelMenu pm = pmenu;
+            if (pm == null || pm.Done || App.Offscreen) return;
+            if ((Control.MouseButtons & (MouseButtons.Left | MouseButtons.Right | MouseButtons.Middle)) == MouseButtons.None) { pm.Armed = true; return; }
+            if (pm.Armed && !pm.Bounds.Contains(Cursor.Position)) pm.CloseMenu();
         }
 
-        // 原生選單畫不出彩色 emoji（會變空心框）：拿掉 BMP 以外的字和變體選擇符；★ ♥ ⏰ 這類保留
-        static string NoEmoji(string s)
+        // 像素選單用的字：拿掉 BMP 以外的字（彩色 emoji）和變體選擇符；★ ♥ ⏰ 這類保留
+        public static string NoEmoji(string s)
         {
             StringBuilder sb = new StringBuilder();
             for (int i = 0; i < s.Length; i++)
@@ -6563,31 +6566,6 @@ namespace DeskPals
             return sb.ToString().Replace("  ", " ").Trim();
         }
 
-        // ToolStrip 項目 → 原生選單（含子選單、打勾、灰色）
-        static IntPtr BuildNative(ToolStripItemCollection items, Dictionary<int, ToolStripItem> map, ref int next)
-        {
-            IntPtr hm = W.CreatePopupMenu();
-            foreach (ToolStripItem it in items)
-            {
-                if (it is ToolStripSeparator) { W.AppendMenu(hm, 0x0800, IntPtr.Zero, null); continue; }   // MF_SEPARATOR
-                if (!it.Available) continue;
-                string text = NoEmoji(it.Text ?? "").Replace("&", "&&");
-                ToolStripMenuItem mi = it as ToolStripMenuItem;
-                uint flags = 0;
-                if (!it.Enabled) flags |= 0x0001;                  // MF_GRAYED
-                if (mi != null && mi.Checked) flags |= 0x0008;     // MF_CHECKED
-                if (mi != null && mi.DropDownItems.Count > 0)
-                {
-                    IntPtr sub = BuildNative(mi.DropDownItems, map, ref next);
-                    W.AppendMenu(hm, flags | 0x0010, sub, text);   // MF_POPUP
-                    continue;
-                }
-                int id = next++;
-                map[id] = it;
-                W.AppendMenu(hm, flags, new IntPtr(id), text);
-            }
-            return hm;
-        }
         // 輸入框：拉到前景、可以直接打字
         public void ActivateForm(Form f)
         {
@@ -6616,16 +6594,14 @@ namespace DeskPals
             m.Items.Add(shelf.Collapsed ? "打開公仔櫃" : "收合成蛋 🥚", null, delegate { ToggleEgg(!shelf.Collapsed); });
             m.Items.Add("全部放出來", null, delegate { AllOut(); });
             m.Items.Add("全部回櫃子", null, delegate { AllHome(); });
-            if (focusOn) m.Items.Add("結束專注", null, delegate { StopFocus(false); });
-            else m.Items.Add("專注 25 分鐘 🍅", null, delegate { StartFocus(25); });
-            AddQuietMenu(m);
-            AddReminderMenus(m);
-            AddTicketMenus(m);
-            m.Items.Add("今天的小結", null, delegate { DailyWrap(true); });
+            ToolStripMenuItem help = new ToolStripMenuItem("小幫手（專注、安靜、提醒）");
+            AddHelpers(help.DropDownItems);
+            m.Items.Add(help);
+            m.Items.Add("公仔小屋（開關、設定）…", null, delegate { HouseMenu(); });
             m.Items.Add("躲起來（Ctrl+Alt+S）", null, delegate { ToggleHide(); });
             m.Items.Add(new ToolStripSeparator());
             m.Items.Add("收工（關掉 Desk Pals）", null, delegate { QuitAll(); });
-            ShowMenu(m);
+            ShowMenu(m, p != null ? p.P.Name : "公仔櫃", false);
         }
 
         // ================= pipe（跟 VS Code 溝通）=================
@@ -6700,7 +6676,7 @@ namespace DeskPals
             List<Pet> outs = OutPets();
             switch (p[0])
             {
-                case "hello": if (active != null) Send(c, "active " + active.P.Id + "\n"); break;
+                case "hello": if (active != null) Send(c, "active " + active.P.Id + "\n"); Send(c, "lineup " + lineup + "\n"); break;   // 櫃子以桌面版為準（第一次設定在桌面做）
                 case "save":
                     Count("saves");
                     foreach (Pet x in outs) x.OnSave(x == l);
@@ -6847,6 +6823,13 @@ namespace DeskPals
                     }
                     return;
                 case "drop": { string[] q = arg.Split(','); int cx2, cy2; if (q.Length == 3 && int.TryParse(q[1], out cx2) && int.TryParse(q[2], out cy2)) SimDrop(Get(q[0]), cx2, cy2); } return;
+                // 測試用：act menu pet|house|shelf、act menuhover <列>、act menuclick <列>、act menuclose、act setup [按鈕]
+                case "menu": TestMenu(arg); return;
+                case "menuhover": { int mi; if (pmenu != null && int.TryParse(arg, out mi)) pmenu.SetHover(mi); } return;
+                case "menuclick": { int mi; if (pmenu != null && int.TryParse(arg, out mi)) pmenu.Pick(mi); } return;
+                case "menuclose": if (pmenu != null) pmenu.CloseMenu(); return;
+                case "setup": if (arg == "") ShowSetup(false); else if (setupForm != null && !setupForm.IsDisposed) setupForm.Press(arg); return;
+                case "feature": { string[] q = arg.Split('='); if (q.Length == 2) SetFeat(q[0], q[1] == "1"); } return;
             }
             if (target != null && arg != "") target.Act(a); else l.Act(a);
         }
@@ -7286,7 +7269,7 @@ namespace DeskPals
 
         void CheckCrossover()
         {
-            if (scene != null || sceneCd > 0 || Hidden || focusOn || quietOn) return;
+            if (scene != null || sceneCd > 0 || Hidden || focusOn || quietOn || !Feat("scenes")) return;
             List<Pet> outs = OutPets();
             if (outs.Count < 2) return;
             List<Pet> free = new List<Pet>();
@@ -8117,6 +8100,8 @@ namespace DeskPals
                 if (fx != null && fx.VVisible) fx.PaintTo(g);
                 foreach (Pet p in Pets) if (p.Bub != null && p.Bub.VVisible) p.Bub.PaintTo(g);
                 if (flash != null && flash.VVisible) flash.PaintTo(g);
+                if (setupForm != null && !setupForm.IsDisposed && setupForm.VVisible) setupForm.PaintTo(g);
+                if (pmenu != null && pmenu.VVisible) pmenu.PaintTo(g);
                 // 游標位置（只畫一個小十字，方便看）
                 Point c = Cursor.Position;
                 using (Pen cp = new Pen(Color.FromArgb(200, 255, 255, 0), 2)) { g.DrawLine(cp, c.X - 6, c.Y, c.X + 6, c.Y); g.DrawLine(cp, c.X, c.Y - 6, c.X, c.Y + 6); }
@@ -8629,13 +8614,13 @@ namespace DeskPals
             ContextMenuStrip m = new ContextMenuStrip();
             m.Items.Add("好了 👍", null, delegate { p.Say("好～辦好了！", 1.4); });
             m.Items.Add("10 分鐘後再提醒", null, delegate { AddReminder(UnixMs(DateTime.Now.AddMinutes(10)), text); });
-            ShowMenu(m);
+            ShowMenu(m, "提醒", false);
             return true;
         }
 
-        void AddReminderMenus(ContextMenuStrip m)
+        void AddReminderMenus(ToolStripItemCollection items)
         {
-            m.Items.Add("提醒我…", null, delegate { ShowReminderForm(); });
+            items.Add("提醒我…", null, delegate { ShowReminderForm(); });
             if (reminders.Count > 0)
             {
                 ToolStripMenuItem my = new ToolStripMenuItem("我的提醒（" + reminders.Count + "）");
@@ -8645,7 +8630,7 @@ namespace DeskPals
                     string label = FromUnixMs(r.At).ToString("MM/dd HH:mm") + "　" + (r.Text.Length > 20 ? r.Text.Substring(0, 20) + "…" : r.Text) + "　（點一下取消）";
                     my.DropDownItems.Add(label, null, delegate { reminders.Remove(rr); SaveReminders(); Lead().Say("取消了：" + rr.Text, 1.8); });
                 }
-                m.Items.Add(my);
+                items.Add(my);
             }
         }
 
@@ -9186,9 +9171,9 @@ namespace DeskPals
             catch { return double.NaN; }
         }
 
-        void AddTicketMenus(ContextMenuStrip m)
+        void AddTicketMenus(ToolStripItemCollection items)
         {
-            m.Items.Add("搶票提醒…", null, delegate { ShowTicketForm(); });
+            items.Add("搶票提醒…", null, delegate { ShowTicketForm(); });
             if (tickets.Count > 0)
             {
                 ToolStripMenuItem my = new ToolStripMenuItem("我的搶票（" + tickets.Count + "）");
@@ -9198,7 +9183,7 @@ namespace DeskPals
                     my.DropDownItems.Add(FromUnixMs(t.At).ToString("MM/dd HH:mm") + "　" + (t.Name.Length > 18 ? t.Name.Substring(0, 18) + "…" : t.Name) + "　（點一下取消）", null,
                         delegate { tickets.Remove(tt); SaveTickets(); Lead().Say("取消搶票提醒：" + tt.Name, 1.8); });
                 }
-                m.Items.Add(my);
+                items.Add(my);
             }
         }
 
@@ -9343,7 +9328,7 @@ namespace DeskPals
             int minute = DateTime.Now.Minute;
             if (!force && minute == lunchChecked) return;
             lunchChecked = minute;
-            string want = forceLunch == 1 ? "eat" : (forceLunch == 2 ? "nap" : (forceLunch == 0 ? "" : LunchByClock()));
+            string want = forceLunch == 1 ? "eat" : (forceLunch == 2 ? "nap" : (forceLunch == 0 || !Feat("lunch") ? "" : LunchByClock()));
             if (want == LunchState) return;
             string was = LunchState;
             LunchState = want;
@@ -9663,6 +9648,1035 @@ namespace DeskPals
                 }
                 b.Save(path, ImageFormat.Png);
             }
+        }
+    }
+
+    // ================= 公仔小屋（蛋的右鍵）：娛樂功能開關、重新設定；只要一隻；第一次設定 =================
+    partial class World
+    {
+        // 小屋的開關（features.txt：一行一個 key=0/1；沒寫的＝開，跟以前一樣）
+        public static readonly string[][] FeatureList = {
+            new string[] { "scenes", "串門子劇情" },
+            new string[] { "lunch", "午餐變身" },
+            new string[] { "night", "下班時間（黑化／催下班）" },
+            new string[] { "rollcall", "早上點名／說再見" },
+            new string[] { "windows", "跟著視窗跑／跳上視窗" },
+            new string[] { "season", "節日造型" },
+            new string[] { "fireworks", "煙火" },
+            new string[] { "chatter", "閒聊泡泡（自己閒晃時講話）" } };
+        readonly Dictionary<string, bool> feats = new Dictionary<string, bool>();
+        public bool Feat(string key) { bool on; return !feats.TryGetValue(key, out on) || on; }
+
+        void LoadFeatures()
+        {
+            feats.Clear();
+            foreach (string line in ReadText("features.txt").Split('\n'))
+            {
+                string[] a = line.Trim().Split('=');
+                if (a.Length == 2 && a[0].Trim() != "") feats[a[0].Trim()] = a[1].Trim() != "0";
+            }
+        }
+
+        void SaveFeatures()
+        {
+            StringBuilder sb = new StringBuilder();
+            foreach (string[] f in FeatureList) sb.Append(f[0] + "=" + (Feat(f[0]) ? "1" : "0") + "\n");
+            WriteText("features.txt", sb.ToString());
+        }
+
+        public void SetFeat(string key, bool on)
+        {
+            feats[key] = on;
+            SaveFeatures();
+            App.Log("feature " + key + "=" + (on ? "1" : "0"));
+            if (key == "night" || key == "season") { nightChecked = -1; CheckNight(); }   // 馬上換樣子（黑化、節日帽子）
+            if (key == "lunch") LunchTick(true);
+            if (key == "scenes" && !on) AbortScene();
+            string name = key;
+            foreach (string[] f in FeatureList) if (f[0] == key) name = f[1];
+            int cut = name.IndexOf('（');
+            if (cut > 0) name = name.Substring(0, cut);
+            Lead().Say(on ? "好～「" + name + "」打開囉" : "好～「" + name + "」先關掉", 1.8);
+        }
+
+        // ---- 你是？（profile.txt：student｜work）、擺法（mode.txt：shelf｜single <id>）----
+        public bool Student;                          // 大學生（之後會有大學生的內容；現在先記著）
+        public bool Single;                           // 只要一隻：沒有櫃子，那隻的家是蛋，其他隻不出來
+        string singleId = "";
+
+        void LoadMode()
+        {
+            Student = ReadText("profile.txt") == "student";
+            string m = ReadText("mode.txt");
+            Single = m.StartsWith("single");
+            singleId = Single && m.Length > 6 ? m.Substring(6).Trim() : "";
+        }
+
+        // 只要一隻的那隻（換到沒有他的那一櫃：用那一櫃預設的那隻）
+        public string SinglePet() { return Get(singleId) != null ? singleId : defaultPet; }
+
+        // 只要一隻：點蛋＝叫他出來／回蛋裡
+        public void EggClick()
+        {
+            Pet p = Get(SinglePet());
+            if (p == null) return;
+            if (p.Out) { if (p.state != "stowfly" && p.state != "enter" && p.state != "exit") p.StowToShelf(true); }
+            else BringOut(p, true);
+        }
+
+        // ---- 公仔小屋選單：開關＋小幫手＋公仔們 ----
+        public void HouseMenu() { HouseMenu(Cursor.Position); }
+        public void HouseMenu(Point at)
+        {
+            ContextMenuStrip m = new ContextMenuStrip();
+            m.Items.Add(new ToolStripLabel("開關（打勾＝開著）"));
+            foreach (string[] f in FeatureList)
+            {
+                string key = f[0];
+                ToolStripMenuItem mi = new ToolStripMenuItem(f[1]);
+                mi.CheckOnClick = true;
+                mi.Checked = Feat(key);
+                mi.Click += delegate { SetFeat(key, !Feat(key)); mi.Checked = Feat(key); };
+                m.Items.Add(mi);
+            }
+            m.Items.Add(new ToolStripSeparator());
+            ToolStripMenuItem help = new ToolStripMenuItem("小幫手（專注、安靜、提醒）");
+            AddHelpers(help.DropDownItems);
+            m.Items.Add(help);
+            m.Items.Add(new ToolStripSeparator());
+            m.Items.Add(new ToolStripLabel(Single ? "我的公仔" : "公仔們"));
+            if (!Single) m.Items.Add(shelf.Collapsed ? "打開公仔櫃" : "收合成蛋 🥚", null, delegate { ToggleEgg(!shelf.Collapsed); });
+            m.Items.Add(Single ? "叫" + Get(SinglePet()).P.Name + "出來" : "全部出來", null, delegate { AllOut(); });
+            m.Items.Add(Single ? "回蛋裡" : "全部回家", null, delegate { AllHome(); });
+            ToolStripMenuItem sw = new ToolStripMenuItem("換一櫃");
+            foreach (string lu in Pal.Lineups)
+            {
+                string l2 = lu;
+                ToolStripMenuItem li = new ToolStripMenuItem(Pal.LineupName(lu), null, delegate { SwitchLineup(l2, Single ? singleId : ""); });
+                li.Checked = lu == lineup;
+                sw.DropDownItems.Add(li);
+            }
+            m.Items.Add(sw);
+            m.Items.Add("重新設定…", null, delegate { ShowSetup(false); });
+            m.Items.Add("躲起來（Ctrl+Alt+S）", null, delegate { ToggleHide(); });
+            m.Items.Add(new ToolStripSeparator());
+            m.Items.Add("收工（關掉 Desk Pals）", null, delegate { QuitAll(); });
+            ShowMenu(m, "公仔小屋", true, at);
+        }
+
+        // 測試用：act menu pet｜house（開在公仔／蛋旁邊，不看游標）
+        void TestMenu(string arg)
+        {
+            if (arg == "house")
+            {
+                Rectangle e = shelf.Collapsed ? shelf.EggScreen() : shelf.Area;
+                HouseMenu(new Point(e.X + e.Width / 2, e.Y + e.Height / 3));
+                return;
+            }
+            Pet l = Get(arg) ?? Lead();
+            ContextMenuStrip m = new ContextMenuStrip();
+            FillMenu(l, m);
+            ShowMenu(m, l.P.Name, false, new Point((int)l.Cx, (int)l.y));
+        }
+
+        // ---- 設定視窗 ----
+        SetupForm setupForm;
+        public void ShowSetup(bool first)
+        {
+            if (setupForm == null || setupForm.IsDisposed)
+                setupForm = new SetupForm(this, first, ReadText("profile.txt"), lineup, Single, Single ? SinglePet() : "");
+            Rectangle wa = App.Offscreen ? screens[0].WorkingArea : Screen.FromPoint(Cursor.Position).WorkingArea;
+            setupForm.Location = new Point(wa.Left + (wa.Width - setupForm.Width) / 2, wa.Top + Math.Max(0, (wa.Height - setupForm.Height) / 2));
+            setupForm.Show();
+            if (App.Offscreen) return;
+            ActivateForm(setupForm);
+            SetupForm sf = setupForm;
+            Later(0.2, delegate { if (!sf.IsDisposed && sf.Visible) ActivateForm(sf); });   // 再補一次，確定點得到
+        }
+
+        // 設定好了：馬上套用（不用重開）
+        public void ApplySetup(string prof, string lu, bool single, string pet, bool first)
+        {
+            WriteText("profile.txt", prof == "student" ? "student" : "work");
+            Student = prof == "student";
+            lu = Pal.NormLineup(lu);
+            bool wasSingle = Single;
+            Single = single;
+            singleId = single ? pet : "";
+            WriteText("mode.txt", single ? "single " + pet : "shelf");
+            App.Log("setup profile=" + prof + " lineup=" + lu + " mode=" + (single ? "single " + pet : "shelf"));
+            if (single)
+            {
+                if (!shelf.Collapsed) { shelf.Collapsed = true; WriteText("shelf-state.txt", "egg"); }
+                if (lu != lineup) SwitchLineup(lu, pet);
+                else { Pet p = Get(pet); if (p != null) SelectOnly(p); }
+                Pet sp = Get(SinglePet());
+                if (sp != null) Later(1.6, delegate { sp.Say("以後我住在右下角的蛋裡～點一下蛋就叫我 🥚", 3.5); });
+            }
+            else
+            {
+                if (lu != lineup) SwitchLineup(lu, "");
+                if (shelf.Collapsed && (wasSingle || first)) { shelf.Collapsed = false; WriteText("shelf-state.txt", "open"); }
+                if (wasSingle || first) Later(0.6, delegate { AllOut(); });
+            }
+            RenderShelf();
+        }
+
+        // 設定視窗用：這一櫃的櫃子縮圖（預覽用的 World 才叫這個，不開視窗）
+        public Bitmap SetupShelfPic()
+        {
+            shelf = new ShelfForm(this, S);
+            shelf.Tubby = TubbyLineup;
+            shelf.Night = false;
+            shelf.Place(new Rectangle(0, 0, 2000, 2000));
+            Bitmap b = shelf.Snapshot(CellPets(), new bool[4], 1.0);
+            return (Bitmap)b.Clone();
+        }
+    }
+
+    partial class Pet
+    {
+        // 設定視窗用：站好的樣子畫成一張小圖（預覽用的 World 才叫這個）
+        public Bitmap IconPic()
+        {
+            int pad = 3 * S, top = P.TopRows * S;
+            Bitmap b = new Bitmap(SW + 2 * pad, SH + top + 2 * pad, PixelFormat.Format32bppArgb);
+            using (Graphics g = Graphics.FromImage(b))
+            {
+                g.Clear(Color.Transparent);
+                Out = true; state = "idle"; anim = 0.3; t = 1; Bt = 0; dir = 1;
+                x = pad; y = pad + top;
+                PaintPet(g, 0, 0);
+                Out = false;
+            }
+            return b;
+        }
+    }
+
+    // 像素風的小工具（像素選單、設定視窗共用）：方塊、缺角方塊、木框、奶油色面板、銅牌、勾勾、愛心、像素圖
+    static class Pix
+    {
+        public static Color C(int rgb) { return Color.FromArgb((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255); }
+        public static Color Mix(Color a, Color b, double f) { return Color.FromArgb((int)(a.R + (b.R - a.R) * f), (int)(a.G + (b.G - a.G) * f), (int)(a.B + (b.B - a.B) * f)); }
+        public static readonly Color Ink = C(0x4A2C17), Cream = C(0xFFF6E4), TextC = C(0x4A3010), Dim = C(0xB5A089), Gold = C(0xE2B550);
+        public static readonly TextFormatFlags Mid = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
+        public static readonly TextFormatFlags LeftMid = TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
+        public static readonly string[] HEART = { ".#.#.", "#####", ".###.", "..#.." };
+        public static readonly string[] CHECK = { "....#", "...##", "#.##.", "###..", ".#..." };
+
+        public static void Box(Graphics g, Color c, int x, int y, int w, int h)
+        {
+            if (w <= 0 || h <= 0) return;
+            using (SolidBrush b = new SolidBrush(c)) g.FillRectangle(b, x, y, w, h);
+        }
+        // 像素圓角：四個角各缺一格
+        public static void Round(Graphics g, Color c, int x, int y, int w, int h, int u)
+        {
+            Box(g, c, x + u, y, w - 2 * u, h);
+            Box(g, c, x, y + u, w, h - 2 * u);
+        }
+        public static void Art(Graphics g, string[] art, Dictionary<char, Color> pal, int x, int y, int c)
+        {
+            for (int ry = 0; ry < art.Length; ry++)
+                for (int rx = 0; rx < art[ry].Length; rx++)
+                {
+                    Color col;
+                    if (pal.TryGetValue(art[ry][rx], out col)) Box(g, col, x + rx * c, y + ry * c, c, c);
+                }
+        }
+        public static void Mono(Graphics g, string[] art, Color c, int x, int y, int u)
+        {
+            Dictionary<char, Color> pal = new Dictionary<char, Color>();
+            pal['#'] = c;
+            Art(g, art, pal, x, y, u);
+        }
+        // 木框（跟公仔櫃同一套木頭色）：深色外框、亮的上緣、暗的下緣、木紋、四角小釘子
+        public static void Wood(Graphics g, int x, int y, int w, int h, int u, bool night, int seed)
+        {
+            Color wl = night ? C(0x74503A) : C(0xB97F4E), wm = night ? C(0x5C3B24) : C(0x9A6338), wd = night ? C(0x3C2617) : C(0x6B4024);
+            Round(g, Ink, x, y, w, h, u);
+            Box(g, wm, x + u, y + u, w - 2 * u, h - 2 * u);
+            Box(g, wl, x + 2 * u, y + u, w - 4 * u, u);
+            Box(g, wd, x + 2 * u, y + h - 2 * u, w - 4 * u, u);
+            Random r = new Random(seed);
+            Color grain = Mix(wm, wd, 0.45);
+            int gh = Math.Max(1, u / 2), n = 10 + w * h / (40 * 40);
+            for (int i = 0; i < n; i++)
+            {
+                int gx = x + 2 * u + r.Next(Math.Max(1, w - 10 * u)), gy = y + 2 * u + r.Next(Math.Max(1, h - 4 * u));
+                Box(g, grain, gx, gy, 3 * u + r.Next(5 * u), gh);
+            }
+            Color nail = night ? C(0xB08A3C) : Gold;
+            Box(g, nail, x + 2 * u, y + 2 * u, u, u); Box(g, nail, x + w - 3 * u, y + 2 * u, u, u);
+            Box(g, nail, x + 2 * u, y + h - 3 * u, u, u); Box(g, nail, x + w - 3 * u, y + h - 3 * u, u, u);
+        }
+        // 奶油色面板：凹進去（外圈深木色、上面和左邊一條陰影）
+        public static void Panel(Graphics g, int x, int y, int w, int h, int u, bool night)
+        {
+            Box(g, night ? C(0x3C2617) : C(0x6B4024), x - u, y - u, w + 2 * u, h + 2 * u);
+            Box(g, Cream, x, y, w, h);
+            Box(g, C(0xEAD7B4), x, y, w, u);
+            Box(g, C(0xF3E6CC), x, y + u, u, h - u);
+        }
+        // 銅牌（跟櫃子的名牌一樣）
+        public static void Plate(Graphics g, string s, Font f, Rectangle r, int u)
+        {
+            Round(g, Ink, r.X, r.Y, r.Width, r.Height, u);
+            Box(g, C(0xEBC56A), r.X + u, r.Y + u, r.Width - 2 * u, r.Height - 2 * u);
+            Box(g, C(0xF8DE8E), r.X + 2 * u, r.Y + u, r.Width - 4 * u, u);
+            Box(g, C(0xC08A2C), r.X + 2 * u, r.Bottom - 2 * u, r.Width - 4 * u, u);
+            Box(g, C(0x8A5A2A), r.X + 2 * u, r.Y + r.Height / 2 - u / 2, u, u);
+            Box(g, C(0x8A5A2A), r.Right - 3 * u, r.Y + r.Height / 2 - u / 2, u, u);
+            TextRenderer.DrawText(g, s, f, new Rectangle(r.X, r.Y, r.Width, r.Height - u / 2), TextC, Mid);
+        }
+        public static int TextW(string s, Font f) { return TextRenderer.MeasureText(s, f, new Size(4000, 400), TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix).Width; }
+    }
+
+    // ================= 像素選單（取代原生右鍵選單）=================
+    // 木框＋奶油色面板（跟公仔櫃同一套顏色）；小屋的選單上面是屋頂和煙囪、下面有門和窗。
+    // 內容照樣用 ToolStrip 項目寫：ToolStripLabel＝小標題、子選單原地展開、CheckOnClick（開關）按了不關選單。
+    // 可以變成前景（收得到 Esc、失去焦點就關）；點到外面由 World 的計時器看滑鼠按鍵來關。
+    class PixelMenu : OverlayForm
+    {
+        class Row { public ToolStripItem It; public int Depth, Y, H; public bool Header, Sep, Sub, Check; }
+        readonly World w;
+        readonly ContextMenuStrip menu;
+        readonly string title;
+        public readonly bool House;
+        readonly List<Row> rows = new List<Row>();
+        readonly List<ToolStripItem> opened = new List<ToolStripItem>();
+        readonly Font font, small, titleFont;
+        readonly int U, F, rowH;
+        readonly bool night;
+        int topH, botH, smokeH, roofH, wallX, hover = -1;
+        bool anyCheck, up;
+        Point anchor;
+        public bool Done, Armed;
+
+        public PixelMenu(World w, ContextMenuStrip menu, string title, bool house) : base(false)
+        {
+            this.w = w; this.menu = menu; this.title = title ?? ""; House = house;
+            double d = w.S / 4.0;
+            U = Math.Max(2, (int)Math.Round(2 * d));
+            F = 4 * U;
+            rowH = Math.Max(22, (int)Math.Round(25 * d));
+            night = w.Night;
+            font = new Font("Microsoft JhengHei UI", 10f, FontStyle.Bold);
+            small = new Font("Microsoft JhengHei UI", 8.5f, FontStyle.Bold);
+            titleFont = new Font("Microsoft JhengHei UI", house ? 11f : 10f, FontStyle.Bold);
+            KeyPreview = true;
+            Deactivate += delegate { CloseMenu(); };
+        }
+
+        // 跟其他小視窗不一樣：要能變成前景（收 Esc、失去焦點時關掉）
+        protected override bool ShowWithoutActivation { get { return false; } }
+        protected override CreateParams CreateParams { get { CreateParams cp = base.CreateParams; cp.ExStyle &= ~0x08000000; return cp; } }
+
+        public void Popup(Point at) { anchor = at; Reflow(true); Show(); }
+
+        void BuildRows()
+        {
+            rows.Clear();
+            anyCheck = false;
+            AddRows(menu.Items, 0);
+            // 頭尾、連在一起的分隔線拿掉
+            for (int i = rows.Count - 1; i >= 0; i--)
+                if (rows[i].Sep && (i == 0 || i == rows.Count - 1 || rows[i - 1].Sep)) rows.RemoveAt(i);
+        }
+
+        void AddRows(ToolStripItemCollection items, int depth)
+        {
+            foreach (ToolStripItem it in items)
+            {
+                if (!it.Available) continue;
+                Row r = new Row();
+                r.It = it; r.Depth = depth;
+                ToolStripMenuItem mi = it as ToolStripMenuItem;
+                if (it is ToolStripSeparator) { r.Sep = true; r.H = 3 * U; }
+                else if (it is ToolStripLabel) { r.Header = true; r.H = rowH * 4 / 5; }
+                else
+                {
+                    r.H = rowH;
+                    r.Sub = mi != null && mi.DropDownItems.Count > 0;
+                    r.Check = mi != null && (mi.Checked || mi.CheckOnClick);
+                    if (r.Check) anyCheck = true;
+                }
+                rows.Add(r);
+                if (r.Sub && opened.Contains(it)) AddRows(mi.DropDownItems, depth + 1);
+            }
+        }
+
+        string RowText(Row r) { return World.NoEmoji(r.It.Text ?? ""); }
+
+        // 算大小、擺位置：開在游標右下，放不下就往左／往上（子選單展開時往上開的就往上長）
+        void Reflow(bool place)
+        {
+            BuildRows();
+            int inner = 0;
+            foreach (Row r in rows)
+            {
+                if (r.Sep) continue;
+                int tw = Pix.TextW(RowText(r), r.Header ? small : font) + r.Depth * 5 * U;
+                if (r.Header) tw += 10 * U; else { if (anyCheck) tw += 9 * U; tw += 8 * U; }
+                inner = Math.Max(inner, tw);
+            }
+            int tTitle = title == "" ? 0 : Pix.TextW(title, titleFont);
+            if (House)
+            {
+                smokeH = 10 * U; roofH = 22 * U;
+                wallX = 4 * U;
+                topH = smokeH + roofH + 3 * U;
+                botH = 22 * U;
+                inner = Math.Max(inner, tTitle + 16 * U);
+            }
+            else
+            {
+                smokeH = 0; roofH = 0; wallX = 0;
+                topH = title == "" ? F : rowH + 5 * U;
+                botH = F;
+                inner = Math.Max(inner, tTitle + 14 * U);
+            }
+            int wd = Math.Max((int)(180 * w.S / 4.0), inner + 2 * (F + 3 * U + wallX));
+            int y = topH + U;
+            foreach (Row r in rows) { r.Y = y; y += r.H; }
+            int ht = y + U + botH;
+            Rectangle wa = Screen.FromPoint(anchor).WorkingArea;
+            int x, yy;
+            if (place)
+            {
+                x = anchor.X + 2; yy = anchor.Y + 2; up = false;
+                if (x + wd > wa.Right) x = anchor.X - wd - 2;
+                if (yy + ht > wa.Bottom) { yy = anchor.Y - ht - 2; up = true; }
+            }
+            else { x = Left; yy = up ? Bottom - ht : Top; }
+            x = Math.Max(wa.Left, Math.Min(x, wa.Right - wd));
+            yy = Math.Max(wa.Top, Math.Min(yy, wa.Bottom - ht));
+            Bounds = new Rectangle(x, yy, wd, ht);
+            Invalidate();
+        }
+
+        bool Selectable(int i) { Row r = rows[i]; return !r.Sep && !r.Header && r.It.Enabled; }
+
+        int RowAt(Point p)
+        {
+            int px = wallX + F;
+            if (p.X < px || p.X >= ClientSize.Width - px) return -1;
+            for (int i = 0; i < rows.Count; i++)
+                if (p.Y >= rows[i].Y && p.Y < rows[i].Y + rows[i].H) return Selectable(i) ? i : -1;
+            return -1;
+        }
+
+        public void SetHover(int i) { hover = i >= 0 && i < rows.Count && Selectable(i) ? i : -1; Invalidate(); }
+
+        void MoveHover(int dir)
+        {
+            int n = rows.Count;
+            int i = hover;
+            for (int j = 0; j < n; j++)
+            {
+                i = i < 0 ? (dir > 0 ? 0 : n - 1) : (i + dir + n) % n;
+                if (Selectable(i)) { hover = i; Invalidate(); return; }
+            }
+        }
+
+        // 按下一列：子選單＝展開／收起來；開關＝打勾換一下（選單不關）；其他＝關掉選單再做
+        public void Pick(int i)
+        {
+            if (Done || i < 0 || i >= rows.Count || !Selectable(i)) return;
+            Row r = rows[i];
+            ToolStripMenuItem mi = r.It as ToolStripMenuItem;
+            if (r.Sub)
+            {
+                bool open = opened.Contains(r.It);
+                for (int j = opened.Count - 1; j >= 0; j--) if (DepthOf(opened[j]) >= r.Depth) opened.RemoveAt(j);   // 同一層只開一個
+                if (!open) opened.Add(r.It);
+                ToolStripItem keep = r.It;
+                Reflow(false);
+                hover = -1;
+                for (int j = 0; j < rows.Count; j++) if (rows[j].It == keep) hover = j;
+                return;
+            }
+            if (mi != null && mi.CheckOnClick) { mi.PerformClick(); Invalidate(); return; }
+            ToolStripItem pick = r.It;
+            App.LogAlways("menu: picked \"" + pick.Text + "\"");
+            CloseMenu();
+            w.BeginInvoke((Action)delegate { pick.PerformClick(); });   // 等選單關掉再做（開輸入框才拿得到焦點）
+        }
+
+        int DepthOf(ToolStripItem it) { foreach (Row r in rows) if (r.It == it) return r.Depth; return 0; }
+
+        public void CloseMenu()
+        {
+            if (Done) return;
+            Done = true;
+            App.LogAlways("menu: closed");
+            w.MenuClosed(this);
+            Hide();
+            w.BeginInvoke((Action)delegate { Close(); });
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            base.OnKeyDown(e);
+            if (e.KeyCode == Keys.Escape) { CloseMenu(); e.Handled = true; }
+            else if (e.KeyCode == Keys.Down || e.KeyCode == Keys.Up) { MoveHover(e.KeyCode == Keys.Down ? 1 : -1); e.Handled = true; }
+            else if (e.KeyCode == Keys.Enter || e.KeyCode == Keys.Space) { if (hover >= 0) Pick(hover); e.Handled = true; }
+        }
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            int h = RowAt(e.Location);
+            if (h != hover) { hover = h; Invalidate(); }
+        }
+        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); if (hover != -1) { hover = -1; Invalidate(); } }
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            if (e.Button != MouseButtons.Left && e.Button != MouseButtons.Right) return;
+            int i = RowAt(e.Location);
+            if (i >= 0) Pick(i);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.Clear(KEY);
+            g.SmoothingMode = SmoothingMode.None;
+            int W0 = ClientSize.Width, H0 = ClientSize.Height;
+            int bodyY = House ? smokeH + roofH - U : 0, bodyH = H0 - bodyY - (House ? 2 * U : 0);
+            Pix.Wood(g, wallX, bodyY, W0 - 2 * wallX, bodyH, U, night, 7);
+            int px = wallX + F, pw = W0 - 2 * px, ph = H0 - topH - botH;
+            Pix.Panel(g, px, topH, pw, ph, U, night);
+            if (House) PaintHouse(g, W0, H0);
+            else if (title != "")
+            {
+                int tw = Pix.TextW(title, titleFont), plw = Math.Min(pw, tw + 12 * U), plh = rowH;
+                Pix.Plate(g, title, titleFont, new Rectangle((W0 - plw) / 2, (topH - plh) / 2 + U / 2, plw, plh), U);
+            }
+            for (int i = 0; i < rows.Count; i++) PaintRow(g, i, px, pw);
+        }
+
+        void PaintRow(Graphics g, int i, int px, int pw)
+        {
+            Row r = rows[i];
+            int x = px + 3 * U + r.Depth * 5 * U, right = px + pw - 3 * U;
+            if (r.Depth > 0) Pix.Box(g, Pix.C(0xF7EBD2), px + U, r.Y, pw - U, r.H);     // 展開的子選單：底色淡一點
+            if (r.Sep)
+            {
+                int sy = r.Y + r.H / 2 - U / 2;
+                for (int sx = px + 2 * U; sx + U <= px + pw - 2 * U; sx += 2 * U) Pix.Box(g, Pix.C(0xD8BF94), sx, sy, U, U);
+                return;
+            }
+            if (r.Header)
+            {
+                string s = RowText(r);
+                int cy = r.Y + r.H / 2, tw = Pix.TextW(s, small);
+                Pix.Box(g, Pix.Gold, x + U, cy - U - U / 2, U, 3 * U); Pix.Box(g, Pix.Gold, x, cy - U / 2, 3 * U, U);   // 小星星
+                TextRenderer.DrawText(g, s, small, new Rectangle(x + 4 * U, r.Y, tw + 4, r.H), night ? Pix.C(0x8A5A2A) : Pix.C(0x9A6338), Pix.LeftMid);
+                for (int sx = x + 6 * U + tw; sx + U <= right; sx += 2 * U) Pix.Box(g, Pix.C(0xE4D0AC), sx, cy, U, U);
+                return;
+            }
+            bool en = r.It.Enabled, hot = i == hover && en;
+            if (hot)
+            {
+                Pix.Round(g, Pix.C(0xD9A944), px + U, r.Y + 1, pw - 2 * U, r.H - 2, U);
+                Pix.Box(g, Pix.C(0xFFE29A), px + 2 * U, r.Y + 1 + U, pw - 4 * U, r.H - 2 - 2 * U);
+                Pix.Box(g, Pix.C(0xFFF1C9), px + 3 * U, r.Y + 1 + U, pw - 6 * U, Math.Max(1, U / 2));
+            }
+            int tx = x;
+            ToolStripMenuItem mi = r.It as ToolStripMenuItem;
+            if (anyCheck)
+            {
+                if (r.Check && mi != null)
+                {
+                    int s = 7 * U, cy = r.Y + (r.H - s) / 2;
+                    if (mi.CheckOnClick)
+                    {
+                        Pix.Round(g, Pix.C(0x9A6338), tx, cy, s, s, U);
+                        Pix.Box(g, mi.Checked ? Pix.C(0xDDF2C8) : Pix.C(0xFFFDF7), tx + U, cy + U, s - 2 * U, s - 2 * U);
+                    }
+                    if (mi.Checked) Pix.Mono(g, Pix.CHECK, Pix.C(0x3F8A30), tx + U, cy + U, U);
+                }
+                tx += 9 * U;
+            }
+            TextRenderer.DrawText(g, RowText(r), font, new Rectangle(tx, r.Y, Math.Max(1, right - tx), r.H), en ? Pix.TextC : Pix.Dim, Pix.LeftMid);
+            if (r.Sub) PaintArrow(g, right - 2 * U, r.Y + r.H / 2, opened.Contains(r.It), hot ? Pix.C(0x8A5A2A) : Pix.C(0xB08A5A));
+            else if (hot) Pix.Mono(g, Pix.HEART, Pix.C(0xE8607A), right - 5 * U, r.Y + r.H / 2 - 2 * U, U);
+        }
+
+        // ▶（收著）／▼（展開了）
+        void PaintArrow(Graphics g, int cx, int cy, bool open, Color c)
+        {
+            if (open) { Pix.Box(g, c, cx - 2 * U, cy - U, 5 * U, U); Pix.Box(g, c, cx - U, cy, 3 * U, U); Pix.Box(g, c, cx, cy + U, U, U); }
+            else { Pix.Box(g, c, cx - U, cy - 2 * U, U, 5 * U); Pix.Box(g, c, cx, cy - U, U, 3 * U); Pix.Box(g, c, cx + U, cy, U, U); }
+        }
+
+        // 小屋：煙囪冒煙、一階一階的屋頂（名字寫在屋頂上）、下面一排窗戶和愛心門、草地
+        void PaintHouse(Graphics g, int W0, int H0)
+        {
+            Color ink = Pix.Ink;
+            int roofBot = smokeH + roofH, rh = 2 * U, n = roofH / rh;
+            int half = W0 / 2, ridge = Math.Max(10 * U, W0 / 7);
+            int step = Math.Max(U, (half - U - ridge) / n / U * U);
+            // 煙囪（屋頂蓋住下半截）＋煙
+            int cw = 5 * U, cx = W0 - W0 / 4 - cw / 2, capY = smokeH - 2 * U;
+            Pix.Box(g, ink, cx - 2 * U, capY - U, cw + 4 * U, 4 * U);
+            Pix.Box(g, ink, cx - U, capY, cw + 2 * U, roofBot - capY);
+            Pix.Box(g, night ? Pix.C(0x8E4A35) : Pix.C(0xC0603F), cx, capY + 2 * U, cw, roofBot - capY - 2 * U);
+            Pix.Box(g, night ? Pix.C(0x5E2E22) : Pix.C(0x7A3B28), cx - U, capY, cw + 2 * U, 2 * U);
+            Pix.Box(g, night ? Pix.C(0x6E3628) : Pix.C(0x9A4A32), cx + U, capY + 4 * U, 2 * U, U / 2 + 1);
+            Color sm = night ? Pix.C(0xB8B2C8) : Pix.C(0xF4F0EA), se = night ? Pix.C(0x7C7690) : Pix.C(0xC8BFB4);
+            Puff(g, cx + cw / 2 + U, capY - 3 * U, 2 * U, sm, se);
+            Puff(g, cx + cw + 3 * U, capY - 6 * U, 2 * U, sm, se);
+            // 屋頂：先畫深色外框（每一階往外一格），再一排一排畫瓦片
+            for (int i = 0; i < n; i++)
+            {
+                int x0 = U + i * step, x1 = W0 - U - i * step, y0 = roofBot - (i + 1) * rh;
+                Pix.Box(g, ink, x0 - U, y0 - U, x1 - x0 + 2 * U, rh + 2 * U);
+            }
+            Color t1 = night ? Pix.C(0x9A4636) : Pix.C(0xD0583F), t2 = night ? Pix.C(0x873B2E) : Pix.C(0xB8472F), tk = night ? Pix.C(0x5E2A22) : Pix.C(0x8E3424), hi = night ? Pix.C(0xB86A55) : Pix.C(0xF08A68);
+            for (int i = 0; i < n; i++)
+            {
+                int x0 = U + i * step, x1 = W0 - U - i * step, y0 = roofBot - (i + 1) * rh;
+                Pix.Box(g, i % 2 == 0 ? t1 : t2, x0, y0, x1 - x0, rh);
+                for (int tx = x0 + (i % 2) * 2 * U + 3 * U; tx < x1 - U; tx += 4 * U) Pix.Box(g, tk, tx, y0 + U, U, U);
+                Pix.Box(g, hi, x0, y0, x1 - x0, Math.Max(1, U / 2));
+            }
+            Pix.Box(g, ink, wallX, roofBot, W0 - 2 * wallX, U);   // 屋簷下的陰影
+            // 屋頂上的小圓窗
+            int aw = 6 * U, ax = (W0 - aw) / 2, ay = smokeH + roofH / 6;
+            Pix.Round(g, ink, ax, ay, aw, aw, U);
+            Pix.Box(g, night ? Pix.C(0xFFD36A) : Pix.C(0xFFF3DA), ax + U, ay + U, aw - 2 * U, aw - 2 * U);
+            Pix.Box(g, ink, ax + aw / 2 - U / 2, ay + U, U, aw - 2 * U);
+            Pix.Box(g, ink, ax + U, ay + aw / 2 - U / 2, aw - 2 * U, U);
+            // 名字寫在屋頂上（深色描邊＋奶油色字）
+            if (title != "")
+            {
+                Rectangle tr = new Rectangle(0, smokeH + roofH * 2 / 5, W0, roofH * 3 / 5 - U);
+                Color sh = night ? Pix.C(0x3A1A12) : Pix.C(0x5E2418);
+                TextRenderer.DrawText(g, title, titleFont, new Rectangle(tr.X + 1, tr.Y + 1, tr.Width, tr.Height), sh, Pix.Mid);
+                TextRenderer.DrawText(g, title, titleFont, new Rectangle(tr.X - 1, tr.Y + 1, tr.Width, tr.Height), sh, Pix.Mid);
+                TextRenderer.DrawText(g, title, titleFont, new Rectangle(tr.X, tr.Y + 2, tr.Width, tr.Height), sh, Pix.Mid);
+                TextRenderer.DrawText(g, title, titleFont, tr, Pix.C(0xFFF3DA), Pix.Mid);
+            }
+            // 窗戶（白天淡藍、晚上亮黃燈）＋花台
+            int ww = 7 * U, wy = H0 - botH + 5 * U;
+            int[] wxs = { W0 / 4 - ww / 2 - U, W0 - W0 / 4 - ww / 2 + U };
+            foreach (int wx in wxs)
+            {
+                Pix.Round(g, ink, wx, wy, ww, ww, U);
+                Pix.Box(g, night ? Pix.C(0xFFD36A) : Pix.C(0xBFE3F2), wx + U, wy + U, ww - 2 * U, ww - 2 * U);
+                Pix.Box(g, night ? Pix.C(0xFFF0B0) : Color.White, wx + U, wy + U, U, U);
+                Pix.Box(g, ink, wx + 3 * U, wy + U, U, ww - 2 * U);
+                Pix.Box(g, ink, wx + U, wy + 3 * U, ww - 2 * U, U);
+                Pix.Box(g, ink, wx - U, wy + ww, ww + 2 * U, 2 * U);
+                Pix.Box(g, Pix.C(0x8E5A34), wx, wy + ww, ww, U);
+                Pix.Box(g, Pix.C(0xE8607A), wx + U, wy + ww - U, U, U);
+                Pix.Box(g, Pix.C(0xFFD84A), wx + 3 * U, wy + ww - U, U, U);
+                Pix.Box(g, Pix.C(0xE8607A), wx + 5 * U, wy + ww - U, U, U);
+                Pix.Box(g, Pix.C(0x5AA040), wx + 2 * U, wy + ww - U, U, U);
+                Pix.Box(g, Pix.C(0x5AA040), wx + 4 * U, wy + ww - U, U, U);
+            }
+            // 門：圓頂、木板、愛心小窗、門把、門前一塊石板
+            int dw = 9 * U, dh = 14 * U, dx = (W0 - dw) / 2, dy = H0 - 2 * U - dh;
+            Pix.Box(g, ink, dx, dy + 2 * U, dw, dh - 2 * U); Pix.Box(g, ink, dx + U, dy + U, dw - 2 * U, U); Pix.Box(g, ink, dx + 2 * U, dy, dw - 4 * U, U);
+            Color door = night ? Pix.C(0x7A4A2A) : Pix.C(0xA8693C), plank = night ? Pix.C(0x5E3820) : Pix.C(0x8A5530);
+            Pix.Box(g, door, dx + U, dy + 2 * U, dw - 2 * U, dh - 2 * U); Pix.Box(g, door, dx + 2 * U, dy + U, dw - 4 * U, U);
+            Pix.Box(g, plank, dx + 3 * U, dy + 7 * U, Math.Max(1, U / 2), dh - 7 * U);
+            Pix.Box(g, plank, dx + 6 * U, dy + 7 * U, Math.Max(1, U / 2), dh - 7 * U);
+            Pix.Mono(g, Pix.HEART, night ? Pix.C(0xFFD36A) : Pix.C(0xF27A90), dx + 2 * U, dy + 2 * U, U);
+            Pix.Box(g, Pix.Gold, dx + dw - 3 * U, dy + 8 * U, U, U);
+            // 草地
+            Color grass = night ? Pix.C(0x4E7A44) : Pix.C(0x7CC45A), grassD = night ? Pix.C(0x3A5C36) : Pix.C(0x5AA040);
+            Pix.Box(g, grass, U, H0 - 2 * U, W0 - 2 * U, 2 * U);
+            Pix.Box(g, grassD, U, H0 - U, W0 - 2 * U, U);
+            for (int gx = 2 * U; gx < W0 - 2 * U; gx += 5 * U) if (gx + U < dx - U || gx > dx + dw + U) Pix.Box(g, grassD, gx, H0 - 3 * U, U, U);
+            Pix.Box(g, night ? Pix.C(0x8A8278) : Pix.C(0xC9BFB3), dx - U, H0 - 2 * U, dw + 2 * U, U);
+        }
+
+        void Puff(Graphics g, int cx, int cy, int r, Color fill, Color edge)
+        {
+            Pix.Box(g, edge, cx - r - U, cy - r, 2 * r + 2 * U, 2 * r);
+            Pix.Box(g, edge, cx - r, cy - r - U, 2 * r, 2 * r + 2 * U);
+            Pix.Box(g, fill, cx - r, cy - r, 2 * r, 2 * r);
+            Pix.Box(g, Color.White, cx - r + U / 2, cy - r + U / 2, U, U);
+        }
+    }
+
+    // ================= 設定視窗（第一次打開、小屋 → 重新設定）=================
+    // 一個視窗、三步：你是？→ 選一櫃 → 怎麼擺（整櫃／只要一隻）。全部自己畫（木框＋大按鈕），點哪裡自己算。
+    class SetupForm : Form
+    {
+        class Btn { public string Id, Text, Sub; public Rectangle R; public int Kind; public bool On, Enabled = true; }   // Kind：0 大卡片 1 公仔小卡 2 普通按鈕 3 主要按鈕
+        readonly World w;
+        readonly bool first;
+        readonly double d;
+        readonly int U;
+        int step;
+        string prof, lu, mode, pet;
+        readonly List<Btn> btns = new List<Btn>();
+        string hoverId = "";
+        readonly Font titleF, qF, bigF, subF, btnF;
+        readonly Dictionary<string, Bitmap> shelfPics = new Dictionary<string, Bitmap>();
+        readonly Dictionary<string, Bitmap> petPics = new Dictionary<string, Bitmap>();
+        public bool VVisible;
+
+        static readonly string[] STUDENT = {
+            "......kkkk......",
+            "....kkddddkk....",
+            "..kkddddddddkk..",
+            "kkddddddddddddkk",
+            "..kkddddddddkkY.",
+            "....kkddddkk..Y.",
+            "....kDDDDDDk..Y.",
+            "....kDDDDDDk.YYY",
+            "....kkkkkkkk.YYY",
+            "................",
+            "kkkkkkk..kkkkkkk",
+            "kwwwwwwkkwwwwwwk",
+            "kwlllwwkkwlllwwk",
+            "kwwwwwwkkwwwwwwk",
+            "kwllwwwkkwllwwwk",
+            "kkkkkkkkkkkkkkkk" };
+        static readonly string[] WORK = {
+            "................",
+            ".....kkkkkk.....",
+            "....kk....kk....",
+            "....k......k....",
+            ".kkkkkkkkkkkkkk.",
+            "kBBBBBBBBBBBBBBk",
+            "kbbbbbbbbbbbbbbk",
+            "kbbbbbbYYbbbbbbk",
+            "kkkkkkkYYkkkkkkk",
+            "kbbbbbbbbbbbbbbk",
+            "kbbbbbbbbbbbbbbk",
+            "kbbbbbbbbbbbbbbk",
+            "kbbbbbbbbbbbbbbk",
+            "kssssssssssssssk",
+            ".kkkkkkkkkkkkkk.",
+            "................" };
+
+        public SetupForm(World w, bool first, string prof, string lu, bool single, string pet)
+        {
+            this.w = w; this.first = first;
+            this.prof = prof == "student" || prof == "work" ? prof : "";
+            this.lu = Pal.NormLineup(lu);
+            mode = single ? "single" : "shelf";
+            this.pet = pet ?? "";
+            d = w.S / 4.0;
+            U = Math.Max(2, (int)Math.Round(2 * d));
+            Text = first ? "歡迎來到公仔櫃" : "公仔櫃・重新設定";
+            FormBorderStyle = FormBorderStyle.FixedSingle;
+            MaximizeBox = false; MinimizeBox = false;
+            ShowInTaskbar = true; TopMost = true;
+            StartPosition = FormStartPosition.Manual;
+            BackColor = Pix.Cream;
+            DoubleBuffered = true;
+            titleF = new Font("Microsoft JhengHei UI", 12f, FontStyle.Bold);
+            qF = new Font("Microsoft JhengHei UI", 15f, FontStyle.Bold);
+            bigF = new Font("Microsoft JhengHei UI", 13f, FontStyle.Bold);
+            subF = new Font("Microsoft JhengHei UI", 9f, FontStyle.Bold);
+            btnF = new Font("Microsoft JhengHei UI", 11f, FontStyle.Bold);
+            ClientSize = new Size(Sc(580), Sc(520));
+            KeyPreview = true;
+            KeyDown += delegate(object s, KeyEventArgs e) { if (e.KeyCode == Keys.Escape) Close(); };
+            LayoutBtns();
+        }
+
+        int Sc(int v) { return (int)Math.Round(v * d); }
+
+        // ---- 離屏測試模式：不真的顯示，snap 時畫到虛擬螢幕上 ----
+        protected override void SetVisibleCore(bool value)
+        {
+            if (App.Offscreen) { VVisible = value; base.SetVisibleCore(false); return; }
+            base.SetVisibleCore(value);
+        }
+        public void PaintTo(Graphics g)
+        {
+            Size cs = ClientSize;
+            if (cs.Width <= 0 || cs.Height <= 0) return;
+            using (Bitmap b = new Bitmap(cs.Width, cs.Height, PixelFormat.Format24bppRgb))
+            {
+                using (Graphics gg = Graphics.FromImage(b)) OnPaint(new PaintEventArgs(gg, new Rectangle(0, 0, cs.Width, cs.Height)));
+                g.DrawImageUnscaled(b, Left, Top);
+            }
+        }
+
+        bool InLineup(string id) { foreach (string x in Pal.LineupIds(lu)) if (x == id) return true; return false; }
+        static string Members(string id)
+        {
+            List<string> names = new List<string>();
+            foreach (string x in Pal.LineupIds(id)) names.Add(Pal.Get(x).Name);
+            return string.Join("・", names.ToArray());
+        }
+        bool CanNext() { return step == 0 ? prof != "" : (step == 1 || mode == "shelf" || InLineup(pet)); }
+
+        Btn Add(string id, string text, string sub, Rectangle r, int kind, bool on)
+        {
+            Btn b = new Btn();
+            b.Id = id; b.Text = text; b.Sub = sub; b.R = r; b.Kind = kind; b.On = on;
+            btns.Add(b);
+            return b;
+        }
+
+        // 這一步有哪些按鈕、擺在哪
+        void LayoutBtns()
+        {
+            btns.Clear();
+            int W0 = ClientSize.Width, H0 = ClientSize.Height, top = Sc(154), bottom = H0 - Sc(72);
+            if (step == 0)
+            {
+                int cw = Sc(220), ch = Sc(230), gap = Sc(28), x0 = (W0 - 2 * cw - gap) / 2;
+                Add("student", "大學生", "上課・報告・期末考", new Rectangle(x0, top, cw, ch), 0, prof == "student");
+                Add("work", "上班族", "上班・開會・準時下班", new Rectangle(x0 + cw + gap, top, cw, ch), 0, prof == "work");
+            }
+            else if (step == 1)
+            {
+                int n = Pal.Lineups.Length, gap = Sc(24), cw = Math.Min(Sc(240), (W0 - Sc(48) - (n - 1) * gap) / n), ch = bottom - top - Sc(8);
+                int x0 = (W0 - n * cw - (n - 1) * gap) / 2;
+                for (int i = 0; i < n; i++)
+                {
+                    string id = Pal.Lineups[i];
+                    EnsurePics(id);
+                    Add("lu:" + id, Pal.LineupName(id), Members(id), new Rectangle(x0 + i * (cw + gap), top, cw, ch), 0, lu == id);
+                }
+            }
+            else
+            {
+                EnsurePics(lu);
+                int cw = Sc(230), ch = Sc(116), gap = Sc(24), x0 = (W0 - 2 * cw - gap) / 2;
+                Add("mode:shelf", "整櫃（四隻）", "四隻住在公仔櫃裡", new Rectangle(x0, top, cw, ch), 0, mode == "shelf");
+                Add("mode:single", "只要一隻", "沒有櫃子，他住在蛋裡", new Rectangle(x0 + cw + gap, top, cw, ch), 0, mode == "single");
+                if (mode == "single")
+                {
+                    string[] ids = Pal.LineupIds(lu);
+                    int pw = Sc(100), pg = Sc(14), px0 = (W0 - ids.Length * pw - (ids.Length - 1) * pg) / 2, py = top + ch + Sc(34);
+                    for (int i = 0; i < ids.Length; i++)
+                        Add("pet:" + ids[i], Pal.Get(ids[i]).Name, "", new Rectangle(px0 + i * (pw + pg), py, pw, Math.Min(Sc(118), bottom - py - Sc(4))), 1, pet == ids[i]);
+                }
+            }
+            int by = H0 - Sc(64), bh = Sc(44);
+            if (step > 0) Add("back", "上一步", "", new Rectangle(Sc(30), by, Sc(130), bh), 2, false);
+            else if (first) Add("skip", "以後再說", "", new Rectangle(Sc(30), by, Sc(130), bh), 2, false);
+            Btn nx = Add("next", step < 2 ? "下一步" : "完成！", "", new Rectangle(W0 - Sc(30) - Sc(160), by, Sc(160), bh), 3, false);
+            nx.Enabled = CanNext();
+        }
+
+        // 每一櫃：櫃子縮圖、每一隻的小照片（用預覽用的 World 畫，不開視窗）
+        void EnsurePics(string id)
+        {
+            if (shelfPics.ContainsKey(id)) return;
+            World pv = new World(Math.Max(3, (int)Math.Round(3 * d)), id);
+            shelfPics[id] = pv.SetupShelfPic();
+            foreach (Pet p in pv.Pets) petPics[id + ":" + p.P.Id] = p.IconPic();
+        }
+
+        Btn Find(string id) { foreach (Btn b in btns) if (b.Id == id) return b; return null; }
+        Btn At(Point p) { foreach (Btn b in btns) if (b.R.Contains(p)) return b; return null; }
+
+        // 按按鈕（滑鼠、測試用的 act setup <按鈕> 都走這裡）
+        public void Press(string id)
+        {
+            Btn b = Find(id);
+            if (b != null && !b.Enabled) return;
+            if (id == "student" || id == "work") prof = id;
+            else if (id.StartsWith("lu:")) { lu = Pal.NormLineup(id.Substring(3)); if (!InLineup(pet)) pet = ""; }
+            else if (id == "mode:shelf") mode = "shelf";
+            else if (id == "mode:single") { mode = "single"; if (!InLineup(pet)) pet = Pal.LineupIds(lu)[0]; }
+            else if (id.StartsWith("pet:")) { pet = id.Substring(4); mode = "single"; }
+            else if (id == "back") { if (step > 0) step--; }
+            else if (id == "next") { if (step < 2) step++; else { w.ApplySetup(prof, lu, mode == "single", pet, first); Close(); return; } }
+            else if (id == "skip" || id == "close") { Close(); return; }
+            else return;
+            LayoutBtns();
+            hoverId = "";
+            Invalidate();
+        }
+
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            Btn b = At(e.Location);
+            string h = b != null && b.Enabled ? b.Id : "";
+            if (h != hoverId) { hoverId = h; Cursor = h != "" ? Cursors.Hand : Cursors.Default; Invalidate(); }
+        }
+        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); if (hoverId != "") { hoverId = ""; Invalidate(); } }
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            if (e.Button != MouseButtons.Left) return;
+            Btn b = At(e.Location);
+            if (b != null) Press(b.Id);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.None;
+            int W0 = ClientSize.Width, H0 = ClientSize.Height, F = 4 * U, crown = Sc(56);
+            Pix.Wood(g, 0, 0, W0, H0, U, false, 11);
+            Pix.Panel(g, F, crown, W0 - 2 * F, H0 - crown - F, U, false);
+            // 頂上的銅牌＋兩邊小愛心
+            string t = first ? "歡迎來到公仔櫃！" : "公仔櫃・重新設定";
+            int tw = Pix.TextW(t, titleF), plw = tw + 14 * U, plh = Sc(34);
+            Rectangle pr = new Rectangle((W0 - plw) / 2, (crown - plh) / 2 + U / 2, plw, plh);
+            Pix.Plate(g, t, titleF, pr, U);
+            Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.X - 9 * U, pr.Y + plh / 2 - 2 * U, U);
+            Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.Right + 4 * U, pr.Y + plh / 2 - 2 * U, U);
+            Steps(g, W0, Sc(68));
+            string q = step == 0 ? "你是？" : (step == 1 ? "選一櫃公仔" : "怎麼擺？");
+            string hint = step == 0 ? "公仔們會照你的生活陪你（之後在小屋可以改）" : (step == 1 ? "兩櫃都很可愛，之後隨時能換" : (mode == "single" ? "選一隻，他會住在右下角的蛋裡" : "公仔櫃放在右下角，點格子就叫他們出來"));
+            TextRenderer.DrawText(g, q, qF, new Rectangle(0, Sc(100), W0, Sc(30)), Pix.TextC, Pix.Mid);
+            TextRenderer.DrawText(g, hint, subF, new Rectangle(0, Sc(130), W0, Sc(18)), Pix.C(0x9A6338), Pix.Mid);
+            if (step == 2 && mode == "single")
+            {
+                Btn first2 = Find("mode:shelf");
+                if (first2 != null) TextRenderer.DrawText(g, "選哪一隻？", btnF, new Rectangle(0, first2.R.Bottom + Sc(6), W0, Sc(26)), Pix.TextC, Pix.Mid);
+            }
+            foreach (Btn b in btns) DrawBtn(g, b);
+        }
+
+        // 上面的三個步驟：現在這步黃色、做完的綠色打勾
+        void Steps(Graphics g, int W0, int y)
+        {
+            string[] names = { "你是？", "選一櫃", "怎麼擺" };
+            int pw = Sc(112), ph = Sc(26), gap = Sc(18), x0 = (W0 - 3 * pw - 2 * gap) / 2;
+            for (int i = 0; i < 3; i++)
+            {
+                int x = x0 + i * (pw + gap);
+                if (i > 0) for (int sx = x - gap + U; sx + U <= x - U; sx += 2 * U) Pix.Box(g, Pix.C(0xD8BF94), sx, y + ph / 2 - U / 2, U, U);
+                Pix.Round(g, i == step ? Pix.C(0x8A5A2A) : Pix.C(0xC9B08A), x, y, pw, ph, U);
+                Pix.Box(g, i == step ? Pix.C(0xF6C453) : (i < step ? Pix.C(0xD9F0C4) : Pix.C(0xF3EADB)), x + U, y + U, pw - 2 * U, ph - 2 * U);
+                string s = (i + 1) + ". " + names[i];
+                int sw = Pix.TextW(s, subF), cx = x + (pw - sw) / 2;
+                if (i < step) { cx += 3 * U; Pix.Mono(g, Pix.CHECK, Pix.C(0x3F8A30), cx - 7 * U, y + ph / 2 - 3 * U, U); }
+                TextRenderer.DrawText(g, s, subF, new Rectangle(cx, y, sw + 4, ph), i <= step ? Pix.TextC : Pix.Dim, Pix.LeftMid);
+            }
+        }
+
+        void DrawBtn(Graphics g, Btn b)
+        {
+            Rectangle r = b.R;
+            bool hot = b.Id == hoverId && b.Enabled;
+            if (b.Kind >= 2)
+            {
+                // 下面的按鈕：有厚度的像素按鈕（主要按鈕是蜂蜜色）
+                Color face = !b.Enabled ? Pix.C(0xE9E0D0) : (b.Kind == 3 ? (hot ? Pix.C(0xFFD36A) : Pix.C(0xF6C453)) : (hot ? Pix.C(0xFFF3D6) : Pix.C(0xFFFBF0)));
+                Color shade = !b.Enabled ? Pix.C(0xD3C7B2) : (b.Kind == 3 ? Pix.C(0xC8902C) : Pix.C(0xDCC6A2));
+                Pix.Round(g, !b.Enabled ? Pix.C(0xBBA98C) : Pix.Ink, r.X, r.Y, r.Width, r.Height, U);
+                Pix.Box(g, face, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U);
+                Pix.Box(g, shade, r.X + U, r.Bottom - 3 * U, r.Width - 2 * U, 2 * U);
+                if (b.Enabled) Pix.Box(g, Pix.Mix(face, Color.White, 0.6), r.X + 2 * U, r.Y + U, r.Width - 4 * U, U);
+                int tw = Pix.TextW(b.Text, btnF), ax = 7 * U, tx = r.X + (r.Width - tw - (b.Id == "back" || b.Id == "next" ? ax : 0)) / 2, cy = r.Y + (r.Height - 2 * U) / 2;
+                Color tc = b.Enabled ? Pix.TextC : Pix.Dim;
+                if (b.Id == "back") { Arrow(g, tx + U, cy, -1, tc); tx += ax; }
+                TextRenderer.DrawText(g, b.Text, btnF, new Rectangle(tx, r.Y, tw + 4, r.Height - 2 * U), tc, Pix.LeftMid);
+                if (b.Id == "next" && step < 2) Arrow(g, tx + tw + 2 * U, cy, 1, tc);
+                return;
+            }
+            // 卡片：底下一層影子；選到的是金色粗框、右上角綠色勾勾
+            Color edge = b.On ? Pix.C(0xC08A2C) : Pix.C(0x8A6A4A);
+            Color fill = b.On ? Pix.C(0xFFEDB8) : (hot ? Pix.C(0xFFF6DE) : Pix.C(0xFFFDF7));
+            Pix.Round(g, Pix.C(0xE6D3B0), r.X + 2 * U, r.Y + 2 * U, r.Width, r.Height, U);
+            Pix.Round(g, edge, r.X, r.Y, r.Width, r.Height, U);
+            int ins = b.On ? 2 * U : U;
+            if (b.On) Pix.Box(g, edge, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U);
+            Pix.Box(g, fill, r.X + ins, r.Y + ins, r.Width - 2 * ins, r.Height - 2 * ins);
+            if (hot && !b.On) Pix.Box(g, Pix.C(0xF6C453), r.X + ins, r.Bottom - ins - U, r.Width - 2 * ins, U);
+            if (b.Kind == 1) DrawPetCard(g, b);
+            else if (b.Id == "student" || b.Id == "work") DrawIconCard(g, b, b.Id == "student" ? STUDENT : WORK);
+            else if (b.Id.StartsWith("lu:")) DrawShelfCard(g, b, b.Id.Substring(3));
+            else DrawModeCard(g, b);
+            if (b.On)
+            {
+                int s = 9 * U, bx = r.Right - s - 2 * U, by2 = r.Y + 2 * U;
+                Pix.Round(g, Pix.C(0x2F6E24), bx, by2, s, s, U);
+                Pix.Box(g, Pix.C(0x5FB04A), bx + U, by2 + U, s - 2 * U, s - 2 * U);
+                Pix.Mono(g, Pix.CHECK, Color.White, bx + 2 * U, by2 + 2 * U, U);
+            }
+        }
+
+        void Arrow(Graphics g, int x, int cy, int dir, Color c)
+        {
+            for (int i = 0; i < 3; i++)
+            {
+                int col = dir > 0 ? x + i * U : x + (2 - i) * U;
+                Pix.Box(g, c, col, cy - (2 - i) * U - U / 2, U, (2 - i) * 2 * U + U);
+            }
+        }
+
+        Dictionary<char, Color> IconPal()
+        {
+            Dictionary<char, Color> p = new Dictionary<char, Color>();
+            p['k'] = Pix.Ink; p['d'] = Pix.C(0x3D4A6B); p['D'] = Pix.C(0x2C3550); p['Y'] = Pix.C(0xF2C14E);
+            p['w'] = Pix.C(0xFFFDF7); p['l'] = Pix.C(0xA9B8D0); p['b'] = Pix.C(0xA0643A); p['B'] = Pix.C(0xC8844E); p['s'] = Pix.C(0x7E4A28);
+            return p;
+        }
+
+        void DrawIconCard(Graphics g, Btn b, string[] art)
+        {
+            Rectangle r = b.R;
+            int c = Math.Max(3, Sc(6)), aw = art[0].Length * c;
+            Pix.Art(g, art, IconPal(), r.X + (r.Width - aw) / 2, r.Y + Sc(26), c);
+            TextRenderer.DrawText(g, b.Text, bigF, new Rectangle(r.X, r.Y + Sc(140), r.Width, Sc(32)), Pix.TextC, Pix.Mid);
+            TextRenderer.DrawText(g, b.Sub, subF, new Rectangle(r.X, r.Y + Sc(174), r.Width, Sc(22)), Pix.C(0x9A6338), Pix.Mid);
+        }
+
+        void DrawShelfCard(Graphics g, Btn b, string id)
+        {
+            Rectangle r = b.R;
+            Bitmap pic;
+            int textY = r.Y + Sc(12);
+            if (shelfPics.TryGetValue(id, out pic))
+            {
+                int avail = r.Height - Sc(72), ph = Math.Min(pic.Height, avail), pw = pic.Width * ph / pic.Height;
+                g.DrawImage(pic, r.X + (r.Width - pw) / 2, r.Y + Sc(12), pw, ph);
+                textY = r.Y + Sc(16) + ph;
+            }
+            TextRenderer.DrawText(g, b.Text, bigF, new Rectangle(r.X, textY, r.Width, Sc(30)), Pix.TextC, Pix.Mid);
+            TextRenderer.DrawText(g, b.Sub, subF, new Rectangle(r.X + Sc(6), textY + Sc(30), r.Width - Sc(12), Sc(20)), Pix.C(0x9A6338), Pix.Mid);
+        }
+
+        void DrawModeCard(Graphics g, Btn b)
+        {
+            Rectangle r = b.R;
+            int iconW = Sc(76), ix = r.X + Sc(14);
+            if (b.Id == "mode:shelf")
+            {
+                Bitmap pic;
+                if (shelfPics.TryGetValue(lu, out pic))
+                {
+                    int ph = r.Height - Sc(24), pw = pic.Width * ph / pic.Height;
+                    InterpolationMode im = g.InterpolationMode;
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    g.DrawImage(pic, ix + (iconW - pw) / 2, r.Y + Sc(12), pw, ph);
+                    g.InterpolationMode = im;
+                }
+            }
+            else
+            {
+                Dictionary<char, Color> pal = new Dictionary<char, Color>();
+                pal['k'] = Pix.C(0x6B4A2E); pal['c'] = Pix.C(0xFFF4DC); pal['s'] = Pix.C(0xE8D3B0); pal['h'] = Color.White;
+                pal['r'] = Pix.C(0xD84A4A); pal['o'] = Pix.C(0xE7836A); pal['b'] = Pix.C(0x3D6BB3); pal['g'] = Pix.C(0x25B3BA); pal['Y'] = Pix.C(0xF5C842);
+                int c = Math.Max(2, Sc(4)), ew = ShelfForm.EGG[0].Length * c, eh = ShelfForm.EGG.Length * c;
+                Pix.Art(g, ShelfForm.EGG, pal, ix + (iconW - ew) / 2, r.Y + (r.Height - eh) / 2, c);
+            }
+            int tx = ix + iconW + Sc(8);
+            TextRenderer.DrawText(g, b.Text, bigF, new Rectangle(tx, r.Y + r.Height / 2 - Sc(30), r.Right - tx - Sc(8), Sc(30)), Pix.TextC, Pix.LeftMid);
+            TextRenderer.DrawText(g, b.Sub, subF, new Rectangle(tx, r.Y + r.Height / 2 + Sc(2), r.Right - tx - Sc(8), Sc(22)), Pix.C(0x9A6338), Pix.LeftMid);
+        }
+
+        void DrawPetCard(Graphics g, Btn b)
+        {
+            Rectangle r = b.R;
+            Bitmap pic;
+            int nameH = Sc(24);
+            if (petPics.TryGetValue(lu + ":" + b.Id.Substring(4), out pic))
+            {
+                int avail = r.Height - nameH - Sc(8), ph = Math.Min(pic.Height, avail), pw = pic.Width * ph / pic.Height;
+                g.DrawImage(pic, r.X + (r.Width - pw) / 2, r.Y + Sc(6) + (avail - ph), pw, ph);
+            }
+            TextRenderer.DrawText(g, b.Text, btnF, new Rectangle(r.X, r.Bottom - nameH - Sc(4), r.Width, nameH), Pix.TextC, Pix.Mid);
         }
     }
 }

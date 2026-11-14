@@ -50,6 +50,12 @@ function activate(context) {
 	const desktop = new Desktop(context);
 	desktop.onFocus = (on, mins) => { focusEnd = on ? Date.now() + mins * 60000 : 0; };
 	desktop.onQuiet = (on, mins) => { quietEnd = on ? Date.now() + mins * 60000 : 0; };
+	// 桌面版換櫃（小屋「換一櫃」、設定視窗）→ VS Code 的設定跟著改（不再回送給桌面版）
+	desktop.onLineup = (lu) => {
+		if (!LINEUPS[lu] || lu === lineupSetting()) return;
+		desktop.skipLineup = lu;
+		vscode.workspace.getConfiguration("deskPals").update("lineup", lu, vscode.ConfigurationTarget.Global);
+	};
 	// 桌面版換角色 → 狀態列、側邊欄跟著換
 	desktop.onActive = (id) => {
 		if (!CHARS[id] || id === current) return;
@@ -206,13 +212,8 @@ function activate(context) {
 	// 實用功能：終端機長指令、推 tag 盯 CI、開會提醒、Jira 新單、工作日誌
 	require("./practical").setup(context, desktop);
 
+	// 第一次設定（你是？選一櫃、擺法）現在由桌面版自己的設定視窗做；這裡只負責把它開起來
 	if (vscode.workspace.getConfiguration("deskPals").get("desktop", true)) desktop.start(false);
-
-	// 第一次安裝：挑你的第一個公仔（從舊版 Spidey 升級的人直接沿用 Spidey）
-	if (desktop.supported && !context.globalState.get("picked")) {
-		if (desktop.migratedFromSpidey) context.globalState.update("picked", true);
-		else setTimeout(() => pickCharacter(context, desktop, provider, true), 2500);
-	}
 }
 
 // 挑公仔：兩櫃的公仔都列出來；挑到另一櫃的公仔就順便換櫃（小波兩櫃都有，選現在這一櫃的小波就不換）
@@ -303,6 +304,7 @@ class Desktop {
 		this.sh = "desk-pals.sh";
 		this.lnkName = "公仔櫃 Desk Pals.lnk";
 		this.onActive = () => {};
+		this.onLineup = () => {};
 		this.skipLineup = null;
 		this.lineupAck = null;
 		this.restartedOnce = false;
@@ -351,7 +353,7 @@ class Desktop {
 	sendLater(line) { this.pending = line; }
 	sendConfig() {
 		const cfg = vscode.workspace.getConfiguration("deskPals");
-		this.setLineup(lineupSetting());   // 跟設定對齊（桌面版已經是這一櫃就什麼都不做）
+		// 櫃子以桌面版為準：連上時桌面版會回「lineup <櫃>」，設定跟著它（VS Code 這邊改設定才送 lineup 過去）
 		this.send(`config ${cfg.get("restMinutes", 50)} ${cfg.get("idleMinutes", 5)}`);
 		const bd = String(cfg.get("birthday", "") || "").trim();
 		this.send(`birthday ${/^\d{2}-\d{2}$/.test(bd) ? bd : ""}`);
@@ -386,7 +388,7 @@ class Desktop {
 				buf = buf.slice(i + 1);
 				if (line === "bye") { if (this.restarting) this.restarting = false; else this.want = false; } // 使用者從桌面右鍵「收工」（換櫃重開不算）
 				const lu = /^lineup (\w+)$/.exec(line);
-				if (lu) this.lineupAck = lu[1];
+				if (lu) { this.lineupAck = lu[1]; this.onLineup(lu[1]); }
 				const m = /^active (\w+)$/.exec(line);
 				if (m) this.onActive(m[1]);
 				const f = /^focus (on|off)(?: (\d+))?$/.exec(line);

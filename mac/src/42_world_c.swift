@@ -463,20 +463,20 @@ extension World {
         let m = ContextMenuStrip()
         m.Items.Add("好了 👍", nil) { p.Say("好～辦好了！", 1.4) }
         m.Items.Add("10 分鐘後再提醒", nil) { self.AddReminder(World.UnixMs(DateTime.Now.AddMinutes(10)), text) }
-        ShowMenu(m)
+        ShowMenu(m, "提醒", false)
         return true
     }
 
-    func AddReminderMenus(_ m: ContextMenuStrip) {
-        m.Items.Add("提醒我…", nil) { self.ShowReminderForm() }
+    func AddReminderMenus(_ items: ToolStripItemCollection) {
+        items.Add("提醒我…", nil) { self.ShowReminderForm() }
         if reminders.Count > 0 {
             let my = ToolStripMenuItem("我的提醒（" + String(reminders.Count) + "）")
             for r in reminders {
                 let rr = r
-                let label = World.FromUnixMs(r.At).ToString("MM/dd HH:mm") + "　" + (r.Text.Length > 20 ? r.Text.Substring(0, 20) + "…" : r.Text) + "　（點一下取消）"
+                let whenS: String = World.FromUnixMs(r.At).ToString("MM/dd HH:mm"); let txtS: String = r.Text.Length > 20 ? r.Text.Substring(0, 20) + "…" : r.Text; let label: String = whenS + "　" + txtS + "　（點一下取消）"
                 my.DropDownItems.Add(label, nil) { self.reminders.Remove(rr); self.SaveReminders(); self.Lead().Say("取消了：" + rr.Text, 1.8) }
             }
-            m.Items.Add(my)
+            items.Add(my)
         }
     }
 
@@ -910,7 +910,14 @@ extension World {
 
     func SaveTickets() {
         let sb = StringBuilder()
-        for t in tickets { sb.Append(String(t.At) + "\t" + String(t.Lead) + "\t" + (t.Url ?? "-") + "\t" + String(t.Stage) + "\t" + t.Name.Replace("\t", " ").Replace("\n", " ") + "\n") }
+        for t in tickets {
+            let at: String = String(t.At), lead: String = String(t.Lead), stage: String = String(t.Stage)
+            let url: String = t.Url ?? "-"
+            let name: String = t.Name.Replace("\t", " ").Replace("\n", " ")
+            var line: String = at + "\t" + lead + "\t" + url
+            line += "\t" + stage + "\t" + name + "\n"
+            sb.Append(line)
+        }
         World.WriteText("tickets.txt", sb.ToString())
     }
 
@@ -1053,8 +1060,8 @@ extension World {
         return mid.timeIntervalSince(server.addingTimeInterval(0.5))
     }
 
-    func AddTicketMenus(_ m: ContextMenuStrip) {
-        m.Items.Add("搶票提醒…", nil) { self.ShowTicketForm() }
+    func AddTicketMenus(_ items: ToolStripItemCollection) {
+        items.Add("搶票提醒…", nil) { self.ShowTicketForm() }
         if tickets.Count > 0 {
             let my = ToolStripMenuItem("我的搶票（" + String(tickets.Count) + "）")
             for t in tickets {
@@ -1063,7 +1070,7 @@ extension World {
                     self.tickets.Remove(tt); self.SaveTickets(); self.Lead().Say("取消搶票提醒：" + tt.Name, 1.8)
                 }
             }
-            m.Items.Add(my)
+            items.Add(my)
         }
     }
 
@@ -1197,7 +1204,7 @@ extension World {
         let minute = DateTime.Now.Minute
         if !force && minute == lunchChecked { return }
         lunchChecked = minute
-        let want = forceLunch == 1 ? "eat" : (forceLunch == 2 ? "nap" : (forceLunch == 0 ? "" : LunchByClock()))
+        let want = forceLunch == 1 ? "eat" : (forceLunch == 2 ? "nap" : (forceLunch == 0 || !Feat("lunch") ? "" : LunchByClock()))
         if want == LunchState { return }
         let was = LunchState
         LunchState = want

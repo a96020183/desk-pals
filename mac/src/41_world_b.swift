@@ -71,7 +71,10 @@ extension World {
         si.NextAt = now.AddMinutes(10)
         let min = Math.Max(1, CInt(Math.Round(quiet / 60)))
         let k2 = kind, t2 = tool, ti = title, sr = src
-        App.Log(src + " stuck: " + (kind ?? "") + " " + (tool ?? "") + " " + String(min) + "min " + Path.GetFileName(key))
+        let kindS: String = kind ?? "", toolS: String = tool ?? "", minS: String = String(min), keyS: String = Path.GetFileName(key)
+        var msg: String = src + " stuck: " + kindS + " " + toolS
+        msg += " " + minS + "min " + keyS
+        App.Log(msg)
         Post { [self] in OnStuck(sr, k2!, t2, ti, min) }
     }
 
@@ -435,7 +438,7 @@ extension World {
     }
 
     func CheckCrossover() {
-        if scene != nil || sceneCd > 0 || Hidden || focusOn || quietOn { return }
+        if scene != nil || sceneCd > 0 || Hidden || focusOn || quietOn || !Feat("scenes") { return }
         let outs = OutPets()
         if outs.Count < 2 { return }
         let free = List<Pet>()
@@ -1217,6 +1220,8 @@ extension World {
         if fx != nil && fx.VVisible { fx.PaintTo(g) }
         for p in Pets { if p.Bub != nil && p.Bub.VVisible { p.Bub.PaintTo(g) } }
         if flash != nil && flash.VVisible { flash.PaintTo(g) }
+        if setupForm != nil && !setupForm.IsDisposed && setupForm.VVisible { setupForm.PaintTo(g) }
+        if pmenu != nil && pmenu.VVisible { pmenu.PaintTo(g) }
         // 游標位置（只畫一個小十字，方便看）
         let c = World.CursorPos()
         let cp = Pen(Color.FromArgb(200, 255, 255, 0), 2); g.DrawLine(cp, c.X - 6, c.Y, c.X + 6, c.Y); g.DrawLine(cp, c.X, c.Y - 6, c.X, c.Y + 6)

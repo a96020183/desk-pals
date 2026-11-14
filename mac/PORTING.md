@@ -23,7 +23,10 @@ mac/
     40_world_a.swift    C# 5407–6819  (World partial #1 — owns `final class World` declaration; scan, shelf mgmt, pipe/socket server, commands)
     41_world_b.swift    C# 6820–8107  (Claude/Codex watch, scenes/Cue, SpriteForm, props)
     42_world_c.swift    C# 8108–9616  (notices, reminders, system stats, downloads, tickets, misc)
+    43_ui.swift         C# last section, from "公仔小屋（蛋的右鍵）" to the end (World: features/小屋 menu/只要一隻/設定;
+                        Pet.IconPic; Pix pixel helpers; PixelMenu; SetupForm)
 ```
+(Line numbers above are from the first port and drift as the C# grows — find your range by the section comments.)
 
 Each file owns exactly one line range. Read only your range (plus whatever else you need for reference — grep freely).
 The output `extension/desktop/DeskPals.swift` is one file, compiled by `xcrun swiftc -O DeskPals.swift -o DeskPals`.
@@ -106,7 +109,8 @@ TranslateTransform, ScaleTransform, RotateTransform, Save/Restore (GraphicsState
 Override points (Swift `override func`): `OnPaint(_ e: PaintEventArgs)` (`e.Graphics`), `OnPaintBackground`, `OnMouseDown/OnMouseUp/OnMouseMove/OnMouseLeave/OnMouseEnter(_ e: MouseEventArgs)` (`e.Button` is `MouseButtons.Left/Right`, `e.X, e.Y, e.Location`), `OnKeyDown(_ e: KeyEventArgs)`, `OnShown`, `OnFormClosing`, `SetVisibleCore`, `WndProc` (no-op on mac).
 `Timer` (WinForms timer on main run loop: `Interval`, `Tick` closure, `Start()`, `Stop()`, `Enabled`). `Cursor.Position` (global, top-left origin). `Control.MouseButtons`, `Control.ModifierKeys`.
 `Screen.AllScreens / PrimaryScreen / FromPoint / FromRectangle` with `.Bounds` and `.WorkingArea` (top-left origin, menu bar & Dock excluded from WorkingArea).
-`ContextMenuStrip` + `ToolStripMenuItem(text)` (`Click` closure, `Checked`, `Enabled`, `DropDownItems`) + `ToolStripSeparator` → NSMenu; `menu.Show(Point)`.
+`ContextMenuStrip` + `ToolStripMenuItem(text)` (`Click` closure, `Checked`, `CheckOnClick`, `Enabled`, `DropDownItems`) + `ToolStripSeparator` + `ToolStripLabel` (section header) — the app no longer shows these natively: `World.ShowMenu` renders them with `PixelMenu` (both platforms).
+`Activated` / `Deactivate` fire when a Form's panel becomes / resigns key. `_overlayKeyable` (override in a borderless Form) = a non-activating panel that can still become key (C#: CreateParams without `WS_EX_NOACTIVATE`) — used by PixelMenu for Esc/arrow keys and close-on-Deactivate.
 `Application.Exit()`, `Application.DoEvents()`.
 
 ## Platform differences (decisions)
@@ -115,7 +119,7 @@ Override points (Swift `override func`): `OnPaint(_ e: PaintEventArgs)` (`e.Grap
 - Full-screen detection: a layer-0 window of the frontmost app covering a whole screen.
 - Hotkey Ctrl+Alt+S (RegisterHotKey) → Carbon `RegisterEventHotKey` Control+Option+S (see SpideyDesktop.swift ≈ line 1128).
 - Idle seconds → `CGEventSource.secondsSinceLastEventType`.
-- Native popup menu (TrackPopupMenuEx) → `NSMenu.popUp` (synchronous; returns chosen id). ForceForeground/SetForegroundWindow → `NSApp.activate(ignoringOtherApps: true)`.
+- Right-click menus: both platforms use the custom-drawn `PixelMenu` (no more TrackPopupMenuEx / NSMenu). Click-outside = World timer polls `Control.MouseButtons` (global on both); Windows also activates the menu and closes it on `Deactivate`, mac makes it key (non-activating) and closes on resign-key. ForceForeground/SetForegroundWindow → `NSApp.activate(ignoringOtherApps: true)` (dialogs only).
 - Memory/CPU (GlobalMemoryStatusEx / PerformanceCounter) → `host_statistics64` / `host_processor_info` (or `vm_stat`/`sysctl`).
 - FileSystemWatcher on ~/Downloads → `DispatchSource.makeFileSystemObjectSource` on the directory + diff listing (or poll every 2 s).
 - `Process.Start(url)` → `NSWorkspace.shared.open(URL)`. `Process.GetProcessesByName("x")` → shim using `NSWorkspace.runningApplications` + `pgrep -x`/`sysctl` (Codex CLI is a node process: match on argv via `ps -axo comm,args`).

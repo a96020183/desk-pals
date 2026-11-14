@@ -937,7 +937,8 @@ final class ShelfForm: OverlayForm
         if Collapsed
         {
             if !EggLocal().Contains(p) { return }
-            if b == MouseButtons.Left { w.ToggleEgg(false) } else if b == MouseButtons.Right { w.ShelfMenu(-1, self) }
+            if b == MouseButtons.Left { if w.Single { w.EggClick() } else { w.ToggleEgg(false) } }
+            else if b == MouseButtons.Right { w.HouseMenu() }   // 蛋＝公仔小屋：開關、設定
             return
         }
         if b == MouseButtons.Left && TabLocal().Contains(p) { w.ToggleEgg(true); return }

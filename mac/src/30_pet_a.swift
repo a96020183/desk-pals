@@ -102,7 +102,7 @@ extension Pet {
     func Free() -> Bool { return Out && !InScene && !dragging && Grounded() && state != "sleep" && state != "hug" && !(Bt > 0 && bubblePri > 0) }
     func SetState(_ s: String, _ dur: Double) { state = s; t = dur }
     func Say(_ s: String?, _ sec: Double) { Say(s, sec, false) }
-    func Say(_ s: String?, _ sec: Double, _ alert: Bool) { if string.IsNullOrEmpty(s) { return }; bubble = s!; Bt = sec; bubbleAlert = alert; bubbleHint = nil; bubblePri = 0 }
+    func Say(_ s: String?, _ sec: Double, _ alert: Bool) { if string.IsNullOrEmpty(s) || muteChat { return }; bubble = s!; Bt = sec; bubbleAlert = alert; bubbleHint = nil; bubblePri = 0 }
     func Pick(_ a: [String]) -> String { return a[rnd.Next(a.count)] }
     func R(_ a: Double, _ b: Double) -> Double { return a + rnd.NextDouble() * (b - a) }
     static func Clamp(_ v: Double, _ lo: Double, _ hi: Double) -> Double { return v < lo ? lo : (v > hi ? hi : v) }
@@ -184,7 +184,9 @@ extension Pet {
         let got = List<String>()
         var i = 2
         while i <= lv { got.Add(Pet.UNLOCK[i]); i += 1 }
-        let next = lv < 6 ? "（" + xp.ToString() + "/" + Pet.LV[lv + 1].ToString() + "）" : "（" + xp.ToString() + "，滿級！）"
+        let xpS: String = xp.ToString()
+        let next: String
+        if lv < 6 { let nx: String = Pet.LV[lv + 1].ToString(); next = "（" + xpS + "/" + nx + "）" } else { next = "（" + xpS + "，滿級！）" }
         let tail = got.Count > 0 ? "　已解鎖：" + string.Join("、", got.ToArray()) : "　多摸摸我就會升級喔"
         Say(P.Name + " 好感度 Lv" + lv.ToString() + next + tail, 4.5)
         AddHeart()
@@ -333,7 +335,7 @@ extension Pet {
         case "walk":
             if sleepMode { GoSleep(); break }
             if MoveOnGround(dt, P.Speed * k) { break }
-            if t < 0 { Decide(wa) }
+            if t < 0 { muteChat = !w.Feat("chatter"); Decide(wa); muteChat = false }   // 小屋關掉「閒聊泡泡」：自己閒晃時不講話
         case "seek": Seek(dt)
         case "idle":
             if !InScene { let cp = Cursor.Position; if Math.Abs(Double(cp.X) - Cx) > 20 { dir = Double(cp.X) > Cx ? 1 : -1 } }
@@ -431,6 +433,7 @@ extension Pet {
     func PickPlatform(_ minDx: Double, _ maxDx: Double) -> [Double]? {
         let cx = Cx, foot: Double = y + Double(SH)
         let opts = List<[Double]>()
+        if w.Feat("windows") {                    // 小屋關掉「跳上視窗」：只在螢幕底走
         for p in w.Plats {
             if p.H == supH && Math.Abs(Double(p.Top) - foot) < 2 { continue }
             let span: Double = Double(Math.Max(0, p.Right - p.Left - SW))
@@ -438,6 +441,7 @@ extension Pet {
             let dx: Double = tx - cx, dy: Double = Double(p.Top) - foot
             if Math.Abs(dx) < minDx || Math.Abs(dx) > maxDx || dy < -600 * k { continue }
             opts.Add([tx, Double(p.Top)])
+        }
         }
         if supH != IntPtr.Zero {
             let wa = w.WA(cx, y)
@@ -580,7 +584,7 @@ extension Pet {
 
     func MouseUp(_ e: MouseEventArgs) {
         if e.Button == MouseButtons.Left && dragging { EndDrag() }
-        else if e.Button == MouseButtons.Right && Menu != nil { w.FillMenu(self, Menu); w.ShowMenu(Menu) }
+        else if e.Button == MouseButtons.Right && Menu != nil { w.FillMenu(self, Menu); w.ShowMenu(Menu, P.Name, false) }
     }
 
     var Dragging: Bool { return dragging && state == "drag" }

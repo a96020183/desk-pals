@@ -633,6 +633,9 @@ final class FormWindowDelegate: NSObject, NSWindowDelegate {
     }
     func windowDidMove(_ notification: Notification) { form?._syncFromWindow() }
     func windowDidResize(_ notification: Notification) { form?._syncFromWindow() }
+    // WinForms Activated / Deactivate（mac：視窗拿到／失去鍵盤焦點）
+    func windowDidBecomeKey(_ notification: Notification) { form?.Activated?() }
+    func windowDidResignKey(_ notification: Notification) { form?.Deactivate?() }
 }
 
 final class FormView: NSView {
@@ -780,6 +783,9 @@ class Form: Control {
     var ShowWithoutActivation: Bool { return false }
     var _wantsClickThrough: Bool { return false }
     var _overlayLevel: NSWindow.Level { return .statusBar }
+    // borderless overlay that may become key without activating the app (C#: CreateParams without WS_EX_NOACTIVATE,
+    // e.g. the pixel popup menu: gets Esc / arrow keys, Deactivate fires when it loses focus)
+    var _overlayKeyable: Bool { return false }
 
     var _styleMask: NSWindow.StyleMask {
         if !_isDialog { return [.borderless, .nonactivatingPanel] }
@@ -836,8 +842,8 @@ class Form: Control {
             p.hasShadow = true
             p.appearance = NSAppearance(named: .aqua)   // C# dialogs are light (cream background, black text)
         } else {
-            p.allowKey = false
-            p.becomesKeyOnlyIfNeeded = true
+            p.allowKey = _overlayKeyable
+            p.becomesKeyOnlyIfNeeded = !_overlayKeyable
             p.backgroundColor = .clear
             p.isOpaque = false
             p.hasShadow = false
@@ -926,8 +932,8 @@ class Form: Control {
                 SetBounds(wa.X + (wa.Width - _w) / 2, wa.Y + (wa.Height - _h) / 2, _w, _h)
             }
             _applyBounds()
-            if _isDialog && !ShowWithoutActivation {
-                p.makeKeyAndOrderFront(nil)   // nonactivating titled panel: becomes key without activating the app
+            if (_isDialog || _overlayKeyable) && !ShowWithoutActivation {
+                p.makeKeyAndOrderFront(nil)   // nonactivating panel: becomes key without activating the app
                 p.orderFrontRegardless()
             } else {
                 p.orderFrontRegardless()
@@ -966,7 +972,7 @@ class Form: Control {
     func Activate() {
         _ensure()
         guard let p = panel else { return }
-        if _isDialog { p.makeKeyAndOrderFront(nil); p.orderFrontRegardless() } else { p.orderFrontRegardless() }
+        if _isDialog || _overlayKeyable { p.makeKeyAndOrderFront(nil); p.orderFrontRegardless() } else { p.orderFrontRegardless() }
     }
     override func BringToFront() { panel?.orderFrontRegardless() }
     override func SendToBack() { panel?.orderBack(nil) }
@@ -1349,6 +1355,12 @@ class ToolStripItem {
 
 final class ToolStripSeparator: ToolStripItem {
     override init() { super.init() }
+}
+
+// a non-clickable label row (the pixel menu draws it as a small section header)
+final class ToolStripLabel: ToolStripItem {
+    override init() { super.init() }
+    override init(_ text: String) { super.init(text) }
 }
 
 class ToolStripMenuItem: ToolStripItem {

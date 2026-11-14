@@ -76,7 +76,7 @@ final class World: Form {
     var foulCd: Double = 0, umpCd: Double = 0
 
     // ---------- 選單 ----------
-    var menuHost: MenuHost! = nil
+    var pmenu: PixelMenu! = nil
     var menuPrevFg: IntPtr = 0
     var shelfMenu: ContextMenuStrip! = nil
 
@@ -176,6 +176,7 @@ extension World {
         active = Get(ids.Count > 0 ? ids[ids.Count - 1] : defaultPet) ?? Get(defaultPet)
         if ids.Count == 0 && active != nil { active.Say(TubbyLineup ? "Eh-oh! 天線寶寶一櫃 ☀" : "經典一櫃回來囉！", 2.4) }
         Broadcast()
+        lock(clients) { for c in clients { World.Send(c, "lineup " + lineup + "\n") } }   // 在桌面換櫃（小屋、設定）：VS Code 跟著改設定
         App.Log("lineup " + lineup)
     }
 
@@ -188,12 +189,14 @@ extension World {
         try? FileManager.default.createDirectory(atPath: World.DataDir, withIntermediateDirectories: true)
         Migrate()
         LoadState()
+        LoadFeatures()
+        LoadMode()
         SeasonNow = Season()
         Night = NightNow()
         nightChecked = DateTime.Now.Minute
         shelf = ShelfForm(self, S)
         shelf.Night = Night
-        shelf.Collapsed = World.ReadText("shelf-state.txt") == "egg"
+        shelf.Collapsed = Single || World.ReadText("shelf-state.txt") == "egg"   // 只要一隻：沒有櫃子，蛋就是家
         if shelf.Collapsed { shelf.SnapFold() }
         shelf.Place(ShelfWA())
         lastT = clock.Elapsed.TotalSeconds; Now = lastT
@@ -205,7 +208,7 @@ extension World {
         // 一開始誰在外面：out.txt，沒有就用 -Pet
         let outIds = LoadOutIds()
         let today = DateTime.Now.ToString("yyyy-MM-dd")
-        let rollCall = outIds.Count >= 2 && !Night && World.ReadText("rollcall.txt") != today
+        let rollCall = outIds.Count >= 2 && !Night && Feat("rollcall") && World.ReadText("rollcall.txt") != today
         if rollCall { World.WriteText("rollcall.txt", today); StartRollCall(outIds) }
         else {
             var delay = 0.2
@@ -231,6 +234,7 @@ extension World {
         timer.Interval = 30
         timer.Tick = { self.Tick() }
         timer.Start()
+        if !FileManager.default.fileExists(atPath: World.FilePath("profile.txt")) { Later(1.2) { self.ShowSetup(true) } }   // 第一次：設定視窗（你是？選一櫃、擺法）
         App.Log("started pipe=" + pipeName + " lineup=" + lineup + " out=" + outIds.ToArray().joined(separator: ",") + " data=" + World.DataDir)
     }
 
@@ -304,7 +308,8 @@ extension World {
                 if Get(s) != nil && !ids.Contains(s) { ids.Add(s) }
             }
         }
-        else { ids.Add(defaultPet) }
+        else { ids.Add(Single ? SinglePet() : defaultPet) }
+        if Single { ids.RemoveAll { x in x != self.SinglePet() } }   // 只要一隻：其他隻都不出來
         return ids
     }
 
@@ -387,6 +392,7 @@ extension World {
     // ---------- 放出來／收回去 ----------
     func BringOut(_ p: Pet, _ say: Bool) {
         if !Pets.Contains(p) { return }          // 換櫃之前排好的延遲動作
+        if Single && p.P.Id != SinglePet() { return }   // 只要一隻：其他隻待在家
         if p.Out { active = p; Broadcast(); return }
         p.ComeOut(say)
         if shelf.Collapsed { shelf.Gulp() }
@@ -497,6 +503,7 @@ extension World {
         TicketTick()
         DownloadTick(dt)
         ExpireNotice()
+        MenuWatch()
         if Hidden { return }
         for p in Pets {
             if p.Out { p.Tick(dt) } else if p.Bt > 0 { p.Bt -= dt; p.UpdateBubble() } else { p.HideForms() }
@@ -608,7 +615,7 @@ extension World {
             var gone: [IntPtr] = []
             for h in known { if !nc.ContainsKey(h) { gone.append(h) } }
             for h in gone { known.Remove(h) }
-            if fresh != nil && newWinCd <= 0 && !Hidden && !focusOn && !quietOn {
+            if fresh != nil && newWinCd <= 0 && !Hidden && !focusOn && !quietOn && Feat("windows") {
                 let p = PickFree()
                 if p != nil { newWinCd = 6; fgCd = Math.Max(fgCd, 6.0); p!.ReactNewWindow(fresh) }
             }
@@ -618,7 +625,7 @@ extension World {
         if fgw != lastFg {
             lastFg = fgw
             var fw: WinInfo! = nil
-            if fgCd <= 0 && !Hidden && !focusOn && !quietOn && Cands.TryGetValue(fgw, &fw) && rnd.NextDouble() < 0.55 {
+            if fgCd <= 0 && !Hidden && !focusOn && !quietOn && Feat("windows") && Cands.TryGetValue(fgw, &fw) && rnd.NextDouble() < 0.55 {
                 let p = PickFree()
                 if p != nil && p!.FollowWindow(fw, p!.AppLine(fgw)) { fgCd = 20 + rnd.NextDouble() * 20 }
             }
@@ -718,7 +725,7 @@ extension World {
 
     // ---------- 煙火 ----------
     func Fireworks(_ area: Rectangle, _ n: Int, _ focusX: Int) {
-        if Hidden { return }
+        if Hidden || !Feat("fireworks") { return }   // 小屋可以關掉煙火
         if fx == nil { fx = FxForm(k) }
         fx.Start(area, n, focusX)
         Zorder()
@@ -802,7 +809,7 @@ extension World {
         if hour < 6 { return IsWeekday(n.addingTimeInterval(-86400)) }
         return false
     }
-    func NightNow() -> Bool { return forceNight >= 0 ? forceNight == 1 : World.IsNightTime(Date()) }
+    func NightNow() -> Bool { return forceNight >= 0 ? forceNight == 1 : Feat("night") && World.IsNightTime(Date()) }   // 小屋可以關掉「下班時間」
 
     func CheckNight() {
         let n = Date()
@@ -816,7 +823,7 @@ extension World {
         if quietOn { return }   // 安靜中：只換夜晚的樣子，不催
         if d && World.IsWeekday(n) && Calendar.current.component(.hour, from: n) == 18 { Later(OutCount() >= 2 ? 30 : 8) { self.DailyWrap(false) } }
         let outs = OutPets()
-        if d && outs.Count >= 2 { NightRitual(); return }
+        if d && outs.Count >= 2 && Feat("rollcall") { NightRitual(); return }
         let l: Pet = Lead()
         for p in outs { if p === l { p.NightChanged(d) } else if !d { p.Say(p.L("night_off"), 3) } }
         if outs.Count == 0 { l.Say(l.L(d ? "night_on" : "night_off"), 3) }
@@ -827,6 +834,7 @@ extension World {
         let n = Date()
         let cal = Calendar.current
         let month = cal.component(.month, from: n), day = cal.component(.day, from: n), hour = cal.component(.hour, from: n)
+        if !Feat("season") { return "" }          // 小屋關掉「節日造型」
         if birthday.count == 5 && String(format: "%02d-%02d", month, day) == birthday { return "birthday" }
         let fmt = DateFormatter(); fmt.locale = Locale(identifier: "en_US_POSIX"); fmt.dateFormat = "yyyy-MM-dd"
         let today = cal.startOfDay(for: n)
@@ -974,55 +982,69 @@ extension World {
             items = [["抱抱 ♥", "hug"], ["打招呼", "hi"], ["敲敲螢幕", "knock"], ["噴絲擺盪", "swing"],
                      ["倒吊", "hang"], ["跳到別的視窗上", "jump"], ["去爬牆", "climb"], ["睡覺", "sleep"], ["丟球給他 ⚾", "ball"]]
         }
+        m.Items.Add(ToolStripLabel("一起玩"))
         for it in items {
             let a = it[1]
             m.Items.Add(it[0], nil, { if a == "ball" { self.StartBall() } else { p.Act(a) } })
         }
         m.Items.Add(p.P.Name + " 的好感度 ♥", nil, { p.ShowBond() })
         m.Items.Add(ToolStripSeparator())
-        if focusOn { m.Items.Add("結束專注（還剩 " + String(FocusLeft()) + " 分）", nil, { self.StopFocus(false) }) }
-        else { m.Items.Add("專注 25 分鐘 🍅", nil, { self.StartFocus(25) }) }
-        AddQuietMenu(m)
-        AddReminderMenus(m)
-        AddTicketMenus(m)
-        m.Items.Add("今天的小結", nil, { self.DailyWrap(true) })
-        if TubbyLineup {
+        let help = ToolStripMenuItem("小幫手（專注、安靜、提醒）")
+        AddHelpers(help.DropDownItems)
+        m.Items.Add(help)
+        m.Items.Add("公仔小屋（開關、設定）…", nil, { self.HouseMenu() })
+        m.Items.Add(ToolStripSeparator())
+        m.Items.Add(ToolStripLabel(Single ? "我的公仔" : "公仔們"))
+        if TubbyLineup && !Single {
             let grp = ToolStripMenuItem("天線寶寶一起…")
             let gs: [[String]] = [["大抱抱 ♥", "bighug"], ["啦啦啦一起唱", "sing"], ["一起跌倒（哎喲！）", "fall"],
                                   ["吐司時間 🍞", "toast"], ["大合照 📷", "photo"], ["天線寶寶說再見", "byebye"]]
             for gi in gs { let key = gi[1]; grp.DropDownItems.Add(gi[0], nil, { self.PlayScene(key) }) }
             m.Items.Add(grp)
         }
-        let sw = ToolStripMenuItem("換角色")
-        for o in Pets {
-            let oo = o
-            let mi = ToolStripMenuItem(o.P.Name + (o.Out ? "（在外面）" : ""), nil, { self.SelectOnly(oo) })
-            mi.Checked = o === p
-            sw.DropDownItems.Add(mi)
+        if !Single {
+            let sw = ToolStripMenuItem("換角色")
+            for o in Pets {
+                let oo = o
+                let mi = ToolStripMenuItem(o.P.Name + (o.Out ? "（在外面）" : ""), nil, { self.SelectOnly(oo) })
+                mi.Checked = o === p
+                sw.DropDownItems.Add(mi)
+            }
+            m.Items.Add(sw)
+            m.Items.Add("只留" + p.P.Name, nil, { self.SelectOnly(p) })
+            m.Items.Add("全部放出來", nil, { self.AllOut() })
+            m.Items.Add("全部回櫃子", nil, { self.AllHome() })
+            m.Items.Add(favPin == p.P.Id ? "取消最愛" : "設為最愛 ★", nil, { self.SetFav(p) })
         }
-        m.Items.Add(sw)
-        m.Items.Add("只留" + p.P.Name, nil, { self.SelectOnly(p) })
-        m.Items.Add("全部放出來", nil, { self.AllOut() })
-        m.Items.Add("全部回櫃子", nil, { self.AllHome() })
-        m.Items.Add(favPin == p.P.Id ? "取消最愛" : "設為最愛 ★", nil, { self.SetFav(p) })
-        m.Items.Add("回櫃子裡待著", nil, { p.StowToShelf(true) })
+        m.Items.Add(Single ? "回蛋裡待著" : "回櫃子裡待著", nil, { p.StowToShelf(true) })
         m.Items.Add("躲起來（Ctrl+Alt+S）", nil, { self.ToggleHide() })
         m.Items.Add(ToolStripSeparator())
         m.Items.Add("收工（關掉 Desk Pals）", nil, { self.QuitAll() })
     }
 
-    func AddQuietMenu(_ m: ContextMenuStrip) {
-        if quietOn { m.Items.Add("結束安靜（還剩 " + String(QuietLeft()) + " 分）", nil, { self.StopQuiet() }); return }
+    // 專注、安靜、提醒、搶票、今天的小結（公仔、櫃子、小屋的選單都有）
+    func AddHelpers(_ items: ToolStripItemCollection) {
+        if focusOn { items.Add("結束專注（還剩 " + String(FocusLeft()) + " 分）", nil, { self.StopFocus(false) }) }
+        else { items.Add("專注 25 分鐘 🍅", nil, { self.StartFocus(25) }) }
+        AddQuietMenu(items)
+        AddReminderMenus(items)
+        AddTicketMenus(items)
+        items.Add("今天的小結", nil, { self.DailyWrap(true) })
+    }
+
+    func AddQuietMenu(_ items: ToolStripItemCollection) {
+        if quietOn { items.Add("結束安靜（還剩 " + String(QuietLeft()) + " 分）", nil, { self.StopQuiet() }); return }
         let q = ToolStripMenuItem("安靜一下")
         q.DropDownItems.Add("30 分鐘", nil, { self.StartQuiet(30) })
         q.DropDownItems.Add("2 小時", nil, { self.StartQuiet(120) })
         q.DropDownItems.Add("到今天下班", nil, { self.StartQuiet(World.MinutesToOffWork()) })
-        m.Items.Add(q)
+        items.Add(q)
     }
 
     // 收合成蛋／打開公仔櫃
     func ToggleEgg(_ collapse: Bool) {
         if shelf.Collapsed == collapse { return }
+        if Single && !collapse { Lead().Say("現在是「只要一隻」，蛋就是我家～（小屋 → 重新設定 可以換）", 3); return }
         shelf.Collapsed = collapse
         World.WriteText("shelf-state.txt", collapse ? "egg" : "open")
         let l: Pet = Lead()
@@ -1041,47 +1063,38 @@ extension World {
         return n
     }
 
-    // ---------- 選單 ----------
-    // mac: 選單用 NSMenu.popUp（同步、背景程式也穩），不需要宿主小視窗、WM_NULL、還焦點
+    // ---------- 選單：自己畫的像素選單（PixelMenu），開在游標旁邊 ----------
+    // 以前要幫原生選單善後（宿主視窗、還焦點）；像素選單自己會處理，留著給公仔的 Menu 用
     func HookMenu(_ m: ContextMenuStrip) { }
-
-    // mac: NSMenu 選到哪一項（tag）記在這裡
-    final class MenuPick: NSObject {
-        var cmd = 0
-        @objc func pick(_ sender: NSMenuItem) { cmd = sender.tag }
+    func ShowMenu(_ m: ContextMenuStrip) { ShowMenu(m, "", false, Cursor.Position) }
+    func ShowMenu(_ m: ContextMenuStrip, _ title: String, _ house: Bool) { ShowMenu(m, title, house, Cursor.Position) }
+    // 選單內容還是用 ToolStrip 項目寫，這裡畫成像素選單，按下後呼叫原本的 Click
+    func ShowMenu(_ m: ContextMenuStrip, _ title: String, _ house: Bool, _ at: Point) {
+        App.LogAlways("menu: requested, items=" + String(m.Items.Count) + " house=" + (house ? "True" : "False"))
+        if pmenu != nil { pmenu.CloseMenu() }
+        if !App.Offscreen { menuPrevFg = W.GetForegroundWindow() }
+        let pm = PixelMenu(self, m, title, house)
+        pmenu = pm
+        W.SuspendZ = true                    // 開著時不要把公仔、櫃子拉到選單上面
+        pm.Popup(at)
+        if !App.Offscreen { pm.Activate() }  // mac: 不搶前景的面板直接拿鍵盤焦點（不用 ForceForeground）
     }
-
-    // 選單一律用原生選單顯示（mac：NSMenu.popUp）；
-    // 選單內容還是用 ToolStrip 項目寫，這裡照樣轉成原生選單，按下後呼叫原本的 Click。
-    func ShowMenu(_ m: ContextMenuStrip) {
-        App.LogAlways("menu: requested, items=" + String(m.Items.Count))
-        if App.Offscreen { return }
-        var map: [Int: ToolStripItem] = [:]
-        var next = 1000
-        let picker = MenuPick()
-        let hm = World.BuildNative(m.Items, &map, &next, picker)
-        NSApp.activate(ignoringOtherApps: true)
-        let c = Cursor.Position
-        // 在螢幕右半／下半就往左／往上開（避開右下角的櫃子）
-        let wa = Screen.FromPoint(c).WorkingArea
-        var loc = NSEvent.mouseLocation
-        let sz = hm.size
-        if c.X > wa.Left + wa.Width / 2 { loc.x -= sz.width }
-        if c.Y > wa.Top + wa.Height / 2 { loc.y += sz.height }
-        W.SuspendZ = true
-        hm.popUp(positioning: nil, at: loc, in: nil)
+    // 選單關掉了（選了、Esc、點外面、失去焦點）：焦點還給原本的視窗
+    // mac: 不搶前景的面板關掉後，鍵盤焦點自己回到原本的 App
+    func MenuClosed(_ pm: PixelMenu) {
+        if pm !== pmenu { return }
+        pmenu = nil
         W.SuspendZ = false
-        let cmd = picker.cmd
-        App.LogAlways("menu: closed cmd=" + String(cmd))
-        if cmd != 0, let it = map[cmd] {
-            App.LogAlways("menu: picked \"" + (it.Text ?? "") + "\"")
-            let pick = it
-            BeginInvoke { pick.PerformClick() }   // 等選單完全關掉再做（開輸入框才拿得到焦點）
-        }
+    }
+    // 點到選單外面就關：直接看滑鼠按鍵（我們是背景程式，點別的程式也看得到）；選單開了之後要先放開過一次
+    func MenuWatch() {
+        let pm: PixelMenu! = pmenu
+        if pm == nil || pm.Done || App.Offscreen { return }
+        if (Control.MouseButtons & (MouseButtons.Left | MouseButtons.Right | MouseButtons.Middle)) == MouseButtons.None { pm.Armed = true; return }
+        if pm.Armed && !pm.Bounds.Contains(Cursor.Position) { pm.CloseMenu() }
     }
 
-    // 原生選單畫不出彩色 emoji（會變空心框）：拿掉 BMP 以外的字和變體選擇符；★ ♥ ⏰ 這類保留
-    // mac: NSMenu 畫得出彩色 emoji，BuildNative 不呼叫這個；留著給其他地方用
+    // 像素選單用的字：拿掉 BMP 以外的字（彩色 emoji）和變體選擇符；★ ♥ ⏰ 這類保留
     static func NoEmoji(_ s: String) -> String {
         var out = String.UnicodeScalarView()
         for u in s.unicodeScalars {
@@ -1089,33 +1102,6 @@ extension World {
             out.append(u)
         }
         return String(out).replacingOccurrences(of: "  ", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    // ToolStrip 項目 → 原生選單（含子選單、打勾、灰色）
-    static func BuildNative(_ items: ToolStripItemCollection, _ map: inout [Int: ToolStripItem], _ next: inout Int, _ picker: MenuPick) -> NSMenu {
-        let hm = NSMenu()
-        hm.autoenablesItems = false
-        for it in items {
-            if it is ToolStripSeparator { hm.addItem(NSMenuItem.separator()); continue }
-            if !it.Available { continue }
-            let text = it.Text ?? ""
-            let mi = it as? ToolStripMenuItem
-            let ni = NSMenuItem(title: text, action: nil, keyEquivalent: "")
-            ni.isEnabled = it.Enabled
-            if mi != nil && mi!.Checked { ni.state = .on }
-            if mi != nil && mi!.DropDownItems.Count > 0 {
-                ni.submenu = BuildNative(mi!.DropDownItems, &map, &next, picker)
-                hm.addItem(ni)
-                continue
-            }
-            let id = next; next += 1
-            map[id] = it
-            ni.tag = id
-            ni.target = picker
-            ni.action = #selector(MenuPick.pick(_:))
-            hm.addItem(ni)
-        }
-        return hm
     }
 
     // 輸入框：拉到前景、可以直接打字
@@ -1142,16 +1128,14 @@ extension World {
         m.Items.Add(shelf.Collapsed ? "打開公仔櫃" : "收合成蛋 🥚", nil, { self.ToggleEgg(!self.shelf.Collapsed) })
         m.Items.Add("全部放出來", nil, { self.AllOut() })
         m.Items.Add("全部回櫃子", nil, { self.AllHome() })
-        if focusOn { m.Items.Add("結束專注", nil, { self.StopFocus(false) }) }
-        else { m.Items.Add("專注 25 分鐘 🍅", nil, { self.StartFocus(25) }) }
-        AddQuietMenu(m)
-        AddReminderMenus(m)
-        AddTicketMenus(m)
-        m.Items.Add("今天的小結", nil, { self.DailyWrap(true) })
+        let help = ToolStripMenuItem("小幫手（專注、安靜、提醒）")
+        AddHelpers(help.DropDownItems)
+        m.Items.Add(help)
+        m.Items.Add("公仔小屋（開關、設定）…", nil, { self.HouseMenu() })
         m.Items.Add("躲起來（Ctrl+Alt+S）", nil, { self.ToggleHide() })
         m.Items.Add(ToolStripSeparator())
         m.Items.Add("收工（關掉 Desk Pals）", nil, { self.QuitAll() })
-        ShowMenu(m)
+        ShowMenu(m, p != nil ? p.P.Name : "公仔櫃", false)
     }
 
     // ================= pipe（跟 VS Code 溝通）=================
@@ -1267,7 +1251,7 @@ extension World {
         let l: Pet = Lead()
         let outs = OutPets()
         switch p[0] {
-        case "hello": if active != nil { World.Send(c, "active " + active.P.Id + "\n") }
+        case "hello": if active != nil { World.Send(c, "active " + active.P.Id + "\n") }; World.Send(c, "lineup " + lineup + "\n")   // 櫃子以桌面版為準（第一次設定在桌面做）
         case "save":
             Count("saves")
             for x in outs { x.OnSave(x === l) }
@@ -1394,6 +1378,13 @@ extension World {
             let q = arg.components(separatedBy: ",")
             if q.count == 3, let cx2 = Int(q[1]), let cy2 = Int(q[2]) { SimDrop(Get(q[0]), cx2, cy2) }
             return
+        // 測試用：act menu pet|house、act menuhover <列>、act menuclick <列>、act menuclose、act setup [按鈕]
+        case "menu": TestMenu(arg); return
+        case "menuhover": if pmenu != nil, let mi = Int(arg) { pmenu.SetHover(mi) }; return
+        case "menuclick": if pmenu != nil, let mi = Int(arg) { pmenu.Pick(mi) }; return
+        case "menuclose": if pmenu != nil { pmenu.CloseMenu() }; return
+        case "setup": if arg == "" { ShowSetup(false) } else if setupForm != nil && !setupForm.IsDisposed { setupForm.Press(arg) }; return
+        case "feature": do { let q = arg.components(separatedBy: "="); if q.count == 2 { SetFeat(q[0], q[1] == "1") } }; return
         default: break
         }
         if target != nil && arg != "" { target!.Act(a) } else { l.Act(a) }

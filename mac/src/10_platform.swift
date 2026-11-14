@@ -2,7 +2,7 @@
 // 獨立程式；一個 World 管全部：視窗掃描、公仔櫃、球、煙火、Claude／Codex 監看、pipe；0～4 隻公仔同時在桌面上跑。
 // 角色＝Pal（資料：調色盤、像素圖、台詞、移動風格），新增角色＝加一個 Pal（＋需要的話加專屬動作）。
 // 10_platform.swift — port of DeskPals.cs lines 1–581 (App, W, WinInfo, Plat, Client, OverlayForm, BubbleForm,
-// BallForm, FxForm, FlashForm, CobwebForm, PetForm, MenuHost) + program entry (App.Main, called from 99_main.swift).
+// BallForm, FxForm, FlashForm, CobwebForm, PetForm) + program entry (App.Main, called from 99_main.swift).
 // mac: pipe → Unix domain socket（argv[1]），Win32 視窗 API → CGWindowList／AppKit，RegisterHotKey → Carbon。
 
 import AppKit
@@ -789,16 +789,6 @@ class PetForm: OverlayForm {
             App.LogAlways("menu: right-up on pet " + id + " at " + at)
         }
         pet.MouseUp(e)
-    }
-}
-
-// 選單的「宿主」：一個看不見、但可以變成前景的小視窗（不然從背景程式叫出來的選單會馬上關掉）
-// mac: NSMenu 不需要宿主；留著讓 World 的程式照搬（Opacity 0、在螢幕外）
-class MenuHost: Form {
-    override init() {
-        super.init()
-        FormBorderStyle = FormBorderStyleT.None; ShowInTaskbar = false; StartPosition = FormStartPosition.Manual
-        Location = Point(-32000, -32000); Size = Size(1, 1); Opacity = 0
     }
 }
 

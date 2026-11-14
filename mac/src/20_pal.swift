@@ -63,6 +63,9 @@ final class Pal
     }
     // 這一櫃預設放在大格的（經典一櫃照用最久的那隻）
     static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Teletubbies ? "po" : nil }
+    // 設定視窗、小屋「換一櫃」列出來的櫃子（之後新增一櫃：這裡加一個 id、LineupIds／LineupName 加一行）
+    static let Lineups: [String] = [Classic, Teletubbies]
+    static func LineupName(_ lineup: String) -> String { return NormLineup(lineup) == Teletubbies ? "天線寶寶一櫃" : "經典一櫃" }
 
     func Shared()
     {

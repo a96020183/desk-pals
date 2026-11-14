@@ -37,8 +37,7 @@ jobs:
           path: |
             extension/desktop/build.log
             run.log
-            shot.png
-            shot-teletubbies.png
+            shot*.png
 
   windows:
     runs-on: windows-latest
@@ -70,5 +69,4 @@ jobs:
           name: desk-pals-vsix
           path: |
             dist/*.vsix
-            shot.png
-            shot-teletubbies.png
+            shot*.png
