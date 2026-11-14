@@ -1,8 +1,8 @@
-// CI smoke test for the Windows overlay running in offscreen mode (DESKPALS_OFFSCREEN=1):
+// CI smoke test for the Windows / macOS overlay running in offscreen mode (DESKPALS_OFFSCREEN=1):
 // bring every pet out, exercise notify / focus / quiet / reminder, save a snapshot, quit.
 const net = require("net");
 const out = (process.env.GITHUB_WORKSPACE || process.cwd()).replace(/\\/g, "/");
-const s = net.connect("\\\\.\\pipe\\desk-pals-ci");
+const s = net.connect(process.env.SMOKE_ENDPOINT || "\\\\.\\pipe\\desk-pals-ci");   // mac：unix socket 路徑
 s.setEncoding("utf8");
 s.on("data", (d) => process.stdout.write("REPLY " + d));
 s.on("error", (e) => { console.log("PIPE ERR", e.message); process.exit(1); });
