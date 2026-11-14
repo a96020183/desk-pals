@@ -370,6 +370,7 @@ extension World {
         return wa
     }
 
+    func RepaintShelf() { RenderShelf() }
     func RenderShelf() {
         if shelf == nil { return }
         if Hidden { if W.Shown(shelf) { shelf.Hide() }; return }

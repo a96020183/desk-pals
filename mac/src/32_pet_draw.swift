@@ -836,6 +836,29 @@ final class ShelfForm: OverlayForm
     // 蛋的腳（公仔收進蛋裡的位置）
     func EggFoot() -> Point { let r = EggScreen(); return Point(r.X + r.Width / 2, r.Y + r.Height * 2 / 3) }
 
+    // ---- 拖著蛋（或櫃頂）搬家：右下角擋到東西時可以移開；位置存在 shelfpos.txt（相對右下角的位移） ----
+    var OffX = 0, OffY = 0
+    var defX = 0, defY = 0
+    var lastWa = Rectangle(0, 0, 0, 0)
+    var dragArm = false, dragMoved = false
+    var dragFrom = Point(0, 0)
+    var dragOX = 0, dragOY = 0
+    var PosFile: String { return Path.Combine(World.DataDir, "shelfpos.txt") }
+    func LoadOffset()
+    {
+        guard File.Exists(PosFile), let txt = try? File.ReadAllText(PosFile) else { return }
+        let a = txt.Trim().Split(" ")
+        var x = 0, y = 0
+        if a.count >= 2 && int.TryParse(a[0], &x) && int.TryParse(a[1], &y) { OffX = x; OffY = y }
+    }
+    func SaveOffset()
+    {
+        _ = try? Directory.CreateDirectory(World.DataDir)
+        _ = try? File.WriteAllText(PosFile, String(OffX) + " " + String(OffY))
+    }
+    // 蛋或櫃頂（不是收合鈕、不是格子）可以拖
+    func DragSpot(_ local: Point) -> Bool { return Collapsed ? EggLocal().Contains(local) : (local.Y < crown && !TabLocal().Contains(local)) }
+
     init(_ w: World, _ S: Int)
     {
         self.w = w
@@ -843,6 +866,7 @@ final class ShelfForm: OverlayForm
         k = Double(S) / 3.0
         super.init(false, true)
         Cursor = Cursors.Hand
+        LoadOffset()
     }
 
     override func OnPaint(_ e: PaintEventArgs) { }
@@ -853,7 +877,9 @@ final class ShelfForm: OverlayForm
         bW = 3 * U; crown = 5 * U; baseH = 5 * U; div = 2 * U; plateH = 5 * U
         let smallW = 24 * U, smallH = 33 * U, tallW = 24 * TU, tallH = 3 * smallH + 2 * div
         let W = bW * 2 + smallW + div + tallW, H = crown + tallH + baseH
-        area = Rectangle(wa.Right - W - 6, wa.Bottom - H, W, H)
+        defX = wa.Right - W - 6; defY = wa.Bottom - H; lastWa = wa
+        let ax = Math.Max(wa.Left, Math.Min(defX, defX + OffX)), ay = Math.Max(wa.Top, Math.Min(defY, defY + OffY))
+        area = Rectangle(ax, ay, W, H)
         cells[0] = Rectangle(bW + smallW + div, crown, tallW, tallH)
         for i in 0..<3 { cells[i + 1] = Rectangle(bW, crown + i * (smallH + div), smallW, smallH) }
     }
@@ -884,11 +910,21 @@ final class ShelfForm: OverlayForm
     override func OnMouseDown(_ e: MouseEventArgs)
     {
         super.OnMouseDown(e)
-        if e.Button == MouseButtons.Left { ClickAt(ShelfForm.CursorPos(), e.Button) }
+        if e.Button != MouseButtons.Left { return }
+        let cp = ShelfForm.CursorPos()
+        if DragSpot(Point(cp.X - Area.X, cp.Y - Area.Y)) { dragArm = true; dragMoved = false; dragFrom = cp; dragOX = OffX; dragOY = OffY; return }   // 放開時才決定是點還是拖
+        ClickAt(cp, e.Button)
     }
     override func OnMouseUp(_ e: MouseEventArgs)
     {
         super.OnMouseUp(e)
+        if e.Button == MouseButtons.Left && dragArm
+        {
+            dragArm = false
+            if dragMoved { OffX = Area.X - defX; OffY = Area.Y - defY; SaveOffset() }   // 貼邊時存實際位置
+            else { ClickAt(ShelfForm.CursorPos(), e.Button) }
+            return
+        }
         if e.Button == MouseButtons.Right { let cp = ShelfForm.CursorPos(); App.LogAlways("menu: right-up on shelf at {X=\(cp.X),Y=\(cp.Y)} collapsed=\(Collapsed ? "True" : "False")"); ClickAt(cp, e.Button) }   // 右鍵放開才叫選單
     }
     // mac: inside a Form, `Cursor` names the instance property; reach the static Cursor.Position here
@@ -910,7 +946,19 @@ final class ShelfForm: OverlayForm
         if b == MouseButtons.Left { w.ShelfClick(c) }
         else if b == MouseButtons.Right { w.ShelfMenu(c, self) }
     }
-    override func OnMouseMove(_ e: MouseEventArgs) { super.OnMouseMove(e); hover = CellAt(ShelfForm.CursorPos()) }
+    override func OnMouseMove(_ e: MouseEventArgs)
+    {
+        super.OnMouseMove(e)
+        let cp = ShelfForm.CursorPos()
+        if dragArm && (Control.MouseButtons.raw & MouseButtons.Left.raw) != 0
+        {
+            let dx = cp.X - dragFrom.X, dy = cp.Y - dragFrom.Y
+            if !dragMoved && Math.Abs(dx) + Math.Abs(dy) > 4 { dragMoved = true }
+            if dragMoved { OffX = dragOX + dx; OffY = dragOY + dy; Place(lastWa); w.RepaintShelf() }
+            return
+        }
+        hover = CellAt(cp)
+    }
     override func OnMouseLeave(_ e: EventArgs) { super.OnMouseLeave(e); hover = -1 }
 
     static func C(_ rgb: Int) -> Color { return Color.FromArgb((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255) }

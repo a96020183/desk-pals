@@ -4689,12 +4689,39 @@ namespace DeskPals
         // 蛋的腳（公仔收進蛋裡的位置）
         public Point EggFoot() { Rectangle r = EggScreen(); return new Point(r.X + r.Width / 2, r.Y + r.Height * 2 / 3); }
 
+        // ---- 拖著蛋（或櫃頂）搬家：右下角擋到東西時可以移開；位置存在 shelfpos.txt（相對右下角的位移） ----
+        public int OffX, OffY;
+        int defX, defY;
+        Rectangle lastWa;
+        bool dragArm, dragMoved;
+        Point dragFrom;
+        int dragOX, dragOY;
+        string PosFile { get { return Path.Combine(World.DataDir, "shelfpos.txt"); } }
+        void LoadOffset()
+        {
+            try
+            {
+                if (!File.Exists(PosFile)) return;
+                string[] a = File.ReadAllText(PosFile).Trim().Split(' ');
+                int x, y;
+                if (a.Length >= 2 && int.TryParse(a[0], out x) && int.TryParse(a[1], out y)) { OffX = x; OffY = y; }
+            }
+            catch { }
+        }
+        void SaveOffset()
+        {
+            try { Directory.CreateDirectory(World.DataDir); File.WriteAllText(PosFile, OffX + " " + OffY); } catch { }
+        }
+        // 蛋或櫃頂（不是收合鈕、不是格子）可以拖
+        bool DragSpot(Point local) { return Collapsed ? EggLocal().Contains(local) : (local.Y < crown && !TabLocal().Contains(local)); }
+
         public ShelfForm(World w, int S) : base(false, true)
         {
             this.w = w;
             U = Math.Max(2, S * 3 / 4); TU = S;
             k = S / 3.0;
             Cursor = Cursors.Hand;
+            LoadOffset();
         }
 
         protected override void OnPaint(PaintEventArgs e) { }
@@ -4705,7 +4732,9 @@ namespace DeskPals
             bW = 3 * U; crown = 5 * U; baseH = 5 * U; div = 2 * U; plateH = 5 * U;
             int smallW = 24 * U, smallH = 33 * U, tallW = 24 * TU, tallH = 3 * smallH + 2 * div;
             int W = bW * 2 + smallW + div + tallW, H = crown + tallH + baseH;
-            area = new Rectangle(wa.Right - W - 6, wa.Bottom - H, W, H);
+            defX = wa.Right - W - 6; defY = wa.Bottom - H; lastWa = wa;
+            int ax = Math.Max(wa.Left, Math.Min(defX, defX + OffX)), ay = Math.Max(wa.Top, Math.Min(defY, defY + OffY));
+            area = new Rectangle(ax, ay, W, H);
             cells[0] = new Rectangle(bW + smallW + div, crown, tallW, tallH);
             for (int i = 0; i < 3; i++) cells[i + 1] = new Rectangle(bW, crown + i * (smallH + div), smallW, smallH);
         }
@@ -4735,11 +4764,21 @@ namespace DeskPals
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
-            if (e.Button == MouseButtons.Left) ClickAt(Cursor.Position, e.Button);
+            if (e.Button != MouseButtons.Left) return;
+            Point cp = Cursor.Position;
+            if (DragSpot(new Point(cp.X - Area.X, cp.Y - Area.Y))) { dragArm = true; dragMoved = false; dragFrom = cp; dragOX = OffX; dragOY = OffY; return; }   // 放開時才決定是點還是拖
+            ClickAt(cp, e.Button);
         }
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
+            if (e.Button == MouseButtons.Left && dragArm)
+            {
+                dragArm = false;
+                if (dragMoved) { OffX = Area.X - defX; OffY = Area.Y - defY; SaveOffset(); }   // 貼邊時存實際位置
+                else ClickAt(Cursor.Position, e.Button);
+                return;
+            }
             if (e.Button == MouseButtons.Right) { App.LogAlways("menu: right-up on shelf at " + Cursor.Position + " collapsed=" + Collapsed); ClickAt(Cursor.Position, e.Button); }   // 右鍵放開才叫選單
         }
 
@@ -4759,7 +4798,19 @@ namespace DeskPals
             if (b == MouseButtons.Left) w.ShelfClick(c);
             else if (b == MouseButtons.Right) w.ShelfMenu(c, this);
         }
-        protected override void OnMouseMove(MouseEventArgs e) { base.OnMouseMove(e); hover = CellAt(Cursor.Position); }
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            Point cp = Cursor.Position;
+            if (dragArm && (Control.MouseButtons & MouseButtons.Left) != 0)
+            {
+                int dx = cp.X - dragFrom.X, dy = cp.Y - dragFrom.Y;
+                if (!dragMoved && Math.Abs(dx) + Math.Abs(dy) > 4) dragMoved = true;
+                if (dragMoved) { OffX = dragOX + dx; OffY = dragOY + dy; Place(lastWa); w.RepaintShelf(); }
+                return;
+            }
+            hover = CellAt(cp);
+        }
         protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); hover = -1; }
 
         static Color C(int rgb) { return Color.FromArgb((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255); }
@@ -5719,6 +5770,7 @@ namespace DeskPals
             return wa;
         }
 
+        public void RepaintShelf() { RenderShelf(); }
         void RenderShelf()
         {
             if (shelf == null) return;
