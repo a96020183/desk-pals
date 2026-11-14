@@ -230,7 +230,7 @@ extension World {
         LoadReminders()
         LoadTickets()
         StartDownloadWatch()
-        if !App.Offscreen && !RegisterHotKeyMac() { App.Log("hotkey Ctrl+Alt+S is taken") }
+        if !App.Offscreen && !RegisterHotKeyMac() { App.Log("hotkey ⌃⌥S is taken") }
         timer.Interval = 30
         timer.Tick = { self.Tick() }
         timer.Start()
@@ -255,7 +255,7 @@ extension World {
                                               MemoryLayout<EventHotKeyID>.size, nil, &hk)
                     if r != OSStatus(noErr) || hk.signature != World.HotKeySig || hk.id != 7 { return OSStatus(eventNotHandledErr) }
                 }
-                DispatchQueue.main.async { World.hotKeyWorld?.ToggleHide() }   // Ctrl+Alt+S
+                DispatchQueue.main.async { World.hotKeyWorld?.ToggleHide() }   // ⌃⌥S
                 return OSStatus(noErr)
             }, 1, &spec, nil, &World.hotKeyHandler)
             if st0 != OSStatus(noErr) { return false }
@@ -1017,7 +1017,7 @@ extension World {
             m.Items.Add(favPin == p.P.Id ? "取消最愛" : "設為最愛 ★", nil, { self.SetFav(p) })
         }
         m.Items.Add(Single ? "回蛋裡待著" : "回櫃子裡待著", nil, { p.StowToShelf(true) })
-        m.Items.Add("躲起來（Ctrl+Alt+S）", nil, { self.ToggleHide() })
+        m.Items.Add("躲起來（⌃⌥S）", nil, { self.ToggleHide() })
         m.Items.Add(ToolStripSeparator())
         m.Items.Add("收工（關掉 Desk Pals）", nil, { self.QuitAll() })
     }
@@ -1132,7 +1132,7 @@ extension World {
         AddHelpers(help.DropDownItems)
         m.Items.Add(help)
         m.Items.Add("公仔小屋（開關、設定）…", nil, { self.HouseMenu() })
-        m.Items.Add("躲起來（Ctrl+Alt+S）", nil, { self.ToggleHide() })
+        m.Items.Add("躲起來（⌃⌥S）", nil, { self.ToggleHide() })
         m.Items.Add(ToolStripSeparator())
         m.Items.Add("收工（關掉 Desk Pals）", nil, { self.QuitAll() })
         ShowMenu(m, p != nil ? p.P.Name : "公仔櫃", false)

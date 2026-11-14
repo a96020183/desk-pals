@@ -103,7 +103,7 @@ extension World {
         }
         m.Items.Add(sw)
         m.Items.Add("重新設定…", nil, { self.ShowSetup(false) })
-        m.Items.Add("躲起來（Ctrl+Alt+S）", nil, { self.ToggleHide() })
+        m.Items.Add("躲起來（⌃⌥S）", nil, { self.ToggleHide() })
         m.Items.Add(ToolStripSeparator())
         m.Items.Add("收工（關掉 Desk Pals）", nil, { self.QuitAll() })
         ShowMenu(m, "公仔小屋", true, at)
