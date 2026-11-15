@@ -15,6 +15,8 @@ from io import BytesIO
 
 from PIL import Image, ImageDraw
 
+sys.dont_write_bytecode = True   # 不在 tools/original_art 留 __pycache__
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "tools", "original_art"))

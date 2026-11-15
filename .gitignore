@@ -10,3 +10,4 @@ art/
 dist/
 **/desktop/DeskPals
 build/
+__pycache__/

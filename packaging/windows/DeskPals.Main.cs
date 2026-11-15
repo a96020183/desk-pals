@@ -34,7 +34,7 @@ namespace DeskPals
                 else if (a == "--replace") mode = "replace";
                 else if (a == "--version") { Console.WriteLine(Version()); return 0; }
             }
-            App.Log("exe " + Version() + " " + mode + " pipe=" + pipe);
+            App.Log("exe " + Version() + " " + mode + " pipe=" + pipe + " " + Thread.CurrentThread.GetApartmentState());   // STA：剪貼簿（分享短片）要
 
             if (mode == "quit") return QuitRunning(pipe, 15000) ? 0 : 1;
             if (mode == "replace") QuitRunning(pipe, 15000);
@@ -123,7 +123,7 @@ namespace DeskPals
 
         public static void Setup(string pipe)
         {
-            if (App.Offscreen || !IsPackaged()) return;
+            if (!IsPackaged()) return;   // 本機測試、安裝程式版都不是 packaged
             try
             {
                 string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
