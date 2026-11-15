@@ -13,9 +13,9 @@ import Foundation
 extension Pet {
     // 角色專屬狀態：回傳 true＝處理掉了
     func StepSpecial(_ dt: Double, _ wa: Rectangle) -> Bool {
-        if HoldToast && rnd.NextDouble() < dt * 2.5 && notes.Count < 10 { notes.Add(Arr<Double>([R(-8, 8) * k, 0, 7])) }   // 吐司屑屑
-        if P.Tubby && TubbyStep(dt) { return true }
-        if P.Pik && PikStep(dt) { return true }
+        if HoldToast && rnd.NextDouble() < dt * 2.5 && notes.Count < 10 { notes.Add(Arr<Double>([R(-8, 8) * k, 0, 7])) }   // 吐司屑屑   //@fan
+        if P.Tubby && TubbyStep(dt) { return true }   //@fan
+        if P.Pik && PikStep(dt) { return true }   //@fan
         if P.Orig && OrigStep(dt) { return true }
         if P.Cu && CuStep(dt) { return true }
         switch state {
@@ -23,6 +23,7 @@ extension Pet {
             sT += dt
             if t < 0 { SetState("idle", InScene ? 30 : 1) }
             return true
+        // <fan>
         // ---- Spidey ----
         case "swing": Swing(dt, wa); return true
         case "hang": Hang(dt, wa); return true
@@ -34,11 +35,12 @@ extension Pet {
             if t < 0 { w.ReleaseBall(Cx, y, 0, 0); KickBallToCursor(1.0); SetState("kick", 0.4) }
             return true
         case "sling": if t < 0 { SetState("idle", 1) }; return true
+        // </fan>
         // ---- 小波 ----
         case "spin":
             if t < 0 { SetState("idle", 1); Say(Pick(["再來一次！", "再來一次！嘻嘻"]), 1.4) }
             return true
-        case "bat": Bat(dt); return true
+        case "bat": Bat(dt); return true   //@fan
         case "catch":
             if t < 0 { SetState("throw", 0.35) }
             return true
@@ -47,15 +49,18 @@ extension Pet {
             if t < 0 { SetState("idle", 1) }
             return true
         // ---- 史迪仔 ----
+        // <fan>
         case "wall": Wall(dt, wa); return true
         case "ceil": Ceil(dt); return true
         case "curl": Curl(dt); return true
         case "nudge": if t < 0 { SetState("idle", 1) }; return true
         case "chomp": Chomp(dt); return true
+        // </fan>
         case "elvis":
             if rnd.NextDouble() < dt * 3 { Mark(0) }
             if t < 0 { SetState("idle", 1); if !InScene { Say(Pick(["Thank you very much ♪", "嘻嘻嘻 ♪"]), 1.6) } }
             return true
+        // <fan>
         // ---- 人魚漢頓 ----
         case "swim": Swim(dt); return true
         case "header": if t < 0 { SetState(fetching ? "fetch" : "idle", fetching ? 15 : 1) }; return true
@@ -64,6 +69,7 @@ extension Pet {
             if capeT >= 1.4 && capeT - dt < 1.4 { tripT = 1.1; Say(Pick(["哎呀…（跌倒）", "嗚…英雄也會跌倒的", "我、我沒事！"]), 1.8) }
             if t < 0 { SetState("idle", 1) }
             return true
+            // </fan>
         default: break
         }
         return false
@@ -71,9 +77,10 @@ extension Pet {
 
     // 走到視窗邊緣：0＝照預設跳下去、1＝回頭、2＝換狀態了
     func EdgeOfWindow(_ right: Bool) -> Int {
-        if P.Pik { return PikEdge(right) }
+        if P.Pik { return PikEdge(right) }   //@fan
         if P.Orig { return OrigEdge(right) }
         if P.Cu { return CuEdge(right) }
+        // <fan>
         switch P.Id {
         case "spidey":
             if !goClimb && rnd.NextDouble() < 0.55 { dir = -dir; if rnd.NextDouble() < 0.3 { SpinWeb(supH, right) }; return 1 }
@@ -119,44 +126,53 @@ extension Pet {
             return 2
         default: break
         }
+        // </fan>
         return 0
     }
 
     // 走到螢幕邊：true＝換狀態了（false＝回頭）
     func EdgeOfScreen() -> Bool {
+        // <fan>
         switch P.Id {
         case "spidey": if goClimb || rnd.NextDouble() < 0.35 { StartClimb(dir); return true }; return false
         case "stitch": if goClimb || rnd.NextDouble() < 0.3 { StartWallUp(dir); return true }; return false
         case "po": dir = -dir; Jump(Double(dir) * 60 * k, -220 * k); Say("嘟嘟～迴轉！", 0.9); return true
         default: break
         }
+        // </fan>
         return false
     }
 
     // 落地時的特別反應：true＝處理掉了
     func Landed(_ wasRolling: Bool, _ landVx: Double) -> Bool {
-        if P.Pik && PikLanded(wasRolling) { return true }
+        if P.Pik && PikLanded(wasRolling) { return true }   //@fan
         if P.Orig && OrigLanded(wasRolling) { return true }
+        // <fan>
         if Is("stitch") && wasRolling { vx = landVx * 0.8; if Math.Abs(vx) < 60 * k { vx = Double(dir) * 120 * k }; SetState("curl", R(0.8, 1.4)); return true }
         if Is("po") && wasRolling && state != "spin" { SetState("dizzy", 0.8); Say(Pick(["轉圈圈～", "再來一次！"]), 1.2); return true }
         if Is("po") && state == "spin" { SetState("spin", 0.4); return true }
         if Is("tinky") && lastLandVy > 650 * k && state != "plop" { afterLand = ""; Plop(Pick(["哎喲！", "哎喲…屁股好痛", "哎喲！（跌坐）"])); return true }
         if Is("laalaa") && wasRolling { afterLand = ""; SetState("twirl", 0.9); Say(Pick(["轉圈圈～", "再來一次！"]), 1.2); return true }
+        // </fan>
         return false
     }
 
     func LandAction() {
         let a = afterLand; afterLand = ""
-        if P.Pik && PikLand(a) { return }
+        if P.Pik && PikLand(a) { return }   //@fan
         if P.Orig && OrigLand(a) { return }
         if P.Cu && CuLand(a) { return }
         switch a {
+        // <fan>
         case "wave": SetState("wave", 1.8); Say("Eh-oh!", 1.6)
         case "sniff": poseKind = "grin"; SetState("pose", 1.6); Mark(2); Say(Pick(["（聞聞）ih?", "嘻嘻，這個好玩", "ih-ih! 史迪仔的！"]), 1.6)
+        // </fan>
         case "bubbles": SetState("idle", 1.6); for _ in 0..<4 { Mark(5) }
+        // <fan>
         case "plop": Plop(Pick(["哎喲！", "哎喲！（跌坐）"]))
         case "hattip": poseKind = "hattip"; SetState("pose", 1.6); Say(Pick(["Eh-oh.", "嘿。", "（扶帽子）酷。"]), 1.4)
         case "twirl": SetState("twirl", 1.2); Say(Pick(["啦啦啦～", "轉圈圈～"]), 1.4)
+        // </fan>
         default: SetState("idle", R(1, 2))
         }
     }
@@ -174,11 +190,12 @@ extension Pet {
             return
         }
         if w.OutCount() > 1 && rnd.NextDouble() < 0.12 && VisitFriend() { return }
-        if P.Pik { PikDecide(r, wa); return }
+        if P.Pik { PikDecide(r, wa); return }   //@fan
         if P.Orig { OrigDecide(r, wa); return }
         if P.Cu { CuDecide(r, wa); return }
         let lateOk: () -> Bool = { self.lateCd <= 0 && self.LateLine() != nil }
         switch P.Id {
+        // <fan>
         case "spidey":
             if r < 0.20 { SetState("idle", R(1.5, 4)) }
             else if r < 0.48 { if !JumpToPlatform() { Hop() } }
@@ -268,6 +285,7 @@ extension Pet {
             else if r < 0.86 && SeasonLine() != nil { Say(SeasonLine() ?? "", 3); SetState("idle", 3) }
             else if r < 0.93 { SetState("idle", 2.5); Say(L("talk"), 2.4) }
             else { dir = -dir; SetState("walk", R(3, 6)) }
+            // </fan>
         default:
             if r < 0.3 { SetState("idle", R(1.5, 4)) }
             else if r < 0.6 { if !JumpToPlatform() { Hop() } }
@@ -284,18 +302,22 @@ extension Pet {
             return true
         }
         if Math.Abs(tx - Cx) > 1000 * k { return false }
+        // <fan>
         if Is("hangyodon") { StartSwim(tx, foot, false) }
         else if Is("spidey") && rnd.NextDouble() < 0.5 { BallisticTo(tx, foot); Say("Thwip!", 0.8) }
-        else { BallisticTo(tx, foot); if Is("po") { Say(L("jump"), 0.8) } }
+        // </fan>
+        else { BallisticTo(tx, foot); if Is("po") { Say(L("jump"), 0.8) } }   //@fan
+        // <public> BallisticTo(tx, foot)
         return true
     }
 
     // 右鍵選單的招牌動作
     func Signature() {
         if !Out { return }
-        if P.Pik { PikSignature(); return }
+        if P.Pik { PikSignature(); return }   //@fan
         if P.Orig { OrigSignature(); return }
         if P.Cu { CuSignature(); return }
+        // <fan>
         switch P.Id {
         case "spidey": if !ShootTo("swing") { Say("這裡太低了，甩不起來", 1.6) }
         case "po": if !JumpToPlatform() { Jump(Double(dir) * 200 * k, -520 * k); Say("咻～～", 1) } else { Say("咻～～再來一次！", 1.4) }
@@ -325,12 +347,14 @@ extension Pet {
         case "laalaa": Juggle()
         default: break
         }
+        // </fan>
     }
 
     func ActSpecial(_ a: String) {
-        if P.Pik && PikAct(a) { return }
+        if P.Pik && PikAct(a) { return }   //@fan
         if P.Orig && OrigAct(a) { return }
         if P.Cu && CuAct(a) { return }
+        // <fan>
         switch a {
         case "swing": if Is("spidey") { if !ShootTo("swing") { Say("這裡太低了，甩不起來", 1.6) } } else { Signature() }
         case "hang": if Is("spidey") { if !ShootTo("hang") { Say("上面沒地方黏", 1.6) } }
@@ -355,25 +379,29 @@ extension Pet {
         case "twirl": if Grounded() { SetState("twirl", 1.6); Say("轉圈圈～啦啦啦！", 1.6) }
         default: break
         }
+        // </fan>
     }
 
     // 新視窗跳出來
     func ReactNewWindow(_ win: WinInfo) {
         if !Grounded() || sleepMode || state == "hug" || InScene || fetching { return }
         if P.Orig { OrigNewWindow(win); return }
+        // <fan>
         switch P.Id {
         case "spidey": if !ZipToWindow(win, L("newwin")) { Say("有新視窗！👀", 1.5) }
         default:
             let after: String = Is("po") || Is("tinky") ? "wave" : (Is("hangyodon") ? "bubbles" : (Is("dipsy") ? "hattip" : (Is("laalaa") ? "twirl" : (P.Cu ? "" : "sniff"))))
             if !GoToWindow(win, L("newwin"), after) { Say(L("newwin"), 1.5) }
         }
+        // </fan>
+        // <public> if !GoToWindow(win, L("newwin"), "") { Say(L("newwin"), 1.5) }
     }
 
     // 你切到哪個視窗，他常常跟過去
     @discardableResult
     func FollowWindow(_ win: WinInfo, _ text: String) -> Bool {
         if !Grounded() || sleepMode || state == "hug" || InScene || fetching { return false }
-        if Is("spidey") { return ZipToWindow(win, text) }
+        if Is("spidey") { return ZipToWindow(win, text) }   //@fan
         return GoToWindow(win, text, "")
     }
 
@@ -383,8 +411,9 @@ extension Pet {
         if supH == win.H { Say(text, 2); if after != "" { afterLand = after; LandAction() }; return true }
         Say(text, 2)
         afterLand = after
-        if Is("hangyodon") { StartSwim(tx, top, false) }
-        else { BallisticTo(tx, top) }
+        if Is("hangyodon") { StartSwim(tx, top, false) }   //@fan
+        else { BallisticTo(tx, top) }   //@fan
+        // <public> BallisticTo(tx, top)
         return true
     }
 
@@ -404,7 +433,8 @@ extension Pet {
     func Call(_ s: String) {
         if !Out || InScene { return }
         Say(s, 1.6)
-        if Grounded() && state != "header" { poseKind = Is("dipsy") ? "hattip" : "hero"; SetState("pose", 0.9) }
+        if Grounded() && state != "header" { poseKind = Is("dipsy") ? "hattip" : "hero"; SetState("pose", 0.9) }   //@fan
+        // <public> if Grounded() && state != "header" { poseKind = "hero"; SetState("pose", 0.9) }
     }
 
     // 串場用：直接設狀態／姿勢
@@ -424,22 +454,27 @@ extension Pet {
         case "dizzy": SetState("dizzy", dur)
         case "lick": poseKind = "lick"; SetState("pose", dur)
         // ---- 天線寶寶 ----
-        case "plop": SetState("plop", dur); sT = 0; Burst(4); Mark(4)
-        case "hattip", "hatwave", "hatdown", "sing": poseKind = kind; SetState("pose", dur)
+        case "plop": SetState("plop", dur); sT = 0; Burst(4); Mark(4)   //@fan
+        case "hattip", "hatwave", "hatdown", "sing": poseKind = kind; SetState("pose", dur)   //@fan
         case "twirl", "dance", "kick", "catch", "spin": SetState(kind, dur)
+        // <fan>
         case "juggle": juggles = 0; sT = 0; SetState("juggle", dur)
         case "hattoss": sT = 0; SetState("hattoss", dur)
         case "bat": StartBat(false)
         default: if kind.StartsWith("bag") { TinkyBag(kind.Length > 4 ? kind.Substring(4) : "", true, dur) }
+        // </fan>
+        // <public> default: break
         }
     }
     func FaceTo(_ o: Pet) { dir = o.Cx > Cx ? 1 : -1 }
     func WalkTo(_ tx: Double, _ dur: Double) { seekX = tx; dir = tx > Cx ? 1 : -1; gotoSpeed = 1.5; SetState("goto", Math.Max(dur, 8)) }
-    func RaceTo(_ tx: Double) { seekX = tx; dir = tx > Cx ? 1 : -1; gotoSpeed = Is("po") || Is("stitch") ? 1.4 : 1.1; SetState("goto", 10) }
+    func RaceTo(_ tx: Double) { seekX = tx; dir = tx > Cx ? 1 : -1; gotoSpeed = Is("po") || Is("stitch") ? 1.4 : 1.1; SetState("goto", 10) }   //@fan
+    // <public> func RaceTo(_ tx: Double) { seekX = tx; dir = tx > Cx ? 1 : -1; gotoSpeed = 1.1; SetState("goto", 10) }
     // 走到／跳到另一隻旁邊（串場前先湊在一起）；回傳大概要幾秒
     @discardableResult
     func ComeNear(_ o: Pet) -> Double {
-        let mul: Double = P.Tubby || o.P.Tubby ? 2.0 : (P.Orig ? 1.6 : 1.35)   // 天線寶寶比較寬（16 格＋道具）
+        let mul: Double = P.Tubby || o.P.Tubby ? 2.0 : (P.Orig ? 1.6 : 1.35)   // 天線寶寶比較寬（16 格＋道具）   //@fan
+        // <public> let mul: Double = P.Orig ? 1.6 : 1.35
         var tx = o.Cx + (Cx > o.Cx ? 1.0 : -1.0) * Double(o.SW) * mul
         let wa = w.WA(o.Cx, o.Foot - 4)
         tx = Pet.Clamp(tx, Double(wa.Left + SW), Double(wa.Right - SW))
@@ -448,7 +483,7 @@ extension Pet {
             if d < Double(SW) * 0.6 { return 0 }
             if d < 700 * k { WalkTo(tx, 10); return Math.Min(6, d / (Math.Max(P.Speed, 60.0) * k * 1.5) + 0.3) }
         }
-        if Is("hangyodon") { StartSwim(tx, o.Foot, false); return flyDur + 0.4 }
+        if Is("hangyodon") { StartSwim(tx, o.Foot, false); return flyDur + 0.4 }   //@fan
         BallisticTo(tx, o.Foot); return 1.6
     }
     func JumpTo(_ tx: Double, _ footY: Double) { BallisticTo(tx, footY) }
@@ -457,7 +492,8 @@ extension Pet {
     func HatPoint() -> PointF { return PointF(Cx, Foot - Double(SH) + Double((P.HeadTop - 3) * S)) }
     func HandPoint() -> PointF { return PointF(Cx + Double(dir * 5 * S), Foot - Double(SH) + Double((P.BodyTop + 2) * S)) }
     func FootPoint() -> PointF { return PointF(Cx + Double(dir * 4 * S), Foot - Double(3 * S)) }
-    func ClimbRace(_ side: Int) { if Is("spidey") { StartClimb(side) } else if Is("stitch") { StartWallUp(side) } }
+    func ClimbRace(_ side: Int) { if Is("spidey") { StartClimb(side) } else if Is("stitch") { StartWallUp(side) } }   //@fan
+    // <public> var HasTv: Bool { return false }
     var Foot: Double { return y + Double(SH) }
     var OnFloor: Bool { return supH == IntPtr.Zero }
 }

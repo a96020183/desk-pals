@@ -1,11 +1,19 @@
 ﻿; 公仔櫃 Desk Pals：Windows 安裝程式（Inno Setup 6，免費）。由 packaging\windows\build.ps1 呼叫：
-;   ISCC /DAppVersion=x.y.z /DRoot=<repo> /DBuildDir=<build\win> /DIconDir=<build\icons> /DLangFile=<ChineseTraditional.isl> /O<dist> DeskPals.iss
+;   ISCC /DAppVersion=x.y.z /DRoot=<repo> [/DSrcDir=<js 來源>] [/DOutSuffix=-personal] /DBuildDir=<build\win> /DIconDir=<build\icons> /DLangFile=<ChineseTraditional.isl> /O<dist> DeskPals.iss
 ; 安裝給「目前這個使用者」（不用系統管理員）：%LOCALAPPDATA%\Programs\DeskPals
 ; 開機自動啟動＝「啟動」資料夾裡的「公仔櫃 Desk Pals.lnk」（跟 VS Code 擴充套件同一個名字 → 直接換成 exe 版，不會開兩次）
 ; 裝好會寫 %LOCALAPPDATA%\DeskPals\standalone.json：VS Code 擴充套件看到它就不再自己編一份、不再建開機捷徑，只負責連上這個 exe。
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
+#endif
+#ifndef SrcDir
+  ; claude-hook.js、ci-watch.js 從哪裡拿（公開版：build\public\extension\desktop）
+  #define SrcDir Root + "\extension\desktop"
+#endif
+#ifndef OutSuffix
+  ; 個人版：-personal
+  #define OutSuffix ""
 #endif
 #define AppName "公仔櫃 Desk Pals"
 #define ExeName "DeskPals.exe"
@@ -27,7 +35,7 @@ DisableDirPage=yes
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 DisableReadyPage=yes
-OutputBaseFilename=DeskPals-Setup-{#AppVersion}
+OutputBaseFilename=DeskPals-Setup-{#AppVersion}{#OutSuffix}
 SetupIconFile={#IconDir}\DeskPals.ico
 UninstallDisplayIcon={app}\{#ExeName}
 UninstallDisplayName={#AppName}
@@ -64,11 +72,11 @@ Name: "desktopicon"; Description: "{cm:DesktopIcon}"; GroupDescription: "{cm:Tas
 
 [Files]
 Source: "{#BuildDir}\{#ExeName}"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#Root}\extension\desktop\claude-hook.js"; DestDir: "{app}"; Flags: ignoreversion
-Source: "{#Root}\extension\desktop\ci-watch.js"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SrcDir}\claude-hook.js"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SrcDir}\ci-watch.js"; DestDir: "{app}"; Flags: ignoreversion
 ; Claude Code hooks 的設定指著 %LOCALAPPDATA%\DeskPals\claude-hook.js（安裝說明這樣寫）：放一份過去；解除安裝時留著（使用者資料夾）
-Source: "{#Root}\extension\desktop\claude-hook.js"; DestDir: "{localappdata}\DeskPals"; Flags: ignoreversion uninsneveruninstall
-Source: "{#Root}\extension\desktop\ci-watch.js"; DestDir: "{localappdata}\DeskPals"; Flags: ignoreversion uninsneveruninstall
+Source: "{#SrcDir}\claude-hook.js"; DestDir: "{localappdata}\DeskPals"; Flags: ignoreversion uninsneveruninstall
+Source: "{#SrcDir}\ci-watch.js"; DestDir: "{localappdata}\DeskPals"; Flags: ignoreversion uninsneveruninstall
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#ExeName}"; Comment: "{cm:StartComment}"

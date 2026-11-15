@@ -21,11 +21,13 @@ final class Pal
     var KeepAntenna: Bool = false              // 帽子戴上後把天線重畫在帽子上面（小波）
     var TopRows: Int = 0
     var NoGlasses: Bool = false                // 眼睛太開，眼鏡戴不上（史迪仔）                           // 頭頂超出 16 格框的列數（小波的天線）
+    // <fan>
     // 天線寶寶一櫃（丁丁、迪西、拉拉）用的；經典一櫃的角色都是預設值
     var Tubby: Bool = false                    // 丁丁／迪西／拉拉（小波另外寫）
     var TummyRow: Double = 10.5                // 肚子電視的中心在第幾列
     var AntRows: Int = -1                      // 戴帽子時露在帽子上面的天線列數（-1＝TopRows-1，小波）
     var AntThrough: Bool = false               // 天線從帽子中間穿出來（不墊高；丁丁太高了）
+    // </fan>
     var HeadTop: Int = -1                      // 頭頂外框那一列在 16 格框的第幾列
     var BodyTop: Int = 8                       // 身體第一列在 16 格框的第幾列
     //@@BODY Pal
@@ -38,8 +40,10 @@ final class Pal
     static var All: List<Pal> {
         if all == nil {
             let l = List<Pal>()
+            // <fan>
             for x in [Spidey(), Po(), Stitch(), Hangyodon(), Tinky(), Dipsy(), LaaLaa()] { l.Add(x) }
-            l.AddRange(PikminPals())
+            // </fan>
+            l.AddRange(PikminPals())   //@fan
             l.AddRange(OrigPals())
             l.AddRange(CuPals())
             all = l
@@ -53,14 +57,18 @@ final class Pal
     }
 
     // ---- 兩櫃：經典（Spidey、小波、史迪仔、人魚漢頓）／天線寶寶（丁丁、迪西、拉拉、小波；大格是小波）----
-    static let Classic = "classic", Teletubbies = "teletubbies"
-    static func NormLineup(_ s: String!) -> String { let t = s == nil ? "" : s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); return t == Teletubbies || t == Pikmin || t == Original || (t == Mine && HasCustom()) ? t : Classic }
+    static let Classic = "classic", Teletubbies = "teletubbies"   //@fan
+    static let Fallback = Classic                      // 找不到的櫃子、還沒選過：回到這一櫃 //@fan
+    // <public> static let Fallback = Original
+    static func NormLineup(_ s: String!) -> String { let t = s == nil ? "" : s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); return t == Teletubbies || t == Pikmin || t == Original || (t == Mine && HasCustom()) ? t : Fallback }   //@fan
+    // <public> static func NormLineup(_ s: String!) -> String { let t = s == nil ? "" : s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); return t == Original || (t == Mine && HasCustom()) ? t : Classic }
     static func LineupIds(_ lineup: String!) -> [String]
     {
-        if NormLineup(lineup) == Pikmin { return PikminIds }   // 皮克敏一櫃：大格是休息花（50_pikmin.swift）
+        if NormLineup(lineup) == Pikmin { return PikminIds }   // 皮克敏一櫃：大格是休息花（50_pikmin.swift）   //@fan
         if NormLineup(lineup) == Original { return OriginalIds }   // 續命小隊（51_original.swift）
         if NormLineup(lineup) == Mine { return MineIds() }                       // 我的櫃：自己做的公仔（53_custom.swift）
-        return NormLineup(lineup) == Teletubbies ? ["tinky", "dipsy", "laalaa", "po"] : ["spidey", "po", "stitch", "hangyodon"]
+        return NormLineup(lineup) == Teletubbies ? ["tinky", "dipsy", "laalaa", "po"] : ["spidey", "po", "stitch", "hangyodon"]   //@fan
+        // <public> return OriginalIds
     }
     static func Lineup(_ lineup: String!) -> List<Pal>
     {
@@ -69,10 +77,13 @@ final class Pal
         return l
     }
     // 這一櫃預設放在大格的（經典一櫃照用最久的那隻）
-    static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Teletubbies ? "po" : (NormLineup(lineup) == Original ? "boba" : nil) }
+    static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Teletubbies ? "po" : (NormLineup(lineup) == Original ? "boba" : nil) }   //@fan
+    // <public> static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Original ? "boba" : nil }
     // 設定視窗、小屋「換一櫃」列出來的櫃子（之後新增一櫃：這裡加一個 id、LineupIds／LineupName 加一行）
-    static let Lineups: [String] = [Original, Classic, Teletubbies, Pikmin]
-    static func LineupName(_ lineup: String) -> String { let n = NormLineup(lineup); return n == Original ? OriginalName : (n == Teletubbies ? "天線寶寶一櫃" : (n == Pikmin ? "皮克敏一櫃" : (n == Mine ? "我的櫃" : "經典一櫃"))) }
+    static let Lineups: [String] = [Original, Classic, Teletubbies, Pikmin]   //@fan
+    // <public> static let Lineups: [String] = [Original]
+    static func LineupName(_ lineup: String) -> String { let n = NormLineup(lineup); return n == Original ? OriginalName : (n == Teletubbies ? "天線寶寶一櫃" : (n == Pikmin ? "皮克敏一櫃" : (n == Mine ? "我的櫃" : "經典一櫃"))) }   //@fan
+    // <public> static func LineupName(_ lineup: String) -> String { let n = NormLineup(lineup); return n == Mine ? "我的櫃" : OriginalName }
 
     func Shared()
     {

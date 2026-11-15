@@ -63,18 +63,22 @@ enum App {
         w.Start()
         app.run()
     }
+// <fan>
 
     // 開發用：把每個角色的各種姿勢畫成一張圖（不會開任何視窗）
     static func Preview(_ path: String, _ night: Bool) {
         Pet.PreviewSheet(path, night)
     }
+    // </fan>
     static func PreviewShelf(_ path: String, _ night: Bool) {
         Pet.PreviewShelf(path, night)
     }
+    // <fan>
     // 開發用：天線寶寶一櫃的各種姿勢
     static func PreviewTubbies(_ path: String, _ night: Bool) {
         Pet.PreviewTubbySheet(path, night)
     }
+    // </fan>
 
     // mac: 程式進入點（99_main.swift 呼叫）
     // DeskPals [socket] [pet] [lineup]
@@ -82,11 +86,15 @@ enum App {
     static func Main() {
         signal(SIGPIPE, SIG_IGN)
         let a = CommandLine.arguments
-        if a.count >= 3 && (a[1] == "--preview" || a[1] == "--preview-shelf" || a[1] == "--preview-tubbies") {
+        if a.count >= 3 && (a[1] == "--preview" || a[1] == "--preview-shelf" || a[1] == "--preview-tubbies") {   //@fan
+        // <public> if a.count >= 3 && a[1] == "--preview-shelf" {
             let night = a.count >= 4 && (a[3] == "night" || a[3] == "1" || a[3].lowercased() == "true")
+            // <fan>
             if a[1] == "--preview" { Preview(a[2], night) }
             else if a[1] == "--preview-shelf" { PreviewShelf(a[2], night) }
             else { PreviewTubbies(a[2], night) }
+            // </fan>
+            // <public> PreviewShelf(a[2], night)
             exit(0)
         }
         let def = (NSHomeDirectory() as NSString).appendingPathComponent("Library/Application Support/SpideyDesktop/spidey.sock")
@@ -401,7 +409,8 @@ enum W {
 
     // 系統閒置秒數（整台電腦最後一次鍵盤／滑鼠）
     static func IdleSeconds() -> Double {
-        if App.Isolated { return World.TestIdle }   // 測試：不看真的鍵盤滑鼠（act idle <秒>）
+        if App.Isolated { return World.TestIdle }   // 測試：不看真的鍵盤滑鼠（act idle <秒>）   //@fan
+        // <public> if App.Isolated { return 0 }
         let anyInput = CGEventType(rawValue: ~0)!
         return CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: anyInput)
     }
@@ -602,13 +611,14 @@ class BallForm: OverlayForm {
     var kind = "tennis"
     static let TENNIS: [String] = ["..kkkk..", ".kTTTTk.", "kTTWTTTk", "kTWTTTTk", "kTTTTWTk", "kTTTWTTk", ".kTTTTk.", "..kkkk.."]
     static let BASEBALL: [String] = ["..gggg..", ".gWWWWg.", "gRWWWWRg", "gWRWWRWg", "gWRWWRWg", "gRWWWWRg", ".gWWWWg.", "..gggg.."]
-    static let TUBBYBALL: [String] = ["..kkkk..", ".kOOYOk.", "kOYOOOOk", "kOOOOOok", "kOOOOOok", "kOOOOook", ".kooook.", "..kkkk.."]   // 天線寶寶的大橘球
+    static let TUBBYBALL: [String] = ["..kkkk..", ".kOOYOk.", "kOYOOOOk", "kOOOOOok", "kOOOOOok", "kOOOOook", ".kooook.", "..kkkk.."]   // 天線寶寶的大橘球   //@fan
     let bk = SolidBrush(Color.FromArgb(0x2A, 0x2F, 0x45)), bt = SolidBrush(Color.FromArgb(0xD9, 0xE8, 0x4A)), bw = SolidBrush(Color.White),
         bg = SolidBrush(Color.FromArgb(0x8A, 0x90, 0xA0)), brd = SolidBrush(Color.FromArgb(0xE0, 0x3A, 0x3A)),
         bo = SolidBrush(Color.FromArgb(0xF2, 0x85, 0x2A)), bod = SolidBrush(Color.FromArgb(0xC2, 0x5E, 0x14)), byl = SolidBrush(Color.FromArgb(0xFF, 0xD8, 0x4A))
     init(_ ps: Int) { self.ps = ps; super.init(false); Size = Size(8 * ps, 8 * ps) }
     var Kind: String { get { return kind } set { if kind != newValue { kind = newValue; Invalidate() } } }
-    static func Art(_ kind: String) -> [String] { return kind == "baseball" ? BASEBALL : (kind == "tubby" ? TUBBYBALL : TENNIS) }
+    static func Art(_ kind: String) -> [String] { return kind == "baseball" ? BASEBALL : (kind == "tubby" ? TUBBYBALL : TENNIS) }   //@fan
+    // <public> static func Art(_ kind: String) -> [String] { return kind == "baseball" ? BASEBALL : TENNIS }
     override func OnPaint(_ e: PaintEventArgs) {
         let g = e.Graphics
         g.Clear(KEY)

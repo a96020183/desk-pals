@@ -5795,18 +5795,22 @@ enum App {
         w.Start()
         app.run()
     }
+// <fan>
 
     // 開發用：把每個角色的各種姿勢畫成一張圖（不會開任何視窗）
     static func Preview(_ path: String, _ night: Bool) {
         Pet.PreviewSheet(path, night)
     }
+    // </fan>
     static func PreviewShelf(_ path: String, _ night: Bool) {
         Pet.PreviewShelf(path, night)
     }
+    // <fan>
     // 開發用：天線寶寶一櫃的各種姿勢
     static func PreviewTubbies(_ path: String, _ night: Bool) {
         Pet.PreviewTubbySheet(path, night)
     }
+    // </fan>
 
     // mac: 程式進入點（99_main.swift 呼叫）
     // DeskPals [socket] [pet] [lineup]
@@ -5814,11 +5818,15 @@ enum App {
     static func Main() {
         signal(SIGPIPE, SIG_IGN)
         let a = CommandLine.arguments
-        if a.count >= 3 && (a[1] == "--preview" || a[1] == "--preview-shelf" || a[1] == "--preview-tubbies") {
+        if a.count >= 3 && (a[1] == "--preview" || a[1] == "--preview-shelf" || a[1] == "--preview-tubbies") {   //@fan
+        // <public> if a.count >= 3 && a[1] == "--preview-shelf" {
             let night = a.count >= 4 && (a[3] == "night" || a[3] == "1" || a[3].lowercased() == "true")
+            // <fan>
             if a[1] == "--preview" { Preview(a[2], night) }
             else if a[1] == "--preview-shelf" { PreviewShelf(a[2], night) }
             else { PreviewTubbies(a[2], night) }
+            // </fan>
+            // <public> PreviewShelf(a[2], night)
             exit(0)
         }
         let def = (NSHomeDirectory() as NSString).appendingPathComponent("Library/Application Support/SpideyDesktop/spidey.sock")
@@ -6133,7 +6141,8 @@ enum W {
 
     // 系統閒置秒數（整台電腦最後一次鍵盤／滑鼠）
     static func IdleSeconds() -> Double {
-        if App.Isolated { return World.TestIdle }   // 測試：不看真的鍵盤滑鼠（act idle <秒>）
+        if App.Isolated { return World.TestIdle }   // 測試：不看真的鍵盤滑鼠（act idle <秒>）   //@fan
+        // <public> if App.Isolated { return 0 }
         let anyInput = CGEventType(rawValue: ~0)!
         return CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: anyInput)
     }
@@ -6334,13 +6343,14 @@ class BallForm: OverlayForm {
     var kind = "tennis"
     static let TENNIS: [String] = ["..kkkk..", ".kTTTTk.", "kTTWTTTk", "kTWTTTTk", "kTTTTWTk", "kTTTWTTk", ".kTTTTk.", "..kkkk.."]
     static let BASEBALL: [String] = ["..gggg..", ".gWWWWg.", "gRWWWWRg", "gWRWWRWg", "gWRWWRWg", "gRWWWWRg", ".gWWWWg.", "..gggg.."]
-    static let TUBBYBALL: [String] = ["..kkkk..", ".kOOYOk.", "kOYOOOOk", "kOOOOOok", "kOOOOOok", "kOOOOook", ".kooook.", "..kkkk.."]   // 天線寶寶的大橘球
+    static let TUBBYBALL: [String] = ["..kkkk..", ".kOOYOk.", "kOYOOOOk", "kOOOOOok", "kOOOOOok", "kOOOOook", ".kooook.", "..kkkk.."]   // 天線寶寶的大橘球   //@fan
     let bk = SolidBrush(Color.FromArgb(0x2A, 0x2F, 0x45)), bt = SolidBrush(Color.FromArgb(0xD9, 0xE8, 0x4A)), bw = SolidBrush(Color.White),
         bg = SolidBrush(Color.FromArgb(0x8A, 0x90, 0xA0)), brd = SolidBrush(Color.FromArgb(0xE0, 0x3A, 0x3A)),
         bo = SolidBrush(Color.FromArgb(0xF2, 0x85, 0x2A)), bod = SolidBrush(Color.FromArgb(0xC2, 0x5E, 0x14)), byl = SolidBrush(Color.FromArgb(0xFF, 0xD8, 0x4A))
     init(_ ps: Int) { self.ps = ps; super.init(false); Size = Size(8 * ps, 8 * ps) }
     var Kind: String { get { return kind } set { if kind != newValue { kind = newValue; Invalidate() } } }
-    static func Art(_ kind: String) -> [String] { return kind == "baseball" ? BASEBALL : (kind == "tubby" ? TUBBYBALL : TENNIS) }
+    static func Art(_ kind: String) -> [String] { return kind == "baseball" ? BASEBALL : (kind == "tubby" ? TUBBYBALL : TENNIS) }   //@fan
+    // <public> static func Art(_ kind: String) -> [String] { return kind == "baseball" ? BASEBALL : TENNIS }
     override func OnPaint(_ e: PaintEventArgs) {
         let g = e.Graphics
         g.Clear(KEY)
@@ -6554,11 +6564,13 @@ final class Pal
     var KeepAntenna: Bool = false              // 帽子戴上後把天線重畫在帽子上面（小波）
     var TopRows: Int = 0
     var NoGlasses: Bool = false                // 眼睛太開，眼鏡戴不上（史迪仔）                           // 頭頂超出 16 格框的列數（小波的天線）
+    // <fan>
     // 天線寶寶一櫃（丁丁、迪西、拉拉）用的；經典一櫃的角色都是預設值
     var Tubby: Bool = false                    // 丁丁／迪西／拉拉（小波另外寫）
     var TummyRow: Double = 10.5                // 肚子電視的中心在第幾列
     var AntRows: Int = -1                      // 戴帽子時露在帽子上面的天線列數（-1＝TopRows-1，小波）
     var AntThrough: Bool = false               // 天線從帽子中間穿出來（不墊高；丁丁太高了）
+    // </fan>
     var HeadTop: Int = -1                      // 頭頂外框那一列在 16 格框的第幾列
     var BodyTop: Int = 8                       // 身體第一列在 16 格框的第幾列
     // ---- from 50_pikmin.swift ----
@@ -6578,8 +6590,10 @@ final class Pal
     static var All: List<Pal> {
         if all == nil {
             let l = List<Pal>()
+            // <fan>
             for x in [Spidey(), Po(), Stitch(), Hangyodon(), Tinky(), Dipsy(), LaaLaa()] { l.Add(x) }
-            l.AddRange(PikminPals())
+            // </fan>
+            l.AddRange(PikminPals())   //@fan
             l.AddRange(OrigPals())
             l.AddRange(CuPals())
             all = l
@@ -6593,14 +6607,18 @@ final class Pal
     }
 
     // ---- 兩櫃：經典（Spidey、小波、史迪仔、人魚漢頓）／天線寶寶（丁丁、迪西、拉拉、小波；大格是小波）----
-    static let Classic = "classic", Teletubbies = "teletubbies"
-    static func NormLineup(_ s: String!) -> String { let t = s == nil ? "" : s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); return t == Teletubbies || t == Pikmin || t == Original || (t == Mine && HasCustom()) ? t : Classic }
+    static let Classic = "classic", Teletubbies = "teletubbies"   //@fan
+    static let Fallback = Classic                      // 找不到的櫃子、還沒選過：回到這一櫃 //@fan
+    // <public> static let Fallback = Original
+    static func NormLineup(_ s: String!) -> String { let t = s == nil ? "" : s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); return t == Teletubbies || t == Pikmin || t == Original || (t == Mine && HasCustom()) ? t : Fallback }   //@fan
+    // <public> static func NormLineup(_ s: String!) -> String { let t = s == nil ? "" : s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); return t == Original || (t == Mine && HasCustom()) ? t : Classic }
     static func LineupIds(_ lineup: String!) -> [String]
     {
-        if NormLineup(lineup) == Pikmin { return PikminIds }   // 皮克敏一櫃：大格是休息花（50_pikmin.swift）
+        if NormLineup(lineup) == Pikmin { return PikminIds }   // 皮克敏一櫃：大格是休息花（50_pikmin.swift）   //@fan
         if NormLineup(lineup) == Original { return OriginalIds }   // 續命小隊（51_original.swift）
         if NormLineup(lineup) == Mine { return MineIds() }                       // 我的櫃：自己做的公仔（53_custom.swift）
-        return NormLineup(lineup) == Teletubbies ? ["tinky", "dipsy", "laalaa", "po"] : ["spidey", "po", "stitch", "hangyodon"]
+        return NormLineup(lineup) == Teletubbies ? ["tinky", "dipsy", "laalaa", "po"] : ["spidey", "po", "stitch", "hangyodon"]   //@fan
+        // <public> return OriginalIds
     }
     static func Lineup(_ lineup: String!) -> List<Pal>
     {
@@ -6609,10 +6627,13 @@ final class Pal
         return l
     }
     // 這一櫃預設放在大格的（經典一櫃照用最久的那隻）
-    static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Teletubbies ? "po" : (NormLineup(lineup) == Original ? "boba" : nil) }
+    static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Teletubbies ? "po" : (NormLineup(lineup) == Original ? "boba" : nil) }   //@fan
+    // <public> static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Original ? "boba" : nil }
     // 設定視窗、小屋「換一櫃」列出來的櫃子（之後新增一櫃：這裡加一個 id、LineupIds／LineupName 加一行）
-    static let Lineups: [String] = [Original, Classic, Teletubbies, Pikmin]
-    static func LineupName(_ lineup: String) -> String { let n = NormLineup(lineup); return n == Original ? OriginalName : (n == Teletubbies ? "天線寶寶一櫃" : (n == Pikmin ? "皮克敏一櫃" : (n == Mine ? "我的櫃" : "經典一櫃"))) }
+    static let Lineups: [String] = [Original, Classic, Teletubbies, Pikmin]   //@fan
+    // <public> static let Lineups: [String] = [Original]
+    static func LineupName(_ lineup: String) -> String { let n = NormLineup(lineup); return n == Original ? OriginalName : (n == Teletubbies ? "天線寶寶一櫃" : (n == Pikmin ? "皮克敏一櫃" : (n == Mine ? "我的櫃" : "經典一櫃"))) }   //@fan
+    // <public> static func LineupName(_ lineup: String) -> String { let n = NormLineup(lineup); return n == Mine ? "我的櫃" : OriginalName }
 
     func Shared()
     {
@@ -6939,7 +6960,7 @@ extension Pet {
         }
         if P.Cu && CuPat() { return }
         let line = !Night && Level() >= 4 && rnd.NextDouble() < 0.4 ? L("pats_hi") : L("pats")
-        if Is("hangyodon") && !Night && P.Lines["pats"].contains(line) { jokeT = 2.6 }
+        if Is("hangyodon") && !Night && P.Lines["pats"].contains(line) { jokeT = 2.6 }   //@fan
         if Grounded() { Hug(line, 2.6) }
         else { Say(line, 2.2); AddHeart() }
     }
@@ -6947,10 +6968,11 @@ extension Pet {
     // 連點三下：每個角色不一樣
     func PatCombo() {
         AddHeart()
-        if P.Pik { PikCombo(); return }
+        if P.Pik { PikCombo(); return }   //@fan
         if P.Orig { OrigCombo(); return }
         if P.Cu { CuCombo(); return }
         switch P.Id {
+        // <fan>
         case "po":   // 咯咯笑＋原地轉一圈「再來一次！」
             Say(L("tickle"), 1.8)
             if Grounded() && state != "dizzy" { SetState("spin", 0.9); Jump(0, -340 * k); rolling = true }
@@ -6969,6 +6991,7 @@ extension Pet {
         case "laalaa": // 啦啦啦～轉圈圈
             Say(L("tickle"), 1.8)
             if Grounded() && state != "dizzy" { SetState("twirl", 1.3) }
+            // </fan>
         default:
             Say(L("tickle"), 1.6)
             if Grounded() && state != "dizzy" { Jump(Double(dir) * 40 * k, -330 * k) }
@@ -6995,8 +7018,9 @@ extension Pet {
         let nearX: Bool = Math.Abs(cX - cx) < 380 * k && Math.Abs(cX - cx) > 8
         if !fetching && state != "seek" && seekCd <= 0 && still > 2.5 && !onMe && nearY && nearX {
             seekX = cX; seekCd = R(45, 100)
-            if Is("stitch") && rnd.NextDouble() < 0.4 { SetState("seek", 8); afterLand = "nudge"; Say("嘻嘻嘻…", 1.2) }
-            else { SetState("seek", 8); Say(L("seek"), 1.2) }
+            if Is("stitch") && rnd.NextDouble() < 0.4 { SetState("seek", 8); afterLand = "nudge"; Say("嘻嘻嘻…", 1.2) }   //@fan
+            else { SetState("seek", 8); Say(L("seek"), 1.2) }   //@fan
+            // <public> do { SetState("seek", 8); Say(L("seek"), 1.2) }
         }
     }
 
@@ -7114,11 +7138,12 @@ extension Pet {
             else { SetState("walk", 2); afterLand = ""; Say(L("seek_lost"), 1.4); return }
         }
         if Math.Abs(seekX - Cx) < 6 {
-            if afterLand == "nudge" { afterLand = ""; SetState("nudge", 1.6); Say(Pick(["ih-ih-ih!（推推）", "嘻嘻，推一下～", "這個是史迪仔的！"]), 1.8); return }
+            if afterLand == "nudge" { afterLand = ""; SetState("nudge", 1.6); Say(Pick(["ih-ih-ih!（推推）", "嘻嘻，推一下～", "這個是史迪仔的！"]), 1.8); return }   //@fan
             Hug(L("seek_got"), 3); return
         }
         dir = seekX > Cx ? 1 : -1
-        let spd: Double = Is("hangyodon") || Is("tinky") ? 60 : 95
+        let spd: Double = Is("hangyodon") || Is("tinky") ? 60 : 95   //@fan
+        // <public> let spd: Double = 95
         if MoveOnGround(dt, spd * k) { return }
         let ncx = Cx
         if (dir > 0 && ncx > seekX) || (dir < 0 && ncx < seekX) { x = seekX - Double(SW) / 2.0 }
@@ -7166,8 +7191,9 @@ extension Pet {
         if !Grounded() { return false }
         guard let o = PickPlatform(40 * k, 900 * k) else { return false }
         BallisticTo(o[0], o[1])
-        if Is("po") { Say(L("jump"), 0.9) }
-        else if rnd.NextDouble() < 0.3 { Say(L("jump"), 0.8) }
+        if Is("po") { Say(L("jump"), 0.9) }   //@fan
+        else if rnd.NextDouble() < 0.3 { Say(L("jump"), 0.8) }   //@fan
+        // <public> if rnd.NextDouble() < 0.3 { Say(L("jump"), 0.8) }
         return true
     }
 
@@ -7182,7 +7208,7 @@ extension Pet {
         cx = Cx
         if y < Double(wa.Top) { y = Double(wa.Top); if vy < 0 { vy = 0 } }
         if Math.Abs(vx) > 1 { dir = vx > 0 ? 1 : -1 }
-        if vy > 1100 * k && (Is("po") || Is("stitch") || Is("laalaa")) { rolling = true } // 摔很快 → 滾
+        if vy > 1100 * k && (Is("po") || Is("stitch") || Is("laalaa")) { rolling = true } // 摔很快 → 滾   //@fan
         if vy <= 0 { return }
         var best = Double(wa.Bottom); var bp: Plat? = nil
         for p in w.Plats {
@@ -7202,7 +7228,8 @@ extension Pet {
             else if dizzyOnLand { dizzyOnLand = false; SetState("dizzy", 1.6) }
             else if fetching && w.BallOn { SetState("fetch", 15) }
             else if afterLand != "" { LandAction() }
-            else if InScene && (w.TubbyLineup || w.PikLineup || w.OrigLineup) { SetState("idle", 30) }   // 天線寶寶串場：跳一下落地就站好，不要走掉
+            else if InScene && (w.TubbyLineup || w.PikLineup || w.OrigLineup) { SetState("idle", 30) }   // 天線寶寶串場：跳一下落地就站好，不要走掉   //@fan
+            // <public> else if InScene && w.OrigLineup { SetState("idle", 30) }
             else { SetState("walk", R(2, 5)) }
         }
     }
@@ -7214,7 +7241,8 @@ extension Pet {
         if supH == IntPtr.Zero || !Grounded() { return }
         if w.CuFake(supH) { return }   // 測試用的假視窗（53_custom.swift）
         var r = W.RECT()
-        if !W.IsWindowVisible(supH) || W.IsIconic(supH) || !W.Rect(supH, &r) { Jump(0, 0); Say(Is("hangyodon") ? "哇！地板游走了！" : "哇！地板不見了", 1.2); return }
+        if !W.IsWindowVisible(supH) || W.IsIconic(supH) || !W.Rect(supH, &r) { Jump(0, 0); Say(Is("hangyodon") ? "哇！地板游走了！" : "哇！地板不見了", 1.2); return }   //@fan
+        // <public> if !W.IsWindowVisible(supH) || W.IsIconic(supH) || !W.Rect(supH, &r) { Jump(0, 0); Say("哇！地板不見了", 1.2); return }
         let dl = r.L - supWinL
         if dl != 0 { x += Double(dl); supL += dl; supR += dl; supWinL = r.L }
         y = Double(r.T - SH)
@@ -7339,7 +7367,7 @@ extension Pet {
 
     func Throw(_ tvx: Double, _ tvy: Double) {
         var tvx = tvx, tvy = tvy
-        if P.Pik { PikThrown(&tvx, &tvy) }
+        if P.Pik { PikThrown(&tvx, &tvy) }   //@fan
         let zone = w.ShelfZone(SW, SH)
         let cx = Cx, cy: Double = y + Double(SH) / 2.0, speed: Double = Math.Abs(tvx) + Math.Abs(tvy)
         nearMiss = false
@@ -7368,7 +7396,8 @@ extension Pet {
         Jump(tvx, tvy)
         if speed > 900 * k {
             Say(L("throw"), 0.9)
-            if Is("po") || Is("stitch") || Is("laalaa") || P.Cu { rolling = true }
+            if Is("po") || Is("stitch") || Is("laalaa") || P.Cu { rolling = true }   //@fan
+            // <public> if P.Cu { rolling = true }
         }
     }
 
@@ -7380,7 +7409,8 @@ extension Pet {
         fx1 = tfx - Double(SW) / 2.0; fy1 = tfy - Double(SH)
         vx = tvx; vy = tvy; flyT = 0
         supH = IntPtr.Zero; sc = 1; fetching = false; InScene = false
-        rolling = Is("po") || Is("stitch") || Is("laalaa") || P.Cu
+        rolling = Is("po") || Is("stitch") || Is("laalaa") || P.Cu   //@fan
+        // <public> rolling = P.Cu
         SetState("fling", 99)
     }
 
@@ -7404,6 +7434,7 @@ extension Pet {
     func GoalCheer() {
         let line: String
         switch P.Id {
+        // <fan>
         case "po": line = "進球！🏀 再來一次！"
         case "stitch": line = "嘻嘻嘻～進球！🏀"
         case "hangyodon": line = "英雄……降落成功 🏀"
@@ -7411,8 +7442,10 @@ extension Pet {
         case "dipsy": line = "進球。🏀 帽子還在，酷。"
         case "laalaa": line = "進球！🏀 啦啦啦～"
         case "pkred", "pkyellow", "pkblue": line = PikLine("goal")
+        // </fan>
         case "boba", "coffee", "onigiri", "sticky": line = OrigLine("goal")
-        default: line = P.Cu ? L("x_goal") : "進球！🏀 Thwip!"
+        default: line = P.Cu ? L("x_goal") : "進球！🏀 Thwip!"   //@fan
+        // <public> default: line = P.Cu ? L("x_goal") : "進球！🏀"
         }
         Say(line, 2.4)
         Burst(14)
@@ -7424,6 +7457,7 @@ extension Pet {
         if !Out || InScene { return }
         let line: String
         switch P.Id {
+        // <fan>
         case "po": line = "Eh-oh! 進了！"
         case "stitch": line = "ih-ih! 嘻嘻嘻"
         case "hangyodon": line = "好、好厲害！"
@@ -7431,6 +7465,7 @@ extension Pet {
         case "dipsy": line = "酷！"
         case "laalaa": line = "啦啦～進了！"
         case "pkred", "pkyellow", "pkblue": line = PikLine("cheer")
+        // </fan>
         case "boba", "coffee", "onigiri", "sticky": line = OrigLine("cheer")
         default: line = P.Cu ? L("x_cheer") : "好球！"
         }
@@ -7441,6 +7476,7 @@ extension Pet {
 
     func MissLine() -> String {
         switch P.Id {
+        // <fan>
         case "po": return "差一點點！再來一次！"
         case "stitch": return "ih! 沒進！嘻嘻"
         case "hangyodon": return "偏、偏了…英雄也會失手"
@@ -7448,6 +7484,7 @@ extension Pet {
         case "dipsy": return "沒進…但帽子很帥"
         case "laalaa": return "差一點！再來一次！"
         case "pkred", "pkyellow", "pkblue": return PikLine("miss")
+        // </fan>
         case "boba", "coffee", "onigiri", "sticky": return OrigLine("miss")
         default: break
         }
@@ -7466,7 +7503,8 @@ extension Pet {
         fx0 = x; fy0 = y; fx1 = tfx - Double(SW) / 2.0; fy1 = tfy - Double(SH)
         let ddx: Double = fx1 - fx0, ddy: Double = fy1 - fy0
         let d: Double = Math.Sqrt(ddx * ddx + ddy * ddy)
-        let flySpeed: Double = Is("hangyodon") ? 560 * k : 900 * k
+        let flySpeed: Double = Is("hangyodon") ? 560 * k : 900 * k   //@fan
+        // <public> let flySpeed: Double = 900 * k
         flyDur = Clamp(d / flySpeed, 0.35, 1.6)
         flyArc = Math.Min(160 * k, 40 * k + d * 0.25)
         flyT = 0; supH = IntPtr.Zero
@@ -7475,8 +7513,9 @@ extension Pet {
 
     func StowFly(_ dt: Double) {
         flyT += dt
-        let f: Double = Math.Min(1, flyT / flyDur), e: Double = Is("hangyodon") ? Ease(f) : f
-        if Is("hangyodon") && rnd.NextDouble() < 0.25 { Mark(5) }
+        let f: Double = Math.Min(1, flyT / flyDur), e: Double = Is("hangyodon") ? Ease(f) : f   //@fan
+        // <public> let f: Double = Math.Min(1, flyT / flyDur), e: Double = f
+        if Is("hangyodon") && rnd.NextDouble() < 0.25 { Mark(5) }   //@fan
         x = fx0 + (fx1 - fx0) * e
         let arc: Double = Math.Sin(Math.PI * f) * flyArc
         y = fy0 + (fy1 - fy0) * e - arc
@@ -7512,14 +7551,16 @@ extension Pet {
         sc = 1
         let wa = w.WA(Cx, y + Double(SH))
         let tx: Double = Clamp(Cx - R(140, 360) * k, Double(wa.Left + SW), Double(wa.Right - SW))
-        if Is("hangyodon") { StartSwim(tx, Double(wa.Bottom), false); return }
+        if Is("hangyodon") { StartSwim(tx, Double(wa.Bottom), false); return }   //@fan
         BallisticTo(tx, Double(wa.Bottom))
-        if Is("stitch") { rolling = true }
+        if Is("stitch") { rolling = true }   //@fan
         if P.Orig { OrigExit() }
-        if P.Pik { afterLand = "pksprout" }                                     // 皮克敏：落地先種在土裡，再「噗！」拔出來
+        if P.Pik { afterLand = "pksprout" }                                     // 皮克敏：落地先種在土裡，再「噗！」拔出來   //@fan
+        // <fan>
         if Is("tinky") && rnd.NextDouble() < 0.3 { afterLand = "plop" }          // 丁丁跳出來常常跌坐
         else if Is("laalaa") && rnd.NextDouble() < 0.4 { afterLand = "twirl" }   // 拉拉落地轉一圈
         else if Is("dipsy") && rnd.NextDouble() < 0.4 { afterLand = "hattip" }   // 迪西落地扶帽子
+        // </fan>
     }
 
     // ---------- 走到指定位置（串場、大合照用）----------
@@ -7558,7 +7599,8 @@ extension Pet {
         let resting = w.Bvy == 0 && Math.Abs(w.Bvx) < 30 * k
         let sameLevel = Math.Abs(w.By + r - foot) < 40 * k
         if resting && !sameLevel { BallisticTo(w.Bx, w.By + r); return }
-        let base: Double = P.Tubby ? (Is("tinky") ? 90 : (Is("laalaa") ? 150 : 125)) : (Is("hangyodon") ? 70 : (Is("stitch") ? 170 : (Is("po") ? 150 : 125)))
+        let base: Double = P.Tubby ? (Is("tinky") ? 90 : (Is("laalaa") ? 150 : 125)) : (Is("hangyodon") ? 70 : (Is("stitch") ? 170 : (Is("po") ? 150 : 125)))   //@fan
+        // <public> let base: Double = 125
         let sp: Double = base * k
         if Math.Abs(dxb) > 6 { dir = dxb > 0 ? 1 : -1; if MoveOnGround(dt, sp) { return } }
         else if w.By < y && w.Bvy > 0 && w.By > y - 160 * k { Jump(0, -380 * k); return }
@@ -7572,9 +7614,10 @@ extension Pet {
         fetching = false
         if ballXp < 20 { ballXp += 2; AddXp(2) }
         Burst(6)
-        if P.Pik { PikBall(); return true }
+        if P.Pik { PikBall(); return true }   //@fan
         if P.Orig { OrigBall(); return true }
         if P.Cu { CuBall(); return true }
+        // <fan>
         switch P.Id {
         case "po": PoBall(); return true
         case "stitch": StitchBall(); return true
@@ -7586,6 +7629,7 @@ extension Pet {
         }
         // Spidey：踢回滑鼠的方向（多人時用絲接住）
         if w.OutCount() > 1 && rnd.NextDouble() < 0.6 { WebCatch(); return true }
+        // </fan>
         Say(L("ball_catch"), 1.8)
         KickBallToCursor(1.0)
         if Grounded() { SetState("kick", 0.5) }
@@ -7612,8 +7656,10 @@ extension Pet {
     func OnErrors(_ n: Int, _ prev: Int, _ hideFrom: Pet?) {
         WakeIfSleep()
         if n > prev {
-            sense = Is("spidey") ? 2.8 : 0
+            sense = Is("spidey") ? 2.8 : 0   //@fan
+            // <public> sense = 0
             let line = L("errors", "n", n.ToString())
+            // <fan>
             if Is("hangyodon") && Grounded() { capeT = 0; SetState("capetrip", 2.6) }
             else if Is("stitch") && Grounded() { Jump(0, -360 * k); Mark(1) }
             else if Is("po") && hideFrom != nil && Grounded() { HideBehindPet(hideFrom!) }
@@ -7621,7 +7667,9 @@ extension Pet {
             else if Is("dipsy") && Grounded() { poseKind = "hatdown"; SetState("pose", 2.6) }
             else if Is("laalaa") && hideFrom != nil && Grounded() { HideBehindPet(hideFrom!) }
             else if P.Pik && Grounded() { PikReact("errors") }
-            else if P.Orig && Grounded() { OrigReact("errors") }
+            // </fan>
+            else if P.Orig && Grounded() { OrigReact("errors") }   //@fan
+            // <public> if P.Orig && Grounded() { OrigReact("errors") }
             else if P.Cu && Grounded() { CuReact("errors") }
             else if state == "walk" { SetState("idle", 3) }
             Say(line, 3, true)
@@ -7631,9 +7679,12 @@ extension Pet {
 
     func OnTyping() {
         if !Grounded() || state == "hug" || state == "sleep" || InScene || Quiet { return }
+        // <fan>
         if Is("stitch") { SetState("elvis", 4) }
         else if Is("laalaa") { SetState("dance", 4); Mark(0); Mark(0) }
-        else { SetState("dance", 4) }
+        // </fan>
+        else { SetState("dance", 4) }   //@fan
+        // <public> SetState("dance", 4)
         Say(L("typing"), 2.5)
     }
 
@@ -7648,7 +7699,7 @@ extension Pet {
     // 卡住提醒（文字已組好）
     func Alert(_ text: String) {
         WakeIfSleep()
-        if Is("spidey") { sense = 2.8 }
+        if Is("spidey") { sense = 2.8 }   //@fan
         Knock(text, "high")
         Say(text, 5, true)
         bubblePri = 2
@@ -7672,7 +7723,8 @@ extension Pet {
 
     func NightChanged(_ d: Bool) {
         if !Out { return }
-        if d { if Is("spidey") { sense = 2.5 }; NoZoom(L("night_on"), 3.5) }
+        if d { if Is("spidey") { sense = 2.5 }; NoZoom(L("night_on"), 3.5) }   //@fan
+        // <public> if d { NoZoom(L("night_on"), 3.5) }
         else { Say(L("night_off"), 3) }
     }
 
@@ -7749,10 +7801,13 @@ extension Pet {
         switch a {
         case "hi":
             if Out && Grounded() {
+                // <fan>
                 if Is("po") { SetState("wave", 1.6) }
                 else if Is("hangyodon") { poseKind = "hero"; SetState("pose", 1.4) }
                 else if Is("dipsy") { poseKind = "hattip"; SetState("pose", 1.6) }
-                else if P.Tubby || P.Orig { SetState("wave", 1.6) }
+                // </fan>
+                else if P.Tubby || P.Orig { SetState("wave", 1.6) }   //@fan
+                // <public> if P.Orig { SetState("wave", 1.6) }
                 else { Jump(0, -260 * k) }
             }
             Say(L("hi"), 2.4)
@@ -7780,12 +7835,14 @@ extension Pet {
 
     func CelebrateWith(_ line: String, _ lead: Bool) {
         switch P.Id {
+        // <fan>
         case "po": HomeRun(line, lead)
         case "stitch": if Grounded() { SetState("elvis", 4.5) }; Say(line, 4); for _ in 0..<3 { Mark(0) }
         case "hangyodon": if Grounded() { poseKind = "hero"; SetState("pose", 3.4) }; Say(line, 4); for _ in 0..<6 { Mark(5) }; Burst(6)
         case "tinky": if Grounded() { TinkyBag("star", true) }; Say(line, 4); Burst(10)
         case "dipsy": if Grounded() { HatToss(true) }; Say(line, 4); Burst(8)
         case "laalaa": if Grounded() { SetState("twirl", 2.4) }; Say(line, 4); for _ in 0..<4 { Mark(0) }; Burst(8)
+        // </fan>
         case "boba", "coffee", "onigiri", "sticky": OrigCelebrate(line, lead)
         default:
             if lead { w.Fireworks(w.WA(Cx, y + Double(SH) / 2.0), 10, -1) }
@@ -7802,8 +7859,9 @@ extension Pet {
         let text = L("done", "who", src)
         if !lead { React(); return }
         if !Out { Say(text, 4); return }
-        if Is("spidey") { NoZoom(text, 4); Burst(8) }
-        else { CelebrateWith(text, true) }
+        if Is("spidey") { NoZoom(text, 4); Burst(8) }   //@fan
+        else { CelebrateWith(text, true) }   //@fan
+        // <public> CelebrateWith(text, true)
         AddXp(1)
     }
 
@@ -7834,9 +7892,9 @@ import Foundation
 extension Pet {
     // 角色專屬狀態：回傳 true＝處理掉了
     func StepSpecial(_ dt: Double, _ wa: Rectangle) -> Bool {
-        if HoldToast && rnd.NextDouble() < dt * 2.5 && notes.Count < 10 { notes.Add(Arr<Double>([R(-8, 8) * k, 0, 7])) }   // 吐司屑屑
-        if P.Tubby && TubbyStep(dt) { return true }
-        if P.Pik && PikStep(dt) { return true }
+        if HoldToast && rnd.NextDouble() < dt * 2.5 && notes.Count < 10 { notes.Add(Arr<Double>([R(-8, 8) * k, 0, 7])) }   // 吐司屑屑   //@fan
+        if P.Tubby && TubbyStep(dt) { return true }   //@fan
+        if P.Pik && PikStep(dt) { return true }   //@fan
         if P.Orig && OrigStep(dt) { return true }
         if P.Cu && CuStep(dt) { return true }
         switch state {
@@ -7844,6 +7902,7 @@ extension Pet {
             sT += dt
             if t < 0 { SetState("idle", InScene ? 30 : 1) }
             return true
+        // <fan>
         // ---- Spidey ----
         case "swing": Swing(dt, wa); return true
         case "hang": Hang(dt, wa); return true
@@ -7855,11 +7914,12 @@ extension Pet {
             if t < 0 { w.ReleaseBall(Cx, y, 0, 0); KickBallToCursor(1.0); SetState("kick", 0.4) }
             return true
         case "sling": if t < 0 { SetState("idle", 1) }; return true
+        // </fan>
         // ---- 小波 ----
         case "spin":
             if t < 0 { SetState("idle", 1); Say(Pick(["再來一次！", "再來一次！嘻嘻"]), 1.4) }
             return true
-        case "bat": Bat(dt); return true
+        case "bat": Bat(dt); return true   //@fan
         case "catch":
             if t < 0 { SetState("throw", 0.35) }
             return true
@@ -7868,15 +7928,18 @@ extension Pet {
             if t < 0 { SetState("idle", 1) }
             return true
         // ---- 史迪仔 ----
+        // <fan>
         case "wall": Wall(dt, wa); return true
         case "ceil": Ceil(dt); return true
         case "curl": Curl(dt); return true
         case "nudge": if t < 0 { SetState("idle", 1) }; return true
         case "chomp": Chomp(dt); return true
+        // </fan>
         case "elvis":
             if rnd.NextDouble() < dt * 3 { Mark(0) }
             if t < 0 { SetState("idle", 1); if !InScene { Say(Pick(["Thank you very much ♪", "嘻嘻嘻 ♪"]), 1.6) } }
             return true
+        // <fan>
         // ---- 人魚漢頓 ----
         case "swim": Swim(dt); return true
         case "header": if t < 0 { SetState(fetching ? "fetch" : "idle", fetching ? 15 : 1) }; return true
@@ -7885,6 +7948,7 @@ extension Pet {
             if capeT >= 1.4 && capeT - dt < 1.4 { tripT = 1.1; Say(Pick(["哎呀…（跌倒）", "嗚…英雄也會跌倒的", "我、我沒事！"]), 1.8) }
             if t < 0 { SetState("idle", 1) }
             return true
+            // </fan>
         default: break
         }
         return false
@@ -7892,9 +7956,10 @@ extension Pet {
 
     // 走到視窗邊緣：0＝照預設跳下去、1＝回頭、2＝換狀態了
     func EdgeOfWindow(_ right: Bool) -> Int {
-        if P.Pik { return PikEdge(right) }
+        if P.Pik { return PikEdge(right) }   //@fan
         if P.Orig { return OrigEdge(right) }
         if P.Cu { return CuEdge(right) }
+        // <fan>
         switch P.Id {
         case "spidey":
             if !goClimb && rnd.NextDouble() < 0.55 { dir = -dir; if rnd.NextDouble() < 0.3 { SpinWeb(supH, right) }; return 1 }
@@ -7940,44 +8005,53 @@ extension Pet {
             return 2
         default: break
         }
+        // </fan>
         return 0
     }
 
     // 走到螢幕邊：true＝換狀態了（false＝回頭）
     func EdgeOfScreen() -> Bool {
+        // <fan>
         switch P.Id {
         case "spidey": if goClimb || rnd.NextDouble() < 0.35 { StartClimb(dir); return true }; return false
         case "stitch": if goClimb || rnd.NextDouble() < 0.3 { StartWallUp(dir); return true }; return false
         case "po": dir = -dir; Jump(Double(dir) * 60 * k, -220 * k); Say("嘟嘟～迴轉！", 0.9); return true
         default: break
         }
+        // </fan>
         return false
     }
 
     // 落地時的特別反應：true＝處理掉了
     func Landed(_ wasRolling: Bool, _ landVx: Double) -> Bool {
-        if P.Pik && PikLanded(wasRolling) { return true }
+        if P.Pik && PikLanded(wasRolling) { return true }   //@fan
         if P.Orig && OrigLanded(wasRolling) { return true }
+        // <fan>
         if Is("stitch") && wasRolling { vx = landVx * 0.8; if Math.Abs(vx) < 60 * k { vx = Double(dir) * 120 * k }; SetState("curl", R(0.8, 1.4)); return true }
         if Is("po") && wasRolling && state != "spin" { SetState("dizzy", 0.8); Say(Pick(["轉圈圈～", "再來一次！"]), 1.2); return true }
         if Is("po") && state == "spin" { SetState("spin", 0.4); return true }
         if Is("tinky") && lastLandVy > 650 * k && state != "plop" { afterLand = ""; Plop(Pick(["哎喲！", "哎喲…屁股好痛", "哎喲！（跌坐）"])); return true }
         if Is("laalaa") && wasRolling { afterLand = ""; SetState("twirl", 0.9); Say(Pick(["轉圈圈～", "再來一次！"]), 1.2); return true }
+        // </fan>
         return false
     }
 
     func LandAction() {
         let a = afterLand; afterLand = ""
-        if P.Pik && PikLand(a) { return }
+        if P.Pik && PikLand(a) { return }   //@fan
         if P.Orig && OrigLand(a) { return }
         if P.Cu && CuLand(a) { return }
         switch a {
+        // <fan>
         case "wave": SetState("wave", 1.8); Say("Eh-oh!", 1.6)
         case "sniff": poseKind = "grin"; SetState("pose", 1.6); Mark(2); Say(Pick(["（聞聞）ih?", "嘻嘻，這個好玩", "ih-ih! 史迪仔的！"]), 1.6)
+        // </fan>
         case "bubbles": SetState("idle", 1.6); for _ in 0..<4 { Mark(5) }
+        // <fan>
         case "plop": Plop(Pick(["哎喲！", "哎喲！（跌坐）"]))
         case "hattip": poseKind = "hattip"; SetState("pose", 1.6); Say(Pick(["Eh-oh.", "嘿。", "（扶帽子）酷。"]), 1.4)
         case "twirl": SetState("twirl", 1.2); Say(Pick(["啦啦啦～", "轉圈圈～"]), 1.4)
+        // </fan>
         default: SetState("idle", R(1, 2))
         }
     }
@@ -7995,11 +8069,12 @@ extension Pet {
             return
         }
         if w.OutCount() > 1 && rnd.NextDouble() < 0.12 && VisitFriend() { return }
-        if P.Pik { PikDecide(r, wa); return }
+        if P.Pik { PikDecide(r, wa); return }   //@fan
         if P.Orig { OrigDecide(r, wa); return }
         if P.Cu { CuDecide(r, wa); return }
         let lateOk: () -> Bool = { self.lateCd <= 0 && self.LateLine() != nil }
         switch P.Id {
+        // <fan>
         case "spidey":
             if r < 0.20 { SetState("idle", R(1.5, 4)) }
             else if r < 0.48 { if !JumpToPlatform() { Hop() } }
@@ -8089,6 +8164,7 @@ extension Pet {
             else if r < 0.86 && SeasonLine() != nil { Say(SeasonLine() ?? "", 3); SetState("idle", 3) }
             else if r < 0.93 { SetState("idle", 2.5); Say(L("talk"), 2.4) }
             else { dir = -dir; SetState("walk", R(3, 6)) }
+            // </fan>
         default:
             if r < 0.3 { SetState("idle", R(1.5, 4)) }
             else if r < 0.6 { if !JumpToPlatform() { Hop() } }
@@ -8105,18 +8181,22 @@ extension Pet {
             return true
         }
         if Math.Abs(tx - Cx) > 1000 * k { return false }
+        // <fan>
         if Is("hangyodon") { StartSwim(tx, foot, false) }
         else if Is("spidey") && rnd.NextDouble() < 0.5 { BallisticTo(tx, foot); Say("Thwip!", 0.8) }
-        else { BallisticTo(tx, foot); if Is("po") { Say(L("jump"), 0.8) } }
+        // </fan>
+        else { BallisticTo(tx, foot); if Is("po") { Say(L("jump"), 0.8) } }   //@fan
+        // <public> BallisticTo(tx, foot)
         return true
     }
 
     // 右鍵選單的招牌動作
     func Signature() {
         if !Out { return }
-        if P.Pik { PikSignature(); return }
+        if P.Pik { PikSignature(); return }   //@fan
         if P.Orig { OrigSignature(); return }
         if P.Cu { CuSignature(); return }
+        // <fan>
         switch P.Id {
         case "spidey": if !ShootTo("swing") { Say("這裡太低了，甩不起來", 1.6) }
         case "po": if !JumpToPlatform() { Jump(Double(dir) * 200 * k, -520 * k); Say("咻～～", 1) } else { Say("咻～～再來一次！", 1.4) }
@@ -8146,12 +8226,14 @@ extension Pet {
         case "laalaa": Juggle()
         default: break
         }
+        // </fan>
     }
 
     func ActSpecial(_ a: String) {
-        if P.Pik && PikAct(a) { return }
+        if P.Pik && PikAct(a) { return }   //@fan
         if P.Orig && OrigAct(a) { return }
         if P.Cu && CuAct(a) { return }
+        // <fan>
         switch a {
         case "swing": if Is("spidey") { if !ShootTo("swing") { Say("這裡太低了，甩不起來", 1.6) } } else { Signature() }
         case "hang": if Is("spidey") { if !ShootTo("hang") { Say("上面沒地方黏", 1.6) } }
@@ -8176,25 +8258,29 @@ extension Pet {
         case "twirl": if Grounded() { SetState("twirl", 1.6); Say("轉圈圈～啦啦啦！", 1.6) }
         default: break
         }
+        // </fan>
     }
 
     // 新視窗跳出來
     func ReactNewWindow(_ win: WinInfo) {
         if !Grounded() || sleepMode || state == "hug" || InScene || fetching { return }
         if P.Orig { OrigNewWindow(win); return }
+        // <fan>
         switch P.Id {
         case "spidey": if !ZipToWindow(win, L("newwin")) { Say("有新視窗！👀", 1.5) }
         default:
             let after: String = Is("po") || Is("tinky") ? "wave" : (Is("hangyodon") ? "bubbles" : (Is("dipsy") ? "hattip" : (Is("laalaa") ? "twirl" : (P.Cu ? "" : "sniff"))))
             if !GoToWindow(win, L("newwin"), after) { Say(L("newwin"), 1.5) }
         }
+        // </fan>
+        // <public> if !GoToWindow(win, L("newwin"), "") { Say(L("newwin"), 1.5) }
     }
 
     // 你切到哪個視窗，他常常跟過去
     @discardableResult
     func FollowWindow(_ win: WinInfo, _ text: String) -> Bool {
         if !Grounded() || sleepMode || state == "hug" || InScene || fetching { return false }
-        if Is("spidey") { return ZipToWindow(win, text) }
+        if Is("spidey") { return ZipToWindow(win, text) }   //@fan
         return GoToWindow(win, text, "")
     }
 
@@ -8204,8 +8290,9 @@ extension Pet {
         if supH == win.H { Say(text, 2); if after != "" { afterLand = after; LandAction() }; return true }
         Say(text, 2)
         afterLand = after
-        if Is("hangyodon") { StartSwim(tx, top, false) }
-        else { BallisticTo(tx, top) }
+        if Is("hangyodon") { StartSwim(tx, top, false) }   //@fan
+        else { BallisticTo(tx, top) }   //@fan
+        // <public> BallisticTo(tx, top)
         return true
     }
 
@@ -8225,7 +8312,8 @@ extension Pet {
     func Call(_ s: String) {
         if !Out || InScene { return }
         Say(s, 1.6)
-        if Grounded() && state != "header" { poseKind = Is("dipsy") ? "hattip" : "hero"; SetState("pose", 0.9) }
+        if Grounded() && state != "header" { poseKind = Is("dipsy") ? "hattip" : "hero"; SetState("pose", 0.9) }   //@fan
+        // <public> if Grounded() && state != "header" { poseKind = "hero"; SetState("pose", 0.9) }
     }
 
     // 串場用：直接設狀態／姿勢
@@ -8245,22 +8333,27 @@ extension Pet {
         case "dizzy": SetState("dizzy", dur)
         case "lick": poseKind = "lick"; SetState("pose", dur)
         // ---- 天線寶寶 ----
-        case "plop": SetState("plop", dur); sT = 0; Burst(4); Mark(4)
-        case "hattip", "hatwave", "hatdown", "sing": poseKind = kind; SetState("pose", dur)
+        case "plop": SetState("plop", dur); sT = 0; Burst(4); Mark(4)   //@fan
+        case "hattip", "hatwave", "hatdown", "sing": poseKind = kind; SetState("pose", dur)   //@fan
         case "twirl", "dance", "kick", "catch", "spin": SetState(kind, dur)
+        // <fan>
         case "juggle": juggles = 0; sT = 0; SetState("juggle", dur)
         case "hattoss": sT = 0; SetState("hattoss", dur)
         case "bat": StartBat(false)
         default: if kind.StartsWith("bag") { TinkyBag(kind.Length > 4 ? kind.Substring(4) : "", true, dur) }
+        // </fan>
+        // <public> default: break
         }
     }
     func FaceTo(_ o: Pet) { dir = o.Cx > Cx ? 1 : -1 }
     func WalkTo(_ tx: Double, _ dur: Double) { seekX = tx; dir = tx > Cx ? 1 : -1; gotoSpeed = 1.5; SetState("goto", Math.Max(dur, 8)) }
-    func RaceTo(_ tx: Double) { seekX = tx; dir = tx > Cx ? 1 : -1; gotoSpeed = Is("po") || Is("stitch") ? 1.4 : 1.1; SetState("goto", 10) }
+    func RaceTo(_ tx: Double) { seekX = tx; dir = tx > Cx ? 1 : -1; gotoSpeed = Is("po") || Is("stitch") ? 1.4 : 1.1; SetState("goto", 10) }   //@fan
+    // <public> func RaceTo(_ tx: Double) { seekX = tx; dir = tx > Cx ? 1 : -1; gotoSpeed = 1.1; SetState("goto", 10) }
     // 走到／跳到另一隻旁邊（串場前先湊在一起）；回傳大概要幾秒
     @discardableResult
     func ComeNear(_ o: Pet) -> Double {
-        let mul: Double = P.Tubby || o.P.Tubby ? 2.0 : (P.Orig ? 1.6 : 1.35)   // 天線寶寶比較寬（16 格＋道具）
+        let mul: Double = P.Tubby || o.P.Tubby ? 2.0 : (P.Orig ? 1.6 : 1.35)   // 天線寶寶比較寬（16 格＋道具）   //@fan
+        // <public> let mul: Double = P.Orig ? 1.6 : 1.35
         var tx = o.Cx + (Cx > o.Cx ? 1.0 : -1.0) * Double(o.SW) * mul
         let wa = w.WA(o.Cx, o.Foot - 4)
         tx = Pet.Clamp(tx, Double(wa.Left + SW), Double(wa.Right - SW))
@@ -8269,7 +8362,7 @@ extension Pet {
             if d < Double(SW) * 0.6 { return 0 }
             if d < 700 * k { WalkTo(tx, 10); return Math.Min(6, d / (Math.Max(P.Speed, 60.0) * k * 1.5) + 0.3) }
         }
-        if Is("hangyodon") { StartSwim(tx, o.Foot, false); return flyDur + 0.4 }
+        if Is("hangyodon") { StartSwim(tx, o.Foot, false); return flyDur + 0.4 }   //@fan
         BallisticTo(tx, o.Foot); return 1.6
     }
     func JumpTo(_ tx: Double, _ footY: Double) { BallisticTo(tx, footY) }
@@ -8278,7 +8371,8 @@ extension Pet {
     func HatPoint() -> PointF { return PointF(Cx, Foot - Double(SH) + Double((P.HeadTop - 3) * S)) }
     func HandPoint() -> PointF { return PointF(Cx + Double(dir * 5 * S), Foot - Double(SH) + Double((P.BodyTop + 2) * S)) }
     func FootPoint() -> PointF { return PointF(Cx + Double(dir * 4 * S), Foot - Double(3 * S)) }
-    func ClimbRace(_ side: Int) { if Is("spidey") { StartClimb(side) } else if Is("stitch") { StartWallUp(side) } }
+    func ClimbRace(_ side: Int) { if Is("spidey") { StartClimb(side) } else if Is("stitch") { StartWallUp(side) } }   //@fan
+    // <public> var HasTv: Bool { return false }
     var Foot: Double { return y + Double(SH) }
     var OnFloor: Bool { return supH == IntPtr.Zero }
 }
@@ -8396,9 +8490,10 @@ extension Pet
 
     func Frame() -> Fr
     {
-        if P.Pik { return FramePik() }
+        if P.Pik { return FramePik() }   //@fan
         if P.Orig { return FrameOrig() }
         if P.Cu { return FrameCu() }
+        // <fan>
         switch P.Id
         {
             case "po": return FramePo()
@@ -8408,6 +8503,8 @@ extension Pet
             default: break
         }
         return FrameSpidey()
+        // </fan>
+        // <public> return F(Pal.Stack(HeadRows(nil), A("BODY"), A("LEGS_A")))
     }
 
     // 把只往右延伸的圖左邊補空白，讓 12 格的身體留在框的中間
@@ -8504,12 +8601,14 @@ extension Pet
         let lv = Level()
         if lv >= 2 { DrawAt(g, Pet.SCARF, P.HatCol, P.ScarfRow + dy, bx0, by0, ps, fx, false, false) }
         if lv >= 4 && normalFace && !P.NoGlasses { DrawAt(g, Pet.GLASSES, P.HatCol, P.GlassRow + dy, bx0, by0, ps, fx, false, false) }
-        if lv >= 5 && !Is("spidey") { DrawAt(g, Pet.BADGE, P.BadgeCol, P.BadgeRow + dy, bx0, by0, ps, fx, false, false) }
+        if lv >= 5 && !Is("spidey") { DrawAt(g, Pet.BADGE, P.BadgeCol, P.BadgeRow + dy, bx0, by0, ps, fx, false, false) }   //@fan
+        // <public> if lv >= 5 { DrawAt(g, Pet.BADGE, P.BadgeCol, P.BadgeRow + dy, bx0, by0, ps, fx, false, false) }
         var hat: [String]? = w.SeasonNow == "xmas" ? Pet.SANTA : (lv >= 6 ? Pet.CROWN : (lv >= 3 ? Pet.BEANIE : nil))
-        if HatOnHead() || WearHat || P.Pik { hat = nil }      // 迪西：自己的帽子不換（借戴迪西帽子時也一樣）
+        if HatOnHead() || WearHat || P.Pik { hat = nil }      // 迪西：自己的帽子不換（借戴迪西帽子時也一樣）   //@fan
         if let hat = hat
         {
             DrawAt(g, hat, P.HatCol, P.HatRow + dy - hat.count, bx0, by0, ps, fx, false, true)
+            // <fan>
             if P.KeepAntenna && P.AntThrough
             {
                 // 丁丁：天線從帽子中間穿出來（照原位置重畫，不墊高，櫃子格子才放得下）
@@ -8530,6 +8629,7 @@ extension Pet
                     DrawAt(g, ant, Double(12 - ant[0].utf8.count) / 2.0, P.HatRow + dy - hat.count - ant.count + 1, bx0, by0, ps, fx, false, true)
                 }
             }
+            // </fan>
         }
         if w.SeasonNow == "cny" { DrawAt(g, Pet.ENVELOPE, 11, P.SideRow + dy, bx0, by0, ps, fx, false, true) }
         if w.SeasonNow == "birthday" { DrawAt(g, Pet.CAKE, 11, P.SideRow - 1 + dy, bx0, by0, ps, fx, false, true) }
@@ -8597,6 +8697,7 @@ extension Pet
     // 小波的滑板車、人魚漢頓的搖椅、隱形船…（畫在身體後面的）
     func DrawBehind(_ g: Graphics, _ f: Fr, _ bx: Int, _ by: Int, _ ps: Int, _ fx: Bool)
     {
+        // <fan>
         if Is("po") && !scooterLost
         {
             if OnScooter() && !rolling { DrawAt(g, A("SCOOTER"), -1, 7, bx, by, ps, fx, false, true) }
@@ -8617,6 +8718,7 @@ extension Pet
         if Is("hangyodon") && state == "sleep" { DrawSleepBubble(g, bx, by, ps, false) }
         if P.Tubby { DrawTubbyBehind(g, f, bx, by, ps, fx) }
         if P.Pik { DrawPikBehind(g, f, bx, by, ps, fx) }
+        // </fan>
         if P.Orig { DrawOrigBehind(g, f, bx, by, ps, fx) }
     }
 
@@ -8662,6 +8764,7 @@ extension Pet
     // 球棒、手套、烏克麗麗、嘴裡的球（畫在身體前面的）
     func DrawFront(_ g: Graphics, _ f: Fr, _ bx: Int, _ by: Int, _ ps: Int, _ fx: Bool)
     {
+        // <fan>
         if Is("po")
         {
             if state == "bat"
@@ -8689,8 +8792,9 @@ extension Pet
         if Is("spidey") && w.Holder === self { DrawAt(g, w.BallKind == "baseball" ? Pet.BALLART : Pet.TBALL, 9, 4, bx, by, ps, fx, false, true) }
         if P.Tubby { DrawTubbyFront(g, f, bx, by, ps, fx) }
         if P.Pik { DrawPikFront(g, f, bx, by, ps, fx) }
+        // </fan>
         if P.Orig { DrawOrigFront(g, f, bx, by, ps, fx) }
-        if HoldToast && f.Rot == 0 && !f.Fy { DrawAt(g, Pet.TOAST, Is("po") ? 9.5 : 10.5, P.BodyTop + 1 + f.AccDy, bx, by, ps, fx, false, true) }
+        if HoldToast && f.Rot == 0 && !f.Fy { DrawAt(g, Pet.TOAST, Is("po") ? 9.5 : 10.5, P.BodyTop + 1 + f.AccDy, bx, by, ps, fx, false, true) }   //@fan
     }
 
     // ================= 一格一格畫到 layered window =================
@@ -8699,7 +8803,8 @@ extension Pet
         l = Math.Min(l, px); r = Math.Max(r, px); tp = Math.Min(tp, py); b = Math.Max(b, py)
     }
     func SilkVisible() -> Bool { return state == "swing" || state == "hang" || state == "zip" || state == "shoot" || state == "webcatch" || state == "sling" }
-    func Bob() -> Double { if P.Cu { return 0 }; if P.Pik { return PikBob() }; if P.Orig { return OrigBob() }; if P.Tubby { return TubbyBob() }; return state == "dance" || state == "elvis" ? Math.Abs(Math.Sin(anim * 8)) * 6 * k : (Is("hangyodon") && state == "walk" ? (Step2(4) ? k : 0) : 0) }
+    func Bob() -> Double { if P.Cu { return 0 }; if P.Pik { return PikBob() }; if P.Orig { return OrigBob() }; if P.Tubby { return TubbyBob() }; return state == "dance" || state == "elvis" ? Math.Abs(Math.Sin(anim * 8)) * 6 * k : (Is("hangyodon") && state == "walk" ? (Step2(4) ? k : 0) : 0) }   //@fan
+    // <public> func Bob() -> Double { if P.Cu { return 0 }; if P.Orig { return OrigBob() }; return state == "dance" || state == "elvis" ? Math.Abs(Math.Sin(anim * 8)) * 6 * k : 0 }
 
     func Render()
     {
@@ -8715,7 +8820,8 @@ extension Pet
         for sp in sparks { Grow(&l, &tp, &r, &b, sp[0], sp[1]) }
         for f in flakes { Grow(&l, &tp, &r, &b, f[0], f[1]) }
         if w.Lead() === self && w.TicketCountdown() != nil { tp = Math.Min(tp, y - Double((P.TopRows + 16) * S)); l = Math.Min(l, Cx - 60 * k); r = Math.Max(r, Cx + 60 * k) }
-        if P.Tubby || WearHat || HoldToast || P.Pik || P.Orig { tp = Math.Min(tp, y - Double((P.TopRows + (state == "juggle" || state == "hattoss" || state == "bagdig" ? 16 : 9)) * S)) }
+        if P.Tubby || WearHat || HoldToast || P.Pik || P.Orig { tp = Math.Min(tp, y - Double((P.TopRows + (state == "juggle" || state == "hattoss" || state == "bagdig" ? 16 : 9)) * S)) }   //@fan
+        // <public> if P.Orig { tp = Math.Min(tp, y - Double((P.TopRows + (state == "juggle" || state == "hattoss" || state == "bagdig" ? 16 : 9)) * S)) }
         let pad = 6 + CInt(5 * k)
         let nb = Rectangle.FromLTRB(CInt(Math.Floor(l)) - pad, CInt(Math.Floor(tp)) - pad, CInt(Math.Ceiling(r)) + pad, CInt(Math.Ceiling(b)) + pad)
         if frameBmp == nil || frameBmp.Width != nb.Width || frameBmp.Height != nb.Height
@@ -8748,7 +8854,7 @@ extension Pet
             var a = y + dSH - dSH * sc - Double(P.TopRows) * dS * sc
             a -= (state == "sleep" ? 30 * k : 0)
             a -= (hearts.Count > 0 ? 24 * k : 0)
-            a -= ((Is("po") && OnScooter()) || RidingPo ? 4 * dS : 0)
+            a -= ((Is("po") && OnScooter()) || RidingPo ? 4 * dS : 0)   //@fan
             above = a
             if w.Lead() === self && w.TicketCountdown() != nil { above -= 11 * dS }   // 讓出搶票倒數徽章的位置
         }
@@ -8831,6 +8937,7 @@ extension Pet
                 g.FillEllipse(fog, sbx + 3 * sps, sby + 7 * sps + fo, 6 * sps, 3 * sps)
                 g.FillEllipse(fog, sbx + 2 * sps, sby + 9 * sps + fo, 8 * sps, 3 * sps)
             }
+            // <fan>
             if Is("stitch") && gt > 0.8
             {
                 let wet = SolidBrush(Color.FromArgb(55, 190, 225, 255))
@@ -8842,6 +8949,7 @@ extension Pet
                 let lip = SolidBrush(Color.FromArgb(70, 245, 140, 170))   // 嘴唇印在玻璃上
                 g.FillEllipse(lip, Double(sbx) + 1.5 * dsps, Double(sby) + 7.2 * dsps, 9 * dsps, 2.6 * dsps)
             }
+            // </fan>
         }
 
         // Codex／Claude 狀態小圖示（小波在肚子上，其他人在頭旁邊）
@@ -8947,11 +9055,13 @@ extension Pet
             DrawAccessories(g, sbx, sby, sps, fx, f.AccDy, normalFace)
         }
         if f.Tummy && f.Rot == 0
+        // <fan>
         {
             let u = Math.Max(1, sps / 2)
             let scx = sbx + 6 * sps, scy = sby + CInt((P.TummyRow + Double(f.AccDy)) * Double(sps))
             DrawStatusIcon(g, TummyStatus(), scx, scy, u, true)
         }
+        // </fan>
         if extras { DrawFront(g, f, sbx, sby, sps, fx); DrawLunch(g, f, sbx, sby, sps, fx) }
     }
 }
@@ -8964,7 +9074,7 @@ final class ShelfForm: OverlayForm
     let U: Int, TU: Int           // 小格、高格的像素大小
     let k: Double
     var Hot = false, Over = false, Night = false
-    var Tubby = false                   // 天線寶寶一櫃：格子裡是藍天綠山丘，大格有太陽寶寶
+    var Tubby = false                   // 天線寶寶一櫃：格子裡是藍天綠山丘，大格有太陽寶寶   //@fan
     // ---- from 50_pikmin.swift ----
     var Pik = false                     // 皮克敏一櫃：格子底下是土和草，大格種一朵休息花
     // ---- from 51_original.swift ----
@@ -9221,8 +9331,8 @@ final class ShelfForm: OverlayForm
             if Night { panel = Mix(panel, C(0x2A2238), 0.55) }
             let inner = RectangleF(Double(c.X), Double(c.Y), Double(c.Width), Double(c.Height - plateH))
             g.FillRectangle(LinearGradientBrush(inner, Mix(panel, Color.White, 0.35), Mix(panel, C(0x6B4A30), 0.25), 90.0), inner)
-            if Tubby { DrawHills(g, inner, i == 0) }
-            if Pik { DrawSoil(g, inner, i == 0) }
+            if Tubby { DrawHills(g, inner, i == 0) }   //@fan
+            if Pik { DrawSoil(g, inner, i == 0) }   //@fan
             if Orig { DrawGridPaper(g, inner, i == 0) }
             // 頂上的展示燈
             do
@@ -9240,14 +9350,16 @@ final class ShelfForm: OverlayForm
             // 內側陰影（凹進去的感覺）
             g.FillRectangle(LinearGradientBrush(RectangleF(inner.X, inner.Y, inner.Width, 3 * dU + 1), Color.FromArgb(90, 40, 20, 5), Color.FromArgb(0, 40, 20, 5), 90.0), inner.X, inner.Y, inner.Width, 3 * dU)
             g.FillRectangle(LinearGradientBrush(RectangleF(inner.X, inner.Y, 2 * dU + 1, inner.Height), Color.FromArgb(70, 40, 20, 5), Color.FromArgb(0, 40, 20, 5), 0.0), inner.X, inner.Y, 2 * dU, inner.Height)
-            if i == 0 && Pik { DrawFlowerBed(g, c) }
-            else if i == 0 { DrawPedestal(g, c, panel) }
+            if i == 0 && Pik { DrawFlowerBed(g, c) }   //@fan
+            else if i == 0 { DrawPedestal(g, c, panel) }   //@fan
+            // <public> if i == 0 { DrawPedestal(g, c, panel) }
             // 層板（公仔站的地方）＋名牌那條
             let board = RectangleF(Double(c.X - U), Double(c.Bottom - plateH), Double(c.Width + 2 * U), dplateH)
             g.FillRectangle(LinearGradientBrush(board, w3, w1, 90.0), board)
             g.DrawLine(Pen(Color.FromArgb(Night ? 60 : 110, 255, 235, 205), Math.Max(1.0, dU * 0.4)), board.X, board.Y + 0.5, board.Right, board.Y + 0.5)
             // 名牌
-            let name = pet == nil ? (i == 0 && Pik ? "★ 休息花" : "？") : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)
+            let name = pet == nil ? (i == 0 && Pik ? "★ 休息花" : "？") : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)   //@fan
+            // <public> let name = pet == nil ? "？" : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)
             do
             {
                 let f = Font("Microsoft JhengHei UI", Math.Max(9.0, 6.6 * k), FontStyle.Bold, GraphicsUnit.Pixel)
@@ -9272,6 +9384,7 @@ final class ShelfForm: OverlayForm
     }
 
 
+    // <fan>
     // ---- 天線寶寶一櫃的格子：藍天、綠色小山丘、小花；大格有太陽寶寶（晚上下山）----
     func HillTop(_ inner: RectangleF, _ tall: Bool) -> Double { return inner.Bottom - inner.Height * (tall ? 0.30 : 0.27) }
     func DrawHills(_ g: Graphics, _ inner: RectangleF, _ tall: Bool)
@@ -9340,6 +9453,7 @@ final class ShelfForm: OverlayForm
         g.FillEllipse(pk, cx - fr * 0.78, y0 + fr * 0.1, fr * 0.3, fr * 0.2); g.FillEllipse(pk, cx + fr * 0.48, y0 + fr * 0.1, fr * 0.3, fr * 0.2)
         g.Restore(st)
     }
+    // </fan>
 
     // 高格：最愛站的小圓台＋背板上淡淡的大星星
     func DrawPedestal(_ g: Graphics, _ c: Rectangle, _ panel: Color)
@@ -9355,9 +9469,10 @@ final class ShelfForm: OverlayForm
             let a = -Math.PI / 2 + Double(i) * Math.PI / 5, rr = i % 2 == 0 ? sr : sr * 0.45
             star.append(PointF(cx + Math.Cos(a) * rr, sy + Math.Sin(a) * rr))
         }
-        if Tubby { DrawSunBaby(g, c, cx, sy, sr) }
-        else
-        { g.FillPolygon(SolidBrush(Night ? Color.FromArgb(40, 255, 220, 150) : Color.FromArgb(70, 255, 236, 180)), star) }
+        if Tubby { DrawSunBaby(g, c, cx, sy, sr) }   //@fan
+        else   //@fan
+        { g.FillPolygon(SolidBrush(Night ? Color.FromArgb(40, 255, 220, 150) : Color.FromArgb(70, 255, 236, 180)), star) }   //@fan
+        // <public> do { g.FillPolygon(SolidBrush(Night ? Color.FromArgb(40, 255, 220, 150) : Color.FromArgb(70, 255, 236, 180)), star) }
         // 圓台
         let m1 = Night ? C(0x8A7A70) : C(0xFFF6E8), m2 = Night ? C(0x4E443F) : C(0xD9C7AE)
         let bodyR = RectangleF(cx - pw / 2, top, pw, ph - dU * 0.5)
@@ -9518,7 +9633,8 @@ final class ShelfForm: OverlayForm
 
     func Cabinet(_ who: [Pet?], _ outNow: [Bool], _ t: Double) -> Bitmap
     {
-        var key = "\(Night)|\(Tubby)|\(Pik)|\(Orig)|\(Area.Width)x\(Area.Height)"
+        var key = "\(Night)|\(Tubby)|\(Pik)|\(Orig)|\(Area.Width)x\(Area.Height)"   //@fan
+        // <public> var key = "\(Night)|\(Orig)|\(Area.Width)x\(Area.Height)"
         for i in 0..<4 { key += "|" + (who[i] == nil ? "-" : who[i]!.P.Id) }
         if key != bgKey || bg == nil { bgKey = key; BuildBg(who, outNow) }
         if bmp == nil || bmp.Width != bg.Width || bmp.Height != bg.Height { if bmp != nil { bmp.Dispose() }; bmp = Bitmap(bg.Width, bg.Height) }
@@ -9535,8 +9651,9 @@ final class ShelfForm: OverlayForm
             let ps = FitPs(i, pet)
             let fx = c.X + c.Width / 2, fy = c.Bottom - plateH - U - (i == 0 ? PedH() : 0)
             g.SetClip(Rectangle(c.X, c.Y, c.Width, c.Height - plateH))
-            if pet == nil && i == 0 && Pik { DrawRestFlower(g, c, t) }
-            else if pet == nil { DrawUnknown(g, fx, fy, ps) }
+            if pet == nil && i == 0 && Pik { DrawRestFlower(g, c, t) }   //@fan
+            else if pet == nil { DrawUnknown(g, fx, fy, ps) }   //@fan
+            // <public> if pet == nil { DrawUnknown(g, fx, fy, ps) }
             else if outNow[i] { pet!.DrawGhost(g, fx, fy, ps, Night); DrawAway(g, c, ps) }
             else { pet!.DrawOnShelf(g, fx, fy, ps, c, t) }
             g.ResetClip()
@@ -9672,6 +9789,7 @@ extension Pet
         if P.Cu { DrawCuShelf(g, fx, fy, ps, cell, tt) } else {
         switch P.Id
         {
+            // <fan>
             case "spidey":
                 // 從格子頂端垂一條絲倒吊著晃；偶爾跳下來擺個噴絲姿勢
                 let dangle = (tt % 11) < 8
@@ -9741,6 +9859,7 @@ extension Pet
                 DrawTubbyShelf(g, head, fx, bx, by, ps, flip, tt, blink)
             case "pkred", "pkyellow", "pkblue":
                 DrawPikShelf(g, fx, bx, by, ps, flip, tt, blink, cell)
+                // </fan>
             case "boba", "coffee", "onigiri", "sticky":
                 DrawOrigShelf(g, fx, bx, by, ps, flip, tt, blink, cell)
             default:
@@ -9750,7 +9869,8 @@ extension Pet
         }
         }
         // 午餐時間：櫃子裡的公仔也拿著午餐
-        if w.Lunch && !P.Cu && !(Is("spidey") && (tt % 11) < 8) { DrawLunchShelf(g, bx, by, ps, flip) }
+        if w.Lunch && !P.Cu && !(Is("spidey") && (tt % 11) < 8) { DrawLunchShelf(g, bx, by, ps, flip) }   //@fan
+        // <public> if w.Lunch && !P.Cu { DrawLunchShelf(g, bx, by, ps, flip) }
         // 剛回櫃子：一圈小星星
         if ShelfFx < 1
         {
@@ -9832,8 +9952,8 @@ final class World: Form {
 
     let pipeName: String
     var defaultPet: String = ""
-    var lineup: String = Pal.Classic                  // 現在是哪一櫃
-    var TubbyLineup: Bool { return lineup == Pal.Teletubbies }
+    var lineup: String = Pal.Fallback                  // 現在是哪一櫃
+    var TubbyLineup: Bool { return lineup == Pal.Teletubbies }   //@fan
     let S: Int
     let k: Double
     let rnd = Random()
@@ -9921,7 +10041,8 @@ final class World: Form {
     init(_ S: Int, _ lineupId: String) {
         pipeName = ""; self.S = S; k = Double(S) / 3.0
         super.init()
-        lineup = Pal.NormLineup(lineupId); defaultPet = "po"
+        lineup = Pal.NormLineup(lineupId); defaultPet = "po"   //@fan
+        // <public> lineup = Pal.NormLineup(lineupId); defaultPet = "boba"
         var seed = 1
         for p in Pal.Lineup(lineup) { Pets.Add(Pet(self, p, S, seed)); seed += 1 }
     }
@@ -9929,9 +10050,10 @@ final class World: Form {
     init(_ S: Int) {
         pipeName = ""; self.S = S; k = Double(S) / 3.0
         super.init()
-        defaultPet = "spidey"
+        defaultPet = "spidey"   //@fan
+        // <public> defaultPet = "boba"
         var seed = 1
-        for p in Pal.Lineup(Pal.Classic) { Pets.Add(Pet(self, p, S, seed)); seed += 1 }
+        for p in Pal.Lineup(Pal.Fallback) { Pets.Add(Pet(self, p, S, seed)); seed += 1 }
     }
 
     override func SetVisibleCore(_ value: Bool) { super.SetVisibleCore(false) }
@@ -10062,12 +10184,13 @@ extension World {
     func DefaultPetFor(_ pet: String) -> String {
         for id in Pal.LineupIds(lineup) { if id == pet { return pet } }
         if lineup == Pal.Mine { let mi = Pal.MineIds(); if mi.count > 0 { return mi[0] } }
-        return lineup == Pal.Teletubbies ? "po" : (lineup == Pal.Pikmin ? "pkred" : (lineup == Pal.Original ? "boba" : "spidey"))
+        return lineup == Pal.Teletubbies ? "po" : (lineup == Pal.Pikmin ? "pkred" : (lineup == Pal.Original ? "boba" : "spidey"))   //@fan
+        // <public> return "boba"
     }
 
     // 每一櫃各自記：誰在外面、最近一隻、最愛（經典一櫃沿用原本的檔名）
     func LF(_ name: String) -> String {
-        if lineup == Pal.Classic { return name }
+        if lineup == Pal.Classic { return name }   //@fan
         let ext = (name as NSString).pathExtension
         let stem = (name as NSString).deletingPathExtension
         return stem + "-" + lineup + (ext.isEmpty ? "" : "." + ext)
@@ -10109,7 +10232,8 @@ extension World {
             delay += 0.5
         }
         active = Get(ids.Count > 0 ? ids[ids.Count - 1] : defaultPet) ?? Get(defaultPet)
-        if ids.Count == 0 && active != nil { active.Say(OrigLineup ? "續命小隊，報到！🥤" : (TubbyLineup ? "Eh-oh! 天線寶寶一櫃 ☀" : (CuLineup ? "我的櫃！大家都在 🧸" : "經典一櫃回來囉！")), 2.4) }
+        if ids.Count == 0 && active != nil { active.Say(OrigLineup ? "續命小隊，報到！🥤" : (TubbyLineup ? "Eh-oh! 天線寶寶一櫃 ☀" : (CuLineup ? "我的櫃！大家都在 🧸" : "經典一櫃回來囉！")), 2.4) }   //@fan
+        // <public> if ids.Count == 0 && active != nil { active.Say(CuLineup ? "我的櫃！大家都在 🧸" : "續命小隊，報到！🥤", 2.4) }
         Broadcast()
         lock(clients) { for c in clients { World.Send(c, "lineup " + lineup + "\n") } }   // 在桌面換櫃（小屋、設定）：VS Code 跟著改設定
         App.Log("lineup " + lineup)
@@ -10213,6 +10337,7 @@ extension World {
     }
 
     func Migrate() {
+        // <fan>
         // 舊的 Spidey 桌面版好感度搬過來（只複製，不動原檔）
         // mac: 舊的 mac 版 SpideyDesktop.swift 存在 ~/Library/Application Support/SpideyDesktop（bond.txt「xp 日期」、pats.txt「日期 次數」，格式一樣）
         let old = NSHomeDirectory() + "/Library/Application Support/SpideyDesktop"
@@ -10224,6 +10349,7 @@ extension World {
                 if (try? fm.copyItem(atPath: src, toPath: dst)) != nil { App.Log("migrated " + map[i][0]) }
             }
         }
+        // </fan>
         for p in Pets { p.Reload() }
     }
 
@@ -10263,7 +10389,7 @@ extension World {
 
     // ---------- 櫃子的格子：最愛（釘選 > 用最久）在高格，其他照順序 ----------
     func FavId() -> String {
-        if PikLineup { return "" }   // 皮克敏一櫃：大格固定是休息花
+        if PikLineup { return "" }   // 皮克敏一櫃：大格固定是休息花   //@fan
         if Get(favPin) != nil { return favPin }
         if let lf = Pal.LineupFav(lineup) as String?, Get(lf) != nil { return lf }                 // 天線寶寶一櫃：大格是小波
         var best: String = Pets[0].P.Id; var bv: Double = -1
@@ -10320,7 +10446,8 @@ extension World {
         for i in 0..<4 { o[i] = c[i] != nil && c[i]!.Out }
         var hot = false, over = false
         for p in Pets { if p.Out && p.Dragging { hot = true; if InShelf(p.Cx, p.y + Double(p.SH) / 2.0) { over = true } } }
-        shelf.Hot = hot; shelf.Over = over; shelf.Night = Night; shelf.Tubby = TubbyLineup; shelf.Pik = PikLineup; shelf.Orig = OrigLineup; shelf.Lunch = Lunch; shelf.Attention = EggAttention()
+        shelf.Hot = hot; shelf.Over = over; shelf.Night = Night; shelf.Tubby = TubbyLineup; shelf.Pik = PikLineup; shelf.Orig = OrigLineup; shelf.Lunch = Lunch; shelf.Attention = EggAttention()   //@fan
+        // <public> shelf.Hot = hot; shelf.Over = over; shelf.Night = Night; shelf.Orig = OrigLineup; shelf.Lunch = Lunch; shelf.Attention = EggAttention()
         shelf.Render(c, o, Now)
         if !W.Shown(shelf) { shelf.Show(); Zorder() }
     }
@@ -10354,7 +10481,8 @@ extension World {
 
     func ShelfClick(_ cell: Int) {
         let p0 = CellPets()[cell]
-        guard let p = p0 else { if cell == 0 && PikLineup { FlowerClicked() }; return }
+        guard let p = p0 else { if cell == 0 && PikLineup { FlowerClicked() }; return }   //@fan
+        // <public> guard let p = p0 else { return }
         if p.Out { if p.state != "stowfly" && p.state != "enter" && p.state != "exit" { p.StowToShelf(true) } }
         else { BringOut(p, true) }
     }
@@ -10378,7 +10506,7 @@ extension World {
     }
 
     func SetFav(_ p: Pet) {
-        if PikLineup { p.Say("大格種的是休息花，花不能搬喔 🌸", 2.2); return }
+        if PikLineup { p.Say("大格種的是休息花，花不能搬喔 🌸", 2.2); return }   //@fan
         favPin = favPin == p.P.Id ? "" : p.P.Id
         World.WriteText(LF("fav.txt"), favPin)
         p.Say(favPin == "" ? "好～不當最愛也沒關係" : "我是最愛！★ 謝謝你 ♥", 2)
@@ -10450,7 +10578,7 @@ extension World {
         }
         UpdateBall(dt)
         StepProps(dt)
-        PikTick(dt)
+        PikTick(dt)   //@fan
         OrigTick(dt)
         if fx != nil { fx.Step(dt) }
         StepScene(dt)
@@ -10474,7 +10602,7 @@ extension World {
         for pr in props { W.KeepOnTop(pr.F) }
         if fx != nil && fx.Active { W.KeepOnTop(fx) }
         for p in Pets { if p.Bub != nil { W.KeepOnTop(p.Bub) } }
-        W.KeepOnTop(flowerBub)
+        W.KeepOnTop(flowerBub)   //@fan
     }
 
     // ================= 掃描視窗 =================
@@ -10491,7 +10619,7 @@ extension World {
         if fx != nil && fx.IsHandleCreated { own.Add(fx.Handle) }
         if flash != nil && flash.IsHandleCreated { own.Add(flash.Handle) }
         for pr in props { if pr.F.IsHandleCreated { own.Add(pr.F.Handle) } }
-        if flowerBub != nil && flowerBub.IsHandleCreated { own.Add(flowerBub.Handle) }
+        if flowerBub != nil && flowerBub.IsHandleCreated { own.Add(flowerBub.Handle) }   //@fan
 
         let nw = List<WinInfo>()
         let nc = Dict<IntPtr, WinInfo>()
@@ -10692,7 +10820,7 @@ extension World {
             if shelf != nil { shelf.Hide() }
             if ballF != nil { ballF.Hide() }
             for pr in props { pr.F.Hide() }
-            if flowerBub != nil { flowerBub.Hide() }
+            if flowerBub != nil { flowerBub.Hide() }   //@fan
             if fx != nil && fx.Active { fx.Stop() }
         }
         else { RenderShelf() }
@@ -10732,7 +10860,7 @@ extension World {
         }
         else if sysIdle && idle < 2 {
             sysIdle = false
-            if PikLineup { PikRested() }       // 休息花：休息回來才恢復
+            if PikLineup { PikRested() }       // 休息花：休息回來才恢復   //@fan
             sessionStart = now
             let l = Lead()
             for p in Pets { if p === l { p.SystemIdle(false) } else { p.WakeIfSleep() } }
@@ -10740,7 +10868,8 @@ extension World {
         if !sysIdle && now - sessionStart >= restMin * 60 {
             sessionStart = now
             if HoldIfQuiet("rest", "該起來動一動了") { return }
-            if PikLineup { PikWiltAlarm() } else { Lead().Rest(restMin) }
+            if PikLineup { PikWiltAlarm() } else { Lead().Rest(restMin) }   //@fan
+            // <public> Lead().Rest(restMin)
         }
     }
 
@@ -10802,8 +10931,9 @@ extension World {
     func StartBall(_ nearPet: Bool) {
         let outs = OutPets()
         if outs.Count == 0 { Lead().Say("先放一隻出來陪你玩球～", 1.8); return }
-        let po = Get("po")
-        BallKind = po != nil && po!.Out ? "baseball" : Lead().P.BallKind
+        let po = Get("po")   //@fan
+        BallKind = po != nil && po!.Out ? "baseball" : Lead().P.BallKind   //@fan
+        // <public> BallKind = Lead().P.BallKind
         if ballF == nil { ballF = BallForm(Math.Max(2, S * 3 / 4)); ballF.Kicked = { self.BallClicked() } }
         ballF.Kind = BallKind
         let c = Cursor.Position
@@ -10846,10 +10976,12 @@ extension World {
 
     func Umpire(_ call: String) {
         if OutCount() < 2 || umpCd > 0 { return }
+        // <fan>
         let mm = Get("hangyodon") ?? Get("dipsy")   // 天線寶寶一櫃：迪西扶帽子當裁判
         if mm == nil || !mm!.Out || Holder === mm! { return }
         umpCd = 1.5
         mm!.Call(call)
+        // </fan>
     }
 
     func UpdateBall(_ dt: Double) {
@@ -10902,7 +11034,9 @@ extension World {
     // ================= 右鍵選單 =================
     func FillMenu(_ p: Pet, _ m: ContextMenuStrip) {
         m.Items.Clear()
-        var items: [[String]]! = p.P.Pik ? PikMenuItems(p) : (p.P.Orig ? OrigMenuItems(p) : (p.P.Cu ? p.CuMenuItems() : nil))
+        var items: [[String]]! = p.P.Pik ? PikMenuItems(p) : (p.P.Orig ? OrigMenuItems(p) : (p.P.Cu ? p.CuMenuItems() : nil))   //@fan
+        // <public> var items: [[String]]! = p.P.Orig ? OrigMenuItems(p) : (p.P.Cu ? p.CuMenuItems() : nil)
+        // <fan>
         if items == nil { switch p.P.Id {
         case "po":
             items = [["大抱抱 ♥", "hug"], ["打招呼 Eh-oh!", "hi"], ["敲敲螢幕", "knock"], ["騎車兜風", "ride"],
@@ -10926,6 +11060,8 @@ extension World {
             items = [["抱抱 ♥", "hug"], ["打招呼", "hi"], ["敲敲螢幕", "knock"], ["噴絲擺盪", "swing"],
                      ["倒吊", "hang"], ["跳到別的視窗上", "jump"], ["去爬牆", "climb"], ["睡覺", "sleep"], ["丟球給他 ⚾", "ball"]]
         } }
+        // </fan>
+        // <public> if items == nil { items = [["抱抱 ♥", "hug"], ["打招呼", "hi"], ["敲敲螢幕", "knock"], ["睡覺", "sleep"], ["丟球給他 ⚾", "ball"]] }
         m.Items.Add(ToolStripLabel("一起玩"))
         for it in items! {
             let a = it[1]
@@ -10940,6 +11076,7 @@ extension World {
         m.Items.Add("公仔小屋（開關、設定）…", nil, { self.HouseMenu() })
         m.Items.Add(ToolStripSeparator())
         m.Items.Add(ToolStripLabel(Single ? "我的公仔" : "公仔們"))
+        // <fan>
         if TubbyLineup && !Single {
             let grp = ToolStripMenuItem("天線寶寶一起…")
             let gs: [[String]] = [["大抱抱 ♥", "bighug"], ["啦啦啦一起唱", "sing"], ["一起跌倒（哎喲！）", "fall"],
@@ -10947,7 +11084,8 @@ extension World {
             for gi in gs { let key = gi[1]; grp.DropDownItems.Add(gi[0], nil, { self.PlayScene(key) }) }
             m.Items.Add(grp)
         }
-        if PikLineup { AddPikMenu(m) }
+        // </fan>
+        if PikLineup { AddPikMenu(m) }   //@fan
         if OrigLineup && !Single { AddOrigMenu(m) }
         if !Single {
             let sw = ToolStripMenuItem("換角色")
@@ -11073,7 +11211,7 @@ extension World {
             m.Items.Add(p.P.Name + " 的好感度 ♥", nil, { p.ShowBond() })
             m.Items.Add(ToolStripSeparator())
         }
-        if PikLineup { m.Items.Add("休息花：還能撐多久？🌸", nil, { self.FlowerClicked() }) }
+        if PikLineup { m.Items.Add("休息花：還能撐多久？🌸", nil, { self.FlowerClicked() }) }   //@fan
         m.Items.Add(shelf.Collapsed ? "打開公仔櫃" : "收合成蛋 🥚", nil, { self.ToggleEgg(!self.shelf.Collapsed) })
         m.Items.Add("全部放出來", nil, { self.AllOut() })
         m.Items.Add("全部回櫃子", nil, { self.AllHome() })
@@ -11210,7 +11348,8 @@ extension World {
             var n = 0, prev = 0
             if p.count >= 3 { n = Int(p[1]) ?? 0; prev = Int(p[2]) ?? 0 }
             if n <= prev && n != 0 { break }
-            for x in outs { x.OnErrors(n, prev, x.P.Id == "po" || x.P.Id == "laalaa" ? Nearest(x) : nil) }
+            for x in outs { x.OnErrors(n, prev, x.P.Id == "po" || x.P.Id == "laalaa" ? Nearest(x) : nil) }   //@fan
+            // <public> for x in outs { x.OnErrors(n, prev, nil) }
             if outs.Count == 0 { l.OnErrors(n, prev, nil) }
         case "config":
             if p.count >= 3, let rm = Double(p[1]), let im = Double(p[2]) { restMin = Math.Max(1.0, rm); idleMin = Math.Max(1.0, im) }
@@ -11221,7 +11360,8 @@ extension World {
             if HoldIfQuiet("tag", "上版成功" + (p.count >= 3 && p[2] == "prod" ? "（正式機）" : "")) { break }
             let env = p.count >= 3 ? p[2] : ""
             var fired = false
-            for x in outs { x.Celebrate(env, !fired && (x.P.Id == "spidey" || x.P.Id == "po" || x === l)); if x.P.Id == "spidey" || x.P.Id == "po" { fired = true } }
+            for x in outs { x.Celebrate(env, !fired && (x.P.Id == "spidey" || x.P.Id == "po" || x === l)); if x.P.Id == "spidey" || x.P.Id == "po" { fired = true } }   //@fan
+            // <public> for x in outs { x.Celebrate(env, !fired && x === l) }
             if !fired && outs.Count > 0 { Fireworks(WA(l.Cx, l.y), 8, -1) }
             if outs.Count == 0 { l.Celebrate(env, true) }
         case "birthday": birthday = p.count >= 2 ? p[1].trimmingCharacters(in: .whitespacesAndNewlines) : ""; SeasonNow = Season()
@@ -11304,8 +11444,8 @@ extension World {
         case "lunchend": forceLunch = 0; LunchTick(true); return
         case "fav": SetFav(target ?? l); return
         case "scene": PlayScene(arg); return
-        case "flower": PikFlowerAct(arg); return
-        case "whistle": Whistle(); return
+        case "flower": PikFlowerAct(arg); return   //@fan
+        case "whistle": Whistle(); return   //@fan
         case "photo": GroupPhoto(); return
         case "rollcall":
             let ids = List<String>(); for x in OutPets() { ids.Add(x.P.Id) }; if ids.Count == 0 { for x in Pets { ids.Add(x.P.Id) } }; StartRollCall(ids); return
@@ -11758,7 +11898,8 @@ extension World {
 
     func AbortScene() {
         scene = nil
-        for p in cast { p.InScene = false; p.ResetSceneProps() }
+        for p in cast { p.InScene = false; p.ResetSceneProps() }   //@fan
+        // <public> for p in cast { p.InScene = false }
         ClearProps()
         cast.Clear()
     }
@@ -11793,7 +11934,8 @@ extension World {
         if outs.Count < 2 { return }
         let free = List<Pet>()
         for p in outs { if p.Free() { free.Add(p) } }
-        if free.Count >= 3 && groupCd <= 0 && rnd.NextDouble() < (TubbyLineup && free.Count >= 4 ? 0.04 : 0.02) { groupCd = 600; if TubbyLineup { TubbyGroup(free.Count) } else if PikLineup { PikGroup(free.Count) } else if OrigLineup { OrigGroup(free.Count) } else if rnd.NextDouble() < 0.6 { GroupPhoto() } else { GroupHug() }; return }
+        if free.Count >= 3 && groupCd <= 0 && rnd.NextDouble() < (TubbyLineup && free.Count >= 4 ? 0.04 : 0.02) { groupCd = 600; if TubbyLineup { TubbyGroup(free.Count) } else if PikLineup { PikGroup(free.Count) } else if OrigLineup { OrigGroup(free.Count) } else if rnd.NextDouble() < 0.6 { GroupPhoto() } else { GroupHug() }; return }   //@fan
+        // <public> if free.Count >= 3 && groupCd <= 0 && rnd.NextDouble() < 0.02 { groupCd = 600; if OrigLineup { OrigGroup(free.Count) } else if rnd.NextDouble() < 0.6 { GroupPhoto() } else { GroupHug() }; return }
         var i = 0
         while i < free.Count {
             var j = i + 1
@@ -11821,8 +11963,9 @@ extension World {
     func PlayScene(_ key: String) {
         var ids = key.components(separatedBy: "-")
         if ids.count == 1 && (key == "photo" || key == "group") { GroupPhoto(); return }
-        if ids.count == 1 && PikLineup { PikScene(key); return }
+        if ids.count == 1 && PikLineup { PikScene(key); return }   //@fan
         if ids.count == 1 && OrigLineup { OrigScene(key); return }
+        // <fan>
         if ids.count == 1 {
             switch key {
             case "bighug": SceneBigHug(); return
@@ -11834,6 +11977,8 @@ extension World {
             }
             return
         }
+        // </fan>
+        // <public> if ids.count == 1 { return }
         if ids.count != 2 { return }
         ids.sort { $0.utf16.lexicographicallyPrecedes($1.utf16) }
         guard let a = Get(ids[0]), let b = Get(ids[1]) else { return }
@@ -11843,7 +11988,8 @@ extension World {
         pairCd[k2] = Now + 180 + rnd.NextDouble() * 120
         let d0: Double = a.Out && b.Out && a.state != "exit" && b.state != "exit" ? 0 : 1.6
         // 離太遠：先湊到一起再演
-        if TubbyLineup || PikLineup || OrigLineup { Later(d0) { [self] in GatherPair(k2, a, b, 0) }; return }
+        if TubbyLineup || PikLineup || OrigLineup { Later(d0) { [self] in GatherPair(k2, a, b, 0) }; return }   //@fan
+        // <public> if OrigLineup { Later(d0) { [self] in GatherPair(k2, a, b, 0) }; return }
         Later(d0) { [self] in
             if !Pets.Contains(a) || !Pets.Contains(b) { return }   // 中間換櫃了
             AbortScene()
@@ -11874,6 +12020,7 @@ extension World {
         // mac: C# 傳 null 進去會在 Begin 丟例外被 Later 吞掉；這裡少一隻就不演
         func g(_ id: String) -> Pet? { return Get(id) }
         switch key {
+        // <fan>
         case "hangyodon-spidey": if let x = g("spidey"), let y = g("hangyodon") { SceneHeroes(x, y) }
         case "po-spidey": if let x = g("spidey"), let y = g("po") { SceneSling(x, y) }
         case "spidey-stitch": if let x = g("spidey"), let y = g("stitch") { SceneClimbRace(x, y) }
@@ -11887,7 +12034,9 @@ extension World {
         case "po-tinky": if let x = g("po"), let y = g("tinky") { SceneScooterRide(x, y) }
         case "dipsy-po": if let x = g("po"), let y = g("dipsy") { SceneHatBaseball(x, y) }
         case "laalaa-po": if let x = g("laalaa"), let y = g("po") { SceneBallFetch(x, y) }
-        default: if PikLineup { PikPairScene(key) } else if OrigLineup { OrigPairScene(key) } else if a.P.Cu || b.P.Cu { CuPairScene(key, a, b) }
+        // </fan>
+        default: if PikLineup { PikPairScene(key) } else if OrigLineup { OrigPairScene(key) } else if a.P.Cu || b.P.Cu { CuPairScene(key, a, b) }   //@fan
+        // <public> default: if OrigLineup { OrigPairScene(key) } else if a.P.Cu || b.P.Cu { CuPairScene(key, a, b) }
         }
     }
 
@@ -11900,7 +12049,8 @@ extension World {
         if outs.Count < 2 { AllOut(); Later(2.5) { [self] in GroupPhoto() }; return }
         let l: Pet = Lead()
         Begin(outs.ToArray())
-        let gap: Double = TubbyLineup ? 1.9 : 1.6   // 天線寶寶比較寬（帽子、袋子、球）
+        let gap: Double = TubbyLineup ? 1.9 : 1.6   // 天線寶寶比較寬（帽子、袋子、球）   //@fan
+        // <public> let gap: Double = 1.6
         let foot = l.Foot
         var left = l.Cx - Double(outs.Count - 1) * Double(l.SW) * gap / 2
         var right = left + Double(outs.Count - 1) * Double(l.SW) * gap
@@ -11914,18 +12064,20 @@ extension World {
             let tx: Double = outs.Count == 1 ? L0 : L0 + (R0 - L0) * Double(i) / Double(outs.Count - 1)
             At(0.4 + Double(i) * 0.35) { [self] in
                 if Math.Abs(p.Foot - foot) < 3 && p.supH == l.supH && Math.Abs(tx - p.Cx) < 600 * k { p.WalkTo(tx, 10) }
-                else if p.P.Id == "hangyodon" { p.StartSwim(tx, foot, false) }
+                else if p.P.Id == "hangyodon" { p.StartSwim(tx, foot, false) }   //@fan
                 else { p.JumpTo(tx, foot) }
             }
         }
         At(5.2) {
             for p in outs {
                 p.dir = p.Cx < (L0 + R0) / 2 ? 1 : -1
-                if p.P.Id == "hangyodon" { p.ScenePose("cape", 3) } else if p.P.Id == "stitch" { p.ScenePose("grin", 3) } else if p.P.Id == "dipsy" { p.ScenePose("hattip", 3) } else { p.ScenePose("photo", 3) }
+                if p.P.Id == "hangyodon" { p.ScenePose("cape", 3) } else if p.P.Id == "stitch" { p.ScenePose("grin", 3) } else if p.P.Id == "dipsy" { p.ScenePose("hattip", 3) } else { p.ScenePose("photo", 3) }   //@fan
+                // <public> p.ScenePose("photo", 3)
             }
             l.Say("笑一個～ 3、2、1！", 1.6)
         }
         At(6.6) { [self] in Flash(Rectangle.FromLTRB(CInt(L0 - 120 * k), CInt(foot - 200 * k), CInt(R0 + 120 * k), CInt(foot + 20 * k))) }
+        // <fan>
         if TubbyLineup {
             // 天線寶寶一櫃：一隻一隻講（站很近，同時講泡泡會疊在一起）
             var d = 7.4
@@ -11938,13 +12090,16 @@ extension World {
             At(d + 0.4) { }
             return
         }
+        // </fan>
         At(7.4) {
             for p in outs {
                 switch p.P.Id! {
+                // <fan>
                 case "po": p.Say("再拍一次！", 1.8)
                 case "stitch": p.Say("Ohana！", 1.8)
                 case "hangyodon": p.Say("我有被拍進去嗎？嘴唇太大了嗎？", 1.8)
                 case "pkred", "pkyellow", "pkblue": p.Say("噗咿！", 1.8)
+                // </fan>
                 default: p.Say(p.P.Cu ? p.L("x_photo") : "帥！", 1.8)
                 }
             }
@@ -11973,8 +12128,8 @@ extension World {
 
     // 早上第一次：一隻一隻從櫃子跳出來點名
     func StartRollCall(_ ids: List<String>) {
-        if TubbyLineup { TubbyRollCall(ids); return }
-        if PikLineup { PikRollCall(ids); return }
+        if TubbyLineup { TubbyRollCall(ids); return }   //@fan
+        if PikLineup { PikRollCall(ids); return }   //@fan
         if OrigLineup { OrigRollCall(ids); return }
         var d = 0.4
         for id in ids {
@@ -11988,23 +12143,25 @@ extension World {
 
     // 下班了：輪流催你回家，然後一隻一隻回櫃子（人魚漢頓先在泡泡裡睡著）
     func NightRitual() {
-        if TubbyLineup { SceneByeBye(true); return }
-        if PikLineup { PikNight(true); return }
+        if TubbyLineup { SceneByeBye(true); return }   //@fan
+        if PikLineup { PikNight(true); return }   //@fan
         if OrigLineup { OrigNight(true); return }
         let outs = OutPets()
+        // <fan>
         // C# List.Sort（不穩定）；這裡穩定排序：人魚漢頓排第一
         let sorted = outs.ToArray().enumerated().sorted { a, b in
             let ka = a.element.P.Id == "hangyodon" ? 0 : 1, kb = b.element.P.Id == "hangyodon" ? 0 : 1
             return ka != kb ? ka < kb : a.offset < b.offset
         }.map { $0.element }
         outs.Clear(); for p in sorted { outs.Add(p) }
+        // </fan>
         Begin(outs.ToArray())
         for p in outs { if p.Grounded() { p.ScenePose("idle", 60) } }
         var d = 0.2
         for p in outs { let pp = p; At(d) { pp.Say(pp.L("nag"), 2.6) }; d += 2.8 }
         for p in outs {
             let pp = p
-            if pp.P.Id == "hangyodon" { At(d) { pp.InScene = false; pp.Act("sleep"); pp.InScene = true; pp.Say("我先在泡泡裡睡了…你也不要一個人待太晚喔", 2.6) }; d += 2.8 }
+            if pp.P.Id == "hangyodon" { At(d) { pp.InScene = false; pp.Act("sleep"); pp.InScene = true; pp.Say("我先在泡泡裡睡了…你也不要一個人待太晚喔", 2.6) }; d += 2.8 }   //@fan
             At(d) { pp.Say(pp.L("goodnight"), 2.4) }
             At(d + 1.2) { pp.InScene = false; if pp.Out { pp.StowToShelf(false) } }
             d += 2.6
@@ -12185,7 +12342,7 @@ extension World {
         if ballF != nil && ballF.VVisible { ballF.PaintTo(g) }
         if fx != nil && fx.VVisible { fx.PaintTo(g) }
         for p in Pets { if p.Bub != nil && p.Bub.VVisible { p.Bub.PaintTo(g) } }
-        if flowerBub != nil && flowerBub.VVisible { flowerBub.PaintTo(g) }
+        if flowerBub != nil && flowerBub.VVisible { flowerBub.PaintTo(g) }   //@fan
         if flash != nil && flash.VVisible { flash.PaintTo(g) }
         if setupForm != nil && !setupForm.IsDisposed && setupForm.VVisible { setupForm.PaintTo(g) }
         StudySnap(g)
@@ -12303,33 +12460,39 @@ extension World {
     }
 
     static func Flavor(_ id: String, _ kind: String, _ night: Bool) -> String {
-        let pk = PikFlavor(id, kind) ?? OrigFlavor(id, kind); if pk != nil { return pk! }
+        let pk = PikFlavor(id, kind) ?? OrigFlavor(id, kind); if pk != nil { return pk! }   //@fan
+        // <public> let pk = OrigFlavor(id, kind); if pk != nil { return pk! }
         let cu = CuFlavor(id, kind, night); if cu != nil { return cu! }
         let sd = StudyFlavor(id, kind); if sd != nil { return sd! }
         let extra = FlavorExtra(id, kind)
         if extra != nil { return extra! }
         if night && kind == "worklog" {
             switch id {
+            // <fan>
             case "po": return "日誌好了…太陽寶寶下山了，回家吧："
             case "stitch": return "日誌好了…Ohana 在家等你："
             case "hangyodon": return "日誌好了…大家都回家了，你也回家吧："
             case "tinky": return "日誌好了…太陽寶寶下山了，丁丁說再見："
             case "dipsy": return "日誌好了…帽子戴好，回家吧："
             case "laalaa": return "日誌好了…啦…該回家囉："
+            // </fan>
             default: return "日誌好了。然後下班："
             }
         }
         let keys: [String] = ["ci-run", "ci-ok", "ci-fail", "cmd-ok", "cmd-fail", "meeting", "meeting-now", "jira", "worklog"]
-        let sp: [String] = ["Thwip～CI 跑起來了：", "CI 過了！帥！", "蜘蛛感應！CI 掛了：", "指令跑完了：", "嗯？指令失敗了：", "等等要開會喔：", "會議開始了！快去：", "有新的 Jira：", "今天的工作日誌好了："]
+        let sp: [String] = ["Thwip～CI 跑起來了：", "CI 過了！帥！", "蜘蛛感應！CI 掛了：", "指令跑完了：", "嗯？指令失敗了：", "等等要開會喔：", "會議開始了！快去：", "有新的 Jira：", "今天的工作日誌好了："]   //@fan
+        // <public> let sp: [String] = ["CI 跑起來了：", "CI 過了！帥！", "CI 掛了：", "指令跑完了：", "嗯？指令失敗了：", "等等要開會喔：", "會議開始了！快去：", "有新的 Jira：", "今天的工作日誌好了："]
+        // <fan>
         let po: [String] = ["嘟嘟～CI 出發：", "全壘打！", "嗚…CI 摔倒了：", "好棒棒，跑完了：", "咦？沒成功：", "等一下要開會會喔：", "要開會了！快快：", "有新任務喔：", "今天的日誌寫好了～"]
         let st: [String] = ["ih! CI 在跑：", "CI 過了！嘻嘻嘻", "ih-ih-ih! CI 壞掉了：", "跑完了！", "失敗！史迪仔去咬它：", "等等開會！", "開會！快去！", "新的 Jira！", "日誌好了，Aloha："]
         let hg: [String] = ["英雄報告：CI 出發了", "英雄報告：", "交給我這個英雄…CI 失敗了：", "英雄報告：指令跑完", "嗚，指令失敗了：", "等一下有會議喔：", "會議開始了！快去吧：", "有新的 Jira 喔：", "今天的日誌好了，辛苦了："]
         let ti: [String] = ["丁丁的魔法袋：CI 出發囉：", "CI 過了！丁丁跳舞～", "哎喲！CI 跌倒了：", "跑完了，好棒棒：", "哎喲，指令失敗了：", "等一下要開會喔：", "開會了！丁丁陪你去：", "魔法袋裡有新的 Jira：", "今天的日誌寫好了～"]
         let di: [String] = ["CI 跑起來了，酷：", "CI 過了。酷。", "CI 掛了…帽子先扶好：", "跑完了，嘿～", "指令失敗了，別慌：", "等等要開會：", "開會了，走吧：", "新的 Jira：", "日誌好了："]
         let la: [String] = ["啦啦～CI 出發：", "CI 過了！啦啦啦～", "哎呀，CI 摔倒了：", "跑完了！啦～", "咦？指令沒成功：", "等一下要開會喔：", "開會了！快快快：", "有新的 Jira 喔：", "今天的日誌好了～啦啦："]
+        // </fan>
         let i = keys.firstIndex(of: kind) ?? -1
         if i < 0 { return "" }
-        switch id { case "po": return po[i]; case "stitch": return st[i]; case "hangyodon": return hg[i]; case "tinky": return ti[i]; case "dipsy": return di[i]; case "laalaa": return la[i]; default: break }
+        switch id { case "po": return po[i]; case "stitch": return st[i]; case "hangyodon": return hg[i]; case "tinky": return ti[i]; case "dipsy": return di[i]; case "laalaa": return la[i]; default: break }   //@fan
         return sp[i]
     }
 
@@ -12413,12 +12576,14 @@ extension World {
             let l: Pet = Lead()
             var line: String
             switch l.P.Id {
+            // <fan>
             case "po": line = "噓～小波安靜陪你 🤫"
             case "stitch": line = "噓…史迪仔乖乖的"
             case "hangyodon": line = "好，我安靜待著…有事再叫我"
             case "tinky": line = "噓～丁丁抱著袋袋安靜陪你 🤫"
             case "dipsy": line = "噓。帽子拉低，安靜。"
             case "laalaa": line = "噓～拉拉小小聲 🤫"
+            // </fan>
             default: line = l.P.Cu ? l.L("x_quiet_on") : "好，我安靜待著。"
             }
             l.Say(line, 2.2)
@@ -12434,12 +12599,14 @@ extension World {
         let l: Pet = Lead()
         var line: String
         switch l.P.Id {
+        // <fan>
         case "po": line = "安靜時間結束～Eh-oh!"
         case "stitch": line = "安靜結束！ih-ih!（小聲）"
         case "hangyodon": line = "安靜時間結束了…我好想講笑話"
         case "tinky": line = "安靜時間結束～Eh-oh!"
         case "dipsy": line = "安靜結束。嘿～"
         case "laalaa": line = "安靜時間結束～啦啦啦！"
+        // </fan>
         default: line = l.P.Cu ? l.L("x_quiet_off") : "安靜時間結束～"
         }
         if heldQuiet.Count == 0 { l.Say(line, 2.4); return }
@@ -12507,12 +12674,14 @@ extension World {
         let n = BumpTomato()
         var end: String
         switch l.P.Id {
+        // <fan>
         case "po": end = "專注結束！休息 5 分鐘 ☕ 好棒棒！"
         case "stitch": end = "專注結束！休息 5 分鐘 ☕ 嘻嘻嘻，史迪仔有乖乖"
         case "hangyodon": end = "專注結束！休息 5 分鐘 ☕ 你才是真正的英雄"
         case "tinky": end = "專注結束！休息 5 分鐘 ☕ 丁丁跳舞給你看"
         case "dipsy": end = "專注結束。休息 5 分鐘 ☕ 你很酷"
         case "laalaa": end = "專注結束！休息 5 分鐘 ☕ 啦啦啦～好棒棒"
+        // </fan>
         default: end = l.P.Cu ? l.L("x_focus_end") : "專注結束！休息 5 分鐘 ☕ 你超強的"
         }
         l.Knock((ExamNear() ? end.Replace("專注結束", "讀書結束") : end) + "　今天第 " + String(n) + " 顆 🍅", "high")
@@ -12597,19 +12766,23 @@ extension Pet {
 extension World {
     // ---------- 共用：每個角色的開場白 ----------
     static func FlavorExtra(_ id: String, _ kind: String) -> String! {
-        let pk = PikFlavor(id, kind) ?? OrigFlavor(id, kind); if pk != nil { return pk! }
+        let pk = PikFlavor(id, kind) ?? OrigFlavor(id, kind); if pk != nil { return pk! }   //@fan
+        // <public> let pk = OrigFlavor(id, kind); if pk != nil { return pk! }
         let cu = CuFlavor(id, kind, false); if cu != nil { return cu! }
         let keys: [String] = ["remind", "pc-cpu", "pc-ram", "pc-disk", "net-down", "net-up", "vpn", "download"]
-        let sp: [String] = ["⏰ 提醒你：", "蜘蛛感應！電腦好燙：", "蜘蛛感應！記憶體快滿了：", "硬碟快滿了：", "網路斷了！", "網路回來了 👍", "連不到公司網路（VPN 斷了？）", "下載好了："]
+        let sp: [String] = ["⏰ 提醒你：", "蜘蛛感應！電腦好燙：", "蜘蛛感應！記憶體快滿了：", "硬碟快滿了：", "網路斷了！", "網路回來了 👍", "連不到公司網路（VPN 斷了？）", "下載好了："]   //@fan
+        // <public> let sp: [String] = ["⏰ 提醒你：", "電腦好燙：", "記憶體快滿了：", "硬碟快滿了：", "網路斷了！", "網路回來了 👍", "連不到公司網路（VPN 斷了？）", "下載好了："]
+        // <fan>
         let po: [String] = ["⏰ 小波提醒你：", "電腦好忙好熱喔：", "記憶體要滿滿了：", "硬碟快塞滿了：", "網路斷掉了！嗚…", "網路回來了！Eh-oh!", "連不到公司網路耶（VPN 斷了？）", "下載好了！"]
         let st: [String] = ["⏰ ih! 提醒你：", "ih-ih! 電腦在冒煙：", "記憶體快爆了：", "硬碟要滿了：", "網路斷了！史迪仔去咬線！", "網路回來了！嘻嘻嘻", "公司網路連不到（VPN 斷了？）", "下載好了！ih!"]
         let hg: [String] = ["⏰ 英雄提醒你：", "電腦好像很累了：", "記憶體快滿了喔：", "硬碟快滿了：", "網路斷了…交給我這個英雄！", "網路回來了～太好了", "連不到公司網路（VPN 斷了嗎？）", "下載好了喔："]
         let ti: [String] = ["⏰ 丁丁提醒你：", "電腦好燙…丁丁幫你扇扇：", "記憶體要滿了，跟魔法袋一樣：", "硬碟快塞滿了：", "網路斷了！哎喲…", "網路回來了！Eh-oh!", "連不到公司網路耶（VPN 斷了？）", "下載好了！放進魔法袋～"]
         let di: [String] = ["⏰ 迪西提醒你：", "電腦很燙，酷不起來：", "記憶體快滿了：", "硬碟快滿了：", "網路斷了，冷靜：", "網路回來了，酷。", "連不到公司網路（VPN 斷了？）", "下載好了，嘿："]
         let la: [String] = ["⏰ 拉拉提醒你：", "電腦好熱喔：", "記憶體快滿滿了：", "硬碟快塞滿了：", "網路斷掉了！嗚…", "網路回來了！啦啦啦～", "連不到公司網路耶（VPN 斷了？）", "下載好了！啦～"]
+        // </fan>
         let i = keys.firstIndex(of: kind) ?? -1
         if i < 0 { return nil }
-        switch id { case "po": return po[i]; case "stitch": return st[i]; case "hangyodon": return hg[i]; case "tinky": return ti[i]; case "dipsy": return di[i]; case "laalaa": return la[i]; default: break }
+        switch id { case "po": return po[i]; case "stitch": return st[i]; case "hangyodon": return hg[i]; case "tinky": return ti[i]; case "dipsy": return di[i]; case "laalaa": return la[i]; default: break }   //@fan
         return sp[i]
     }
 
@@ -13004,12 +13177,14 @@ extension World {
         if parts.Count == 0 { l.Say("今天很安靜呢～今天辛苦了 ♥", 4); return }
         var intro: String
         switch l.P.Id {
+        // <fan>
         case "po": intro = "Eh-oh! 今天的我們："
         case "stitch": intro = "Aloha～今天的 Ohana 紀錄："
         case "hangyodon": intro = "英雄報告：今天的我們"
         case "tinky": intro = "Eh-oh! 丁丁的魔法袋裝了今天的我們："
         case "dipsy": intro = "嘿，今天的我們："
         case "laalaa": intro = "啦啦～今天的我們："
+        // </fan>
         default: intro = l.P.Cu ? l.L("x_wrap") : "今天的我們："
         }
         if outs.Count >= 2 && !quietOn {
@@ -13149,16 +13324,20 @@ extension World {
     static func TicketLine(_ id: String, _ stage: Int, _ t: Ticket) -> String {
         if t.Kind == "course" { return CourseLine(id, stage, t) }   // 搶課：52_study.swift
         let h = String(t.Lead / 60) + " 小時", n: String = t.Name
-        let pk = PikTicket(id, stage, n, h) ?? OrigTicket(id, stage, n, h); if pk != nil { return pk! }
+        let pk = PikTicket(id, stage, n, h) ?? OrigTicket(id, stage, n, h); if pk != nil { return pk! }   //@fan
+        // <public> let pk = OrigTicket(id, stage, n, h); if pk != nil { return pk! }
         let cu = CuTicket(id, stage, n, h); if cu != nil { return cu! }
-        let sp: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款", "🎫 " + n + " 再 30 分鐘開賣，網頁先開好", "🎫 " + n + " 剩 10 分鐘！蜘蛛感應全開", "🎫 準備！手指放在按鈕上", "🎫 開搶！！Thwip!"]
+        let sp: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款", "🎫 " + n + " 再 30 分鐘開賣，網頁先開好", "🎫 " + n + " 剩 10 分鐘！蜘蛛感應全開", "🎫 準備！手指放在按鈕上", "🎫 開搶！！Thwip!"]   //@fan
+        // <public> let sp: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款", "🎫 " + n + " 再 30 分鐘開賣，網頁先開好", "🎫 " + n + " 剩 10 分鐘！", "🎫 準備！手指放在按鈕上", "🎫 開搶！！"]
+        // <fan>
         let po: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款喔", "🎫 " + n + " 再 30 分鐘！小波陪你等", "🎫 " + n + " 剩 10 分鐘！好緊張～", "🎫 準備！深呼吸～", "🎫 開搶！！衝衝衝！"]
         let st: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款！ih!", "🎫 " + n + " 30 分鐘！史迪仔幫你顧著", "🎫 " + n + " 10 分鐘！ih-ih-ih!", "🎫 準備！史迪仔也準備好了", "🎫 開搶！！衝啊！"]
         let hg: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款", "🎫 " + n + " 30 分鐘後開賣，英雄陪你等", "🎫 " + n + " 剩 10 分鐘！英雄出動準備", "🎫 準備！這次一定搶到！", "🎫 開搶！！祝你搶到！"]
         let ti: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款喔", "🎫 " + n + " 再 30 分鐘！丁丁陪你等", "🎫 " + n + " 剩 10 分鐘！魔法袋準備好了", "🎫 準備！深呼吸～", "🎫 開搶！！衝衝衝！"]
         let di: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款", "🎫 " + n + " 30 分鐘後開賣，網頁先開好", "🎫 " + n + " 剩 10 分鐘！帽子戴好", "🎫 準備。冷靜，酷。", "🎫 開搶！！嘿！"]
         let la: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款喔", "🎫 " + n + " 再 30 分鐘！拉拉唱歌陪你等", "🎫 " + n + " 剩 10 分鐘！好緊張～", "🎫 準備！啦…啦…", "🎫 開搶！！衝啊～啦！"]
-        switch id { case "po": return po[stage]; case "stitch": return st[stage]; case "hangyodon": return hg[stage]; case "tinky": return ti[stage]; case "dipsy": return di[stage]; case "laalaa": return la[stage]; default: break }
+        // </fan>
+        switch id { case "po": return po[stage]; case "stitch": return st[stage]; case "hangyodon": return hg[stage]; case "tinky": return ti[stage]; case "dipsy": return di[stage]; case "laalaa": return la[stage]; default: break }   //@fan
         return sp[stage]
     }
 
@@ -13456,9 +13635,10 @@ extension Pet {
     static let PLATE: [String] = ["..1....", "kWWWWWk", ".kkkkk."]
 
     func LunchLine(_ phase: String) -> String {
-        if P.Pik { return PikLunchLine(phase) }
+        if P.Pik { return PikLunchLine(phase) }   //@fan
         if P.Orig { return OrigLunchLine(phase) }
         if P.Cu { return CuLunchLine(phase) }
+        // <fan>
         switch P.Id {
         case "po":
             if phase == "start" { return "嘟嘟糊！午餐時間！🔔" }
@@ -13496,6 +13676,8 @@ extension Pet {
         if phase == "nap" { return "吃飽了…蜘蛛也要午睡 zZ" }
         if phase == "end" { return "回來工作！能力越強，吃得越多 🕸" }
         return Pick(["嗯～起司拉好長", "Pizza time! 🍕", "Thwip! 接到掉下來的臘腸了"])
+        // </fan>
+        // <public> return "午餐時間！🔔"
     }
 
     func LunchStart() {
@@ -13529,10 +13711,11 @@ extension Pet {
         if state == "sleep" { DrawAt(g, Pet.PLATE, 12, 13, bx, by, ps, fx, false, true); return }
         if !HoldingFood() || state == "glass" || state == "hug" { return }
         let bite = Step2(2.5) ? 1 : 0   // 一口一口：手上的食物上下動
-        if P.Pik { DrawPikLunch(g, f, bx, by, ps, fx, bite); return }
+        if P.Pik { DrawPikLunch(g, f, bx, by, ps, fx, bite); return }   //@fan
         if P.Orig { DrawOrigLunch(g, f, bx, by, ps, fx, bite); return }
         if P.Cu { CuLunch(g, f, bx, by, ps, fx, bite); return }
         switch P.Id {
+        // <fan>
         case "po":
             DrawAt(g, Pet.CUSTARD, 9, Double(8 + bite + f.AccDy), bx, by, ps, fx, false, true)
             // 嘟嘟糊沾在臉上
@@ -13552,6 +13735,7 @@ extension Pet {
         case "laalaa":
             DrawAt(g, Pet.TOAST, -1.5, Double(P.BodyTop + 1 + bite + f.AccDy), bx, by, ps, fx, false, true)
             DrawAt(g, A("DUDU_CUP"), 11, Double(P.BodyTop + 2 + f.AccDy), bx, by, ps, fx, false, true)
+            // </fan>
         default:
             DrawAt(g, Pet.PIZZA, 10, Double(7 + bite), bx, by, ps, fx, false, true)
         }
@@ -13560,15 +13744,18 @@ extension Pet {
     // 櫃子裡的公仔也拿著午餐
     func DrawLunchShelf(_ g: Graphics, _ bx: Int, _ by: Int, _ ps: Int, _ flip: Bool) {
         if !w.Lunch { return }
-        if P.Pik || P.Orig { return }   // 皮克敏、續命小隊在自己的櫃子畫法裡拿午餐
+        if P.Pik || P.Orig { return }   // 皮克敏、續命小隊在自己的櫃子畫法裡拿午餐   //@fan
+        // <public> if P.Orig { return }
         var food: [String]; var col: Double, row: Double
         switch P.Id {
+        // <fan>
         case "po": food = Pet.CUSTARD; col = 9; row = 8
         case "stitch": food = Pet.SANDWICH; col = 3; row = 6
         case "hangyodon": food = Pet.MILKTEA; col = 10.5; row = 8
         case "tinky": food = Pet.TOAST; col = 10.5; row = Double(P.BodyTop + 1)
         case "dipsy": food = A("DUDU"); col = 9; row = Double(P.BodyTop)
         case "laalaa": food = Pet.TOAST; col = -1.5; row = Double(P.BodyTop + 1)
+        // </fan>
         default: food = Pet.PIZZA; col = 10; row = 7
         }
         DrawAt(g, food, col, row, bx, by, ps, flip, false, true)
@@ -13595,17 +13782,19 @@ extension Pet {
 
     // 在櫃子裡要佔幾列高（腳到最高點：天線、耳朵、帽子、滑板車墊高、晃動）
     func ShelfRows() -> Int {
-        if P.Pik { return PikShelfRows() }
+        if P.Pik { return PikShelfRows() }   //@fan
         if P.Orig { return OrigShelfRows() }
         if P.Cu { return CuShelfRows() }
         let hat = (w.SeasonNow == "xmas" || Level() >= 3) ? 4 : 0
         switch P.Id {
+        // <fan>
         case "po": return 16 + P.TopRows + 1                             // 扶著停在旁邊的滑板車
         case "stitch": return 16 + Math.Max(P.TopRows, hat > 0 ? 3 : 0) + 1
         case "hangyodon": return 16 + (hat > 0 ? 2 : 0) + 1
         case "tinky": return 16 + P.TopRows + 1                           // 天線從帽子穿出來，不會更高
         case "dipsy": return 16 + P.TopRows + 2                           // 高帽子＋偶爾抬一下
         case "laalaa": return 16 + Math.Max(P.TopRows, hat > 0 ? 7 : 0) + 1
+        // </fan>
         default: break
         }
         return 16 + hat + 1
@@ -13615,6 +13804,7 @@ extension Pet {
 
     func Reload() { xp = 0; lastPatDay = ""; patsToday = 0; patsDate = ""; LoadBond() }
 
+    // <fan>
     // 開發用預覽：每個角色各種姿勢排成一張圖
     static func PreviewSheet(_ path: String, _ night: Bool) {
         let w = World(6)
@@ -13695,6 +13885,7 @@ extension Pet {
             b.Save(path, ImageFormat.Png)
         }
     }
+    // </fan>
 
     // 開發用：櫃子畫成圖
     static func PreviewShelf(_ path: String, _ night: Bool) {
@@ -13708,7 +13899,8 @@ extension World {
     func PreviewShelfTo(_ path: String) {
         shelf = ShelfForm(self, S)
         shelf.Place(Rectangle(0, 0, 400, 400))
-        let favs: [String] = ["spidey", "po", "stitch", "hangyodon", "po"]
+        let favs: [String] = ["spidey", "po", "stitch", "hangyodon", "po"]   //@fan
+        // <public> let favs: [String] = ["boba", "coffee", "onigiri", "sticky", "boba"]
         let W0 = shelf.Area.Width + 16, H0 = shelf.Area.Height + 16
         do {
             let b = Bitmap(W0 * favs.count, H0)
@@ -13889,7 +14081,8 @@ extension World {
     // 設定視窗用：這一櫃的櫃子縮圖（預覽用的 World 才叫這個，不開視窗）
     func SetupShelfPic() -> Bitmap {
         shelf = ShelfForm(self, S)
-        shelf.Tubby = TubbyLineup; shelf.Pik = PikLineup; shelf.Orig = OrigLineup
+        shelf.Tubby = TubbyLineup; shelf.Pik = PikLineup; shelf.Orig = OrigLineup   //@fan
+        // <public> shelf.Orig = OrigLineup
         shelf.Night = false
         shelf.Place(Rectangle(0, 0, 2000, 2000))
         let b = shelf.Snapshot(CellPets(), [false, false, false, false], 1.0)
@@ -14420,7 +14613,7 @@ class SetupForm: Form {
     static func Members(_ id: String) -> String {
         var names: [String] = []
         for x in Pal.LineupIds(id) { let p: Pal! = Pal.Get(x); if p != nil { names.append(p.Name) } }
-        if Pal.NormLineup(id) == Pal.Pikmin { names.append("休息花") }
+        if Pal.NormLineup(id) == Pal.Pikmin { names.append("休息花") }   //@fan
         return names.joined(separator: "・")
     }
     func CanNext() -> Bool { return step == 0 ? lu != "" : (mode == "shelf" || InLineup(pet)) }
@@ -14454,7 +14647,8 @@ class SetupForm: Form {
             EnsurePics(lu)
             let cw = Sc(240), ch = Sc(116), gap = Sc(24), x0 = (W0 - 2 * cw - gap) / 2
             Add("mode:single", "只要一隻", "沒有櫃子，他住在右下角的蛋裡", Rectangle(x0, top, cw, ch), 0, mode == "single")
-            Add("mode:shelf", lu == Pal.Pikmin ? "整櫃（三隻＋花）" : "整櫃", lu == Pal.Pikmin ? "三隻皮克敏和休息花住在櫃子裡" : "大家住在公仔櫃裡，點格子叫他們出來", Rectangle(x0 + cw + gap, top, cw, ch), 0, mode == "shelf")
+            Add("mode:shelf", lu == Pal.Pikmin ? "整櫃（三隻＋花）" : "整櫃", lu == Pal.Pikmin ? "三隻皮克敏和休息花住在櫃子裡" : "大家住在公仔櫃裡，點格子叫他們出來", Rectangle(x0 + cw + gap, top, cw, ch), 0, mode == "shelf")   //@fan
+            // <public> Add("mode:shelf", "整櫃", "大家住在公仔櫃裡，點格子叫他們出來", Rectangle(x0 + cw + gap, top, cw, ch), 0, mode == "shelf")
             if mode == "single" {
                 let ids = Pal.LineupIds(lu)
                 let pw = Sc(100), pg = Sc(14), px0 = (W0 - ids.count * pw - (ids.count - 1) * pg) / 2, py = top + ch + Sc(34)
@@ -17085,12 +17279,14 @@ extension World {
         if saved != "" { return saved }
         let fm = FileManager.default
         var fresh = !fm.fileExists(atPath: World.FilePath("out.txt")) && !fm.fileExists(atPath: World.FilePath("profile.txt")) && !fm.fileExists(atPath: World.FilePath("usage.txt"))
+        // <fan>
         if fresh && !App.Isolated {
             // mac: 舊版 Spidey（SpideyDesktop.swift）的資料在 ~/Library/Application Support/SpideyDesktop（bond.txt／pats.txt，見 Migrate）。
             //      這個資料夾現在也是 VS Code 放程式和 socket 的地方，一定存在，所以看舊的資料檔在不在（Windows 是看資料夾在不在）。
             let old = NSHomeDirectory() + "/Library/Application Support/SpideyDesktop"
             if fm.fileExists(atPath: old + "/bond.txt") || fm.fileExists(atPath: old + "/pats.txt") { fresh = false }   // 從舊版 Spidey 小夥伴升級的：維持經典一櫃
         }
+        // </fan>
         if !fresh { return "" }
         World.WriteText("lineup.txt", Pal.Original)   // 記下來：下次開機（沒帶參數）還是續命小隊
         return Pal.Original
@@ -18697,29 +18893,35 @@ extension World {
     static func ExamPrefix(_ id: String) -> String {
         let cu = World.CuStudy(id, "x_exam_prefix", nil, nil, nil); if cu != nil { return cu! }   // 自己做的公仔（53_custom.swift）
         switch id {
+        // <fan>
         case "spidey": return "蜘蛛感應："
         case "po", "tinky": return "Eh-oh! "
         case "stitch": return "ih! "
         case "hangyodon": return "英雄報告："
         case "dipsy": return "嘿，"
         case "laalaa": return "啦啦～"
+        // </fan>
         default: break
         }
-        return id.StartsWith("pk") ? "皮克敏報告：" : ""
+        return id.StartsWith("pk") ? "皮克敏報告：" : ""   //@fan
+        // <public> return ""
     }
 
     static func ExamTail(_ id: String) -> String {
         let cu = World.CuStudy(id, "x_exam_tail", nil, nil, nil); if cu != nil { return cu! }
         switch id {
+        // <fan>
         case "po": return "小波陪你讀書！"
         case "stitch": return "史迪仔幫你翻書！ih!"
         case "hangyodon": return "讀書的你才是真正的英雄"
         case "tinky": return "丁丁陪你讀～"
         case "dipsy": return "讀一點，很酷。"
         case "laalaa": return "邊讀邊唱～啦啦"
+        // </fan>
         default: break
         }
-        return id.StartsWith("pk") ? "皮克敏幫你搬課本！" : "今天讀一點？"
+        return id.StartsWith("pk") ? "皮克敏幫你搬課本！" : "今天讀一點？"   //@fan
+        // <public> return "今天讀一點？"
     }
 
     // ================= 熬夜提醒（預設 01:00 起；02:00、03:00 再講；06:00 結束；離開電腦 15 分鐘就當你睡了）=================
@@ -18764,6 +18966,7 @@ extension World {
         let cu = World.CuStudy(id, "x_late" + String(Math.Max(0, Math.Min(2, lv))), hm, nil, nil); if cu != nil { return cu! }
         var a: [String]
         switch id {
+        // <fan>
         case "spidey": a = ["已經 " + hm + " 了…蜘蛛也要睡覺的，今天先到這裡？🌙", hm + " 了。熬夜的英雄明天會變殭屍，存檔去睡吧", hm + "！！蜘蛛感應：你真的該睡了 😴 剩下的明天再做"]
         case "po": a = ["嗚…" + hm + " 了，小波好睏…你也去睡覺覺好不好 🌙", hm + " 了！太陽寶寶都睡好久了，關電腦吧～", hm + " 了…小波撐不住了，一起去睡嘛 😴"]
         case "stitch": a = [hm + " 了…史迪仔想睡了，你也睡 🌙", hm + "！ih! 睡覺！明天再玩！", hm + "！！再不睡史迪仔要拔電源線了喔 😴"]
@@ -18771,9 +18974,11 @@ extension World {
         case "tinky": a = [hm + " 了…丁丁抱著袋袋想睡覺覺 🌙", hm + " 了！天線寶寶說：該睡覺囉～", hm + " 了…丁丁跌坐在枕頭上了，你也去睡 😴"]
         case "dipsy": a = [hm + "。很晚了，帽子拉低，該睡了 🌙", hm + "。熬夜不酷，睡覺比較酷。", hm + "。真的，去睡。😴"]
         case "laalaa": a = [hm + " 了…拉拉唱搖籃曲給你聽～啦…啦… 🌙", hm + " 了！球球都睡了，你也睡吧～", hm + " 了…啦…（打哈欠）一起去睡嘛 😴"]
+        // </fan>
         default:
-            if id.StartsWith("pk") { a = [hm + " 了…皮克敏都回洋蔥睡了 🌙", hm + " 了，夜晚很危險，快回基地睡覺！", hm + " 了！！再不睡天就亮了 😴"] }
-            else { a = ["已經 " + hm + " 了，今天先到這裡好嗎？早點休息 🌙", hm + " 了，明天會很累喔，存檔去睡吧", hm + " 了！真的該睡了 😴"] }
+            if id.StartsWith("pk") { a = [hm + " 了…皮克敏都回洋蔥睡了 🌙", hm + " 了，夜晚很危險，快回基地睡覺！", hm + " 了！！再不睡天就亮了 😴"] }   //@fan
+            else { a = ["已經 " + hm + " 了，今天先到這裡好嗎？早點休息 🌙", hm + " 了，明天會很累喔，存檔去睡吧", hm + " 了！真的該睡了 😴"] }   //@fan
+            // <public> do { a = ["已經 " + hm + " 了，今天先到這裡好嗎？早點休息 🌙", hm + " 了，明天會很累喔，存檔去睡吧", hm + " 了！真的該睡了 😴"] }
         }
         return a[Math.Max(0, Math.Min(2, lv))]
     }
@@ -18797,6 +19002,7 @@ extension World {
         if i < 0 { return nil }
         var a: [String]
         switch id {
+        // <fan>
         case "po": a = ["🎒 小波提醒你上課：", "🎒 上課囉！Eh-oh!", "📚 要考試了，小波幫你加油：", "📚 考試！小波陪你：", "等一下有事喔：", "時間到囉：", "📝 小波提醒你寫作業：", "📝 嗚～快截止了："]
         case "stitch": a = ["🎒 ih! 要上課：", "🎒 上課！快去！", "📚 要考試！ih-ih!", "📚 考試！史迪仔幫你集氣：", "等等有事！", "開始了！", "📝 ih! 作業：", "📝 ih-ih-ih! 快截止："]
         case "hangyodon": a = ["🎒 英雄提醒：要上課了", "🎒 上課時間到了：", "📚 英雄報告：要考試了", "📚 考試開始，你就是英雄：", "等一下有行程喔：", "行程開始了：", "📝 英雄提醒你：", "📝 交給我這個英雄…快截止了："]
@@ -18804,6 +19010,7 @@ extension World {
         case "dipsy": a = ["🎒 要上課了：", "🎒 上課了，走吧：", "📚 要考試了，冷靜：", "📚 考試開始，酷：", "等等有事：", "開始了：", "📝 作業：", "📝 快截止了，帽子扶好："]
         case "laalaa": a = ["🎒 拉拉提醒你上課：", "🎒 上課囉！啦～", "📚 要考試了，拉拉幫你加油：", "📚 考試！啦啦加油：", "等一下有事喔：", "時間到囉：", "📝 拉拉提醒你寫作業：", "📝 啦！快截止了："]
         case "spidey": a = ["🎒 要上課囉：", "🎒 上課時間！", "📚 蜘蛛感應！要考試了：", "📚 考試開始！", "等一下有行程：", "行程開始了：", "📝 作業提醒：", "📝 蜘蛛感應！快截止了："]
+        // </fan>
         default: a = ["🎒 要上課囉：", "🎒 上課時間！", "📚 要考試了：", "📚 考試開始！", "等一下有行程：", "行程開始了：", "📝 作業提醒：", "📝 快截止了："]
         }
         return a[i]
@@ -18815,6 +19022,7 @@ extension World {
         let h = String(t.Lead / 60) + " 小時", n: String = t.Name
         var a: [String]
         switch id {
+        // <fan>
         case "spidey": a = ["🎓 " + n + " 還有 " + h + "開放選課！先登入、志願序排好", "🎓 " + n + " 再 30 分鐘開放，選課頁先開好、課號抄好", "🎓 " + n + " 剩 10 分鐘！蜘蛛感應全開", "🎓 準備！手指放在加選按鈕上", "🎓 開放了！！快加選！Thwip!"]
         case "po": a = ["🎓 " + n + " 還有 " + h + "開放選課！先登入、志願排好喔", "🎓 " + n + " 再 30 分鐘！課號先抄好，小波陪你等", "🎓 " + n + " 剩 10 分鐘！好緊張～", "🎓 準備！深呼吸～", "🎓 開放了！！衝衝衝！"]
         case "stitch": a = ["🎓 " + n + " 還有 " + h + "開放選課！先登入！ih!", "🎓 " + n + " 30 分鐘！課號抄好，史迪仔幫你顧著", "🎓 " + n + " 10 分鐘！ih-ih-ih!", "🎓 準備！史迪仔也準備好了", "🎓 開放了！！衝啊！"]
@@ -18822,9 +19030,11 @@ extension World {
         case "tinky": a = ["🎓 " + n + " 還有 " + h + "開放選課！先登入喔", "🎓 " + n + " 再 30 分鐘！丁丁陪你等", "🎓 " + n + " 剩 10 分鐘！魔法袋準備好了", "🎓 準備！深呼吸～", "🎓 開放了！！衝衝衝！"]
         case "dipsy": a = ["🎓 " + n + " 還有 " + h + "開放選課，先登入", "🎓 " + n + " 30 分鐘後開放，課號抄好", "🎓 " + n + " 剩 10 分鐘，帽子戴好", "🎓 準備。冷靜，酷。", "🎓 開放了！！嘿！"]
         case "laalaa": a = ["🎓 " + n + " 還有 " + h + "開放選課！先登入喔", "🎓 " + n + " 再 30 分鐘！拉拉唱歌陪你等", "🎓 " + n + " 剩 10 分鐘！好緊張～", "🎓 準備！啦…啦…", "🎓 開放了！！衝啊～啦！"]
+        // </fan>
         default:
-            if id.StartsWith("pk") { a = ["🎓 " + n + " 還有 " + h + "開放選課！先登入、志願排好", "🎓 " + n + " 再 30 分鐘，皮克敏排好隊了", "🎓 " + n + " 剩 10 分鐘！全員集合！", "🎓 準備！吹哨子準備～", "🎓 開放了！！全員衝鋒！"] }
-            else { a = ["🎓 " + n + " 還有 " + h + "開放選課！先登入、志願序排好", "🎓 " + n + " 再 30 分鐘開放，選課頁先開好", "🎓 " + n + " 剩 10 分鐘！", "🎓 準備！手指放在加選按鈕上", "🎓 開放了！！快加選！"] }
+            if id.StartsWith("pk") { a = ["🎓 " + n + " 還有 " + h + "開放選課！先登入、志願排好", "🎓 " + n + " 再 30 分鐘，皮克敏排好隊了", "🎓 " + n + " 剩 10 分鐘！全員集合！", "🎓 準備！吹哨子準備～", "🎓 開放了！！全員衝鋒！"] }   //@fan
+            else { a = ["🎓 " + n + " 還有 " + h + "開放選課！先登入、志願序排好", "🎓 " + n + " 再 30 分鐘開放，選課頁先開好", "🎓 " + n + " 剩 10 分鐘！", "🎓 準備！手指放在加選按鈕上", "🎓 開放了！！快加選！"] }   //@fan
+            // <public> do { a = ["🎓 " + n + " 還有 " + h + "開放選課！先登入、志願序排好", "🎓 " + n + " 再 30 分鐘開放，選課頁先開好", "🎓 " + n + " 剩 10 分鐘！", "🎓 準備！手指放在加選按鈕上", "🎓 開放了！！快加選！"] }
         }
         return a[Math.Max(0, Math.Min(4, stage))]
     }
@@ -19823,7 +20033,8 @@ enum CuStore
 extension Pal
 {
     static let Mine = "mine"
-    static let Guests: [String] = ["boba", "coffee", "onigiri", "sticky", "spidey", "po", "stitch", "hangyodon", "tinky", "dipsy", "laalaa"]   // 可以來我的櫃作客的內建公仔
+    static let Guests: [String] = ["boba", "coffee", "onigiri", "sticky", "spidey", "po", "stitch", "hangyodon", "tinky", "dipsy", "laalaa"]   // 可以來我的櫃作客的內建公仔   //@fan
+    // <public> static let Guests: [String] = ["boba", "coffee", "onigiri", "sticky"]
 
     static func CuReset() { all = nil }
     static func GetBuiltin(_ id: String) -> Pal! { if all == nil { return nil }; for p in all! { if p.Id == id && !p.Cu { return p } }; return nil }
@@ -20848,7 +21059,7 @@ extension World
     func CuReload(_ pet: String)
     {
         CuStore.Reset(false)
-        if lineup == Pal.Mine && !Pal.HasCustom() { SwitchLineup(Pal.Classic, ""); return }
+        if lineup == Pal.Mine && !Pal.HasCustom() { SwitchLineup(Pal.Fallback, ""); return }
         if lineup != Pal.Mine { return }
         // 跟 SwitchLineup 一樣，只是同一櫃也要重建（公仔的資料換了）
         AbortScene()
@@ -22636,7 +22847,7 @@ class CuMaker: Form {
         if m.Id == "" { m.Id = "cudraft" }
         if m.Name == "" { m.Name = "小公仔" }
         draft = Pal.MakeCu(m, spr)
-        if pvw == nil { pvw = World(w.S, Pal.Classic) }
+        if pvw == nil { pvw = World(w.S, Pal.Fallback) }
         pv = Pet(pvw, draft, w.S, 7)
     }
 
@@ -23553,7 +23764,7 @@ extension World {
 
     // 畫每一格：可愛的小桌面背景＋公仔照劇本動
     func ShareFrames(_ cast: List<Pal>, _ W0: Int, _ H0: Int, _ fps: Int, _ n: Int, _ caption: inout String!) -> List<[Int]> {
-        let pw = World(S, Pal.Classic)
+        let pw = World(S, Pal.Fallback)
         let pets = List<Pet>()
         var seed = 11
         for p in cast { pets.Add(Pet(pw, p, S, seed)); seed += 1 }

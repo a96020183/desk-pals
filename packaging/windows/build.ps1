@@ -5,21 +5,30 @@
 #   powershell -NoProfile -File packaging\windows\build.ps1                    # 全部（找不到 Inno／SDK 的那一步會略過並提示）
 #   powershell -NoProfile -File packaging\windows\build.ps1 -Steps exe         # 只編 exe
 #   ... -Steps exe,installer,msix -Strict                                       # CI：缺工具就失敗
-# 產出：dist\DeskPals.exe、dist\DeskPals-Setup-<版號>.exe、dist\DeskPals-<版號>.msix（版號＝extension/package.json 的 version）
+#   ... -Variant personal                                                       # 個人版（全部角色，含同人；自己用，不要公開）
+# 產出（版號＝extension/package.json 的 version）：
+#   公開版（預設；上架 Microsoft Store、公開下載只能用這個）：dist\DeskPals.exe、dist\DeskPals-Setup-<版號>.exe、dist\DeskPals-<版號>.msix
+#   個人版：dist\DeskPals-personal.exe、dist\DeskPals-Setup-<版號>-personal.exe（預設不打 MSIX）
+# 公開版的原始碼由 tools/variant.py 從 extension/desktop 減掉同人角色產生（build\public\extension\desktop），
+# 編好的 exe、MSIX 會再用 variant.py guard 掃一次同人字眼，有就失敗。
 #
 # 簽章（之後有憑證再開）：設了環境變數 DESKPALS_SIGN_PFX（.pfx 路徑）＋ DESKPALS_SIGN_PASSWORD 就會用 signtool 簽 exe、安裝程式（含解除安裝程式）；
 # 沒設就安靜略過。MSIX 一律不簽（上架時 Microsoft Store 會簽）。
 # MSIX 的身分（Partner Center 給的）：環境變數 MSIX_IDENTITY_NAME、MSIX_PUBLISHER、MSIX_PUBLISHER_DISPLAY_NAME；沒設＝佔位值（只能拿來檢查，不能上架）。
 param(
-    [string[]]$Steps = @("exe", "installer", "msix"),
+    [string[]]$Steps = @(),
     [string]$OutDir = "dist",
+    [ValidateSet("public", "personal")][string]$Variant = "public",
     [switch]$Strict
 )
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 Set-Location $Root
 $Steps = @($Steps | ForEach-Object { $_ -split "," } | Where-Object { $_ })
-$Build = Join-Path $Root "build\win"
+$Personal = $Variant -eq "personal"
+if ($Steps.Count -eq 0) { $Steps = if ($Personal) { @("exe", "installer") } else { @("exe", "installer", "msix") } }
+$Suffix = if ($Personal) { "-personal" } else { "" }
+$Build = Join-Path $Root $(if ($Personal) { "build\win-personal" } else { "build\win" })
 $Icons = Join-Path $Root "build\icons"
 $Out = Join-Path $Root $OutDir
 New-Item -ItemType Directory -Force -Path $Build, $Out | Out-Null
@@ -28,7 +37,7 @@ $pkg = Get-Content (Join-Path $Root "extension\package.json") -Raw -Encoding UTF
 $Version = $pkg.version
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "extension/package.json version '$Version' must be x.y.z" }
 $Version4 = "$Version.0"
-Write-Host "Desk Pals $Version"
+Write-Host "Desk Pals $Version ($Variant)"
 
 function Skip([string]$what) {
     if ($Strict) { throw $what }
@@ -66,13 +75,26 @@ if ($LASTEXITCODE -ne 0) { throw "make_icons.py failed" }
 
 $Exe = Join-Path $Build "DeskPals.exe"
 
+# ---------- 原始碼：個人版＝repo 本身；公開版＝減掉同人角色（並掃一次）----------
+if ($Personal) { $Desk = Join-Path $Root "extension\desktop" }
+else {
+    & $py.Source -I (Join-Path $Root "tools\variant.py") public
+    if ($LASTEXITCODE -ne 0) { throw "tools/variant.py public failed (fan content in the public variant?)" }
+    $Desk = Join-Path $Root "build\public\extension\desktop"
+}
+function Guard([string[]]$paths) {
+    if ($Personal) { return }
+    & $py.Source -I (Join-Path $Root "tools\variant.py") guard @paths
+    if ($LASTEXITCODE -ne 0) { throw "fan content in the public build: $($paths -join ', ')" }
+}
+
 # ---------- exe ----------
 if ($Steps -contains "exe") {
     $csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
     if (-not (Test-Path $csc)) { $csc = Join-Path $env:WINDIR "Microsoft.NET\Framework\v4.0.30319\csc.exe" }
     if (-not (Test-Path $csc)) { throw "csc.exe (.NET Framework 4.x) not found" }
     # 跟 desk-pals.ps1 一模一樣的組法：DeskPals.cs ＋ DeskPals.*.cs（照名字排序）接成一份，同一個編譯器（C# 5）
-    $desk = Join-Path $Root "extension\desktop"
+    $desk = $Desk
     $src = [System.IO.File]::ReadAllText((Join-Path $desk "DeskPals.cs"), [System.Text.Encoding]::UTF8)
     foreach ($f in (Get-ChildItem -Path $desk -Filter "DeskPals.*.cs" | Sort-Object Name)) { $src += "`n" + [System.IO.File]::ReadAllText($f.FullName, [System.Text.Encoding]::UTF8) }
     $utf8 = New-Object System.Text.UTF8Encoding($true)
@@ -100,8 +122,9 @@ using System.Reflection;
     )
     & $csc @cscArgs
     if ($LASTEXITCODE -ne 0) { throw "csc failed" }
+    Guard @($Exe, (Join-Path $Build "DeskPals.all.cs"))
     Sign-File $Exe
-    Copy-Item $Exe (Join-Path $Out "DeskPals.exe") -Force
+    Copy-Item $Exe (Join-Path $Out "DeskPals$Suffix.exe") -Force
     Write-Host ("built {0} ({1:N0} bytes)" -f $Exe, (Get-Item $Exe).Length)
 }
 if (($Steps -contains "installer" -or $Steps -contains "msix") -and -not (Test-Path $Exe)) { throw "DeskPals.exe not built yet (add -Steps exe)" }
@@ -116,14 +139,15 @@ if ($Steps -contains "installer") {
         $innoDir = Split-Path $iscc
         $isl = @("$innoDir\Languages\ChineseTraditional.isl", "$innoDir\Languages\Unofficial\ChineseTraditional.isl") | Where-Object { Test-Path $_ } | Select-Object -First 1
         if (-not $isl) { $isl = Join-Path $PSScriptRoot "ChineseTraditional.isl" }
-        $isccArgs = @("/Q", "/DAppVersion=$Version", "/DRoot=$Root", "/DBuildDir=$Build", "/DIconDir=$Icons", "/DLangFile=$isl", "/O$Out")
+        $isccArgs = @("/Q", "/DAppVersion=$Version", "/DRoot=$Root", "/DSrcDir=$Desk", "/DBuildDir=$Build", "/DIconDir=$Icons", "/DLangFile=$isl", "/O$Out")
+        if ($Personal) { $isccArgs += "/DOutSuffix=$Suffix" }
         if ($Sign) {
             $isccArgs += "/DSIGN"
             $isccArgs += "/Sdpsign=`"$SignTool`" sign /fd sha256 /f `"$($env:DESKPALS_SIGN_PFX)`" /p `"$($env:DESKPALS_SIGN_PASSWORD)`" /tr http://timestamp.digicert.com /td sha256 `$f"
         }
         & $iscc @isccArgs (Join-Path $PSScriptRoot "DeskPals.iss")
         if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
-        $setup = Join-Path $Out "DeskPals-Setup-$Version.exe"
+        $setup = Join-Path $Out "DeskPals-Setup-$Version$Suffix.exe"
         Write-Host ("built {0} ({1:N0} bytes)" -f $setup, (Get-Item $setup).Length)
     }
 }
@@ -138,7 +162,7 @@ if ($Steps -contains "msix") {
         if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
         New-Item -ItemType Directory -Force -Path $stage | Out-Null
         Copy-Item $Exe $stage
-        Copy-Item (Join-Path $Root "extension\desktop\claude-hook.js"), (Join-Path $Root "extension\desktop\ci-watch.js") $stage
+        Copy-Item (Join-Path $Desk "claude-hook.js"), (Join-Path $Desk "ci-watch.js") $stage
         Copy-Item (Join-Path $Icons "msix\Assets") (Join-Path $stage "Assets") -Recurse
         $name = if ($env:MSIX_IDENTITY_NAME) { $env:MSIX_IDENTITY_NAME } else { "DeskPals.Placeholder" }
         $publisher = if ($env:MSIX_PUBLISHER) { $env:MSIX_PUBLISHER } else { "CN=DeskPals-Placeholder" }
@@ -157,8 +181,9 @@ if ($Steps -contains "msix") {
         if ($pk) { [void]$cfg.resources.RemoveChild($pk) }
         $cfg.Save($pricfg)
         Quiet "makepri new" { & $makepri new /pr $stage /cf $pricfg /mn (Join-Path $stage "AppxManifest.xml") /of (Join-Path $stage "resources.pri") /o }
-        $msix = Join-Path $Out "DeskPals-$Version.msix"
+        $msix = Join-Path $Out "DeskPals-$Version$Suffix.msix"
         Quiet "makeappx pack" { & $makeappx pack /d $stage /p $msix /o }
+        Guard @($msix)
         Write-Host ("built {0} ({1:N0} bytes, unsigned — Microsoft Store signs it)" -f $msix, (Get-Item $msix).Length)
         if ($name -eq "DeskPals.Placeholder") { Write-Warning "MSIX identity is a placeholder — set MSIX_IDENTITY_NAME / MSIX_PUBLISHER / MSIX_PUBLISHER_DISPLAY_NAME from Partner Center before uploading (see PUBLISHING.md)" }
     }

@@ -408,7 +408,8 @@ extension World {
 
     func AbortScene() {
         scene = nil
-        for p in cast { p.InScene = false; p.ResetSceneProps() }
+        for p in cast { p.InScene = false; p.ResetSceneProps() }   //@fan
+        // <public> for p in cast { p.InScene = false }
         ClearProps()
         cast.Clear()
     }
@@ -443,7 +444,8 @@ extension World {
         if outs.Count < 2 { return }
         let free = List<Pet>()
         for p in outs { if p.Free() { free.Add(p) } }
-        if free.Count >= 3 && groupCd <= 0 && rnd.NextDouble() < (TubbyLineup && free.Count >= 4 ? 0.04 : 0.02) { groupCd = 600; if TubbyLineup { TubbyGroup(free.Count) } else if PikLineup { PikGroup(free.Count) } else if OrigLineup { OrigGroup(free.Count) } else if rnd.NextDouble() < 0.6 { GroupPhoto() } else { GroupHug() }; return }
+        if free.Count >= 3 && groupCd <= 0 && rnd.NextDouble() < (TubbyLineup && free.Count >= 4 ? 0.04 : 0.02) { groupCd = 600; if TubbyLineup { TubbyGroup(free.Count) } else if PikLineup { PikGroup(free.Count) } else if OrigLineup { OrigGroup(free.Count) } else if rnd.NextDouble() < 0.6 { GroupPhoto() } else { GroupHug() }; return }   //@fan
+        // <public> if free.Count >= 3 && groupCd <= 0 && rnd.NextDouble() < 0.02 { groupCd = 600; if OrigLineup { OrigGroup(free.Count) } else if rnd.NextDouble() < 0.6 { GroupPhoto() } else { GroupHug() }; return }
         var i = 0
         while i < free.Count {
             var j = i + 1
@@ -471,8 +473,9 @@ extension World {
     func PlayScene(_ key: String) {
         var ids = key.components(separatedBy: "-")
         if ids.count == 1 && (key == "photo" || key == "group") { GroupPhoto(); return }
-        if ids.count == 1 && PikLineup { PikScene(key); return }
+        if ids.count == 1 && PikLineup { PikScene(key); return }   //@fan
         if ids.count == 1 && OrigLineup { OrigScene(key); return }
+        // <fan>
         if ids.count == 1 {
             switch key {
             case "bighug": SceneBigHug(); return
@@ -484,6 +487,8 @@ extension World {
             }
             return
         }
+        // </fan>
+        // <public> if ids.count == 1 { return }
         if ids.count != 2 { return }
         ids.sort { $0.utf16.lexicographicallyPrecedes($1.utf16) }
         guard let a = Get(ids[0]), let b = Get(ids[1]) else { return }
@@ -493,7 +498,8 @@ extension World {
         pairCd[k2] = Now + 180 + rnd.NextDouble() * 120
         let d0: Double = a.Out && b.Out && a.state != "exit" && b.state != "exit" ? 0 : 1.6
         // 離太遠：先湊到一起再演
-        if TubbyLineup || PikLineup || OrigLineup { Later(d0) { [self] in GatherPair(k2, a, b, 0) }; return }
+        if TubbyLineup || PikLineup || OrigLineup { Later(d0) { [self] in GatherPair(k2, a, b, 0) }; return }   //@fan
+        // <public> if OrigLineup { Later(d0) { [self] in GatherPair(k2, a, b, 0) }; return }
         Later(d0) { [self] in
             if !Pets.Contains(a) || !Pets.Contains(b) { return }   // 中間換櫃了
             AbortScene()
@@ -524,6 +530,7 @@ extension World {
         // mac: C# 傳 null 進去會在 Begin 丟例外被 Later 吞掉；這裡少一隻就不演
         func g(_ id: String) -> Pet? { return Get(id) }
         switch key {
+        // <fan>
         case "hangyodon-spidey": if let x = g("spidey"), let y = g("hangyodon") { SceneHeroes(x, y) }
         case "po-spidey": if let x = g("spidey"), let y = g("po") { SceneSling(x, y) }
         case "spidey-stitch": if let x = g("spidey"), let y = g("stitch") { SceneClimbRace(x, y) }
@@ -537,7 +544,9 @@ extension World {
         case "po-tinky": if let x = g("po"), let y = g("tinky") { SceneScooterRide(x, y) }
         case "dipsy-po": if let x = g("po"), let y = g("dipsy") { SceneHatBaseball(x, y) }
         case "laalaa-po": if let x = g("laalaa"), let y = g("po") { SceneBallFetch(x, y) }
-        default: if PikLineup { PikPairScene(key) } else if OrigLineup { OrigPairScene(key) } else if a.P.Cu || b.P.Cu { CuPairScene(key, a, b) }
+        // </fan>
+        default: if PikLineup { PikPairScene(key) } else if OrigLineup { OrigPairScene(key) } else if a.P.Cu || b.P.Cu { CuPairScene(key, a, b) }   //@fan
+        // <public> default: if OrigLineup { OrigPairScene(key) } else if a.P.Cu || b.P.Cu { CuPairScene(key, a, b) }
         }
     }
 
@@ -550,7 +559,8 @@ extension World {
         if outs.Count < 2 { AllOut(); Later(2.5) { [self] in GroupPhoto() }; return }
         let l: Pet = Lead()
         Begin(outs.ToArray())
-        let gap: Double = TubbyLineup ? 1.9 : 1.6   // 天線寶寶比較寬（帽子、袋子、球）
+        let gap: Double = TubbyLineup ? 1.9 : 1.6   // 天線寶寶比較寬（帽子、袋子、球）   //@fan
+        // <public> let gap: Double = 1.6
         let foot = l.Foot
         var left = l.Cx - Double(outs.Count - 1) * Double(l.SW) * gap / 2
         var right = left + Double(outs.Count - 1) * Double(l.SW) * gap
@@ -564,18 +574,20 @@ extension World {
             let tx: Double = outs.Count == 1 ? L0 : L0 + (R0 - L0) * Double(i) / Double(outs.Count - 1)
             At(0.4 + Double(i) * 0.35) { [self] in
                 if Math.Abs(p.Foot - foot) < 3 && p.supH == l.supH && Math.Abs(tx - p.Cx) < 600 * k { p.WalkTo(tx, 10) }
-                else if p.P.Id == "hangyodon" { p.StartSwim(tx, foot, false) }
+                else if p.P.Id == "hangyodon" { p.StartSwim(tx, foot, false) }   //@fan
                 else { p.JumpTo(tx, foot) }
             }
         }
         At(5.2) {
             for p in outs {
                 p.dir = p.Cx < (L0 + R0) / 2 ? 1 : -1
-                if p.P.Id == "hangyodon" { p.ScenePose("cape", 3) } else if p.P.Id == "stitch" { p.ScenePose("grin", 3) } else if p.P.Id == "dipsy" { p.ScenePose("hattip", 3) } else { p.ScenePose("photo", 3) }
+                if p.P.Id == "hangyodon" { p.ScenePose("cape", 3) } else if p.P.Id == "stitch" { p.ScenePose("grin", 3) } else if p.P.Id == "dipsy" { p.ScenePose("hattip", 3) } else { p.ScenePose("photo", 3) }   //@fan
+                // <public> p.ScenePose("photo", 3)
             }
             l.Say("笑一個～ 3、2、1！", 1.6)
         }
         At(6.6) { [self] in Flash(Rectangle.FromLTRB(CInt(L0 - 120 * k), CInt(foot - 200 * k), CInt(R0 + 120 * k), CInt(foot + 20 * k))) }
+        // <fan>
         if TubbyLineup {
             // 天線寶寶一櫃：一隻一隻講（站很近，同時講泡泡會疊在一起）
             var d = 7.4
@@ -588,13 +600,16 @@ extension World {
             At(d + 0.4) { }
             return
         }
+        // </fan>
         At(7.4) {
             for p in outs {
                 switch p.P.Id! {
+                // <fan>
                 case "po": p.Say("再拍一次！", 1.8)
                 case "stitch": p.Say("Ohana！", 1.8)
                 case "hangyodon": p.Say("我有被拍進去嗎？嘴唇太大了嗎？", 1.8)
                 case "pkred", "pkyellow", "pkblue": p.Say("噗咿！", 1.8)
+                // </fan>
                 default: p.Say(p.P.Cu ? p.L("x_photo") : "帥！", 1.8)
                 }
             }
@@ -623,8 +638,8 @@ extension World {
 
     // 早上第一次：一隻一隻從櫃子跳出來點名
     func StartRollCall(_ ids: List<String>) {
-        if TubbyLineup { TubbyRollCall(ids); return }
-        if PikLineup { PikRollCall(ids); return }
+        if TubbyLineup { TubbyRollCall(ids); return }   //@fan
+        if PikLineup { PikRollCall(ids); return }   //@fan
         if OrigLineup { OrigRollCall(ids); return }
         var d = 0.4
         for id in ids {
@@ -638,23 +653,25 @@ extension World {
 
     // 下班了：輪流催你回家，然後一隻一隻回櫃子（人魚漢頓先在泡泡裡睡著）
     func NightRitual() {
-        if TubbyLineup { SceneByeBye(true); return }
-        if PikLineup { PikNight(true); return }
+        if TubbyLineup { SceneByeBye(true); return }   //@fan
+        if PikLineup { PikNight(true); return }   //@fan
         if OrigLineup { OrigNight(true); return }
         let outs = OutPets()
+        // <fan>
         // C# List.Sort（不穩定）；這裡穩定排序：人魚漢頓排第一
         let sorted = outs.ToArray().enumerated().sorted { a, b in
             let ka = a.element.P.Id == "hangyodon" ? 0 : 1, kb = b.element.P.Id == "hangyodon" ? 0 : 1
             return ka != kb ? ka < kb : a.offset < b.offset
         }.map { $0.element }
         outs.Clear(); for p in sorted { outs.Add(p) }
+        // </fan>
         Begin(outs.ToArray())
         for p in outs { if p.Grounded() { p.ScenePose("idle", 60) } }
         var d = 0.2
         for p in outs { let pp = p; At(d) { pp.Say(pp.L("nag"), 2.6) }; d += 2.8 }
         for p in outs {
             let pp = p
-            if pp.P.Id == "hangyodon" { At(d) { pp.InScene = false; pp.Act("sleep"); pp.InScene = true; pp.Say("我先在泡泡裡睡了…你也不要一個人待太晚喔", 2.6) }; d += 2.8 }
+            if pp.P.Id == "hangyodon" { At(d) { pp.InScene = false; pp.Act("sleep"); pp.InScene = true; pp.Say("我先在泡泡裡睡了…你也不要一個人待太晚喔", 2.6) }; d += 2.8 }   //@fan
             At(d) { pp.Say(pp.L("goodnight"), 2.4) }
             At(d + 1.2) { pp.InScene = false; if pp.Out { pp.StowToShelf(false) } }
             d += 2.6
@@ -838,7 +855,7 @@ extension World {
         if ballF != nil && ballF.VVisible { ballF.PaintTo(g) }
         if fx != nil && fx.VVisible { fx.PaintTo(g) }
         for p in Pets { if p.Bub != nil && p.Bub.VVisible { p.Bub.PaintTo(g) } }
-        if flowerBub != nil && flowerBub.VVisible { flowerBub.PaintTo(g) }
+        if flowerBub != nil && flowerBub.VVisible { flowerBub.PaintTo(g) }   //@fan
         if flash != nil && flash.VVisible { flash.PaintTo(g) }
         if setupForm != nil && !setupForm.IsDisposed && setupForm.VVisible { setupForm.PaintTo(g) }
         StudySnap(g)

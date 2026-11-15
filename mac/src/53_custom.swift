@@ -546,7 +546,8 @@ enum CuStore
 extension Pal
 {
     static let Mine = "mine"
-    static let Guests: [String] = ["boba", "coffee", "onigiri", "sticky", "spidey", "po", "stitch", "hangyodon", "tinky", "dipsy", "laalaa"]   // 可以來我的櫃作客的內建公仔
+    static let Guests: [String] = ["boba", "coffee", "onigiri", "sticky", "spidey", "po", "stitch", "hangyodon", "tinky", "dipsy", "laalaa"]   // 可以來我的櫃作客的內建公仔   //@fan
+    // <public> static let Guests: [String] = ["boba", "coffee", "onigiri", "sticky"]
 
     static func CuReset() { all = nil }
     static func GetBuiltin(_ id: String) -> Pal! { if all == nil { return nil }; for p in all! { if p.Id == id && !p.Cu { return p } }; return nil }
@@ -1585,7 +1586,7 @@ extension World
     func CuReload(_ pet: String)
     {
         CuStore.Reset(false)
-        if lineup == Pal.Mine && !Pal.HasCustom() { SwitchLineup(Pal.Classic, ""); return }
+        if lineup == Pal.Mine && !Pal.HasCustom() { SwitchLineup(Pal.Fallback, ""); return }
         if lineup != Pal.Mine { return }
         // 跟 SwitchLineup 一樣，只是同一櫃也要重建（公仔的資料換了）
         AbortScene()

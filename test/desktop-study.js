@@ -188,7 +188,7 @@ s.on("connect", async () => {
 	});
 
 	// 選單：公仔的右鍵 → 小幫手展開
-	send("act menu spidey");
+	send("act menu " + (process.env.STUDY_PET || "spidey"));   // 公開版沒有 spidey：STUDY_PET=boba
 	await sleep(400);
 	send("act menuhover 0");
 	await snap("08-pet-menu");
