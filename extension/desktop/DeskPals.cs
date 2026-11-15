@@ -588,7 +588,7 @@ namespace DeskPals
         public int HatRow = 0, HatCol = 0, ScarfRow = 8, GlassRow = 4, BadgeRow = 10, BadgeCol = 5, BadgeFrom = 'k';
         public int SideRow = 9;                       // 紅包、蛋糕的高度
         public double Speed = 40;                     // 走路速度（×k）
-        public bool KeepAntenna;                      // 帽子戴上後把天線重畫在帽子上面（小波）
+        public bool KeepAntenna;                      // 帽子戴上後把天線重畫在帽子上面（小波）   //@fan
         public int TopRows;                           // 頭頂超出 16 格框的列數（小波的天線）
         public bool NoGlasses;                        // 眼睛太開，眼鏡戴不上（史迪仔）                           
         // <fan>
@@ -699,12 +699,14 @@ namespace DeskPals
         string afterGlass = "";
 
         // Spidey：絲的錨點／擺盪／倒吊／爬牆／噴絲
-        double ax, ay, ropeL, th, om, targetL; int hangPhase;
-        int wallSide, climbDir;
-        double shootT; string nextAct = ""; IntPtr zipH; bool zipRight;
-        double reelT, reelX, reelY;
+        double ax, ay, ropeL, th, om, targetL; int hangPhase;   //@fan
+        // <public> double ax = 0, ay = 0; int hangPhase = 0;   // 公開版沒有用到（個人版的角色才有）
+        int wallSide, climbDir;   //@fan
+        double shootT; string nextAct = ""; IntPtr zipH; bool zipRight;   //@fan
+        // <public> double shootT = 0;
+        double reelT, reelX, reelY;   //@fan
         public IntPtr supH; int supL, supR, supWinL;
-        bool goClimb;
+        bool goClimb;   //@fan
         double seekX;
 
         string bubble = ""; public double Bt; bool bubbleAlert;
@@ -715,7 +717,8 @@ namespace DeskPals
         readonly List<double> clickTimes = new List<double>();
         readonly List<double[]> flakes = new List<double[]>();
         bool dizzyOnLand, rolling;
-        double jokeT, tripT, capeT;     // 人魚漢頓：笑話後追問、跌倒、披風
+        double jokeT, tripT, capeT;     // 人魚漢頓：笑話後追問、跌倒、披風   //@fan
+        // <public> double jokeT, tripT;
         public bool fetching;
         double hoverCd, seekCd = 20, lateCd = 120, stuckRepeat;
         string stuckLine;
@@ -1864,10 +1867,10 @@ namespace DeskPals
     partial class Pet
     {
         string poseKind = "";           // pose 狀態畫哪個姿勢（homerun／hero／photo／grin）
-        double batT; bool batHit;       // 小波揮棒
+        double batT; bool batHit;       // 小波揮棒   //@fan
         bool scooterLost;               // 小波的滑板車被史迪仔騎走了（串場）
-        public bool RidingStolen;       // 史迪仔正在騎別人的滑板車（串場）
-        IntPtr crawlH; double ceilY, ceilL, ceilR; // 史迪仔爬牆／天花板
+        public bool RidingStolen;       // 史迪仔正在騎別人的滑板車（串場）   //@fan
+        IntPtr crawlH; double ceilY, ceilL, ceilR; // 史迪仔爬牆／天花板   //@fan
         double sT, lastLandVy;          // 專屬動作計時、落地前的速度
 
         // 角色專屬狀態：回傳 true＝處理掉了
@@ -2046,7 +2049,7 @@ namespace DeskPals
 
         void Decide(Rectangle wa)
         {
-            goClimb = false;
+            goClimb = false;   //@fan
             if (Bt > 0 && bubblePri > 0) { SetState("idle", R(1, 2)); return; }   // 通知還在講：先別亂跑亂聊
             if (fetching && w.BallOn) { SetState("fetch", 15); return; }
             double r = rnd.NextDouble(), cx = Cx;
@@ -2396,7 +2399,8 @@ namespace DeskPals
     {
         public string[] Rows;
         public int Top, Rot;          // Top：圖的第一列放在 16 格框的第幾列（可負）；Rot：轉 90° 的次數
-        public bool Fy, Acc = true, Tummy;
+        public bool Fy, Acc = true, Tummy;   //@fan
+        // <public> public bool Fy = false, Acc = true;
         public int AccDy;             // 配件（帽子等）要跟著頭上下移多少格
     }
 
@@ -3653,7 +3657,7 @@ namespace DeskPals
             int bx = fx - 6 * ps, by = fy - 16 * ps + breathe;
             bool flip = (Math.Floor(tt / 9) % 2) == 1;
             string[] head = (string[])A("HEAD").Clone();
-            Fr f;
+            Fr f;   //@fan
             if (P.Cu) DrawCuShelf(g, fx, fy, ps, cell, tt); else
             switch (P.Id)
             {
@@ -7583,17 +7587,17 @@ namespace DeskPals
             if (P.Orig) return OrigShelfRows();
             if (P.Cu) return CuShelfRows();
             int hat = (w.SeasonNow == "xmas" || Level() >= 3) ? 4 : 0;
+            // <fan>
             switch (P.Id)
             {
-                // <fan>
                 case "po": return 16 + P.TopRows + 1;                             // 扶著停在旁邊的滑板車
                 case "stitch": return 16 + Math.Max(P.TopRows, hat > 0 ? 3 : 0) + 1;
                 case "hangyodon": return 16 + (hat > 0 ? 2 : 0) + 1;
                 case "tinky": return 16 + P.TopRows + 1;                           // 天線從帽子穿出來，不會更高
                 case "dipsy": return 16 + P.TopRows + 2;                           // 高帽子＋偶爾抬一下
                 case "laalaa": return 16 + Math.Max(P.TopRows, hat > 0 ? 7 : 0) + 1;
-                // </fan>
             }
+            // </fan>
             return 16 + hat + 1;
         }
 

@@ -677,8 +677,8 @@ extension Pet
             let normalFace = state != "sleep" && state != "hug" && state != "dizzy"
             DrawAccessories(g, sbx, sby, sps, fx, f.AccDy, normalFace)
         }
-        if f.Tummy && f.Rot == 0
         // <fan>
+        if f.Tummy && f.Rot == 0
         {
             let u = Math.Max(1, sps / 2)
             let scx = sbx + 6 * sps, scy = sby + CInt((P.TummyRow + Double(f.AccDy)) * Double(sps))

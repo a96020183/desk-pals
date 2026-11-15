@@ -1226,17 +1226,17 @@ namespace DeskPals
         static string ExamPrefix(string id)
         {
             string cu = CuStudy(id, "x_exam_prefix", null, null, null); if (cu != null) return cu;   // 自己做的公仔（DeskPals.Custom.cs）
+            // <fan>
             switch (id)
             {
-                // <fan>
                 case "spidey": return "蜘蛛感應：";
                 case "po": case "tinky": return "Eh-oh! ";
                 case "stitch": return "ih! ";
                 case "hangyodon": return "英雄報告：";
                 case "dipsy": return "嘿，";
                 case "laalaa": return "啦啦～";
-                // </fan>
             }
+            // </fan>
             return id.StartsWith("pk") ? "皮克敏報告：" : "";   //@fan
             // <public> return "";
         }
@@ -1244,17 +1244,17 @@ namespace DeskPals
         static string ExamTail(string id)
         {
             string cu = CuStudy(id, "x_exam_tail", null, null, null); if (cu != null) return cu;
+            // <fan>
             switch (id)
             {
-                // <fan>
                 case "po": return "小波陪你讀書！";
                 case "stitch": return "史迪仔幫你翻書！ih!";
                 case "hangyodon": return "讀書的你才是真正的英雄";
                 case "tinky": return "丁丁陪你讀～";
                 case "dipsy": return "讀一點，很酷。";
                 case "laalaa": return "邊讀邊唱～啦啦";
-                // </fan>
             }
+            // </fan>
             return id.StartsWith("pk") ? "皮克敏幫你搬課本！" : "今天讀一點？";   //@fan
             // <public> return "今天讀一點？";
         }

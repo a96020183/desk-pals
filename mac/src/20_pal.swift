@@ -61,7 +61,7 @@ final class Pal
     static let Fallback = Classic                      // 找不到的櫃子、還沒選過：回到這一櫃 //@fan
     // <public> static let Fallback = Original
     static func NormLineup(_ s: String!) -> String { let t = s == nil ? "" : s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); return t == Teletubbies || t == Pikmin || t == Original || (t == Mine && HasCustom()) ? t : Fallback }   //@fan
-    // <public> static func NormLineup(_ s: String!) -> String { let t = s == nil ? "" : s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); return t == Original || (t == Mine && HasCustom()) ? t : Classic }
+    // <public> static func NormLineup(_ s: String!) -> String { let t = s == nil ? "" : s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); return t == Original || (t == Mine && HasCustom()) ? t : Fallback }
     static func LineupIds(_ lineup: String!) -> [String]
     {
         if NormLineup(lineup) == Pikmin { return PikminIds }   // 皮克敏一櫃：大格是休息花（50_pikmin.swift）   //@fan
