@@ -26,6 +26,7 @@ mac/
     43_ui.swift         C# last section, from "公仔小屋（蛋的右鍵）" to the end (World: features/小屋 menu/只要一隻/設定;
                         Pet.IconPic; Pix pixel helpers; PixelMenu; SetupForm)
     50_pikmin.swift     DeskPals.Pikmin.cs（皮克敏一櫃：Pal／Pet／ShelfForm／World partials；DeskPals.cs 裡的一行 hook 對應到各檔的一行 hook）
+    51_original.swift   DeskPals.Original.cs（續命小隊：Pal 資料＋像素圖／Pet「orig」狀態／ShelfForm 方格紙背板／World 串場；hook 同上）
 ```
 (Line numbers above are from the first port and drift as the C# grows — find your range by the section comments.)
 
@@ -152,18 +153,23 @@ are spread across files, so:
 - No `TODO`s that drop behaviour. Where mac truly can't do something, implement the closest equivalent and leave a `// mac:` comment.
 - Your part has no errors of its own when assembled and compiled (errors referencing names owned by other parts are fine while they're in progress).
 
-## 續命小隊（original lineup）— not ported yet
+## 續命小隊（original lineup）— ported (`mac/src/51_original.swift`)
 
-`extension/desktop/DeskPals.Original.cs` (Windows, added after the Pikmin lineup) holds the original lineup
-「續命小隊」: 半糖 boba / 醒醒 coffee / 糰糰 onigiri / 貼貼 sticky — `Pal` data (art is generated from the design
-source `final_art.py` into the `像素圖` block; every pal has HEAD / HEAD_UP / BODY / BODY_UP / BODY_HUG / LEGS_* plus `F_<face>`
-rows that are merged into the stacked frame at `FaceRow`, keeping non-'.' pixels of the head), the `Pet` behaviour
-(state `"orig"` + `oAct`, like Pikmin's `"pik"`), a grid-paper `ShelfForm` background and the `World` scenes.
-DeskPals.cs only has one-line hooks (`P.Orig`, `OrigLineup`, `StartLineup()`); grep `Orig` to find them.
-Port it like the Pikmin partial: one new `mac/src/` file, same names. Until then the Mac build falls back to the classic
-lineup when asked for `original` (`NormLineup`), and VS Code only passes `-Lineup` when the user set it explicitly.
-Note: a fresh install (no `lineup.txt`, `out.txt`, `profile.txt`, `usage.txt`, no old SpideyDesktop folder) starts in
-`original` and writes `lineup.txt`.
+`extension/desktop/DeskPals.Original.cs` holds the original lineup 「續命小隊」: 半糖 boba / 醒醒 coffee / 糰糰 onigiri / 貼貼 sticky
+— `Pal` data (art is generated from the design source `tools/original_art/final_art.py` into the `像素圖` block; every pal has
+HEAD / HEAD_UP / BODY / BODY_UP / BODY_HUG / LEGS_* plus `F_<face>` rows merged into the stacked frame at `FaceRow`, keeping non-'.'
+pixels of the head), the `Pet` behaviour (state `"orig"` + `oAct`, like Pikmin's `"pik"`), a grid-paper `ShelfForm` background and
+the `World` scenes. DeskPals.cs only has one-line hooks (`P.Orig`, `OrigLineup`, `StartLineup()`); grep `Orig` to find them — every
+one has a Swift counterpart in the core parts (same count: 56 lines).
+When the art changes: re-run `export_cs.py` for the C#, then convert the `像素圖` block the same way (`p.Col('x', …)` → `p.Col("x", …)`,
+`new string[] { … };` → `[ … ]`) — the strings must stay byte-identical.
+Mac differences (all marked `// mac:`):
+- `World.StartLineup()` is `static` (it runs in `World.init` before `super.init`).
+- Fresh install = no `lineup.txt`, `out.txt`, `profile.txt`, `usage.txt` in the data dir → `original` (writes `lineup.txt`), same as
+  Windows. Windows treats an existing `%LOCALAPPDATA%\SpideyDesktop` folder as "upgraded from old Spidey"; on mac
+  `~/Library/Application Support/SpideyDesktop` always exists (VS Code keeps the binary and socket there), so the mac checks for the old
+  Spidey data files `bond.txt` / `pats.txt` in it instead (the files `Migrate()` copies).
+- `OrigPairScene` skips a pair scene when one of the two pets is missing (C# throws inside `Begin` and the exception is swallowed by `Later`).
 
 ## Still to port: 讀書小幫手 (`DeskPals.Study.cs`, branch study-tools)
 

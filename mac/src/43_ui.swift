@@ -103,6 +103,7 @@ extension World {
         }
         m.Items.Add(sw)
         m.Items.Add("重新設定…", nil, { self.ShowSetup(false) })
+        m.Items.Add("讀書小幫手設定（學校行事曆、熬夜）…", nil, { self.ShowStudySettings() })
         m.Items.Add("躲起來（⌃⌥S）", nil, { self.ToggleHide() })
         m.Items.Add(ToolStripSeparator())
         m.Items.Add("收工（關掉 Desk Pals）", nil, { self.QuitAll() })
@@ -163,7 +164,7 @@ extension World {
     // 設定視窗用：這一櫃的櫃子縮圖（預覽用的 World 才叫這個，不開視窗）
     func SetupShelfPic() -> Bitmap {
         shelf = ShelfForm(self, S)
-        shelf.Tubby = TubbyLineup; shelf.Pik = PikLineup
+        shelf.Tubby = TubbyLineup; shelf.Pik = PikLineup; shelf.Orig = OrigLineup
         shelf.Night = false
         shelf.Place(Rectangle(0, 0, 2000, 2000))
         let b = shelf.Snapshot(CellPets(), [false, false, false, false], 1.0)
@@ -823,7 +824,7 @@ class SetupForm: Form {
         Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.Right + 4 * U, pr.Y + plh / 2 - 2 * U, U)
         Steps(g, W0, Sc(68))
         let q = step == 0 ? "你是？" : (step == 1 ? "選一櫃公仔" : "怎麼擺？")
-        let hint = step == 0 ? "公仔們會照你的生活陪你（之後在小屋可以改）" : (step == 1 ? "兩櫃都很可愛，之後隨時能換" : (mode == "single" ? "選一隻，他會住在右下角的蛋裡" : "公仔櫃放在右下角，點格子就叫他們出來"))
+        let hint = step == 0 ? "公仔們會照你的生活陪你（之後在小屋可以改）" : (step == 1 ? "每一櫃都很可愛，之後隨時能換" : (mode == "single" ? "選一隻，他會住在右下角的蛋裡" : "公仔櫃放在右下角，點格子就叫他們出來"))
         TextRenderer.DrawText(g, q, qF, Rectangle(0, Sc(100), W0, Sc(30)), Pix.TextC, Pix.Mid)
         TextRenderer.DrawText(g, hint, subF, Rectangle(0, Sc(130), W0, Sc(18)), Pix.C(0x9A6338), Pix.Mid)
         if step == 2 && mode == "single" {
@@ -923,7 +924,7 @@ class SetupForm: Form {
             textY = r.Y + Sc(16) + ph
         }
         TextRenderer.DrawText(g, b.Text, bigF, Rectangle(r.X, textY, r.Width, Sc(30)), Pix.TextC, Pix.Mid)
-        TextRenderer.DrawText(g, b.Sub, subF, Rectangle(r.X + Sc(6), textY + Sc(30), r.Width - Sc(12), Sc(20)), Pix.C(0x9A6338), Pix.Mid)
+        TextRenderer.DrawText(g, b.Sub, subF, Rectangle(r.X + Sc(6), textY + Sc(28), r.Width - Sc(12), Sc(38)), Pix.C(0x9A6338), [TextFormatFlags.HorizontalCenter, TextFormatFlags.Top, TextFormatFlags.WordBreak, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix])   // 四櫃並排時名單換行，不要被切掉
     }
 
     func DrawModeCard(_ g: Graphics, _ b: Btn) {

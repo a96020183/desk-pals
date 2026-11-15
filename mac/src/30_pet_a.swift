@@ -93,7 +93,7 @@ extension Pet {
     func Grounded() -> Bool {
         switch state {
         case "walk", "idle", "sleep", "hug", "seek", "dizzy", "fetch", "dance", "kick", "wave", "pose", "bat", "catch", "header", "capetrip", "elvis", "chomp", "think", "hide", "nudge", "spin", "goto",
-             "plop", "twirl", "hattoss", "juggle", "bagdig", "pik":
+             "plop", "twirl", "hattoss", "juggle", "bagdig", "pik", "orig":
             return true
         default:
             return false
@@ -241,6 +241,7 @@ extension Pet {
     func PatCombo() {
         AddHeart()
         if P.Pik { PikCombo(); return }
+        if P.Orig { OrigCombo(); return }
         switch P.Id {
         case "po":   // 咯咯笑＋原地轉一圈「再來一次！」
             Say(L("tickle"), 1.8)
@@ -493,7 +494,7 @@ extension Pet {
             else if dizzyOnLand { dizzyOnLand = false; SetState("dizzy", 1.6) }
             else if fetching && w.BallOn { SetState("fetch", 15) }
             else if afterLand != "" { LandAction() }
-            else if InScene && (w.TubbyLineup || w.PikLineup) { SetState("idle", 30) }   // 天線寶寶串場：跳一下落地就站好，不要走掉
+            else if InScene && (w.TubbyLineup || w.PikLineup || w.OrigLineup) { SetState("idle", 30) }   // 天線寶寶串場：跳一下落地就站好，不要走掉
             else { SetState("walk", R(2, 5)) }
         }
     }
@@ -701,6 +702,7 @@ extension Pet {
         case "dipsy": line = "進球。🏀 帽子還在，酷。"
         case "laalaa": line = "進球！🏀 啦啦啦～"
         case "pkred", "pkyellow", "pkblue": line = PikLine("goal")
+        case "boba", "coffee", "onigiri", "sticky": line = OrigLine("goal")
         default: line = "進球！🏀 Thwip!"
         }
         Say(line, 2.4)
@@ -720,6 +722,7 @@ extension Pet {
         case "dipsy": line = "酷！"
         case "laalaa": line = "啦啦～進了！"
         case "pkred", "pkyellow", "pkblue": line = PikLine("cheer")
+        case "boba", "coffee", "onigiri", "sticky": line = OrigLine("cheer")
         default: line = "好球！"
         }
         Say(line, 1.4)
@@ -736,6 +739,7 @@ extension Pet {
         case "dipsy": return "沒進…但帽子很帥"
         case "laalaa": return "差一點！再來一次！"
         case "pkred", "pkyellow", "pkblue": return PikLine("miss")
+        case "boba", "coffee", "onigiri", "sticky": return OrigLine("miss")
         default: break
         }
         return "差一點！再一次？"
@@ -802,6 +806,7 @@ extension Pet {
         if Is("hangyodon") { StartSwim(tx, Double(wa.Bottom), false); return }
         BallisticTo(tx, Double(wa.Bottom))
         if Is("stitch") { rolling = true }
+        if P.Orig { OrigExit() }
         if P.Pik { afterLand = "pksprout" }                                     // 皮克敏：落地先種在土裡，再「噗！」拔出來
         if Is("tinky") && rnd.NextDouble() < 0.3 { afterLand = "plop" }          // 丁丁跳出來常常跌坐
         else if Is("laalaa") && rnd.NextDouble() < 0.4 { afterLand = "twirl" }   // 拉拉落地轉一圈
@@ -859,6 +864,7 @@ extension Pet {
         if ballXp < 20 { ballXp += 2; AddXp(2) }
         Burst(6)
         if P.Pik { PikBall(); return true }
+        if P.Orig { OrigBall(); return true }
         switch P.Id {
         case "po": PoBall(); return true
         case "stitch": StitchBall(); return true
@@ -905,6 +911,7 @@ extension Pet {
             else if Is("dipsy") && Grounded() { poseKind = "hatdown"; SetState("pose", 2.6) }
             else if Is("laalaa") && hideFrom != nil && Grounded() { HideBehindPet(hideFrom!) }
             else if P.Pik && Grounded() { PikReact("errors") }
+            else if P.Orig && Grounded() { OrigReact("errors") }
             else if state == "walk" { SetState("idle", 3) }
             Say(line, 3, true)
         }
@@ -1034,7 +1041,7 @@ extension Pet {
                 if Is("po") { SetState("wave", 1.6) }
                 else if Is("hangyodon") { poseKind = "hero"; SetState("pose", 1.4) }
                 else if Is("dipsy") { poseKind = "hattip"; SetState("pose", 1.6) }
-                else if P.Tubby { SetState("wave", 1.6) }
+                else if P.Tubby || P.Orig { SetState("wave", 1.6) }
                 else { Jump(0, -260 * k) }
             }
             Say(L("hi"), 2.4)
@@ -1068,6 +1075,7 @@ extension Pet {
         case "tinky": if Grounded() { TinkyBag("star", true) }; Say(line, 4); Burst(10)
         case "dipsy": if Grounded() { HatToss(true) }; Say(line, 4); Burst(8)
         case "laalaa": if Grounded() { SetState("twirl", 2.4) }; Say(line, 4); for _ in 0..<4 { Mark(0) }; Burst(8)
+        case "boba", "coffee", "onigiri", "sticky": OrigCelebrate(line, lead)
         default:
             if lead { w.Fireworks(w.WA(Cx, y + Double(SH) / 2.0), 10, -1) }
             if Grounded() { SetState("dance", 3.5) }

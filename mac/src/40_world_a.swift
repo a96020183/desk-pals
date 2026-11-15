@@ -87,7 +87,7 @@ final class World: Form {
     init(_ pipeName: String, _ pet: String, _ lineupArg: String) {
         self.pipeName = pipeName
         // 哪一櫃：有傳就用（並記住），沒傳（開機捷徑）就照上次的
-        lineup = Pal.NormLineup(lineupArg.isEmpty ? World.ReadText("lineup.txt") : lineupArg)
+        lineup = Pal.NormLineup(lineupArg.isEmpty ? World.StartLineup() : lineupArg)   // 全新安裝：續命小隊（51_original.swift）
         if !lineupArg.isEmpty { World.WriteText("lineup.txt", lineup) }
         // mac: 用 point，dpi 一律當 96
         let dpi: Double = 96
@@ -127,7 +127,7 @@ final class World: Form {
 extension World {
     func DefaultPetFor(_ pet: String) -> String {
         for id in Pal.LineupIds(lineup) { if id == pet { return pet } }
-        return lineup == Pal.Teletubbies ? "po" : (lineup == Pal.Pikmin ? "pkred" : "spidey")
+        return lineup == Pal.Teletubbies ? "po" : (lineup == Pal.Pikmin ? "pkred" : (lineup == Pal.Original ? "boba" : "spidey"))
     }
 
     // 每一櫃各自記：誰在外面、最近一隻、最愛（經典一櫃沿用原本的檔名）
@@ -174,7 +174,7 @@ extension World {
             delay += 0.5
         }
         active = Get(ids.Count > 0 ? ids[ids.Count - 1] : defaultPet) ?? Get(defaultPet)
-        if ids.Count == 0 && active != nil { active.Say(TubbyLineup ? "Eh-oh! 天線寶寶一櫃 ☀" : "經典一櫃回來囉！", 2.4) }
+        if ids.Count == 0 && active != nil { active.Say(OrigLineup ? "續命小隊，報到！🥤" : (TubbyLineup ? "Eh-oh! 天線寶寶一櫃 ☀" : "經典一櫃回來囉！"), 2.4) }
         Broadcast()
         lock(clients) { for c in clients { World.Send(c, "lineup " + lineup + "\n") } }   // 在桌面換櫃（小屋、設定）：VS Code 跟著改設定
         App.Log("lineup " + lineup)
@@ -385,7 +385,7 @@ extension World {
         for i in 0..<4 { o[i] = c[i] != nil && c[i]!.Out }
         var hot = false, over = false
         for p in Pets { if p.Out && p.Dragging { hot = true; if InShelf(p.Cx, p.y + Double(p.SH) / 2.0) { over = true } } }
-        shelf.Hot = hot; shelf.Over = over; shelf.Night = Night; shelf.Tubby = TubbyLineup; shelf.Pik = PikLineup; shelf.Lunch = Lunch; shelf.Attention = EggAttention()
+        shelf.Hot = hot; shelf.Over = over; shelf.Night = Night; shelf.Tubby = TubbyLineup; shelf.Pik = PikLineup; shelf.Orig = OrigLineup; shelf.Lunch = Lunch; shelf.Attention = EggAttention()
         shelf.Render(c, o, Now)
         if !W.Shown(shelf) { shelf.Show(); Zorder() }
     }
@@ -503,6 +503,7 @@ extension World {
         QuietTick()
         ReminderTick()
         TicketTick()
+        StudyTick()          // 讀書小幫手（52_study.swift）：學校行事曆、作業死線、考試倒數、熬夜
         DownloadTick(dt)
         ExpireNotice()
         MenuWatch()
@@ -515,6 +516,7 @@ extension World {
         UpdateBall(dt)
         StepProps(dt)
         PikTick(dt)
+        OrigTick(dt)
         if fx != nil { fx.Step(dt) }
         StepScene(dt)
         proxT -= dt
@@ -964,7 +966,7 @@ extension World {
     // ================= 右鍵選單 =================
     func FillMenu(_ p: Pet, _ m: ContextMenuStrip) {
         m.Items.Clear()
-        var items: [[String]]! = p.P.Pik ? PikMenuItems(p) : nil
+        var items: [[String]]! = p.P.Pik ? PikMenuItems(p) : (p.P.Orig ? OrigMenuItems(p) : nil)
         if items == nil { switch p.P.Id {
         case "po":
             items = [["大抱抱 ♥", "hug"], ["打招呼 Eh-oh!", "hi"], ["敲敲螢幕", "knock"], ["騎車兜風", "ride"],
@@ -1009,6 +1011,7 @@ extension World {
             m.Items.Add(grp)
         }
         if PikLineup { AddPikMenu(m) }
+        if OrigLineup && !Single { AddOrigMenu(m) }
         if !Single {
             let sw = ToolStripMenuItem("換角色")
             for o in Pets {
@@ -1032,10 +1035,11 @@ extension World {
     // 專注、安靜、提醒、搶票、今天的小結（公仔、櫃子、小屋的選單都有）
     func AddHelpers(_ items: ToolStripItemCollection) {
         if focusOn { items.Add("結束專注（還剩 " + String(FocusLeft()) + " 分）", nil, { self.StopFocus(false) }) }
-        else { items.Add("專注 25 分鐘 🍅", nil, { self.StartFocus(25) }) }
+        else { items.Add(ExamNear() ? "讀書 25 分鐘 📚" : "專注 25 分鐘 🍅", nil, { self.StartFocus(25) }) }   // 7 天內有考試：讀書
         AddQuietMenu(items)
         AddReminderMenus(items)
         AddTicketMenus(items)
+        AddStudyMenus(items)   // 搶課、考試倒數、這週要交的
         items.Add("今天的小結", nil, { self.DailyWrap(true) })
     }
 
@@ -1332,7 +1336,7 @@ extension World {
                 }
             }
         case "quit": QuitAll()
-        default: break
+        default: StudyMsg(c, p, line)   // course／exam／study-…（52_study.swift）
         }
     }
 
