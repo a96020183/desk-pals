@@ -38,9 +38,12 @@
 </div>
 <script nonce="{{nonce}}">
 const vscodeApi = acquireVsCodeApi();
+// <fan>
 const COL_N = { k:"#2A2F45", r:"#D84A4A", R:"#A83A3A", b:"#3D5FAE", w:"#FFFFFF" };
 const COL_D = { k:"#0B0B10", r:"#2C2E3B", R:"#1B1C26", b:"#3E4055", w:"#F6F6FA" };
 let COL = COL_N, dark = false;
+// </fan>
+// <public> let dark = false;
 // 平日 18:00 之後到隔天 06:00 黑化（跟桌面版同一條規則）
 function isDarkTime(n) {
   const wd = d => d >= 1 && d <= 5;
@@ -51,12 +54,15 @@ function isDarkTime(n) {
 function checkDark(announce) {
   const d = isDarkTime(new Date());
   if (d === dark) return;
-  dark = d; COL = d ? COL_D : COL_N;
+  dark = d; COL = d ? COL_D : COL_N;   //@fan
+  // <public> dark = d;
   if (announce) {
-    if (isOther()) say(d ? LINES[charId].night_on : LINES[charId].night_off, 3);
-    else say(d ? "……下班時間到了。" : "早安，我又變回來了 ☀", 3, d);
+    if (isOther()) say(d ? LINES[charId].night_on : LINES[charId].night_off, 3);   //@fan
+    // <public> say(d ? LINES[charId].night_on : LINES[charId].night_off, 3);
+    else say(d ? "……下班時間到了。" : "早安，我又變回來了 ☀", 3, d);   //@fan
   }
 }
+// <fan>
 const HEAD = ["...kkkkkk...","..krrrrrrk..",".krRrrrrRrk.",".krrrRRrrrk.",".kwwkrrkwwk.",".kwwwkkwwwk.",".krwwrrwwrk.","..krrRRrrk.."];
 const SLEEPY = [".krrrrrrrrk.", ".kkkkrrkkkk.", ".krrrrrrrrk."];
 const BODY = ["...kkkkkk...","..kbrrrrbk..",".kbbrkkrbbk.",".krbrrrrbrk.","..kbbbbbbk.."];
@@ -70,9 +76,11 @@ function frame(o) {
   if (dark) rows[10] = rows[10].slice(0, 5) + "ww" + rows[10].slice(7); // 黑衣白蜘蛛
   return rows;
 }
+// </fan>
 const S = 3;
 let SW = 36, SH = 48;
 // ---- 其他角色（Desk Pals 公仔櫃）：小波、史迪仔、人魚漢頓。Spidey 走上面原本的那一套，完全不變 ----
+// <fan>
 const ART = {"po":{"HEAD":[".......rr.......","......r..r......",".......rr.......",".......rr.......",".....kkkkkk.....","...kkrrrrrrkk...",".kkhrffffffrRkk.","kehrffffffffrRek","kehrfkffffkfrRek","kehrfkffffkfrRek","kehrpfmffmfprRek",".kkhrffmmffrRkk.","...kkrrrrrrkk..."],"SLEEPY":["kehrffffffffrRek","kehrffffffffrRek","kehrkkffffkkrRek","kehrpffffffprRek",".kkhrffmmffrRkk."],"HAPPY":["kehrffffffffrRek","kehrfkffffkfrRek","kehrkfkffkfkrRek","kehrpmffffmprRek",".kkhrfmmmmfrRkk."],"BODY":["..khGGGGGGGGRk..","rkhrGwggggggGRkr","rkhrGggggggGrRkr",".khrGggggggGrRk.","..khGGGGGGGGRk..","...kRrrrrrrrRk.."],"ARMS_UP":["rkkhGGGGGGGGRkkr",".khrGwgggggGrRk.",".khrGggggggGrRk.",".khrGggggggGrRk.","..khGGGGGGGGRk..","...kRrrrrrrrRk.."],"LEGS_A":["...krrk..krrk...","...kkkk..kkkk..."],"LEGS_B":["..krrk....krrk..","..kkkk....kkkk.."],"LEGS_RIDE":["....krrkkrrk....","....kkkkkkkk...."],"SCOOTER":["...........kk.","...........ks.","...........ks.","...........ks.","...........ks.",".kkkkkkkkkkks.",".kssssssssssk.",".kooq....kooq.","..oo......oo.."]},"stitch":{"HEAD":["..kkkk..........kkkk..","..bppk..........kppbk.",".kpppbk........kbpppk.",".kpppbk........kbpppk.",".kpppk.....k....kpppk.",".kpppk....kk....kpppk.",".kppbk.kkkbbkkk.kbppk.","..kbbbkbbbbbbbbkbbbk..","...kbbbllbbbbllbbbk...","...kbbllwebblewlbbk...","....kbleeennleeebk....","....kbleenhnneeebk....","....kbllennnneelbk....",".....kbmbbbbbbmbk.....","......kmmqmmqmmk......",".....kbbbbttbbbbk....."],"SLEEPY":["...kbbllllbbllllbbk...","....kbllllnnllllbk....","....kbleenhnnleebk....","....kblllnnnnlllbk....",".....kbmbbbbbbmbk.....","......kmmqmmqmmk......"],"HAPPY":["...kbbllllbbllllbbk...","....kbllelnnllelbk....","....kblelnhnnelebk....","....kblllnnnnlllbk....",".....kbmbbbbbbmbk.....","......kmmqmmqmmk......"],"BODY":[".....kbdbbllbbdbk.....",".....kbdlllllldbk.....","....kbbdlllllldbbk....","....kbbdlllllldbbk....","....kkbbllllllbbkk....",".....kbbbkkkkbbbk....."],"ARMS_UP":[".....kbbbbllbbbbk.....","..kkkbbbllllllbbbkkk..","..kbbkbllllllllbkbbk..","..kkkbbllllllllbbkkk..","....kbbllllllllbbk....","....kkbbllllllbbkk...."],"LEGS_A":[".....kbbk....kbbk.....","......kk......kk......"],"LEGS_B":[".....kbbk.....kbbk....","......kk.......kk....."],"CRAWL_A":[".....kbbbllllbbbk.....","....kbbk.kkkk.kbbk....","....kkk........kkk...."],"CRAWL_B":[".....kbbbllllbbbk.....",".....kbbkkkkkkbbk.....",".....kkk......kkk....."]},"hangyodon":{"HEAD":["...fff........","..fFfFkkkk....","..kfkbbbbbkk..",".kbwwbbbbwwbk.","fkwwwKbbKwwwkf","fkwwwKbbKwwwkf","fkbwwbbbbwwbkf","kmmmmmmmmmmmmk"],"SLEEPY":[".kbbbbbbbbbbk.","fkbbbbbbbbbbkf","fkbkkkbbkkkbkf","fkbbbbbbbbbbkf"],"HAPPY":[".kbbbbbbbbbbk.","fkbbkbbbbkbbkf","fkbkbkbbkbkbkf","fkbbbbbbbbbbkf"],"BODY":["kmMMMMMMMMMMmk",".kmmmmmmmmmmk.","kbkbbbbbbbbkbk",".kbdbbdbbdbbk.",".kbbbbbbbbbbk."],"ARMS_UP":["bmMMMMMMMMMMmb","bkmmmmmmmmmmkb",".kbbbbbbbbbbk.",".kbdbbdbbdbbk.",".kbbbbbbbbbbk."],"LEGS_A":[".kbkbbbbbbkbk.","..kbbk..kbbk..","..kkkk..kkkk.."],"LEGS_B":[".kbkbbbbbbkbk.",".kbbk....kbbk.",".kkkk....kkkk."]}};
 const PAL = {
   po: { n: { k:"#3A1A1A", r:"#E3262B", R:"#A8161C", h:"#FF5A5E", e:"#F4CDBE", f:"#F6D2B0", F:"#E8B892", m:"#B8323C", p:"#F29A9A", g:"#C9CDD3", G:"#8E949C", w:"#FFFFFF", s:"#55C7BE", q:"#2F8F88", o:"#6B6F7A" },
@@ -82,6 +90,9 @@ const PAL = {
   hangyodon: { n: { k:"#1B1F24", b:"#25B3BA", d:"#137F87", w:"#FFFFFF", K:"#111111", m:"#F5A9C0", M:"#D8708F", f:"#2D9BE3", F:"#1E74B5" },
                d: { k:"#101318", b:"#1E8F9C", d:"#10666F", w:"#E6F2F8", K:"#111111", m:"#D08AA4", M:"#A95A76", f:"#2678B8", F:"#1A5C90" }, halo: "#A6E3F0" },
 };
+// </fan>
+// <public> const ART = {}, PAL = {};
+// <fan>
 // 天線寶寶一櫃：丁丁、迪西、拉拉（跟桌面版同一套像素圖：小波的母版換顏色、換天線）
 Object.assign(ART, {"tinky":{"HEAD":["....rrrrrrrr....",".....r....r.....","......r..r......",".......rr.......",".......rr.......",".....kkkkkk.....","...kkrrrrrrkk...",".kkhrffffffrRkk.","kehrffffffffrRek","kehrfkffffkfrRek","kehrfkffffkfrRek","kehrpfmffmfprRek",".kkhrffmmffrRkk.","...kkrrrrrrkk..."],"SLEEPY":["kehrffffffffrRek","kehrffffffffrRek","kehrkkffffkkrRek","kehrpffffffprRek",".kkhrffmmffrRkk."],"HAPPY":["kehrffffffffrRek","kehrfkffffkfrRek","kehrkfkffkfkrRek","kehrpmffffmprRek",".kkhrfmmmmfrRkk."],"BODY":["..khGGGGGGGGRk..","rkhrGwggggggGRkr","rkhrGggggggGrRkr",".khrGggggggGrRk.",".khrGggggggGrRk.","..khGGGGGGGGRk..","...kRrrrrrrrRk.."],"ARMS_UP":["rkkhGGGGGGGGRkkr",".khrGwgggggGrRk.",".khrGggggggGrRk.",".khrGggggggGrRk.",".khrGggggggGrRk.","..khGGGGGGGGRk..","...kRrrrrrrrRk.."],"LEGS_A":["...krrk..krrk...","...krrk..krrk...","...kkkk..kkkk..."],"LEGS_B":["..krrk....krrk..","..krrk....krrk..","..kkkk....kkkk.."],"HAT":["....kkkkkkkk....","....kWWWWKKk....","....kKKWWWKk....","....kKWWWWWk....","....kWWWKKWk....","..kkkkkkkkkkkk..","..kWWWKKWWWWWk..","...kkkkkkkkkk..."],"BAG":["..kkkk..",".k....k.","kkkkkkkk","kaWaaaAk","kaaaaaAk","kaaaaAAk",".kAAAAk."],"BALL":["..kkkk..",".kcYccck","kcYccccC","kccccccC","kcccccCk",".kcCCCk.","..kkkk.."]},"dipsy":{"HEAD":[".......rr.......",".......rr.......",".......rr.......",".......rr.......",".......rr.......",".....kkkkkk.....","...kkrrrrrrkk...",".kkhrffffffrRkk.","kehrffffffffrRek","kehrfkffffkfrRek","kehrfkffffkfrRek","kehrpfmffmfprRek",".kkhrffmmffrRkk.","...kkrrrrrrkk..."],"SLEEPY":["kehrffffffffrRek","kehrffffffffrRek","kehrkkffffkkrRek","kehrpffffffprRek",".kkhrffmmffrRkk."],"HAPPY":["kehrffffffffrRek","kehrfkffffkfrRek","kehrkfkffkfkrRek","kehrpmffffmprRek",".kkhrfmmmmfrRkk."],"BODY":["..khGGGGGGGGRk..","rkhrGwggggggGRkr","rkhrGggggggGrRkr",".khrGggggggGrRk.","..khGGGGGGGGRk..","...kRrrrrrrrRk.."],"ARMS_UP":["rkkhGGGGGGGGRkkr",".khrGwgggggGrRk.",".khrGggggggGrRk.",".khrGggggggGrRk.","..khGGGGGGGGRk..","...kRrrrrrrrRk.."],"LEGS_A":["...krrk..krrk...","...kkkk..kkkk..."],"LEGS_B":["..krrk....krrk..","..kkkk....kkkk.."],"HAT":["....kkkkkkkk....","....kWWWWKKk....","....kKKWWWKk....","....kKWWWWWk....","....kWWWKKWk....","..kkkkkkkkkkkk..","..kWWWKKWWWWWk..","...kkkkkkkkkk..."],"BAG":["..kkkk..",".k....k.","kkkkkkkk","kaWaaaAk","kaaaaaAk","kaaaaAAk",".kAAAAk."],"BALL":["..kkkk..",".kcYccck","kcYccccC","kccccccC","kcccccCk",".kcCCCk.","..kkkk.."]},"laalaa":{"HEAD":["......rrr.......",".....r...r......",".......r.r......","........rr......",".......rr.......",".....kkkkkk.....","...kkrrrrrrkk...",".kkhrffffffrRkk.","kehrffffffffrRek","kehrfkffffkfrRek","kehrfkffffkfrRek","kehrpfmffmfprRek",".kkhrffmmffrRkk.","...kkrrrrrrkk..."],"SLEEPY":["kehrffffffffrRek","kehrffffffffrRek","kehrkkffffkkrRek","kehrpffffffprRek",".kkhrffmmffrRkk."],"HAPPY":["kehrffffffffrRek","kehrfkffffkfrRek","kehrkfkffkfkrRek","kehrpmffffmprRek",".kkhrfmmmmfrRkk."],"BODY":["..khGGGGGGGGRk..","rkhrGwggggggGRkr","rkhrGggggggGrRkr",".khrGggggggGrRk.","..khGGGGGGGGRk..","...kRrrrrrrrRk.."],"ARMS_UP":["rkkhGGGGGGGGRkkr",".khrGwgggggGrRk.",".khrGggggggGrRk.",".khrGggggggGrRk.","..khGGGGGGGGRk..","...kRrrrrrrrRk.."],"LEGS_A":["...krrk..krrk...","...kkkk..kkkk..."],"LEGS_B":["..krrk....krrk..","..kkkk....kkkk.."],"HAT":["....kkkkkkkk....","....kWWWWKKk....","....kKKWWWKk....","....kKWWWWWk....","....kWWWKKWk....","..kkkkkkkkkkkk..","..kWWWKKWWWWWk..","...kkkkkkkkkk..."],"BAG":["..kkkk..",".k....k.","kkkkkkkk","kaWaaaAk","kaaaaaAk","kaaaaAAk",".kAAAAk."],"BALL":["..kkkk..",".kcYccck","kcYccccC","kccccccC","kcccccCk",".kcCCCk.","..kkkk.."]}});
 Object.assign(PAL, {"tinky":{"n":{"A":"#9E1F27","C":"#C25E14","G":"#8E949C","K":"#222222","R":"#5E3A92","W":"#FFFFFF","Y":"#F5C842","a":"#D8323A","c":"#F2852A","e":"#F4CDBE","f":"#F6D2B0","g":"#C9CDD3","h":"#A884DA","k":"#2E1A3A","m":"#B8323C","p":"#F29A9A","r":"#8A5CC2","w":"#FFFFFF"},"d":{"A":"#761C2F","C":"#AE522D","G":"#5F5C78","K":"#1A1A1A","R":"#45296E","W":"#FFFFFF","Y":"#F5C842","a":"#AB313F","c":"#E07541","e":"#D3A79C","f":"#D9AE92","g":"#8F8CA6","h":"#8A6CB8","k":"#1E1028","m":"#8E2E40","p":"#C97A84","r":"#6A4A9E","w":"#FFE4CC"},"halo":"#FFC58F"},"dipsy":{"n":{"A":"#9E1F27","C":"#C25E14","G":"#8E949C","K":"#222222","R":"#4F8A27","W":"#FFFFFF","Y":"#F5C842","a":"#D8323A","c":"#F2852A","e":"#E2B08E","f":"#D9A77C","g":"#C9CDD3","h":"#A2D86C","k":"#22301A","m":"#B8323C","p":"#E28A78","r":"#7DC242","w":"#FFFFFF"},"d":{"A":"#761C2F","C":"#AE522D","G":"#5F5C78","K":"#1A1A1A","R":"#3E6A2E","W":"#FFFFFF","Y":"#F5C842","a":"#AB313F","c":"#E07541","e":"#C29076","f":"#BC8A68","g":"#8F8CA6","h":"#88B266","k":"#141E10","m":"#8E2E40","p":"#B8707A","r":"#66984A","w":"#FFE4CC"},"halo":"#FFC58F"},"laalaa":{"n":{"A":"#9E1F27","C":"#C25E14","G":"#8E949C","K":"#222222","R":"#C9A116","W":"#FFFFFF","Y":"#F5C842","a":"#D8323A","c":"#F2852A","e":"#F4CDBE","f":"#F6D2B0","g":"#C9CDD3","h":"#FFE67A","k":"#3E2A10","m":"#B8323C","p":"#F29A9A","r":"#F7D23A","w":"#FFFFFF"},"d":{"A":"#761C2F","C":"#AE522D","G":"#5F5C78","K":"#1A1A1A","R":"#A27A2C","W":"#FFFFFF","Y":"#F5C842","a":"#AB313F","c":"#E07541","e":"#D3A79C","f":"#D9AE92","g":"#8F8CA6","h":"#E8C46E","k":"#2A1A0C","m":"#8E2E40","p":"#C97A84","r":"#D9A84A","w":"#FFE4CC"},"halo":"#FFC58F"}});
@@ -90,10 +101,12 @@ const TUBBY = { tinky: 1, dipsy: 1, laalaa: 1 };
 Object.assign(ART, {"pkred":{"HEAD":["............GGGG..","..........GGgGGGG.",".........GgGGGGG..","........GgGGGG....","........GGG.......","..........r.......",".........r........",".........r........","........rr........","........oo........",".......orro.......","......orhrro......",".....orhrrrro.....","....orhrrrrrro....","...orhrrrrrrrRo...","...oWKWrrrrWKWo...","...oWKWrrrrWKWo...","...orrrrnnrrrRo...","...orrrrNNrrRRo...","....orrrrrrRRo....",".....oorrrRoo....."],"BODY":[".......orRo.......","......orrrRo......",".....r.orRo.r.....","....r..orRo..r....",".......orRRo......"],"ARMS_UP":["....r..orRo..r....",".....rorrrRor.....",".......orRo.......",".......orRo.......",".......orRRo......"],"LEGS_A":[".......o...o......","......oo...oo....."],"LEGS_B":["......o.....o.....",".....oo.....oo...."]},"pkyellow":{"HEAD":["............GGGG..","..........GGgGGGG.",".........GgGGGGG..","........GgGGGG....","........GGG.......","..........r.......",".........r........",".........r........","........rr........","........oo........",".......orro.......","......orhrro......","o....orhrrrro....o","oeo.orhrrrrrro.oeo","oeeerhrrrrrrrReeeo",".oooWKWrrrrWKWooo.","...oWKWrrrrWKWo...","...orrrrrrrrrRo...","...orrrrrrrrRRo...","....orrrrrrRRo....",".....oorrrRoo....."],"BODY":[".......orRo.......","......orrrRo......",".....r.orRo.r.....","....r..orRo..r....",".......orRRo......"],"ARMS_UP":["....r..orRo..r....",".....rorrrRor.....",".......orRo.......",".......orRo.......",".......orRRo......"],"LEGS_A":[".......o...o......","......oo...oo....."],"LEGS_B":["......o.....o.....",".....oo.....oo...."]},"pkblue":{"HEAD":["............GGGG..","..........GGgGGGG.",".........GgGGGGG..","........GgGGGG....","........GGG.......","..........r.......",".........r........",".........r........","........rr........","........oo........",".......orro.......","......orhrro......",".....orhrrrro.....","....orhrrrrrro....","...orhrrrrrrrRo...","...oWKWrrrrWKWo...","...oWKWrrrrWKWo...","...orrrrrrrrrRo...","...orrrrMMrrRRo...","....orrMrrMRRo....",".....oorrrRoo....."],"BODY":[".......orRo.......","......orrrRo......",".....r.orRo.r.....","....r..orRo..r....",".......orRRo......"],"ARMS_UP":["....r..orRo..r....",".....rorrrRor.....",".......orRo.......",".......orRo.......",".......orRRo......"],"LEGS_A":[".......o...o......","......oo...oo....."],"LEGS_B":["......o.....o.....",".....oo.....oo...."]}});
 Object.assign(PAL, {"pkred":{"n":{"W":"#FFFFFF","w":"#E2E6D2","K":"#111111","G":"#3E9E3A","g":"#7CCB5A","e":"#F2B418","N":"#B81E1C","n":"#FF8C7C","M":"#F29AA6","r":"#E8312F","R":"#B4201F","h":"#FF7A6A","o":"#7A1414"},"d":{"W":"#BFBEE7","w":"#AAADC5","K":"#141734","G":"#347A53","g":"#619A6B","e":"#B68A3A","N":"#8C213D","n":"#BF6E85","M":"#B677A4","r":"#AF2E4B","R":"#89223F","h":"#BF6177","o":"#5F1A37"},"halo":"#B8C4F0"},"pkyellow":{"n":{"W":"#FFFFFF","w":"#E2E6D2","K":"#111111","G":"#3E9E3A","g":"#7CCB5A","e":"#F2B418","N":"#B81E1C","n":"#FF8C7C","M":"#F29AA6","r":"#F6C51E","R":"#D49A0C","h":"#FFE47A","o":"#8A5A06"},"d":{"W":"#BFBEE7","w":"#AAADC5","K":"#141734","G":"#347A53","g":"#619A6B","e":"#B68A3A","N":"#8C213D","n":"#BF6E85","M":"#B677A4","r":"#B9953E","R":"#A07731","h":"#BFAB83","o":"#6B4B2C"},"halo":"#B8C4F0"},"pkblue":{"n":{"W":"#FFFFFF","w":"#E2E6D2","K":"#111111","G":"#3E9E3A","g":"#7CCB5A","e":"#F2B418","N":"#B81E1C","n":"#FF8C7C","M":"#F29AA6","r":"#2E6BE6","R":"#1F4CB8","h":"#6E9CFF","o":"#14286E"},"d":{"W":"#BFBEE7","w":"#AAADC5","K":"#141734","G":"#347A53","g":"#619A6B","e":"#B68A3A","N":"#8C213D","n":"#BF6E85","M":"#B677A4","r":"#2956D4","R":"#1E41B2","h":"#5779E7","o":"#16287A"},"halo":"#B8C4F0"}});
 const PIK = { pkred: 1, pkyellow: 1, pkblue: 1 };
+// </fan>
 // 續命小隊（原創角色，桌面版 DeskPals.Original.cs 同一套像素圖）：半糖、醒醒、糰糰、貼貼
 Object.assign(ART, {"boba":{"HEAD":["...........sz..","..........sz...",".........sz....","........sz.....","kkkkkkkkszkkkkk","kfFfFfFszFfFfFk","kkkkkkkkkkkkkkk",".khmmmmmmmmmMk.",".khmwemmmwemMk.",".khmeemmmeemMk.",".khbmmooommbMk.",".khmmmmxmmmmMk."],"BODY":["kkhmmmmmmmmmMkk",".khmmmmmmmmmMk.",".khjQmjQmjQmMk.",".khjjmjjmjjmMk.",".kHHHHHHHHHHHk.","..kkkkkkkkkkk.."],"ARMS_UP":[".khmmmmmmmmmMk.",".khmmmmmmmmmMk.",".khjQmjQmjQmMk.",".khjjmjjmjjmMk.",".kHHHHHHHHHHHk.","..kkkkkkkkkkk.."],"LEGS_A":["...kk.....kk...","...kk.....kk..."],"LEGS_B":["..kk.......kk..","..kk.......kk.."],"SLEEPY":[".khmmmmmmmmmMk.",".khmkkmmmkkmMk.",".khbmmmmmmmbMk.",".khmmmmommmmMk."],"HAPPY":[".khmemmmmmemMk.",".khememmmemeMk.",".khbmmooommbMk.",".khmmmmxmmmmMk."]},"coffee":{"HEAD":[".....v.....v.....","....v.....v......",".....V.....V.....","......V.....V....","..kkkkkkkkkkkk...",".kwcccccccccCwk..",".kwccpppcccCCwk..",".kwwCCpcccCCwwk..",".kltttttttttttkkk",".klttttttttttTkTk",".klttwwttttwwtkTk",".klttetttttettkTk"],"BODY":[".kltbtttttttbtkkk",".kltttttkktttTk..",".klttttttttttTk..","..kTTTTTTTTTTk...","...kkkkkkkkkk...."],"ARMS_UP":[".kltbtttttttbtkkk",".kltttttkktttTk..",".klttttttttttTk..","..kTTTTTTTTTTk...","...kkkkkkkkkk...."],"LEGS_A":["....kk....kk.....","....kk....kk....."],"LEGS_B":["...kk......kk....","...kk......kk...."],"SLEEPY":[".kltttttttttttkTk",".klttkkttttkktkTk"],"HAPPY":[".kltteetttteetkTk",".kltettettettekTk"]},"onigiri":{"HEAD":[".......kk.......","......krrk......",".....krrrrk.....","....krrgrrrk....","...krrrrrrrrk...","...krrrrrrgrk...","..krreerreerrk..","..krreerreerrk..",".krrbrrrrrrbrrk.",".krrrrrmmrrrrrk."],"BODY":["krrrrrrrrrrrrrrk","knnnnnnnnnnnnnnk","knNnnnnnnnnnNnnk",".kkkkkkkkkkkkkk."],"ARMS_UP":["krrrrrrrrrrrrrrk","knnnnnnnnnnnnnnk","knNnnnnnnnnnNnnk",".kkkkkkkkkkkkkk."],"LEGS_A":["....kk....kk....","....kk....kk...."],"LEGS_B":["...kk......kk...","...kk......kk..."],"SLEEPY":["..krrrrrrrrrrk..","..krkkrrrrkkrk..",".krrbrrrrrrbrrk.",".krrrrrrrrrrrrk."],"HAPPY":["..krrerrrrerrk..","..krerrrrrrerk..",".krrbrrrrrrbrrk.",".krrrrrmmrrrrrk."]},"sticky":{"HEAD":["..............kk","............kklk","..kkkkkkkkkkllk.","..kggggggggklk..","..kyyyyyyyyykk..","..kyyyyyyyyyyk..","..kyydyyyydyyk..","..kyydyyyydyyk..","..kypyyyyyypyk..","..kyyyyddyyyyk.."],"BODY":["..kyyyyyyyyyyk..",".kkyyyyyyyyyykk.","..kyyyyyyyyyyk..","..kkkkkkkkkkkk.."],"ARMS_UP":["..kyyyyyyyyyyk..",".kkyyyyyyyyyykk.","..kyyyyyyyyyyk..","..kkkkkkkkkkkk.."],"LEGS_A":["....kk...kk.....","....kk...kk....."],"LEGS_B":["...kk.....kk....","...kk.....kk...."],"SLEEPY":["..kyyyyyyyyyyk..","..kyddyyyddyyk..","..kypyyyyyypyk..","..kyyyyddyyyyk.."],"HAPPY":["..kyydyyyydyyk..","..kydydyydydyk..","..kypyyyyyypyk..","..kyyyddddyyyk.."]}});
 Object.assign(PAL, {"boba":{"n":{"k":"#4A2C1C","m":"#E8B57C","M":"#C98E55","h":"#FBEBD4","H":"#F3D2A8","j":"#2E1C16","Q":"#A58472","f":"#FFFFFF","F":"#FF8FB5","s":"#FF7AAE","z":"#D2508A","e":"#2A1810","w":"#FFFFFF","b":"#F79A9A","o":"#7A3A2A","x":"#FF6F9C"},"d":{"k":"#2E1A14","m":"#B98A62","M":"#946A44","h":"#D8C2AE","H":"#C2A488","j":"#1E120E","Q":"#7A6458","f":"#E6DDF0","F":"#C77AA0","s":"#D86A9A","z":"#A84878","e":"#1E120E","w":"#F0E8F4","b":"#C07A86","o":"#5A2A20","x":"#C85A80"},"halo":"#FFC58F"},"coffee":{"n":{"k":"#1E2A3A","t":"#4FB6C8","T":"#2F8AA0","l":"#A8E6EE","w":"#FFFFFF","c":"#8A5432","C":"#5A3018","v":"#F2F6FA","V":"#C8D4E2","e":"#1E2A3A","b":"#F2A0A0","p":"#FFE2C8","d":"#2A5A6E","z":"#6A4ADA"},"d":{"k":"#101824","t":"#3A8A9E","T":"#245E70","l":"#7CB4C4","w":"#E8F0F8","c":"#6A4026","C":"#402212","v":"#C8D0E8","V":"#8E98B8","e":"#0E1420","b":"#B87A8A","p":"#D8C0A8","d":"#14303E","z":"#5A3ABA"},"halo":"#A8D8F0"},"onigiri":{"n":{"k":"#2B2B33","r":"#FCF9F0","g":"#E3DCC8","n":"#22302A","N":"#45604F","e":"#2B2B33","b":"#F4A0A0","w":"#FFFFFF","u":"#E8607E","m":"#C04050"},"d":{"k":"#16161C","r":"#D6D4E2","g":"#B4B0C4","n":"#141C18","N":"#2E4036","e":"#16161C","b":"#B87A90","w":"#ECEAF6","u":"#B04A68","m":"#903040"},"halo":"#C8D8B8"},"sticky":{"n":{"k":"#6A5418","y":"#FFE45C","g":"#F2CC3A","l":"#FFF6C8","L":"#E8D890","d":"#3A3020","p":"#FF9AA8","w":"#FFFFFF","u":"#3F6FD8","b":"#2A4FA8"},"d":{"k":"#3A2E10","y":"#D8BC5A","g":"#BCA040","l":"#E6DCB0","L":"#C4B680","d":"#221C10","p":"#C87A88","w":"#E8E4F0","u":"#3458A8","b":"#203E80"},"halo":"#F0E0A0"}});
 const ORIG = {"boba": [45, 60], "coffee": [51, 57], "onigiri": [48, 48], "sticky": [48, 48]};
+// <fan>
 let flowerPct = null;
 // 側邊欄左下角的小休息花：越久沒休息越垂、越枯
 function drawMiniFlower() {
@@ -106,8 +119,11 @@ function drawMiniFlower() {
   if (f < 1) { g.fillStyle = petal; for (const [dx, dy] of [[-2, 0], [2, 0], [0, -2], [0, 2], [-1, -1], [1, 1], [1, -1], [-1, 1]]) g.fillRect(hx + dx * u, hy + dy * u, u * 1.5, u * 1.5); }
   g.fillStyle = f >= 1 ? "#9A7A3A" : "#FFD84A"; g.fillRect(hx - u / 2, hy - u / 2, u * 2, u * 2);
 }
-const FACE_ROW = { po: 7, stitch: 9, hangyodon: 3, tinky: 8, dipsy: 8, laalaa: 8, boba: 8, coffee: 10, onigiri: 6, sticky: 6 };
+// </fan>
+const FACE_ROW = { po: 7, stitch: 9, hangyodon: 3, tinky: 8, dipsy: 8, laalaa: 8, boba: 8, coffee: 10, onigiri: 6, sticky: 6 };   //@fan
+// <public> const FACE_ROW = { boba: 8, coffee: 10, onigiri: 6, sticky: 6 };
 const LINES = {
+  // <fan>
   po: {
     save: ["存好了！好棒棒 👏", "存起來了～再來一次！", "Eh-oh! 存檔成功", "小波幫你收好囉"], save_d: ["存好了…那我們回家好不好", "存好了，太陽寶寶也下山囉"],
     pats: ["嘻嘻，好舒服", "你好棒棒！", "小波喜歡你 ♥", "Eh-oh! 再摸一下", "有小波陪你喔"], pats_d: ["嗯…小波想睡覺覺了", "太陽寶寶下山了，你也該休息囉"],
@@ -181,6 +197,7 @@ const LINES = {
     rest: "花都枯了…起來喝口可樂、走一走 🥤", rest_d: "花都枯了…喝完可樂就下班吧 🥤", wake: "噗咿。你回來了。", wake_d: "回來了…是要回家了嗎？",
     sleep: "咕嚕…zZ", night_on: "天黑了…噗咿…回土裡睡覺", night_off: "噗咿。早安。", sig: "咕嚕咕嚕～", trick: "咕嚕咕嚕～游泳！💧",
     btn: ["打招呼", "游泳", "跳跳", "睡覺"] },
+    // </fan>
   // 續命小隊
   boba: { "save": ["存好了！甜度滿分 🥤", "Q 彈存檔～", "存檔成功～半糖少冰！"], "save_d": ["存好了～那就打烊吧", "收好了…晚安～"], "pats": ["嘿嘿～好甜", "被摸摸，珍珠都在跳～", "半糖最喜歡你了 ♥", "慢慢來，甜度剛好就好"], "pats_d": ["嗯…半糖想打烊了", "摸完就回家喔～"], "combo": ["噗噗噗！珍珠噴出來了～", "哈哈好癢～Q 彈 Q 彈"], "hi": "嗨～我是半糖，甜度剛好的那種 🥤", "hi_d": "嗨…打烊時間到了耶", "ok": "錯誤都清光了！加珍珠慶祝～", "ok_d": "修好了！那就打烊吧", "rest": "好久了，起來喝口水、伸個懶腰～🥤", "rest_d": "喝完這杯就下班吧", "wake": "你回來了！要不要來一杯？♥", "wake_d": "你回來了…是要來打烊的吧？", "sleep": "半糖要瞇一下…", "night_on": "打烊時間到了～下班囉", "night_off": "早安～今天也要甜甜的 ☀", "sig": "嘿！", "trick": "吸管撐竿跳！嘿～", "btn": ["打招呼", "撐竿跳", "跳跳", "瞇一下"],
     err: n => `嗚…有 ${n} 個錯誤，甜度不夠了`, err_d: n => `${n} 個錯誤…明天再修，回家吧` },
@@ -191,8 +208,10 @@ const LINES = {
   sticky: { "save": ["存好了！我也記下來了 ✍", "存檔 ✓ 打勾！", "收好了～貼貼！"], "save_d": ["存好了～下班吧", "收好了…晚安"], "pats": ["貼貼～♥", "嘿嘿，被摸摸了", "辛苦了，我都記得", "貼緊緊～"], "pats_d": ["嗯…貼貼想睡了", "摸完就回家喔"], "combo": ["哈哈好癢！角翹起來了～", "貼貼貼貼～！"], "hi": "嗨！我是貼貼，什麼都幫你記 📝", "hi_d": "嗨…下班時間到了喔", "ok": "錯誤清光了！打勾 ✓", "ok_d": "修好了！回家吧", "rest": "提醒：起來喝水、伸展一下 📝", "rest_d": "今天的待辦先到這裡吧", "wake": "你回來了！我都幫你記著喔", "wake_d": "你回來了…是要下班了嗎？", "sleep": "貼貼睡一下…zZ", "night_on": "下班時間到了！待辦明天再說", "night_off": "早安！今天的待辦我都寫好了 ☀", "sig": "飄～", "trick": "貼貼～飄過去！", "btn": ["打招呼", "貼過去", "飄飄", "睡覺"],
     err: n => `有 ${n} 個錯誤！我先記下來！`, err_d: n => `${n} 個錯誤…記下來了，明天修` },
 };
-let charId = "spidey";
-function isOther() { return charId !== "spidey"; }
+let charId = "spidey";   //@fan
+// <public> let charId = "boba";
+function isOther() { return charId !== "spidey"; }   //@fan
+// <public> function isOther() { return true; }
 // 自己做的公仔（擴充套件送來：小圖＋幾句台詞）
 const CUSTOM = {};
 function registerCustom(m) {
@@ -216,6 +235,7 @@ function registerCustom(m) {
 }
 function sizeFor(id) {
   if (CUSTOM[id]) return [CUSTOM[id].w, CUSTOM[id].h];
+  // <fan>
   if (id === "po") return [48, 63];
   if (id === "stitch") return [66, 72];
   if (id === "hangyodon") return [42, 48];
@@ -223,6 +243,7 @@ function sizeFor(id) {
   if (id === "dipsy") return [48, 69];
   if (id === "laalaa") return [48, 66];
   if (PIK[id]) return [54, 84];
+  // </fan>
   if (ORIG[id]) return ORIG[id];
   return [36, 48];
 }
@@ -234,11 +255,15 @@ function faceRows(head, face, id) {
 function frameOther(o) {
   const A = ART[charId];
   const head = faceRows(A.HEAD, o.sleep ? "SLEEPY" : (o.happy ? "HAPPY" : null), charId);
+  // <fan>
   if (charId === "stitch" && o.moving) return head.concat(o.step ? A.CRAWL_B : A.CRAWL_A);
   if (charId === "po" && o.moving) return head.concat(o.armsUp ? A.ARMS_UP : A.BODY, A.LEGS_RIDE);
+  // </fan>
   const rows = head.concat(o.armsUp ? A.ARMS_UP : A.BODY, o.step ? A.LEGS_B : A.LEGS_A);
-  return TUBBY[charId] ? tubbyProps(rows, A, o) : rows;
+  return TUBBY[charId] ? tubbyProps(rows, A, o) : rows;   //@fan
+  // <public> return rows;
 }
+// <fan>
 // 天線寶寶的道具：迪西戴帽子、丁丁提魔法袋、拉拉腳邊一顆大橘球
 function tubbyProps(rows, A, o) {
   const pad = ".".repeat(8);
@@ -250,6 +275,7 @@ function tubbyProps(rows, A, o) {
   if (charId === "laalaa") put(A.BALL, g.length - 7, o.moving ? 23 + (Math.floor(pet.anim * 6) % 2) : 22);
   return g;
 }
+// </fan>
 // 畫任意寬度的像素圖，貼齊 SW×SH 框的底、左右置中
 function spriteAny(rows, x, y, fx, colors, halo) {
   const w = Math.max(...rows.map(r => r.length)), h = rows.length;
@@ -275,14 +301,18 @@ new ResizeObserver(resize).observe(zone); resize();
 const ground = () => H - 12 - SH;
 const pick = a => a[Math.floor(Math.random() * a.length)];
 
+// <fan>
 const TALK = ["嗨！今天也一起寫 code 吧", "能力越強，bug 越少！", "蜘蛛感應：你存檔了嗎？", "要不要喝口可樂？", "我幫你盯著 console", "這段 code 好帥", "Thwip! 🕸"];
 const SAVE = ["存好了！👍", "存檔成功，帥！", "Thwip! 已存檔", "穩穩的 👍"];
 const TALK_D = ["都幾點了還不下班？", "老闆不會多給你加班費的。", "……你還在？", "這個 bug 明天還會在，你不用在。", "下班。現在。"];
 const SAVE_D = ["存了就快走。", "存好了。可以關機了吧？", "……存檔。然後下班。"];
 const T = (n, d) => pick(dark ? d : n);
+// </fan>
 const LT = (k) => { const L = LINES[charId]; if (!L) return ""; const v = dark && L[k + "_d"] !== undefined ? L[k + "_d"] : L[k]; return Array.isArray(v) ? pick(v) : v; };
+// <fan>
 const PATS = ["你今天也很棒！", "累了就休息一下，我陪你", "有我在，bug 不敢來", "我一直都在喔 ♥", "你寫的 code 很帥", "辛苦了，摸摸頭", "不管怎樣我都站你這邊", "慢慢來，你可以的"];
 const PATS_D = ["……摸夠了就下班。", "我是擔心你才一直催你。", "你已經很努力了，剩下的明天再說。", "哼，就讓你摸一下。"];
+// </fan>
 
 const saved = vscodeApi.getState() || {};
 if (saved.char && ART[saved.char]) { charId = saved.char; [SW, SH] = sizeFor(charId); }
@@ -313,17 +343,21 @@ function update(dt) {
   const gy = ground();
   switch (pet.state) {
     case "walk":
-      pet.x += pet.dir * (charId === "po" ? 70 : charId === "stitch" ? 60 : charId === "hangyodon" ? 22 : charId === "tinky" ? 22 : charId === "dipsy" ? 40 : charId === "laalaa" ? 55 : 28) * dt; pet.y = gy;
+      pet.x += pet.dir * (charId === "po" ? 70 : charId === "stitch" ? 60 : charId === "hangyodon" ? 22 : charId === "tinky" ? 22 : charId === "dipsy" ? 40 : charId === "laalaa" ? 55 : 28) * dt; pet.y = gy;   //@fan
+      // <public> pet.x += pet.dir * 28 * dt; pet.y = gy;
       if (pet.x < 2) { pet.x = 2; pet.dir = 1; }
       if (pet.x > W - SW - 2) { pet.x = W - SW - 2; pet.dir = -1; }
       if (pet.t < 0) {
         const r = Math.random();
         if (r < .38) setState("idle", 1.5 + Math.random() * 2.5);
         else if (r < .56) jump(pet.dir * 60, -260);
-        else if (isOther()) { if (r < .7) jump(pet.dir * (charId === "po" ? 140 : 80), charId === "hangyodon" ? -220 : -320); else { pet.dir = Math.random() < .5 ? -1 : 1; setState("walk", 3 + Math.random() * 3); } }
+        else if (isOther()) { if (r < .7) jump(pet.dir * (charId === "po" ? 140 : 80), charId === "hangyodon" ? -220 : -320); else { pet.dir = Math.random() < .5 ? -1 : 1; setState("walk", 3 + Math.random() * 3); } }   //@fan
+        // <public> else { if (r < .7) jump(pet.dir * 80, -320); else { pet.dir = Math.random() < .5 ? -1 : 1; setState("walk", 3 + Math.random() * 3); } }
+        // <fan>
         else if (r < .68 && H > 140) startSwing(Math.min(W - 24, Math.max(24, pet.x + pet.dir * 60)), 16 + Math.random() * 24);
         else if (r < .73 && H > 140) startHang();
         else { pet.dir = Math.random() < .5 ? -1 : 1; setState("walk", 3 + Math.random() * 3); }
+        // </fan>
       }
       break;
     case "idle":
@@ -331,7 +365,8 @@ function update(dt) {
     case "sleep":
       pet.y = gy; pet.z += dt; if (pet.t < 0) setState("walk", 3); break;
     case "air":
-      pet.vy += (charId === "hangyodon" ? 520 : 900) * dt;   // 人魚漢頓像在水裡一樣慢慢落下
+      pet.vy += (charId === "hangyodon" ? 520 : 900) * dt;   // 人魚漢頓像在水裡一樣慢慢落下   //@fan
+      // <public> pet.vy += 900 * dt;
       pet.x += pet.vx * dt; pet.y += pet.vy * dt;
       if (pet.x < 0) { pet.x = 0; pet.vx = -pet.vx * .5; }
       if (pet.x > W - SW) { pet.x = W - SW; pet.vx = -pet.vx * .5; }
@@ -356,6 +391,7 @@ function update(dt) {
   }
 }
 
+// <fan>
 function sprite(rows, x, y, fx, fy) {
   g.save();
   g.translate(Math.round(x + (fx ? SW : 0)), Math.round(y + (fy ? SH : 0)));
@@ -367,6 +403,7 @@ function sprite(rows, x, y, fx, fy) {
   rows.forEach((row, ry) => { for (let rx = 0; rx < row.length; rx++) { const c = row[rx]; if (c !== ".") { g.fillStyle = COL[c]; g.fillRect(rx * S, ry * S, S, S); } } });
   g.restore();
 }
+// </fan>
 
 // 自己做的公仔：整張小圖輕輕動（走路一跳一跳、呼吸、睡覺歪一邊、跳起來拉長）；下班變暗
 function drawCustom() {
@@ -391,19 +428,25 @@ function drawCustom() {
 function drawOther() {
   if (CUSTOM[charId]) { drawCustom(); return; }
   const P = PAL[charId], colors = dark ? P.d : P.n, moving = pet.state === "walk";
+  // <fan>
   if (dark && (charId === "po" || TUBBY[charId])) { // 太陽寶寶下山：夕陽色
     const gr = g.createLinearGradient(0, 0, 0, H); gr.addColorStop(0, "rgba(255,140,70,0.10)"); gr.addColorStop(1, "rgba(120,60,140,0.18)");
     g.fillStyle = gr; g.fillRect(0, 0, W, H);
   }
-  const rows = frameOther({ moving, step: Math.floor(pet.anim * (charId === "stitch" ? 12 : 6)) % 2 === 1 && moving,
+  // </fan>
+  const rows = frameOther({ moving, step: Math.floor(pet.anim * (charId === "stitch" ? 12 : 6)) % 2 === 1 && moving,   //@fan
+  // <public> const rows = frameOther({ moving, step: Math.floor(pet.anim * 6) % 2 === 1 && moving,
     armsUp: pet.state === "air" || (pet.bt > 0 && pet.state === "idle"), sleep: pet.state === "sleep", happy: pet.happy > 0 });
-  const lift = charId === "po" && moving ? 4 * S : 0;
-  if (charId === "po" && moving) spriteAny(ART.po.SCOOTER, pet.x, pet.y, pet.dir < 0, colors, dark ? P.halo : "#FFFFFF");
+  const lift = charId === "po" && moving ? 4 * S : 0;   //@fan
+  // <public> const lift = 0;
+  if (charId === "po" && moving) spriteAny(ART.po.SCOOTER, pet.x, pet.y, pet.dir < 0, colors, dark ? P.halo : "#FFFFFF");   //@fan
   spriteAny(rows, pet.x, pet.y - lift, pet.dir < 0, colors, dark ? P.halo : "#FFFFFF");
+  // <fan>
   if (charId === "hangyodon" && (pet.state === "idle" || pet.state === "air")) { // 吐泡泡
     g.strokeStyle = "rgba(150,215,255,0.9)"; g.lineWidth = 1.2;
     for (let i = 0; i < 3; i++) { const p = (pet.anim * 0.5 + i / 3) % 1; g.beginPath(); g.arc(pet.x + SW / 2 + (pet.dir < 0 ? -12 : 12) + Math.sin(p * 9 + i) * 3, pet.y + 20 - p * 40, 1.5 + p * 2.5, 0, 7); g.stroke(); }
   }
+  // </fan>
 }
 
 function draw() {
@@ -427,12 +470,15 @@ function draw() {
   }
   if (pet.state === "hang") { g.beginPath(); g.moveTo(pet.ax, 0); g.lineTo(pet.ax, pet.y + 3); g.stroke(); }
 
+  // <fan>
   if (isOther()) { drawOther(); if (PIK[charId]) drawMiniFlower(); }   // 別的角色：不要再疊畫一隻 Spidey
   else sprite(frame({
     step: pet.state === "walk" && Math.floor(pet.anim * 6) % 2 === 1,
     armsUp: pet.state === "swing" || pet.state === "air" || (pet.bt > 0 && pet.state === "idle"),
     sleep: pet.state === "sleep",
   }), pet.x, pet.y, pet.dir < 0, pet.state === "hang");
+  // </fan>
+  // <public> drawOther();
 
   if (pet.sense > 0 && pet.state !== "hang") {
     // 蜘蛛感應：頭兩側的波紋
@@ -457,11 +503,13 @@ function draw() {
   }
   if (pet.bubble && pet.bt > 0) {
     bubble.hidden = false; bubble.textContent = pet.bubble; bubble.classList.toggle("alert", pet.alert);
-    bubble.classList.toggle("dark", dark && charId === "spidey"); bubble.classList.toggle("dusk", dark && (charId === "po" || !!TUBBY[charId]));
-    bubble.classList.toggle("deep", dark && (charId === "stitch" || !!PIK[charId] || !!CUSTOM[charId])); bubble.classList.toggle("lonely", dark && charId === "hangyodon");
+    bubble.classList.toggle("dark", dark && charId === "spidey"); bubble.classList.toggle("dusk", dark && (charId === "po" || !!TUBBY[charId]));   //@fan
+    bubble.classList.toggle("deep", dark && (charId === "stitch" || !!PIK[charId] || !!CUSTOM[charId])); bubble.classList.toggle("lonely", dark && charId === "hangyodon");   //@fan
+    // <public> bubble.classList.toggle("deep", dark && !!CUSTOM[charId]);
     const bw = bubble.offsetWidth;
     const bxp = Math.min(W - bw / 2 - 4, Math.max(bw / 2 + 4, pet.x + SW / 2));
-    const byp = pet.state === "hang" ? pet.y + SH + 34 : pet.y - 8 - (charId === "po" ? 12 : 0);
+    const byp = pet.state === "hang" ? pet.y + SH + 34 : pet.y - 8 - (charId === "po" ? 12 : 0);   //@fan
+    // <public> const byp = pet.state === "hang" ? pet.y + SH + 34 : pet.y - 8 ;
     bubble.style.left = bxp + "px"; bubble.style.top = Math.max(30, byp) + "px";
   } else bubble.hidden = true;
 }
@@ -476,7 +524,8 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
-if (charId !== "spidey") setChar(charId, false);
+if (charId !== "spidey") setChar(charId, false);   //@fan
+// <public> setChar(charId, false);
 
 zone.addEventListener("pointerdown", e => {
   const r = zone.getBoundingClientRect(); const x = e.clientX - r.left, y = e.clientY - r.top;
@@ -486,17 +535,23 @@ zone.addEventListener("pointerdown", e => {
       const now = performance.now(); pet.clicks = (pet.clicks || []).filter(t => now - t < 1300); pet.clicks.push(now);
       pet.happy = 1.5;
       if (pet.clicks.length >= 3) say(pick(LINES[charId].combo), 1.8);
-      else { const l = LT("pats"); say(l, 2.4); if (charId === "hangyodon" && !dark) pet.joke = 2.6; }
+      else { const l = LT("pats"); say(l, 2.4); if (charId === "hangyodon" && !dark) pet.joke = 2.6; }   //@fan
+      // <public> else { const l = LT("pats"); say(l, 2.4); }
       if (pet.state === "walk" || pet.state === "idle") jump(0, pet.clicks.length >= 3 ? -340 : -260);
       return;
     }
+    // <fan>
     say(T(PATS, PATS_D), 2.4); if (pet.state === "walk" || pet.state === "idle") jump(0, -260);
     return;
+    // </fan>
   }
-  if (isOther()) { if (pet.state === "sleep") setState("walk", 1); grounded(); jump((x - pet.x - SW / 2) / 0.6, charId === "hangyodon" ? -200 : -300); say(LINES[charId].sig, .8); return; }
+  if (isOther()) { if (pet.state === "sleep") setState("walk", 1); grounded(); jump((x - pet.x - SW / 2) / 0.6, charId === "hangyodon" ? -200 : -300); say(LINES[charId].sig, .8); return; }   //@fan
+  // <public> if (isOther()) { if (pet.state === "sleep") setState("walk", 1); grounded(); jump((x - pet.x - SW / 2) / 0.6, -300); say(LINES[charId].sig, .8); return; }
+  // <fan>
   if (pet.state === "hang" || pet.state === "sleep") { setState("walk", 1); grounded(); }
   if (y < ground() - 20) { startSwing(x, y); say("Thwip!", .8); }
   else { jump((x - pet.x - SW / 2) / 0.6, -260); say("Thwip!", .8); }
+  // </fan>
 });
 
 function actOther(a) {
@@ -504,20 +559,26 @@ function actOther(a) {
   if (a === "hi") { grounded(); setState("idle", 2.4); pet.happy = 2; say(LT("hi"), 2.4); }
   if (a === "swing") { // 招牌：小波騎車、史迪仔搗蛋、人魚漢頓講笑話
     grounded();
+    // <fan>
     if (charId === "po") { setState("walk", 6); say(L.trick, 1.6); }
     else if (charId === "stitch") { setState("idle", 2); pet.happy = 2; say(L.trick, 1.6); jump(pet.dir * 160, -200); }
-    else if (TUBBY[charId] || PIK[charId] || ORIG[charId] || CUSTOM[charId]) { setState("idle", 2.4); pet.happy = 2; say(L.trick, 2.2); jump(0, charId === "tinky" ? -180 : (charId === "pkyellow" ? -460 : -300)); }
+    // </fan>
+    else if (TUBBY[charId] || PIK[charId] || ORIG[charId] || CUSTOM[charId]) { setState("idle", 2.4); pet.happy = 2; say(L.trick, 2.2); jump(0, charId === "tinky" ? -180 : (charId === "pkyellow" ? -460 : -300)); }   //@fan
+    // <public> if (ORIG[charId] || CUSTOM[charId]) { setState("idle", 2.4); pet.happy = 2; say(L.trick, 2.2); jump(0, -300); }
     else { setState("idle", 3); say(pick(L.pats), 2.4); if (!dark) pet.joke = 2.6; }
   }
-  if (a === "hang") { grounded(); jump((pet.x + SW / 2 > W / 2 ? -1 : 1) * 160, charId === "hangyodon" ? -260 : (charId === "tinky" ? -300 : -420)); say(L.sig, 1); }
+  if (a === "hang") { grounded(); jump((pet.x + SW / 2 > W / 2 ? -1 : 1) * 160, charId === "hangyodon" ? -260 : (charId === "tinky" ? -300 : -420)); say(L.sig, 1); }   //@fan
+  // <public> if (a === "hang") { grounded(); jump((pet.x + SW / 2 > W / 2 ? -1 : 1) * 160, -420); say(L.sig, 1); }
   if (a === "sleep") { pet.z = 0; pet.y = ground(); setState("sleep", 8); say(L.sleep, 1.2); }
 }
-const BTN_SPIDEY = ["打招呼", "擺盪", "倒吊", "睡覺"];
+const BTN_SPIDEY = ["打招呼", "擺盪", "倒吊", "睡覺"];   //@fan
 function setChar(id, announce) {
-  if (!(id === "spidey" || ART[id])) return;
+  if (!(id === "spidey" || ART[id])) return;   //@fan
+  // <public> if (!(ART[id])) return;
   charId = id; [SW, SH] = sizeFor(id);
   pet.x = Math.min(Math.max(2, pet.x), Math.max(2, W - SW - 2)); pet.y = ground(); setState("walk", 2);
-  const labels = id === "spidey" ? BTN_SPIDEY : LINES[id].btn;
+  const labels = id === "spidey" ? BTN_SPIDEY : LINES[id].btn;   //@fan
+  // <public> const labels = LINES[id].btn;
   document.querySelectorAll("button").forEach((b, i) => { b.textContent = labels[i]; });
   vscodeApi.setState({ x: pet.x, char: charId });
   if (announce) act("hi");
@@ -525,10 +586,12 @@ function setChar(id, announce) {
 
 function act(a) {
   if (isOther()) { actOther(a); return; }
+  // <fan>
   if (a === "hi") { grounded(); setState("idle", 2.4); say(dark ? "……嗨。下班了嗎？" : "嗨！我是你的 Spidey 👋", 2.4); }
   if (a === "swing") { grounded(); startSwing(pet.x + SW / 2 > W / 2 ? W * .25 : W * .75, 20); say("Thwip!", 1); }
   if (a === "hang") { grounded(); startHang(); say("倒吊看世界～", 2); }
   if (a === "sleep") { pet.z = 0; pet.y = ground(); setState("sleep", 8); say("晚安…", 1.2); }
+  // </fan>
 }
 document.querySelectorAll("button").forEach(b => b.addEventListener("click", () => act(b.dataset.act)));
 
@@ -536,7 +599,7 @@ window.addEventListener("message", e => {
   const m = e.data || {};
   if (m.type === "custom") { registerCustom(m); return; }
   if (m.type === "character") { setChar(m.id, true); return; }
-  if (m.type === "flower") { flowerPct = m.pct; return; }
+  if (m.type === "flower") { flowerPct = m.pct; return; }   //@fan
   if (isOther()) {
     if (m.type === "save") { if (pet.state === "sleep") setState("walk", 2); grounded(); say(LT("save"), 2); jump(0, -300); }
     else if (m.type === "errors") {
@@ -548,6 +611,7 @@ window.addEventListener("message", e => {
     else if (m.type === "hi") act("hi");
     return;
   }
+  // <fan>
   if (m.type === "save") {
     if (pet.state === "sleep") setState("walk", 2);
     grounded(); say(T(SAVE, SAVE_D), 2); jump(0, -300);
@@ -568,6 +632,7 @@ window.addEventListener("message", e => {
   } else if (m.type === "wake") {
     if (pet.state === "sleep") { setState("walk", 2); say(dark ? "……你回來了。是要來關機的吧？" : "你回來啦！", 1.8); }
   } else if (m.type === "hi") act("hi");
+  // </fan>
 });
 </script>
 </body>

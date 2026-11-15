@@ -1,4 +1,5 @@
-param([string]$PipeName = "desk-pals", [string]$Pet = "spidey", [string]$Lineup = "")
+param([string]$PipeName = "desk-pals", [string]$Pet = "spidey", [string]$Lineup = "")   #@fan
+# <public> param([string]$PipeName = "desk-pals", [string]$Pet = "boba", [string]$Lineup = "")
 # Desk Pals (figure shelf) desktop overlay launcher: compiles DeskPals.cs (UTF-8) and runs it.
 $ErrorActionPreference = "Stop"
 try {

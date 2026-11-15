@@ -1243,11 +1243,13 @@ namespace DeskPals
             string saved = ReadText("lineup.txt");
             if (saved != "") return saved;
             bool fresh = !File.Exists(FilePath("out.txt")) && !File.Exists(FilePath("profile.txt")) && !File.Exists(FilePath("usage.txt"));
+            // <fan>
             if (fresh && !App.Isolated)
             {
                 string old = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SpideyDesktop");
                 if (Directory.Exists(old)) fresh = false;   // 從舊版 Spidey 小夥伴升級的：維持經典一櫃
             }
+            // </fan>
             if (!fresh) return "";
             WriteText("lineup.txt", Pal.Original);   // 記下來：下次開機（沒帶參數）還是續命小隊
             return Pal.Original;
