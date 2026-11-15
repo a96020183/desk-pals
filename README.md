@@ -24,7 +24,7 @@
 - **大家一起**：揪團訂飲料（外送到了！）、下午三點下午茶續命乾杯、大合照、早上點名「續命小隊，報到！」、下班時貼貼貼一張「回家」再一個一個回櫃子（醒醒最後才睡）。右鍵選單「續命小隊一起…」也能叫。
 - **午餐變身**（平日 12:00–13:30）：半糖雞排配珍奶、醒醒可頌配（自己的）咖啡、糰糰雞腿便當、貼貼滷肉飯，吃飽睡午覺。
 
-也有現成的公仔可以選：**經典一櫃**（Spidey、小波、史迪仔、人魚漢頓）、**天線寶寶一櫃**（丁丁、迪西、拉拉、小波）、**皮克敏一櫃**。
+個人版（自己打包的）還有幾櫃粉絲作品，見下面「[換一櫃](#換一櫃)」；公開下載的版本只有續命小隊和你自己做的公仔。
 
 ## 做一隻自己的公仔 🐾
 
@@ -54,7 +54,10 @@
 
 ## 換一櫃
 
-除了續命小隊，程式裡還有幾櫃**個人粉絲作品**（經典一櫃：Spidey、小波、史迪仔、人魚漢頓；天線寶寶一櫃：丁丁、迪西、拉拉、小波；皮克敏一櫃：紅、黃、藍皮克敏＋休息花）。這幾櫃只供自己玩，不放在宣傳圖裡。
+除了續命小隊，原始碼裡還有幾櫃**個人粉絲作品**（經典一櫃：Spidey、小波、史迪仔、人魚漢頓；天線寶寶一櫃：丁丁、迪西、拉拉、小波；皮克敏一櫃：紅、黃、藍皮克敏＋休息花）。這幾櫃只供自己玩，不放在宣傳圖裡，**也不在公開下載的版本裡**：
+
+- **公開版**（Releases、Microsoft Store、Steam、DMG 都是這個）：只有續命小隊＋自己做的公仔（我的櫃）。由 `tools/variant.py` 從原始碼減掉粉絲作品產生，打包時會掃一遍，有任何粉絲角色的名字、口頭禪、像素圖就建置失敗。
+- **個人版**：全部的櫃。自己打包（`python build_vsix.py` 會同時打出 `desk-pals-<版號>-personal.vsix`；`build.ps1 -Variant personal`、`VARIANT=personal packaging/mac/build_app.sh`），或從 CI 的 `personal-build-windows` artifact 拿；檔名都帶 `-personal`，不要公開散布。
 
 > 粉絲作品的幾櫃為個人非商業用途，與各角色的版權方（Marvel、Ragdoll／WildBrain、Disney、Sanrio、Nintendo）無關。續命小隊是原創角色。
 
@@ -111,7 +114,7 @@
 | 只有 VS Code 才有：存檔比讚、錯誤數、打字速度、終端機長指令、推 tag 盯 CI、開會提醒（工作行事曆）、Jira／GitLab 待辦、天氣、工作日誌、側邊欄公仔 | | | ✓ |
 | 開機自動出現 | ✓（安裝時可取消） | ✓ | ✓ |
 
-檔案從 [Releases](../../releases) 下載（還沒發版之前：[Actions](../../actions) 最新一次成功的建置 → Artifacts 的 `desk-pals-windows`／`desk-pals-mac`）。
+檔案從 [Releases](../../releases) 下載（還沒發版之前：[Actions](../../actions) 最新一次成功的建置 → Artifacts 的 `desk-pals-windows`／`desk-pals-mac`）。這些都是公開版（只有續命小隊＋自己做的公仔）；個人版見「[換一櫃](#換一櫃)」。
 
 ### Windows：安裝程式
 
@@ -136,13 +139,13 @@
 1. VS Code →「延伸模組」→ 右上角「⋯」→「從 VSIX 安裝…」→ 選 `desk-pals-<版號>.vsix`。
 2. 重新開啟 VS Code。第一次會在背景編譯桌面版（30 秒到 1 分鐘），之後開機會自動出現，不用開 VS Code。
 
-細節：[Windows安裝說明.md](Windows安裝說明.md)、[Mac安裝說明.md](Mac安裝說明.md)。自己打包：`python build_vsix.py`。
+細節：[Windows安裝說明.md](Windows安裝說明.md)、[Mac安裝說明.md](Mac安裝說明.md)。自己打包：`python build_vsix.py`（`dist/` 裡會有公開版 `desk-pals-<版號>.vsix` 和個人版 `desk-pals-<版號>-personal.vsix`；只要一種加 `--public` 或 `--personal`）。
 
 ### 兩種都裝
 
 裝了 Windows 安裝程式（或 Microsoft Store 版）／Mac App 之後，VS Code 擴充套件就**不再自己編一份、也不建自己的開機啟動**，只負責連上獨立版（沒開的話叫它起來），VS Code 才有的功能照常送過去。兩邊用同一個資料夾（Windows `%LOCALAPPDATA%\DeskPals`、Mac `~/Library/Application Support/DeskPals`），設定、紀錄、自己做的公仔都是同一份。先用擴充套件、後來才裝獨立版也沒問題：安裝時會請擴充套件那份收工、把開機啟動換成獨立版。解除安裝獨立版之後，擴充套件會回到原本的做法。
 
-自己打包獨立版：Windows `powershell -File packaging\windows\build.ps1`（需要免費的 Inno Setup 6、Windows SDK、Python + Pillow），Mac `packaging/mac/build_app.sh`。上架、簽章見 [PUBLISHING.md](PUBLISHING.md)。
+自己打包獨立版：Windows `powershell -File packaging\windows\build.ps1`（需要免費的 Inno Setup 6、Windows SDK、Python + Pillow），Mac `packaging/mac/build_app.sh`。兩支預設都打**公開版**（上架、公開下載用）；自己用的個人版加 `-Variant personal`（Windows，產出 `DeskPals-Setup-<版號>-personal.exe`）或 `VARIANT=personal`（Mac，`DeskPals-<版號>-personal.dmg`）。上架、簽章見 [PUBLISHING.md](PUBLISHING.md)。
 
 ## 結構
 
@@ -153,7 +156,8 @@
 | `extension/media/pet.html` | 側邊欄裡的公仔 |
 | `extension/desktop/DeskPals.cs` | Windows 桌面版：公仔櫃、各櫃公仔、通知（由 `desk-pals.ps1` 用 PowerShell 編譯執行，連同下面兩個 partial 檔） |
 | `extension/desktop/DeskPals.Original.cs` | 續命小隊（半糖、醒醒、糰糰、貼貼）：角色、動作、串場、櫃子方格紙 |
-| `extension/desktop/DeskPals.Pikmin.cs` | 皮克敏一櫃（休息花） |
+| `extension/desktop/DeskPals.Fan.cs` | 經典一櫃、天線寶寶一櫃（粉絲作品，只在個人版） |
+| `extension/desktop/DeskPals.Pikmin.cs` | 皮克敏一櫃（休息花；粉絲作品，只在個人版） |
 | `extension/desktop/DeskPals.Study.cs` | Windows 桌面版的讀書小幫手：抓學校行事曆（ICS）、分類上課／作業、搶課、考試倒數、熬夜提醒、讀書小幫手設定視窗 |
 | `test/` | `node --test test/study.test.js`（VS Code 這邊）；`test/desktop-study.js`（桌面版離屏測試，範例 ICS 在 `test/fixtures`） |
 | `extension/desktop/DeskPals.Custom*.cs` | 自己做的公仔：去背與像素化（`CustomImage`）、做公仔視窗（`CustomMake`）、六種個性的台詞（`CustomLines`）、畫法與動作、我的櫃（`Custom`） |
@@ -161,10 +165,13 @@
 | `extension/desktop/DeskPals.swift` | Mac 桌面版（DeskPals.cs 的 Swift 移植，由 `desk-pals.sh` 編譯執行；由 `mac/src/*.swift` 經 `python3 mac/assemble.py` 產生，別直接改） |
 | `mac/` | Mac 版原始碼與移植規範（`PORTING.md`） |
 | `extension/desktop/claude-hook.js`、`ci-watch.js` | Claude Code hooks、推 tag 後盯 CI |
-| `build_vsix.py` | 打包成 `.vsix` |
+| `build_vsix.py` | 打包成 `.vsix`（公開版＋個人版） |
+| `tools/variant.py` | 產生公開版（減掉粉絲作品）＋掃同人字眼的 guard，見下面「改程式時」 |
 | `packaging/windows/` | Windows 獨立版：`DeskPals.Main.cs`（exe 進入點）、`build.ps1`（exe → 安裝程式 → MSIX）、`DeskPals.iss`（Inno Setup）、`msix/AppxManifest.xml`（Microsoft Store） |
 | `packaging/mac/` | Mac 獨立版：`build_app.sh`（universal `.app` → DMG，可選簽章＋公證）、`Info.plist`；開場邏輯在 `mac/src/95_standalone.swift` |
 | `packaging/icons/make_icons.py` | 從續命小隊的像素圖畫出所有圖示（`.ico`、`.icns`、Store 磚、安裝程式圖） |
 | `PUBLISHING.md` | 簽章、上架（Microsoft Store、Steam、Apple 公證）要做的事 |
 
-每次推送都會在雲端的 Windows 和 Mac 上各編譯、試跑一次（都用不顯示畫面的離屏模式），也會打包獨立版並實際安裝、升級、解除安裝測一次；推 `v<版號>` 的 tag 會自動建 GitHub Release，附上安裝程式、DMG、vsix、MSIX。
+每次推送都會在雲端的 Windows 和 Mac 上各編譯、試跑一次（都用不顯示畫面的離屏模式），也會打包獨立版並實際安裝、升級、解除安裝測一次；推 `v<版號>` 的 tag 會自動建 GitHub Release，附上公開版的安裝程式、DMG、vsix、MSIX（個人版只留在那次建置的 `personal-*` artifact）。
+
+**改程式時（公開版）**：粉絲角色的資料、動作、串場放在 `extension/desktop/DeskPals.Fan.cs`、`DeskPals.Pikmin.cs`、`mac/src/58_fan.swift`、`50_pikmin.swift`，公開版整個檔案不帶。共用程式碼裡碰到粉絲角色的地方（`Is("po")`、`case "spidey":`、台詞表、側邊欄的像素圖…）用 `// <fan>`…`// </fan>` 或行尾 `//@fan` 標起來，公開版要換成別的寫法的那一行寫成 `// <public> …`（標記本身是註解，個人版完全不受影響）。`python -I tools/variant.py public` 產生公開版（`build/public/extension`）並掃一遍；`python3 mac/assemble.py --public` 產生公開版的 `DeskPals.swift`。CI 會編譯、試跑兩個版本。
