@@ -24,6 +24,18 @@ const msgs = [
 	"act egg", "wait", "wait", "act menu house", "act menuhover 2", "snap " + out + "/shot-house.png", "act menuclose",
 	"act menu tinky", "act menuhover 3", "snap " + out + "/shot-menu.png", "act menuclose",
 ];
+// SMOKE_PIKMIN=1（只有 Mac 的 job 另外跑一次，DESKPALS_ISOLATED=1）：皮克敏一櫃（個人用，不放進文件）
+// 設定視窗 → 全部出來 → 休息花 → 一起搬顆粒 → 右鍵選單 → 花枯了 → 休息回來喝花蜜
+const pikmin = [
+	"hello", "wait", "act setup work", "act setup next", "act setup next", "snap " + out + "/shot-pikmin-setup.png",
+	"act setup mode:shelf", "act setup next", "wait",
+	"act all", "wait", "wait", "wait", "act flower 30", "act flower click", "wait", "snap " + out + "/shot-pikmin-flower.png",
+	"act scene carry", "wait", "wait", "wait", "wait", "wait", "wait", "snap " + out + "/shot-pikmin.png", "where",
+	"act menu pkred", "act menuhover 3", "snap " + out + "/shot-pikmin-menu.png", "act menuclose",
+	"act flower 60", "act flower wilt", "wait", "wait", "wait", "wait", "snap " + out + "/shot-pikmin-wilt.png",
+	"act flower rest", "wait", "wait", "wait", "wait", "wait", "wait", "snap " + out + "/shot-pikmin-nectar.png", "where",
+];
+if (process.env.SMOKE_PIKMIN === "1") msgs.splice(0, msgs.length, ...pikmin);
 let i = 0;
 const t = setInterval(() => {
 	if (i < msgs.length) {

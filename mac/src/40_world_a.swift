@@ -127,7 +127,7 @@ final class World: Form {
 extension World {
     func DefaultPetFor(_ pet: String) -> String {
         for id in Pal.LineupIds(lineup) { if id == pet { return pet } }
-        return lineup == Pal.Teletubbies ? "po" : "spidey"
+        return lineup == Pal.Teletubbies ? "po" : (lineup == Pal.Pikmin ? "pkred" : "spidey")
     }
 
     // 每一櫃各自記：誰在外面、最近一隻、最愛（經典一櫃沿用原本的檔名）
@@ -328,6 +328,7 @@ extension World {
 
     // ---------- 櫃子的格子：最愛（釘選 > 用最久）在高格，其他照順序 ----------
     func FavId() -> String {
+        if PikLineup { return "" }   // 皮克敏一櫃：大格固定是休息花
         if Get(favPin) != nil { return favPin }
         if let lf = Pal.LineupFav(lineup) as String?, Get(lf) != nil { return lf }                 // 天線寶寶一櫃：大格是小波
         var best: String = Pets[0].P.Id; var bv: Double = -1
@@ -384,7 +385,7 @@ extension World {
         for i in 0..<4 { o[i] = c[i] != nil && c[i]!.Out }
         var hot = false, over = false
         for p in Pets { if p.Out && p.Dragging { hot = true; if InShelf(p.Cx, p.y + Double(p.SH) / 2.0) { over = true } } }
-        shelf.Hot = hot; shelf.Over = over; shelf.Night = Night; shelf.Tubby = TubbyLineup; shelf.Lunch = Lunch; shelf.Attention = EggAttention()
+        shelf.Hot = hot; shelf.Over = over; shelf.Night = Night; shelf.Tubby = TubbyLineup; shelf.Pik = PikLineup; shelf.Lunch = Lunch; shelf.Attention = EggAttention()
         shelf.Render(c, o, Now)
         if !W.Shown(shelf) { shelf.Show(); Zorder() }
     }
@@ -418,7 +419,7 @@ extension World {
 
     func ShelfClick(_ cell: Int) {
         let p0 = CellPets()[cell]
-        guard let p = p0 else { return }
+        guard let p = p0 else { if cell == 0 && PikLineup { FlowerClicked() }; return }
         if p.Out { if p.state != "stowfly" && p.state != "enter" && p.state != "exit" { p.StowToShelf(true) } }
         else { BringOut(p, true) }
     }
@@ -442,6 +443,7 @@ extension World {
     }
 
     func SetFav(_ p: Pet) {
+        if PikLineup { p.Say("大格種的是休息花，花不能搬喔 🌸", 2.2); return }
         favPin = favPin == p.P.Id ? "" : p.P.Id
         World.WriteText(LF("fav.txt"), favPin)
         p.Say(favPin == "" ? "好～不當最愛也沒關係" : "我是最愛！★ 謝謝你 ♥", 2)
@@ -512,6 +514,7 @@ extension World {
         }
         UpdateBall(dt)
         StepProps(dt)
+        PikTick(dt)
         if fx != nil { fx.Step(dt) }
         StepScene(dt)
         proxT -= dt
@@ -534,6 +537,7 @@ extension World {
         for pr in props { W.KeepOnTop(pr.F) }
         if fx != nil && fx.Active { W.KeepOnTop(fx) }
         for p in Pets { if p.Bub != nil { W.KeepOnTop(p.Bub) } }
+        W.KeepOnTop(flowerBub)
     }
 
     // ================= 掃描視窗 =================
@@ -550,6 +554,7 @@ extension World {
         if fx != nil && fx.IsHandleCreated { own.Add(fx.Handle) }
         if flash != nil && flash.IsHandleCreated { own.Add(flash.Handle) }
         for pr in props { if pr.F.IsHandleCreated { own.Add(pr.F.Handle) } }
+        if flowerBub != nil && flowerBub.IsHandleCreated { own.Add(flowerBub.Handle) }
 
         let nw = List<WinInfo>()
         let nc = Dict<IntPtr, WinInfo>()
@@ -749,6 +754,7 @@ extension World {
             if shelf != nil { shelf.Hide() }
             if ballF != nil { ballF.Hide() }
             for pr in props { pr.F.Hide() }
+            if flowerBub != nil { flowerBub.Hide() }
             if fx != nil && fx.Active { fx.Stop() }
         }
         else { RenderShelf() }
@@ -781,14 +787,14 @@ extension World {
 
     // ---------- 整台電腦的鍵盤滑鼠：太久沒動 → 睡；回來 → 敲螢幕；用太久 → 提醒休息 ----------
     func SystemActivity(_ now: Double) {
-        // mac: GetLastInputInfo → CGEventSource
-        let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
+        let idle = W.IdleSeconds()   // mac: GetLastInputInfo → CGEventSource（在 W.IdleSeconds 裡）
         if !sysIdle && idle > idleMin * 60 {
             sysIdle = true
             for p in Pets { p.SystemIdle(true) }
         }
         else if sysIdle && idle < 2 {
             sysIdle = false
+            if PikLineup { PikRested() }       // 休息花：休息回來才恢復
             sessionStart = now
             let l = Lead()
             for p in Pets { if p === l { p.SystemIdle(false) } else { p.WakeIfSleep() } }
@@ -796,7 +802,7 @@ extension World {
         if !sysIdle && now - sessionStart >= restMin * 60 {
             sessionStart = now
             if HoldIfQuiet("rest", "該起來動一動了") { return }
-            Lead().Rest(restMin)
+            if PikLineup { PikWiltAlarm() } else { Lead().Rest(restMin) }
         }
     }
 
@@ -958,8 +964,8 @@ extension World {
     // ================= 右鍵選單 =================
     func FillMenu(_ p: Pet, _ m: ContextMenuStrip) {
         m.Items.Clear()
-        var items: [[String]]
-        switch p.P.Id {
+        var items: [[String]]! = p.P.Pik ? PikMenuItems(p) : nil
+        if items == nil { switch p.P.Id {
         case "po":
             items = [["大抱抱 ♥", "hug"], ["打招呼 Eh-oh!", "hi"], ["敲敲螢幕", "knock"], ["騎車兜風", "ride"],
                      ["滑板車飛跳", "sig"], ["揮棒", "bat"], ["睡覺", "sleep"], ["丟棒球給她 ⚾", "ball"]]
@@ -981,9 +987,9 @@ extension World {
         default:
             items = [["抱抱 ♥", "hug"], ["打招呼", "hi"], ["敲敲螢幕", "knock"], ["噴絲擺盪", "swing"],
                      ["倒吊", "hang"], ["跳到別的視窗上", "jump"], ["去爬牆", "climb"], ["睡覺", "sleep"], ["丟球給他 ⚾", "ball"]]
-        }
+        } }
         m.Items.Add(ToolStripLabel("一起玩"))
-        for it in items {
+        for it in items! {
             let a = it[1]
             m.Items.Add(it[0], nil, { if a == "ball" { self.StartBall() } else { p.Act(a) } })
         }
@@ -1002,6 +1008,7 @@ extension World {
             for gi in gs { let key = gi[1]; grp.DropDownItems.Add(gi[0], nil, { self.PlayScene(key) }) }
             m.Items.Add(grp)
         }
+        if PikLineup { AddPikMenu(m) }
         if !Single {
             let sw = ToolStripMenuItem("換角色")
             for o in Pets {
@@ -1125,6 +1132,7 @@ extension World {
             m.Items.Add(p.P.Name + " 的好感度 ♥", nil, { p.ShowBond() })
             m.Items.Add(ToolStripSeparator())
         }
+        if PikLineup { m.Items.Add("休息花：還能撐多久？🌸", nil, { self.FlowerClicked() }) }
         m.Items.Add(shelf.Collapsed ? "打開公仔櫃" : "收合成蛋 🥚", nil, { self.ToggleEgg(!self.shelf.Collapsed) })
         m.Items.Add("全部放出來", nil, { self.AllOut() })
         m.Items.Add("全部回櫃子", nil, { self.AllHome() })
@@ -1353,6 +1361,8 @@ extension World {
         case "lunchend": forceLunch = 0; LunchTick(true); return
         case "fav": SetFav(target ?? l); return
         case "scene": PlayScene(arg); return
+        case "flower": PikFlowerAct(arg); return
+        case "whistle": Whistle(); return
         case "photo": GroupPhoto(); return
         case "rollcall":
             let ids = List<String>(); for x in OutPets() { ids.Add(x.P.Id) }; if ids.Count == 0 { for x in Pets { ids.Add(x.P.Id) } }; StartRollCall(ids); return

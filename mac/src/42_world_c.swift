@@ -107,6 +107,7 @@ extension World {
     }
 
     static func Flavor(_ id: String, _ kind: String, _ night: Bool) -> String {
+        let pk = PikFlavor(id, kind); if pk != nil { return pk! }
         let extra = FlavorExtra(id, kind)
         if extra != nil { return extra! }
         if night && kind == "worklog" {
@@ -400,6 +401,7 @@ extension Pet {
 extension World {
     // ---------- 共用：每個角色的開場白 ----------
     static func FlavorExtra(_ id: String, _ kind: String) -> String! {
+        let pk = PikFlavor(id, kind); if pk != nil { return pk! }
         let keys: [String] = ["remind", "pc-cpu", "pc-ram", "pc-disk", "net-down", "net-up", "vpn", "download"]
         let sp: [String] = ["⏰ 提醒你：", "蜘蛛感應！電腦好燙：", "蜘蛛感應！記憶體快滿了：", "硬碟快滿了：", "網路斷了！", "網路回來了 👍", "連不到公司網路（VPN 斷了？）", "下載好了："]
         let po: [String] = ["⏰ 小波提醒你：", "電腦好忙好熱喔：", "記憶體要滿滿了：", "硬碟快塞滿了：", "網路斷掉了！嗚…", "網路回來了！Eh-oh!", "連不到公司網路耶（VPN 斷了？）", "下載好了！"]
@@ -944,6 +946,7 @@ extension World {
 
     static func TicketLine(_ id: String, _ stage: Int, _ t: Ticket) -> String {
         let h = String(t.Lead / 60) + " 小時", n: String = t.Name
+        let pk = PikTicket(id, stage, n, h); if pk != nil { return pk! }
         let sp: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款", "🎫 " + n + " 再 30 分鐘開賣，網頁先開好", "🎫 " + n + " 剩 10 分鐘！蜘蛛感應全開", "🎫 準備！手指放在按鈕上", "🎫 開搶！！Thwip!"]
         let po: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款喔", "🎫 " + n + " 再 30 分鐘！小波陪你等", "🎫 " + n + " 剩 10 分鐘！好緊張～", "🎫 準備！深呼吸～", "🎫 開搶！！衝衝衝！"]
         let st: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款！ih!", "🎫 " + n + " 30 分鐘！史迪仔幫你顧著", "🎫 " + n + " 10 分鐘！ih-ih-ih!", "🎫 準備！史迪仔也準備好了", "🎫 開搶！！衝啊！"]
@@ -1236,6 +1239,7 @@ extension Pet {
     static let PLATE: [String] = ["..1....", "kWWWWWk", ".kkkkk."]
 
     func LunchLine(_ phase: String) -> String {
+        if P.Pik { return PikLunchLine(phase) }
         switch P.Id {
         case "po":
             if phase == "start" { return "嘟嘟糊！午餐時間！🔔" }
@@ -1306,6 +1310,7 @@ extension Pet {
         if state == "sleep" { DrawAt(g, Pet.PLATE, 12, 13, bx, by, ps, fx, false, true); return }
         if !HoldingFood() || state == "glass" || state == "hug" { return }
         let bite = Step2(2.5) ? 1 : 0   // 一口一口：手上的食物上下動
+        if P.Pik { DrawPikLunch(g, f, bx, by, ps, fx, bite); return }
         switch P.Id {
         case "po":
             DrawAt(g, Pet.CUSTARD, 9, Double(8 + bite + f.AccDy), bx, by, ps, fx, false, true)
@@ -1334,6 +1339,7 @@ extension Pet {
     // 櫃子裡的公仔也拿著午餐
     func DrawLunchShelf(_ g: Graphics, _ bx: Int, _ by: Int, _ ps: Int, _ flip: Bool) {
         if !w.Lunch { return }
+        if P.Pik { return }   // 皮克敏在 DrawPikShelf 裡拿水果
         var food: [String]; var col: Double, row: Double
         switch P.Id {
         case "po": food = Pet.CUSTARD; col = 9; row = 8
@@ -1367,6 +1373,7 @@ extension Pet {
 
     // 在櫃子裡要佔幾列高（腳到最高點：天線、耳朵、帽子、滑板車墊高、晃動）
     func ShelfRows() -> Int {
+        if P.Pik { return PikShelfRows() }
         let hat = (w.SeasonNow == "xmas" || Level() >= 3) ? 4 : 0
         switch P.Id {
         case "po": return 16 + P.TopRows + 1                             // 扶著停在旁邊的滑板車

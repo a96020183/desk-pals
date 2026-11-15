@@ -30,6 +30,20 @@ jobs:
           cat "$HOME/Library/Logs/desk-pals.log" || true
           if kill -0 $PID 2>/dev/null; then echo "did not quit"; kill $PID; exit 1; fi
           test -f shot.png || { echo "no snapshot"; exit 1; }
+      - name: Smoke run, pikmin lineup (personal; screenshots only in the artifact)
+        run: |
+          export DESKPALS_OFFSCREEN=1 DESKPALS_ISOLATED=1
+          export DESKPALS_DATA_DIR="$RUNNER_TEMP/dp-data-pik"
+          SOCK="$RUNNER_TEMP/dp-pik.sock"
+          extension/desktop/DeskPals "$SOCK" pkred pikmin > run-pikmin.log 2>&1 &
+          PID=$!
+          sleep 8
+          kill -0 $PID || { echo "died at startup"; cat run-pikmin.log; exit 1; }
+          SMOKE_ENDPOINT="$SOCK" SMOKE_PIKMIN=1 node .github/smoke.js
+          sleep 3
+          tail -n 80 "$HOME/Library/Logs/desk-pals.log" || true
+          if kill -0 $PID 2>/dev/null; then echo "did not quit"; kill $PID; exit 1; fi
+          test -f shot-pikmin.png || { echo "no snapshot"; exit 1; }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -37,6 +51,7 @@ jobs:
           path: |
             extension/desktop/build.log
             run.log
+            run-pikmin.log
             shot*.png
 
   windows:

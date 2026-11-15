@@ -550,6 +550,7 @@ namespace DeskPals
             string[] blank = { "............" };
             foreach (string k in new string[] { "HEAD", "BODY", "ARMS_UP", "ARMS_HUG", "LEGS_A", "LEGS_B", "LEGS_SIT", "SLEEPY", "HAPPY", "DIZZY" }) p.Art[k] = blank;
             p.CuLines(m.Persona, p.Name);
+            p.CuStudyLines(m.Persona, p.Name);
             p.Shared();
             return p;
         }
@@ -1498,6 +1499,15 @@ namespace DeskPals
             if (night && p.Lines.TryGetValue("x_" + kind + "_d", out a) && a.Length > 0) return a[new Random().Next(a.Length)];
             if (p.Lines.TryGetValue("x_" + kind, out a) && a.Length > 0) return a[new Random().Next(a.Length)];
             return null;
+        }
+
+        // 讀書小幫手：自己做的公仔用自己個性的句子（DeskPals.Study.cs 的 ExamPrefix／ExamTail／LateNightLine／CourseLine 會先問這裡）
+        static string CuStudy(string id, string key, string hm, string t, string h)
+        {
+            Pal p = Pal.Get(id);
+            string[] a;
+            if (p == null || !p.Cu || !p.Lines.TryGetValue(key, out a) || a.Length == 0) return null;
+            return a[new Random().Next(a.Length)].Replace("{hm}", hm ?? "").Replace("{t}", t ?? "").Replace("{h}", h ?? "");
         }
 
         static string CuTicket(string id, int stage, string n, string h)

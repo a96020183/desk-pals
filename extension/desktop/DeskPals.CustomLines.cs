@@ -615,4 +615,33 @@ namespace DeskPals
             Say("x_loaf", "（趴下，下巴放地上）"); Say("x_wag", "（尾巴搖到屁股都在動）", "汪汪！好開心！"); Say("x_fetch_back", "汪！撿回來了！再丟一次！", "（叼著球跑回來）給你！"); Say("x_return", "你回來了！！汪汪汪！（跳跳跳）");
         }
     }
+
+    // 讀書小幫手（DeskPals.Study.cs）：上課／考試／行程／作業的開場白、考試的一句、熬夜提醒（{hm}＝幾點）、搶課倒數（{t} 課名、{h} 幾小時）
+    partial class Pal
+    {
+        void CuStudyLines(string persona, string me)
+        {
+            switch (persona)
+            {
+                case "cool":
+                    Say("x_class", "🎒 要上課了："); Say("x_class-now", "🎒 上課了，走。"); Say("x_exam-soon", "📚 要考試了，穩住："); Say("x_exam-now", "📚 考試開始。你可以："); Say("x_event", "等等有事："); Say("x_event-now", "開始了："); Say("x_deadline", "📝 作業："); Say("x_deadline-hot", "📝 快截止了，別拖："); Say("x_deadline-hot_d", "📝 快截止了…交完就睡："); Say("x_exam_prefix", "嗯，"); Say("x_exam_tail", "讀一點，就很酷。"); Say("x_late0", "{hm}。很晚了，該睡了 🌙"); Say("x_late1", "{hm}。熬夜不酷，睡覺才酷。"); Say("x_late2", "{hm}。去睡。真的。😴"); Say("x_course0", "🎓 {t} 還有 {h}開放選課，先登入、志願排好"); Say("x_course1", "🎓 {t} 再 30 分鐘，課號抄好"); Say("x_course2", "🎓 {t} 剩 10 分鐘，穩住"); Say("x_course3", "🎓 準備。手放加選鍵上。"); Say("x_course4", "🎓 開放了。加選！");
+                    break;
+                case "shy":
+                    Say("x_class", "🎒 那個…要上課了："); Say("x_class-now", "🎒 （小聲）上課時間到了…"); Say("x_exam-soon", "📚 那個…快考試了："); Say("x_exam-now", "📚 考試開始了…加油："); Say("x_event", "那個…等一下有事："); Say("x_event-now", "（小聲）開始了："); Say("x_deadline", "📝 那個…作業："); Say("x_deadline-hot", "📝 快、快截止了："); Say("x_deadline-hot_d", "📝 快截止了…寫完就睡喔："); Say("x_exam_prefix", "那個…"); Say("x_exam_tail", "我（小聲）陪你讀…"); Say("x_late0", "那個…已經 {hm} 了…要不要去睡？🌙"); Say("x_late1", "（小聲）{hm} 了…明天會很累的…"); Say("x_late2", "{hm} 了！拜、拜託去睡…😴"); Say("x_course0", "🎓 那個…{t} 還有 {h}開放選課，先登入喔"); Say("x_course1", "🎓 {t} 再 30 分鐘…課號抄好了嗎？"); Say("x_course2", "🎓 {t} 剩 10 分鐘…好緊張"); Say("x_course3", "🎓 準、準備…"); Say("x_course4", "🎓 開放了！快加選！（小聲）");
+                    break;
+                case "funny":
+                    Say("x_class", "🎒 上課時間（不是下課，很遺憾）："); Say("x_class-now", "🎒 上課了！睡覺請小聲："); Say("x_exam-soon", "📚 考試要來了，書在哪？"); Say("x_exam-now", "📚 考試開始！猜 C 不保證對："); Say("x_event", "等一下有事，不是我編的："); Say("x_event-now", "開演了："); Say("x_deadline", "📝 作業在敲門："); Say("x_deadline-hot", "📝 死線在跑百米："); Say("x_deadline-hot_d", "📝 死線熬夜中，你別陪它："); Say("x_exam_prefix", "冷知識："); Say("x_exam_tail", "讀一頁，等於少擔心一頁。"); Say("x_late0", "{hm} 了！現在睡還算早睡（騙你的）🌙"); Say("x_late1", "{hm} 了，你的黑眼圈要升級成熊貓了"); Say("x_late2", "{hm}！再不睡太陽要來跟你打招呼了 😴"); Say("x_course0", "🎓 {t} 還有 {h}開放選課！先登入，手指熱身"); Say("x_course1", "🎓 {t} 再 30 分鐘，課號背起來"); Say("x_course2", "🎓 {t} 剩 10 分鐘！手速決勝負"); Say("x_course3", "🎓 預備——別先按！"); Say("x_course4", "🎓 開放了！！手速全開！");
+                    break;
+                case "cat":
+                    Say("x_class", "🎒 喵。要上課了："); Say("x_class-now", "🎒 上課了。我在這裡睡，你去："); Say("x_exam-soon", "📚 要考試了。本喵罩你："); Say("x_exam-now", "📚 考試開始。喵："); Say("x_event", "等一下有事。記一下："); Say("x_event-now", "開始了，喵："); Say("x_deadline", "📝 作業。別讓我提醒第二次："); Say("x_deadline-hot", "📝 快截止了。喵！"); Say("x_deadline-hot_d", "📝 快截止了…寫完陪我睡："); Say("x_exam_prefix", "喵，"); Say("x_exam_tail", "我趴在課本上陪你（不准移開我）。"); Say("x_late0", "{hm} 了。本喵都睡第三輪了 🌙"); Say("x_late1", "{hm}。被窩比螢幕暖，喵。"); Say("x_late2", "{hm}！我要坐在鍵盤上了 😴"); Say("x_course0", "🎓 {t} 還有 {h}開放選課。先登入，喵"); Say("x_course1", "🎓 {t} 再 30 分鐘。課號抄好"); Say("x_course2", "🎓 {t} 剩 10 分鐘。尾巴豎起來了"); Say("x_course3", "🎓 準備……（壓低身體）"); Say("x_course4", "🎓 開放了！撲！");
+                    break;
+                case "dog":
+                    Say("x_class", "🎒 汪！要上課囉："); Say("x_class-now", "🎒 上課了！汪汪，快去："); Say("x_exam-soon", "📚 要考試了！我幫你加油汪："); Say("x_exam-now", "📚 考試開始！你最棒了汪："); Say("x_event", "汪！等一下有事："); Say("x_event-now", "開始了！汪："); Say("x_deadline", "📝 汪！作業："); Say("x_deadline-hot", "📝 汪汪！快截止了："); Say("x_deadline-hot_d", "📝 快截止了…寫完我們去睡汪："); Say("x_exam_prefix", "汪！"); Say("x_exam_tail", "我坐在旁邊陪你讀，乖乖的！"); Say("x_late0", "{hm} 了汪…我趴著等你去睡 🌙"); Say("x_late1", "{hm} 了！散步明天再說，先睡覺汪"); Say("x_late2", "{hm}！！汪汪汪！去睡覺！😴"); Say("x_course0", "🎓 {t} 還有 {h}開放選課！先登入汪"); Say("x_course1", "🎓 {t} 再 30 分鐘！課號叼好了嗎"); Say("x_course2", "🎓 {t} 剩 10 分鐘！尾巴搖好快"); Say("x_course3", "🎓 坐下…等…"); Say("x_course4", "🎓 開放了！衝啊汪！");
+                    break;
+                default:
+                    Say("x_class", "🎒 要上課囉！" + me + "提醒你："); Say("x_class-now", "🎒 上課時間！衝！"); Say("x_exam-soon", "📚 要考試了，" + me + "幫你加油："); Say("x_exam-now", "📚 考試開始！你可以的："); Say("x_event", "等一下有事喔："); Say("x_event-now", "時間到囉："); Say("x_deadline", "📝 作業提醒："); Say("x_deadline-hot", "📝 快截止了！衝刺："); Say("x_deadline-hot_d", "📝 快截止了…寫完就睡喔："); Say("x_exam_prefix", "嘿！"); Say("x_exam_tail", "" + me + "陪你讀！"); Say("x_late0", "已經 {hm} 了！今天先到這裡好不好？🌙"); Say("x_late1", "{hm} 了，明天還要元氣滿滿，去睡吧"); Say("x_late2", "{hm}！真的該睡了 😴"); Say("x_course0", "🎓 {t} 還有 {h}開放選課！先登入、志願排好"); Say("x_course1", "🎓 {t} 再 30 分鐘！選課頁先開好"); Say("x_course2", "🎓 {t} 剩 10 分鐘！好緊張"); Say("x_course3", "🎓 準備！手指放好！"); Say("x_course4", "🎓 開放了！！快加選！");
+                    break;
+            }
+        }
+    }
 }

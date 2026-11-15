@@ -93,7 +93,7 @@ extension Pet {
     func Grounded() -> Bool {
         switch state {
         case "walk", "idle", "sleep", "hug", "seek", "dizzy", "fetch", "dance", "kick", "wave", "pose", "bat", "catch", "header", "capetrip", "elvis", "chomp", "think", "hide", "nudge", "spin", "goto",
-             "plop", "twirl", "hattoss", "juggle", "bagdig":
+             "plop", "twirl", "hattoss", "juggle", "bagdig", "pik":
             return true
         default:
             return false
@@ -240,6 +240,7 @@ extension Pet {
     // 連點三下：每個角色不一樣
     func PatCombo() {
         AddHeart()
+        if P.Pik { PikCombo(); return }
         switch P.Id {
         case "po":   // 咯咯笑＋原地轉一圈「再來一次！」
             Say(L("tickle"), 1.8)
@@ -492,7 +493,7 @@ extension Pet {
             else if dizzyOnLand { dizzyOnLand = false; SetState("dizzy", 1.6) }
             else if fetching && w.BallOn { SetState("fetch", 15) }
             else if afterLand != "" { LandAction() }
-            else if InScene && w.TubbyLineup { SetState("idle", 30) }   // 天線寶寶串場：跳一下落地就站好，不要走掉
+            else if InScene && (w.TubbyLineup || w.PikLineup) { SetState("idle", 30) }   // 天線寶寶串場：跳一下落地就站好，不要走掉
             else { SetState("walk", R(2, 5)) }
         }
     }
@@ -627,6 +628,8 @@ extension Pet {
     }
 
     func Throw(_ tvx: Double, _ tvy: Double) {
+        var tvx = tvx, tvy = tvy
+        if P.Pik { PikThrown(&tvx, &tvy) }
         let zone = w.ShelfZone(SW, SH)
         let cx = Cx, cy: Double = y + Double(SH) / 2.0, speed: Double = Math.Abs(tvx) + Math.Abs(tvy)
         nearMiss = false
@@ -697,6 +700,7 @@ extension Pet {
         case "tinky": line = "進球！🏀 丁丁回家家～"
         case "dipsy": line = "進球。🏀 帽子還在，酷。"
         case "laalaa": line = "進球！🏀 啦啦啦～"
+        case "pkred", "pkyellow", "pkblue": line = PikLine("goal")
         default: line = "進球！🏀 Thwip!"
         }
         Say(line, 2.4)
@@ -715,6 +719,7 @@ extension Pet {
         case "tinky": line = "好棒棒！大抱抱！"
         case "dipsy": line = "酷！"
         case "laalaa": line = "啦啦～進了！"
+        case "pkred", "pkyellow", "pkblue": line = PikLine("cheer")
         default: line = "好球！"
         }
         Say(line, 1.4)
@@ -730,6 +735,7 @@ extension Pet {
         case "tinky": return "哎喲，差一點點…"
         case "dipsy": return "沒進…但帽子很帥"
         case "laalaa": return "差一點！再來一次！"
+        case "pkred", "pkyellow", "pkblue": return PikLine("miss")
         default: break
         }
         return "差一點！再一次？"
@@ -796,6 +802,7 @@ extension Pet {
         if Is("hangyodon") { StartSwim(tx, Double(wa.Bottom), false); return }
         BallisticTo(tx, Double(wa.Bottom))
         if Is("stitch") { rolling = true }
+        if P.Pik { afterLand = "pksprout" }                                     // 皮克敏：落地先種在土裡，再「噗！」拔出來
         if Is("tinky") && rnd.NextDouble() < 0.3 { afterLand = "plop" }          // 丁丁跳出來常常跌坐
         else if Is("laalaa") && rnd.NextDouble() < 0.4 { afterLand = "twirl" }   // 拉拉落地轉一圈
         else if Is("dipsy") && rnd.NextDouble() < 0.4 { afterLand = "hattip" }   // 迪西落地扶帽子
@@ -851,6 +858,7 @@ extension Pet {
         fetching = false
         if ballXp < 20 { ballXp += 2; AddXp(2) }
         Burst(6)
+        if P.Pik { PikBall(); return true }
         switch P.Id {
         case "po": PoBall(); return true
         case "stitch": StitchBall(); return true
@@ -896,6 +904,7 @@ extension Pet {
             else if Is("tinky") && Grounded() { Plop(nil) }
             else if Is("dipsy") && Grounded() { poseKind = "hatdown"; SetState("pose", 2.6) }
             else if Is("laalaa") && hideFrom != nil && Grounded() { HideBehindPet(hideFrom!) }
+            else if P.Pik && Grounded() { PikReact("errors") }
             else if state == "walk" { SetState("idle", 3) }
             Say(line, 3, true)
         }
