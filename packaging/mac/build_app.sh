@@ -7,7 +7,7 @@
 # 有 Developer ID 之後（之後再開，不用改這支）：
 #   MAC_SIGN_IDENTITY="Developer ID Application: 你的名字 (TEAMID)"   → 用 hardened runtime 簽 .app 和 DMG
 #   再加 APPLE_ID、APPLE_TEAM_ID、APPLE_APP_PASSWORD（App 專用密碼）     → 送 Apple 公證（notarize）＋ staple
-# 其他：MAC_BUNDLE_ID（預設 io.github.a96020183.deskpals）、MAC_MIN_MACOS（預設 11.0）
+# 其他：MAC_BUNDLE_ID（預設 io.github.a96020183.deskpals）、MAC_MIN_MACOS（預設 13.0：程式用到 macOS 13 的 API）
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
@@ -16,7 +16,7 @@ BUILD="$ROOT/build/mac"
 PY="${PYTHON:-python3}"
 VERSION="$("$PY" -c 'import json,sys; print(json.load(open("extension/package.json", encoding="utf-8"))["version"])')"
 BUNDLE_ID="${MAC_BUNDLE_ID:-io.github.a96020183.deskpals}"
-MIN_MACOS="${MAC_MIN_MACOS:-11.0}"
+MIN_MACOS="${MAC_MIN_MACOS:-13.0}"
 APP_NAME="Desk Pals"
 APP="$BUILD/$APP_NAME.app"
 DMG="$OUT/DeskPals-$VERSION.dmg"

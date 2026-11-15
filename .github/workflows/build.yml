@@ -286,7 +286,7 @@ jobs:
           | 檔案 | 給誰 |
           |---|---|
           | \`DeskPals-Setup-$VER.exe\` | Windows 10／11（不用 VS Code）。還沒簽章：SmartScreen 擋下來時按「其他資訊」→「仍要執行」 |
-          | \`DeskPals-$VER.dmg\` | macOS 11 以後（Apple 晶片、Intel 都可以）。還沒公證：第一次打開請看 DMG 裡的說明 |
+          | \`DeskPals-$VER.dmg\` | macOS 13（Ventura）以後（Apple 晶片、Intel 都可以）。還沒公證：第一次打開請看 DMG 裡的說明 |
           | \`desk-pals-$VER.vsix\` | VS Code 擴充套件（含 VS Code 才有的功能） |
           | \`DeskPals-$VER.msix\` | 給 Microsoft Store 上架用（未簽章，不能直接安裝） |
 

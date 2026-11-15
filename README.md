@@ -103,7 +103,7 @@
 | | Windows 安裝程式 | Mac App（DMG） | VS Code 擴充套件 |
 |---|---|---|---|
 | 檔案 | `DeskPals-Setup-<版號>.exe` | `DeskPals-<版號>.dmg` | `desk-pals-<版號>.vsix` |
-| 要先有 | Windows 10／11（不用 VS Code） | macOS 11 以後，Apple 晶片、Intel 都可以（不用 VS Code、不用 Xcode） | VS Code（Mac 還要 Xcode Command Line Tools） |
+| 要先有 | Windows 10／11（不用 VS Code） | macOS 13（Ventura）以後，Apple 晶片、Intel 都可以（不用 VS Code、不用 Xcode） | VS Code（Mac 還要 Xcode Command Line Tools） |
 | 桌面公仔櫃、各櫃公仔、串門子、午餐、下班時間 | ✓ | ✓ | ✓ |
 | 做自己的公仔、分享短片、`.deskpal` 匯出匯入 | ✓ | 移植中 | Windows ✓／Mac 移植中 |
 | 讀書小幫手（學校行事曆、作業、考試、熬夜、搶課） | ✓ | 移植中 | Windows ✓／Mac 移植中 |
