@@ -49,6 +49,22 @@
 				"title": "公仔櫃：搶票提醒 🎫"
 			},
 			{
+				"command": "deskPals.course",
+				"title": "公仔櫃：搶課提醒 🎓（選課系統開放時叫你）"
+			},
+			{
+				"command": "deskPals.exam",
+				"title": "公仔櫃：考試倒數 📚"
+			},
+			{
+				"command": "deskPals.deadlines",
+				"title": "公仔櫃：這週要交的 📝（作業死線、考試）"
+			},
+			{
+				"command": "deskPals.schoolSetup",
+				"title": "公仔櫃：加入學校行事曆（Canvas／NTU COOL／Moodle／Google Classroom）"
+			},
+			{
 				"command": "deskPals.all",
 				"title": "公仔櫃：全部放出來（會串門子）"
 			},
@@ -203,6 +219,36 @@
 					"type": "number",
 					"default": 5,
 					"description": "開會前幾分鐘提醒"
+				},
+				"deskPals.schoolIcsUrl": {
+					"type": "array",
+					"items": {
+						"type": "string"
+					},
+					"default": [],
+					"markdownDescription": "學校行事曆的 ICS 網址（可以放好幾個）。填了就會：上課前提醒、上課中自動安靜；作業截止前 3 天、1 天、3 小時、1 小時提醒，右鍵「小幫手 → 這週要交的」看清單。\n\n- **Canvas／NTU COOL**：行事曆 → 右邊欄最下面「Calendar Feed（行事曆摘要）」\n- **Moodle**：行事曆 → 匯入或匯出行事曆 → 匯出行事曆 → 選「所有事件」→ 取得行事曆網址\n- **Google Classroom**：課程「課業」頁 →「Google 日曆」→ 該課程日曆的「設定和共用」→「iCal 格式的私密網址」\n- **自己的 Google 日曆**（排好的課表）：設定 → 你的日曆 →「iCal 格式的私密網址」\n\n提醒都由桌面版做（沒開 VS Code 也會提醒）。不用 VS Code 的話，在桌面公仔小屋 →「讀書小幫手設定」填；這裡填了就以這裡為準。也可以用指令「公仔櫃：加入學校行事曆」。"
+				},
+				"deskPals.classRemindMinutes": {
+					"type": "number",
+					"default": 10,
+					"description": "上課、考試前幾分鐘提醒（要先填學校行事曆）"
+				},
+				"deskPals.classAutoQuiet": {
+					"type": "boolean",
+					"default": true,
+					"description": "上課、考試時自動安靜到下課（要先填學校行事曆）"
+				},
+				"deskPals.examNudgeTime": {
+					"type": "string",
+					"default": "20:00",
+					"pattern": "^(\\d{1,2}:\\d{2})?$",
+					"description": "考試倒數每天幾點提醒（HH:MM）：考前兩週每天一次，前一天晚上這個時間提醒早點睡，當天早上再加油一次。用指令「公仔櫃：考試倒數」或右鍵小幫手加考試。"
+				},
+				"deskPals.lateNightStart": {
+					"type": "string",
+					"default": "01:00",
+					"pattern": "^(\\d{1,2}:\\d{2})?$",
+					"description": "熬夜提醒：過了這個時間還在用電腦，公仔會溫柔催你去睡（之後每一小時再講一次，最多三次；你離開電腦就不再吵，06:00 結束）。清空＝不要熬夜提醒。安靜、專注、分享螢幕時不會講。沒設的話用桌面公仔小屋「讀書小幫手設定」裡的。"
 				},
 				"deskPals.jira.site": {
 					"type": "string",
