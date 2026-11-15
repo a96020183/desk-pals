@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Claude Code hook → 通知桌面上的公仔（Windows：公仔櫃；macOS：Spidey）。
+// Claude Code hook → 通知桌面上的公仔櫃（Windows：named pipe；macOS：unix socket）。
 // 用法（settings.json 的 hooks）：node claude-hook.js start|done|wait|post
 //   start＝UserPromptSubmit、done＝Stop、wait＝Notification、post＝PostToolUse(Bash)：偵測 git push tag 成功 → 放煙火
 // 桌面版沒開或任何錯誤都安靜結束（exit 0），絕不擋 Claude。

@@ -8,7 +8,7 @@ from xml.sax.saxutils import escape
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 EXT = os.path.join(ROOT, "extension")
-SKIP_NAMES = {"SpideyDesktop", ".DS_Store"}  # mac 編譯產物、雜檔不打包
+SKIP_NAMES = {"SpideyDesktop", "DeskPals", ".DS_Store"}  # mac 編譯產物、雜檔不打包
 
 pkg = json.load(open(os.path.join(EXT, "package.json"), encoding="utf-8"))
 ver = pkg["version"]

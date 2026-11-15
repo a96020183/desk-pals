@@ -59,7 +59,7 @@
 一個 `.vsix` 同時支援 Windows 和 Mac，在 VS Code 安裝。
 
 - **Windows**（完整公仔櫃）：見 [Windows安裝說明.md](Windows安裝說明.md)
-- **Mac**（目前只有 Spidey）：見 [Mac安裝說明.md](Mac安裝說明.md)，不提供 Mac 支援
+- **Mac**（完整公仔櫃，兩櫃都有）：見 [Mac安裝說明.md](Mac安裝說明.md)
 
 `.vsix` 從 [Actions](../../actions) 最新一次成功的建置下載（Artifacts 裡的 `desk-pals-vsix`），或自己打包：
 
@@ -75,8 +75,9 @@ python build_vsix.py
 | `extension/practical.js` | 實用功能的資料來源：終端機、CI、行事曆、Jira、GitLab、天氣、工作日誌、提醒 |
 | `extension/media/pet.html` | 側邊欄裡的公仔 |
 | `extension/desktop/DeskPals.cs` | Windows 桌面版：公仔櫃、兩櫃公仔（經典／天線寶寶）、通知（由 `desk-pals.ps1` 用 PowerShell 編譯執行） |
-| `extension/desktop/SpideyDesktop.swift` | Mac 桌面版（只有 Spidey，由 `spidey-desktop.sh` 編譯執行） |
+| `extension/desktop/DeskPals.swift` | Mac 桌面版（DeskPals.cs 的 Swift 移植，由 `desk-pals.sh` 編譯執行；由 `mac/src/*.swift` 經 `python3 mac/assemble.py` 產生，別直接改） |
+| `mac/` | Mac 版原始碼與移植規範（`PORTING.md`） |
 | `extension/desktop/claude-hook.js`、`ci-watch.js` | Claude Code hooks、推 tag 後盯 CI |
 | `build_vsix.py` | 打包成 `.vsix` |
 
-每次推送都會在雲端的 Windows 和 Mac 上各編譯、試跑一次（Windows 用不顯示畫面的離屏模式）。
+每次推送都會在雲端的 Windows 和 Mac 上各編譯、試跑一次（都用不顯示畫面的離屏模式）。
