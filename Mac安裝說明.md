@@ -4,6 +4,8 @@
 
 > Mac 版是 Windows 版（`DeskPals.cs`）的 Swift 移植。用起來怪怪的話，先看最下面的自查方法。
 
+> 這份是 **VS Code 擴充套件**的裝法。不用 VS Code（也不用 Xcode）的話，直接用 `DeskPals-<版號>.dmg`：把 Desk Pals 拖進「應用程式」，第一次打開照 DMG 裡的說明按「仍要打開」，見 [README 的安裝](README.md#安裝)。
+
 ## 需要先有
 
 - VS Code
