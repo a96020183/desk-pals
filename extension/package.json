@@ -38,7 +38,7 @@
 			},
 			{
 				"command": "deskPals.lineup",
-				"title": "公仔櫃：換一櫃（經典／天線寶寶／皮克敏）"
+				"title": "公仔櫃：換一櫃（續命小隊／經典／天線寶寶／皮克敏）"
 			},
 			{
 				"command": "deskPals.remind",
@@ -126,8 +126,12 @@
 			"properties": {
 				"deskPals.character": {
 					"type": "string",
-					"default": "spidey",
+					"default": "boba",
 					"enum": [
+						"boba",
+						"coffee",
+						"onigiri",
+						"sticky",
 						"spidey",
 						"po",
 						"stitch",
@@ -140,6 +144,10 @@
 						"pkblue"
 					],
 					"enumDescriptions": [
+						"半糖（珍奶；續命小隊）",
+						"醒醒（咖啡馬克杯；續命小隊）",
+						"糰糰（三角飯糰；續命小隊）",
+						"貼貼（便利貼；續命小隊）",
 						"Spidey（像素小蜘蛛人）",
 						"小波（騎滑板車；兩櫃都有）",
 						"史迪仔",
@@ -155,18 +163,20 @@
 				},
 				"deskPals.lineup": {
 					"type": "string",
-					"default": "classic",
+					"default": "original",
 					"enum": [
+						"original",
 						"classic",
 						"teletubbies",
 						"pikmin"
 					],
 					"enumDescriptions": [
+						"續命小隊（原創）：半糖、醒醒、糰糰、貼貼（大格是半糖）",
 						"經典一櫃：Spidey、小波、史迪仔、人魚漢頓",
 						"天線寶寶一櫃：丁丁、迪西、拉拉、小波（大格是小波）",
 						"皮克敏一櫃：紅、黃、藍皮克敏（大格是休息花：用電腦太久花會枯，休息回來才開）"
 					],
-					"description": "公仔櫃裡放哪一櫃公仔（Windows）。改了會當場換；也可以用指令「公仔櫃：換一櫃」"
+					"description": "公仔櫃裡放哪一櫃公仔（Windows）。改了會當場換；也可以用指令「公仔櫃：換一櫃」。沒設定過的話照桌面版上次的那一櫃（全新安裝是續命小隊）"
 				},
 				"deskPals.desktop": {
 					"type": "boolean",

@@ -1,5 +1,5 @@
 // 公仔櫃 Desk Pals：右下角一個公仔櫃，選一隻出來在整個螢幕陪你
-// 兩櫃：經典（Spidey／小波／史迪仔／人魚漢頓）、天線寶寶（丁丁／迪西／拉拉／小波，大格是小波）
+// 幾櫃：續命小隊（原創：半糖／醒醒／糰糰／貼貼，新安裝的預設）、經典、天線寶寶、皮克敏
 // Windows：多角色桌面版（DeskPals.cs）；macOS：同一套的 Swift 移植（DeskPals.swift）
 const vscode = require("vscode");
 const fs = require("fs");
@@ -20,13 +20,21 @@ const CHARS = {
 	pkred: { emoji: "🔥", name: "紅皮克敏", lineup: "pikmin" },
 	pkyellow: { emoji: "⚡", name: "黃皮克敏", lineup: "pikmin" },
 	pkblue: { emoji: "💧", name: "藍皮克敏", lineup: "pikmin" },
+	boba: { emoji: "🥤", name: "半糖", lineup: "original" },
+	coffee: { emoji: "☕", name: "醒醒", lineup: "original" },
+	onigiri: { emoji: "🍙", name: "糰糰", lineup: "original" },
+	sticky: { emoji: "📝", name: "貼貼", lineup: "original" },
 };
 const LINEUPS = {
+	original: { name: "續命小隊", desc: "半糖、醒醒、糰糰、貼貼（原創角色，大格是半糖）", ids: ["boba", "coffee", "onigiri", "sticky"] },
 	classic: { name: "經典一櫃", desc: "Spidey、小波、史迪仔、人魚漢頓", ids: ["spidey", "po", "stitch", "hangyodon"] },
 	teletubbies: { name: "天線寶寶一櫃", desc: "丁丁、迪西、拉拉、小波（大格是小波）", ids: ["tinky", "dipsy", "laalaa", "po"] },
 	pikmin: { name: "皮克敏一櫃", desc: "紅、黃、藍皮克敏（大格是休息花）", ids: ["pkred", "pkyellow", "pkblue"] },
 };
-const lineupSetting = () => { const v = vscode.workspace.getConfiguration("deskPals").get("lineup", "classic"); return LINEUPS[v] ? v : "classic"; };
+const lineupSetting = () => { const v = vscode.workspace.getConfiguration("deskPals").get("lineup", "original"); return LINEUPS[v] ? v : "classic"; };
+// 使用者真的設過「哪一櫃」嗎？沒設過＝讓桌面版自己決定（照它上次的；全新安裝才是續命小隊），舊使用者不會因為預設值改了被換櫃
+const lineupExplicit = () => { const i = vscode.workspace.getConfiguration("deskPals").inspect("lineup"); return !!i && (i.globalValue !== undefined || i.workspaceValue !== undefined || i.workspaceFolderValue !== undefined); };
+const lineupDefaultPet = (lu) => (lu === "teletubbies" ? "po" : (lu === "pikmin" ? "pkred" : (lu === "original" ? "boba" : "spidey")));
 const inLineup = (id, lu) => !!CHARS[id] && (CHARS[id].lineup === "both" || CHARS[id].lineup === lu);
 let current = "spidey";
 let flowerPct = null;   // 皮克敏一櫃：休息花（0 開好開滿 → 100 枯了）
@@ -208,6 +216,7 @@ function activate(context) {
 			if (e.affectsConfiguration("deskPals.restMinutes") || e.affectsConfiguration("deskPals.idleMinutes") || e.affectsConfiguration("deskPals.birthday") || e.affectsConfiguration("deskPals.companyHost")) desktop.sendConfig();
 			// 換一櫃（設定頁直接改也算）：桌面版當場換，不用重開
 			if (e.affectsConfiguration("deskPals.lineup")) {
+				if (!lineupExplicit()) return;   // 只是預設值變了（例如更新擴充套件）：不要動桌面版現在的櫃子
 				const lu = lineupSetting();
 				if (desktop.skipLineup === lu) { desktop.skipLineup = null; return; }
 				desktop.setLineup(lu);
@@ -259,7 +268,7 @@ async function pickCharacter(context, desktop, provider, first) {
 async function pickLineup(desktop) {
 	const now = lineupSetting();
 	const items = Object.keys(LINEUPS).map((lu) => ({
-		label: `${lu === "classic" ? "🕷" : (lu === "pikmin" ? "🌸" : "☀")} ${LINEUPS[lu].name}`,
+		label: `${lu === "classic" ? "🕷" : (lu === "pikmin" ? "🌸" : (lu === "original" ? "🥤" : "☀"))} ${LINEUPS[lu].name}`,
 		description: LINEUPS[lu].desc,
 		detail: lu === now ? "現在是這一櫃" : undefined,
 		lineup: lu,
@@ -434,7 +443,7 @@ class Desktop {
 		const src = path.join(this.context.extensionPath, "desktop");
 		fs.mkdirSync(this.home, { recursive: true });
 		const files = this.win
-			? ["DeskPals.cs", "DeskPals.Pikmin.cs", "desk-pals.ps1", "claude-hook.js", "ci-watch.js"]
+			? ["DeskPals.cs", "DeskPals.Pikmin.cs", "DeskPals.Original.cs", "desk-pals.ps1", "claude-hook.js", "ci-watch.js"]
 			: ["DeskPals.swift", this.sh, "claude-hook.js", "ci-watch.js"];
 		const copy = (f, dir) => {
 			const from = path.join(src, f), to = path.join(dir, f);
@@ -507,13 +516,13 @@ class Desktop {
 				// detached 的 powershell 沒有主控台會直接結束；改由短命的 powershell 用 Start-Process 叫一支獨立的起來
 				const lu = lineupSetting();
 				const pet = vscode.workspace.getConfiguration("deskPals").get("character", "spidey");
-				const args = `-NoProfile -WindowStyle Hidden -File "${path.join(this.home, this.ps1)}" -PipeName ${this.name} -Pet ${inLineup(pet, lu) ? pet : (lu === "teletubbies" ? "po" : (lu === "pikmin" ? "pkred" : "spidey"))} -Lineup ${lu}`;
+				const args = `-NoProfile -WindowStyle Hidden -File "${path.join(this.home, this.ps1)}" -PipeName ${this.name} -Pet ${inLineup(pet, lu) ? pet : lineupDefaultPet(lu)}${lineupExplicit() ? " -Lineup " + lu : ""}`;
 				p = cp.spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList $env:SPIDEY_ARGS"],
 					{ stdio: "ignore", windowsHide: true, env: Object.assign({}, process.env, { SPIDEY_ARGS: args }) });
 			} else {
 				const lu = lineupSetting();
 				const pet = vscode.workspace.getConfiguration("deskPals").get("character", "spidey");
-				p = cp.spawn("/bin/bash", [path.join(this.home, this.sh), this.name, inLineup(pet, lu) ? pet : (lu === "teletubbies" ? "po" : "spidey"), lu], { detached: true, stdio: "ignore" });
+				p = cp.spawn("/bin/bash", [path.join(this.home, this.sh), this.name, inLineup(pet, lu) ? pet : lineupDefaultPet(lu), lineupExplicit() ? lu : ""], { detached: true, stdio: "ignore" });
 			}
 			p.on("error", () => {});
 			p.unref();
