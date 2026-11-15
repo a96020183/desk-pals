@@ -152,6 +152,19 @@ are spread across files, so:
 - No `TODO`s that drop behaviour. Where mac truly can't do something, implement the closest equivalent and leave a `// mac:` comment.
 - Your part has no errors of its own when assembled and compiled (errors referencing names owned by other parts are fine while they're in progress).
 
+## 續命小隊（original lineup）— not ported yet
+
+`extension/desktop/DeskPals.Original.cs` (Windows, added after the Pikmin lineup) holds the original lineup
+「續命小隊」: 半糖 boba / 醒醒 coffee / 糰糰 onigiri / 貼貼 sticky — `Pal` data (art is generated from the design
+source `final_art.py` into the `像素圖` block; every pal has HEAD / HEAD_UP / BODY / BODY_UP / BODY_HUG / LEGS_* plus `F_<face>`
+rows that are merged into the stacked frame at `FaceRow`, keeping non-'.' pixels of the head), the `Pet` behaviour
+(state `"orig"` + `oAct`, like Pikmin's `"pik"`), a grid-paper `ShelfForm` background and the `World` scenes.
+DeskPals.cs only has one-line hooks (`P.Orig`, `OrigLineup`, `StartLineup()`); grep `Orig` to find them.
+Port it like the Pikmin partial: one new `mac/src/` file, same names. Until then the Mac build falls back to the classic
+lineup when asked for `original` (`NormLineup`), and VS Code only passes `-Lineup` when the user set it explicitly.
+Note: a fresh install (no `lineup.txt`, `out.txt`, `profile.txt`, `usage.txt`, no old SpideyDesktop folder) starts in
+`original` and writes `lineup.txt`.
+
 ## Still to port: 讀書小幫手 (`DeskPals.Study.cs`, branch study-tools)
 
 New partial file + one-line hooks in `DeskPals.cs`; the Swift port needs a new part (e.g. `mac/src/44_study.swift`) plus the same hooks in the
