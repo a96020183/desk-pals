@@ -44,6 +44,30 @@
 
 全部在你電腦上跑，不用任何付費服務，也不會把你的資料送出去（行事曆、Jira、GitLab 都只用你自己的帳號讀取）。
 
+## 陪你讀書
+
+不分學生、上班族，功能都在；有資料的才會動（沒填學校行事曆就不會有上課、作業提醒）。全部由桌面版做，**沒有 VS Code 也能用**（目前是 Windows 版；Mac 版之後補上）。
+
+| 功能 | 做什麼 | 要設定什麼 |
+|---|---|---|
+| 上課提醒 🎒 | 上課前 10 分鐘、開始時各叫一次，點公仔打開上課連結（Meet／Zoom／Teams 或行事曆上的網址）；上課、考試中自動安靜 | 學校行事曆的 ICS 網址 |
+| 作業死線 📝 | 截止前 3 天、1 天、3 小時、1 小時提醒，點公仔打開作業頁或標成「交了」；右鍵「小幫手 → 這週要交的」 | 學校行事曆的 ICS 網址 |
+| 搶課提醒 🎓 | 跟搶票一樣：選課系統開放前 1–2 小時、30 分、10 分、1 分和開放時叫你，最後 10 分鐘頭上有學士帽倒數 | 不用 |
+| 考試倒數 📚 | 考前兩週每天 20:00 倒數、前一天晚上叫你早點睡、當天早上加油；7 天內專注變成「讀書 25 分鐘」 | 不用（自己加；行事曆上寫「期中考」「小考」的也會自動加進來） |
+| 熬夜提醒 🌙 | 01:00 後還在用電腦，溫柔催你去睡（02:00、03:00 再講）；你離開電腦就不吵，安靜、專注時不講 | 不用（可以改時間或關掉） |
+| 讀書統計 | 今天的小結多了這週吃了幾顆番茄、上了幾堂課、這週還有幾份作業 | 不用 |
+
+設定：桌面公仔小屋（右鍵蛋或櫃子）→「讀書小幫手設定」；有 VS Code 的話也可以設 `deskPals.schoolIcsUrl`（可以放好幾個）、`deskPals.lateNightStart`、`deskPals.examNudgeTime`，設了就以 VS Code 為準。
+
+**學校行事曆的 ICS 網址怎麼拿**（貼 `https://` 或 `webcal://` 開頭的都可以，好幾個就一行一個）：
+
+- **Canvas／NTU COOL**：左邊「行事曆」→ 右邊欄最下面「Calendar Feed（行事曆摘要）」→ 複製網址。作業、測驗、討論區的截止都在裡面。
+- **Moodle**：「行事曆」→「匯入或匯出行事曆」→「匯出行事曆」→ 事件選「所有事件」、時間選最近和接下來 →「取得行事曆網址」→ 複製。
+- **Google Classroom**：課程的「課業」頁 →「Google 日曆」打開這門課的日曆 → 在 Google 日曆左邊找到這門課 →「設定和共用」→「iCal 格式的私密網址」。每門課一個網址。（學校帳號如果被管理員關掉私密網址，就請老師或助教把作業同步到 Canvas／Moodle。）
+- **自己排的 Google 日曆課表**：Google 日曆設定 → 你的日曆 →「iCal 格式的私密網址」。每週重複的行程會被當成「上課」。
+
+私密網址等於帳號密碼，不要貼給別人；公仔櫃只用它讀你的行事曆。
+
 ## 安裝
 
 一個 `.vsix` 同時支援 Windows 和 Mac，在 VS Code 安裝。
@@ -64,9 +88,11 @@ python build_vsix.py
 | `extension/extension.js` | VS Code 擴充：側邊欄、狀態列、啟動桌面版 |
 | `extension/practical.js` | 實用功能的資料來源：終端機、CI、行事曆、Jira、GitLab、天氣、工作日誌、提醒 |
 | `extension/media/pet.html` | 側邊欄裡的公仔 |
-| `extension/desktop/DeskPals.cs` | Windows 桌面版：公仔櫃、經典／天線寶寶一櫃、通知（由 `desk-pals.ps1` 用 PowerShell 編譯執行，連同下面兩個 partial 檔） |
+| `extension/desktop/DeskPals.cs` | Windows 桌面版：公仔櫃、各櫃公仔、通知（由 `desk-pals.ps1` 用 PowerShell 編譯執行，連同下面兩個 partial 檔） |
 | `extension/desktop/DeskPals.Original.cs` | 續命小隊（半糖、醒醒、糰糰、貼貼）：角色、動作、串場、櫃子方格紙 |
 | `extension/desktop/DeskPals.Pikmin.cs` | 皮克敏一櫃（休息花） |
+| `extension/desktop/DeskPals.Study.cs` | Windows 桌面版的讀書小幫手：抓學校行事曆（ICS）、分類上課／作業、搶課、考試倒數、熬夜提醒、讀書小幫手設定視窗 |
+| `test/` | `node --test test/study.test.js`（VS Code 這邊）；`test/desktop-study.js`（桌面版離屏測試，範例 ICS 在 `test/fixtures`） |
 | `extension/desktop/DeskPals.swift` | Mac 桌面版（DeskPals.cs 的 Swift 移植，由 `desk-pals.sh` 編譯執行；由 `mac/src/*.swift` 經 `python3 mac/assemble.py` 產生，別直接改） |
 | `mac/` | Mac 版原始碼與移植規範（`PORTING.md`） |
 | `extension/desktop/claude-hook.js`、`ci-watch.js` | Claude Code hooks、推 tag 後盯 CI |

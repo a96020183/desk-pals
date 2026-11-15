@@ -163,7 +163,7 @@ extension World {
     // 設定視窗用：這一櫃的櫃子縮圖（預覽用的 World 才叫這個，不開視窗）
     func SetupShelfPic() -> Bitmap {
         shelf = ShelfForm(self, S)
-        shelf.Tubby = TubbyLineup
+        shelf.Tubby = TubbyLineup; shelf.Pik = PikLineup
         shelf.Night = false
         shelf.Place(Rectangle(0, 0, 2000, 2000))
         let b = shelf.Snapshot(CellPets(), [false, false, false, false], 1.0)
@@ -715,6 +715,7 @@ class SetupForm: Form {
     static func Members(_ id: String) -> String {
         var names: [String] = []
         for x in Pal.LineupIds(id) { names.append(Pal.Get(x).Name) }
+        if Pal.NormLineup(id) == Pal.Pikmin { names.append("休息花") }
         return names.joined(separator: "・")
     }
     func CanNext() -> Bool { return step == 0 ? prof != "" : (step == 1 || mode == "shelf" || InLineup(pet)) }
@@ -747,7 +748,7 @@ class SetupForm: Form {
         else {
             EnsurePics(lu)
             let cw = Sc(230), ch = Sc(116), gap = Sc(24), x0 = (W0 - 2 * cw - gap) / 2
-            Add("mode:shelf", "整櫃（四隻）", "四隻住在公仔櫃裡", Rectangle(x0, top, cw, ch), 0, mode == "shelf")
+            Add("mode:shelf", lu == Pal.Pikmin ? "整櫃（三隻）" : "整櫃（四隻）", lu == Pal.Pikmin ? "三隻＋一朵休息花" : "四隻住在公仔櫃裡", Rectangle(x0, top, cw, ch), 0, mode == "shelf")
             Add("mode:single", "只要一隻", "沒有櫃子，他住在蛋裡", Rectangle(x0 + cw + gap, top, cw, ch), 0, mode == "single")
             if mode == "single" {
                 let ids = Pal.LineupIds(lu)

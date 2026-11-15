@@ -401,6 +401,7 @@ enum W {
 
     // 系統閒置秒數（整台電腦最後一次鍵盤／滑鼠）
     static func IdleSeconds() -> Double {
+        if App.Isolated { return World.TestIdle }   // 測試：不看真的鍵盤滑鼠（act idle <秒>）
         let anyInput = CGEventType(rawValue: ~0)!
         return CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: anyInput)
     }

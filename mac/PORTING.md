@@ -25,6 +25,7 @@ mac/
     42_world_c.swift    C# 8108–9616  (notices, reminders, system stats, downloads, tickets, misc)
     43_ui.swift         C# last section, from "公仔小屋（蛋的右鍵）" to the end (World: features/小屋 menu/只要一隻/設定;
                         Pet.IconPic; Pix pixel helpers; PixelMenu; SetupForm)
+    50_pikmin.swift     DeskPals.Pikmin.cs（皮克敏一櫃：Pal／Pet／ShelfForm／World partials；DeskPals.cs 裡的一行 hook 對應到各檔的一行 hook）
 ```
 (Line numbers above are from the first port and drift as the C# grows — find your range by the section comments.)
 
@@ -163,3 +164,32 @@ Port it like the Pikmin partial: one new `mac/src/` file, same names. Until then
 lineup when asked for `original` (`NormLineup`), and VS Code only passes `-Lineup` when the user set it explicitly.
 Note: a fresh install (no `lineup.txt`, `out.txt`, `profile.txt`, `usage.txt`, no old SpideyDesktop folder) starts in
 `original` and writes `lineup.txt`.
+
+## Still to port: 讀書小幫手 (`DeskPals.Study.cs`, branch study-tools)
+
+New partial file + one-line hooks in `DeskPals.cs`; the Swift port needs a new part (e.g. `mac/src/44_study.swift`) plus the same hooks in the
+existing parts. The desktop app owns everything (works without VS Code); VS Code only pushes settings it has set (`study-vs`, `study-set …`).
+
+- **Types**: `IcsTime`, `IcsEvent`, `IcsOcc`, static `Ics` (Parse / ParseTime / WallToUtc / Occurrences / MeetLink), `SchoolFeed`, `SchoolTimed`,
+  `SchoolDue`, `SchoolExam`, `SchoolScan`, `SchoolPlanItem`, static `School` (KindOf / Feed / Classify / Scan / Plan),
+  World members (`exams`, `deadlines`, `plan`, settings fields, `StudyTick`, `StudyMsg`, `AddStudyMenus`, `ExamNear`, `StudyPriority`,
+  `StudyFlavor`, `MeetingLike`, `StudyClicked`, `WeekTomatoNote`, `StudyWrapParts`, `CourseLine`, `BadgeIsCourse`, `ShowStudySettings`, `StudySnap`),
+  `Pet.DrawCapIcon`, `ExamForm`, `StudySettingsForm` (pixel style like `SetupForm`, with real text fields).
+- **Hooks in DeskPals.cs to mirror**: TickInner → `StudyTick()`; OnMsg `default:` → `StudyMsg`; AddHelpers → focus label via `ExamNear()` +
+  `AddStudyMenus`; StartFocus/StopFocus wording; `Priority` → `StudyPriority`; `Flavor` → `StudyFlavor`; OnNotify quiet branch and Deliver use
+  `MeetingLike`; NoticeClicked → `StudyClicked`; DailyWrap → `WeekTomatoNote` + `StudyWrapParts`; HouseMenu「讀書小幫手設定…」; Snap → `StudySnap`;
+  ticket section: `Ticket.Kind` (ticket|course, 6th column in tickets.txt), `AddTicket(…, kind)`, `TicketLine` → `CourseLine`, kind-aware hint /
+  `CheckClock(url, what)` (skipped offscreen) / 「開放囉！」/ menus `AddTicketMenus(items, kind)` / `TicketForm(w, accent, kind)`; badge icon
+  `BadgeIsCourse()` → `DrawCapIcon`.
+- **Platform bits**: HTTPS GET of the ICS URLs on a background thread every 10 min (20 s timeout, 8 MB cap, cache to `school-<md5>.ics` in the data
+  dir, never on the UI thread) → `URLSession`. Time zones: C# maps IANA → Windows ids and uses fixed offsets from VTIMEZONE without DAYLIGHT;
+  on mac `TimeZone(identifier:)` takes IANA names directly (keep the VTIMEZONE fixed-offset path and the `UTC`/`Z` and floating=local rules).
+  Regexes use ECMAScript semantics (`\b`/`\w` ASCII-only, like the JS) — `NSRegularExpression` treats CJK as word chars, so `\bdue\b` next to
+  Chinese differs; port those patterns with explicit `(?<![A-Za-z0-9_])…(?![A-Za-z0-9_])` boundaries.
+  User idle → existing `W.IdleSeconds()` port. `Process.Start(url)` → `NSWorkspace.open`.
+- **Data files**: `exams.txt`, `deadlines.txt`, `study-done.txt`, `study-config.txt` (url=…, remind, autoquiet, late, lateon, nudge, workcal, vs),
+  `late.txt`, `school-*.ics`; the `classes` counter in `day-*.txt`.
+- **Pipe** (see the header comment of DeskPals.Study.cs): `course`, `exam`, `exam-del`, `study-vs`, `study-set`, `study-hello` → `study-state <json>`,
+  `study-done`; test-only (offscreen): `study-ics`, `study-clock`, `study-idle`, `study-dump`, `study-settings`.
+- **Tests**: `test/desktop-study.js <pipe>` drives an offscreen instance with `test/fixtures/*.ics` and a fake clock; it must pass unchanged on mac
+  (run it with TZ=Asia/Taipei — the fixtures are written in Taipei time).

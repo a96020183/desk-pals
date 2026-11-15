@@ -49,5 +49,5 @@ for f, lines in texts:
 missing = set(bodies) - used
 if missing:
     print("warning: no //@@BODY marker for: " + ", ".join(sorted(missing)), file=sys.stderr)
-open(OUT, "w", encoding="utf-8").write("\n".join(result) + "\n")
+open(OUT, "w", encoding="utf-8", newline="\n").write("\n".join(result) + "\n")   # LF on every OS (CI diffs against the committed file)
 print(f"wrote {os.path.relpath(OUT)} ({len(result)} lines from {len(files)} files)")
