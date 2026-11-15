@@ -17660,10 +17660,9 @@ enum Standalone {
     static var reopen: ReopenHandler? = nil
 
     static func Prepare() {
-        CommandLine.arguments = CommandLine.arguments.filter { !$0.hasPrefix("-psn_") }   // 舊版 macOS 從 Finder 打開會多帶這個
         let bundle = Bundle.main.bundlePath
         if !bundle.hasSuffix(".app") || App.Offscreen { return }
-        let a = CommandLine.arguments
+        let a = CommandLine.arguments   // （macOS 13 以後 Finder 不會再帶 -psn_ 參數）
         if a.count >= 2 && a[1].hasPrefix("--") { return }   // --preview 之類的開發用指令
         let sock = a.count >= 2 && !a[1].isEmpty ? a[1] : home + "/spidey.sock"
         let exe = Bundle.main.executablePath ?? (bundle + "/Contents/MacOS/DeskPals")
