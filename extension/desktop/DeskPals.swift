@@ -20113,16 +20113,16 @@ enum School {
                 names.append(t.Summary)
                 key += (key == "" ? "" : "+") + t.Id
             }
-            let name = names.count > 1 ? names[0] + "、" + names[1] + (names.count > 2 ? " 等 " + String(names.count) + " 個" : "") : names[0]
+            let more: String = names.count > 2 ? " 等 " + String(names.count) + " 個" : ""
+            let name: String = names.count > 1 ? names[0] + "、" + names[1] + more : names[0]
             let hhmm = DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddMilliseconds(start).ToLocalTime().ToString("HH:mm")
-            let where_ = loc != "" ? "・" + (loc.Length > 16 ? loc.Substring(0, 16) + "…" : loc) : ""
+            let locS: String = loc.Length > 16 ? loc.Substring(0, 16) + "…" : loc
+            let where_: String = loc != "" ? "・" + locS : ""
             let bs = String(before)
-            let pre: String = kind == "class" ? hhmm + " " + name + where_ + "（" + bs + " 分鐘後）"
-                : kind == "exam" ? hhmm + " " + name + where_ + "（" + bs + " 分鐘後），文具帶好，加油！"
-                : hhmm + " " + name + where_ + "（" + bs + " 分鐘後）"
-            let go: String = kind == "class" ? name + (link != "" ? "（點我打開）" : "")
-                : kind == "exam" ? name + "，加油！🍀"
-                : name + (link != "" ? "（點我打開）" : "")
+            let head: String = hhmm + " " + name + where_ + "（" + bs + " 分鐘後）"
+            let pre: String = kind == "exam" ? head + "，文具帶好，加油！" : head   // class／event 一樣
+            let openS: String = link != "" ? "（點我打開）" : ""
+            let go: String = kind == "exam" ? name + "，加油！🍀" : name + openS
             let kPre = kind == "class" ? "class" : (kind == "exam" ? "exam-soon" : "event")
             let kNow = kind == "class" ? "class-now" : (kind == "exam" ? "exam-now" : "event-now")
             let at1 = start - before * 60000
@@ -20224,8 +20224,11 @@ extension World {
     func SaveExams() {
         let sb = StringBuilder()
         for e in exams {
-            let a: String = String(e.At) + "\t" + e.Src + "\t" + e.LastDaily + "\t" + (e.DayBefore ? "1" : "0") + (e.Morning ? "1" : "0")
-            sb.Append(a + "\t" + e.Id + "\t" + World.OneLine(e.Name) + "\n")
+            let src: String = e.Src, id: String = e.Id, flags: String = (e.DayBefore ? "1" : "0") + (e.Morning ? "1" : "0")
+            var a: String = String(e.At) + "\t" + src
+            a += "\t" + e.LastDaily + "\t" + flags
+            a += "\t" + id + "\t" + World.OneLine(e.Name) + "\n"
+            sb.Append(a)
         }
         World.WriteText("exams.txt", sb.ToString())
     }
@@ -20233,8 +20236,11 @@ extension World {
     func SaveDeadlines() {
         let sb = StringBuilder()
         for d in deadlines {
-            let a: String = String(d.Due) + "\t" + String(d.Stage) + "\t" + d.Id + "\t" + (d.Url ?? "-")
-            sb.Append(a + "\t" + (d.Course == "" ? "-" : World.OneLine(d.Course)) + "\t" + World.OneLine(d.Title) + "\n")
+            let id: String = d.Id, url: String = d.Url ?? "-", course: String = d.Course == "" ? "-" : World.OneLine(d.Course)
+            var a: String = String(d.Due) + "\t" + String(d.Stage)
+            a += "\t" + id + "\t" + url
+            a += "\t" + course + "\t" + World.OneLine(d.Title) + "\n"
+            sb.Append(a)
         }
         World.WriteText("deadlines.txt", sb.ToString())
     }
@@ -20331,14 +20337,41 @@ extension World {
 
     func StudyDump() -> String {
         let sb = StringBuilder()
-        var head: String = "study now=" + SNow().ToString("yyyy-MM-ddTHH:mm") + " school=" + (haveSchool ? "1" : "0") + " urls=" + String(schoolUrls.Count) + " remind=" + String(classRemind) + " autoquiet=" + (classAutoQuiet ? "1" : "0")
-        head += " late=" + (lateOn ? World.Hm(lateStartMin) : "off") + " nudge=" + World.Hm(examNudgeMin) + " lateKey=" + lateKey + " lateLevel=" + String(lateLevel) + " asleep=" + (lateAsleep ? "1" : "0")
-        head += " quiet=" + String(quietOn ? QuietLeft() : 0) + " vs=" + string.Join(",", vsKeys.ToArray()) + "\n"
+        let nowS: String = SNow().ToString("yyyy-MM-ddTHH:mm"), lateS: String = lateOn ? World.Hm(lateStartMin) : "off"
+        var head: String = "study now=" + nowS + " school=" + (haveSchool ? "1" : "0")
+        head += " urls=" + String(schoolUrls.Count) + " remind=" + String(classRemind)
+        head += " autoquiet=" + (classAutoQuiet ? "1" : "0") + " late=" + lateS
+        head += " nudge=" + World.Hm(examNudgeMin) + " lateKey=" + lateKey
+        head += " lateLevel=" + String(lateLevel) + " asleep=" + (lateAsleep ? "1" : "0")
+        let vsS: String = string.Join(",", vsKeys.ToArray())
+        head += " quiet=" + String(quietOn ? QuietLeft() : 0) + " vs=" + vsS + "\n"
         sb.Append(head)
-        for e in exams { sb.Append("exam " + e.Src + " " + World.FromUnixMs(e.At).ToString("yyyy-MM-ddTHH:mm") + " daily=" + e.LastDaily + " before=" + (e.DayBefore ? "1" : "0") + " morning=" + (e.Morning ? "1" : "0") + " " + e.Name + "\n") }
-        for d in deadlines { sb.Append("deadline " + World.FromUnixMs(d.Due).ToString("yyyy-MM-ddTHH:mm") + " stage=" + String(d.Stage) + " " + d.Title + (d.Course != "" ? " [" + d.Course + "]" : "") + " " + (d.Url ?? "-") + "\n") }
-        for it in plan { sb.Append("plan " + World.FromUnixMs(it.At).ToString("yyyy-MM-ddTHH:mm") + " " + it.Kind + " q=" + String(it.QuietMin) + (planFired.Contains(it.Key) ? " fired" : "") + " " + it.Text + "\n") }
-        for tk in tickets { sb.Append("ticket " + tk.Kind + " " + World.FromUnixMs(tk.At).ToString("yyyy-MM-ddTHH:mm") + " stage=" + String(tk.Stage) + " " + tk.Name + "\n") }
+        for e in exams {
+            let src: String = e.Src, name: String = e.Name, at: String = World.FromUnixMs(e.At).ToString("yyyy-MM-ddTHH:mm")
+            var l: String = "exam " + src + " " + at
+            l += " daily=" + e.LastDaily + " before=" + (e.DayBefore ? "1" : "0")
+            l += " morning=" + (e.Morning ? "1" : "0") + " " + name + "\n"
+            sb.Append(l)
+        }
+        for d in deadlines {
+            let title: String = d.Title, course: String = d.Course, url: String = d.Url ?? "-", due: String = World.FromUnixMs(d.Due).ToString("yyyy-MM-ddTHH:mm")
+            var l: String = "deadline " + due + " stage=" + String(d.Stage)
+            l += " " + title + (course != "" ? " [" + course + "]" : "")
+            l += " " + url + "\n"
+            sb.Append(l)
+        }
+        for it in plan {
+            let kind: String = it.Kind, text: String = it.Text, at: String = World.FromUnixMs(it.At).ToString("yyyy-MM-ddTHH:mm")
+            var l: String = "plan " + at + " " + kind + " q=" + String(it.QuietMin)
+            l += (planFired.Contains(it.Key) ? " fired" : "") + " " + text + "\n"
+            sb.Append(l)
+        }
+        for tk in tickets {
+            let kind: String = tk.Kind, name: String = tk.Name, at: String = World.FromUnixMs(tk.At).ToString("yyyy-MM-ddTHH:mm")
+            var l: String = "ticket " + kind + " " + at
+            l += " stage=" + String(tk.Stage) + " " + name + "\n"
+            sb.Append(l)
+        }
         sb.Append("bar " + BarText() + "\n")
         sb.Append("end\n")
         return sb.ToString()
@@ -20375,13 +20408,14 @@ extension World {
         let now = SNowMs(); var best = long.MaxValue
         var text = ""
         for x in deadlines {
-            if x.Due > now && x.Due - now <= 24 * 3600000 && x.Due < best { best = x.Due; text = "📝 " + World.Short(x.Title, 8) + " " + World.LeftText(x.Due - now) }
+            if x.Due > now && x.Due - now <= 24 * 3600000 && x.Due < best { best = x.Due; let sh: String = World.Short(x.Title, 8); text = "📝 " + sh + " " + World.LeftText(x.Due - now) }
         }
         for x in exams {
             if x.At > now && x.At - now <= 7 * 86400000 && x.At < best {
                 best = x.At
                 let days = (World.FromUnixMs(x.At).Date - SNow().Date).Days
-                text = "📚 " + World.Short(x.Name, 8) + " " + (days <= 0 ? "今天" : (days == 1 ? "明天" : String(days) + " 天"))
+                let sh: String = World.Short(x.Name, 8), dd: String = days <= 0 ? "今天" : (days == 1 ? "明天" : String(days) + " 天")
+                text = "📚 " + sh + " " + dd
             }
         }
         return text
@@ -20419,7 +20453,8 @@ extension World {
                         else { text = World.ReadText(World.CacheName(u)) }
                         if !string.IsNullOrEmpty(text) { texts[u] = text }
                     }
-                    let st = DateTime.Now.ToString("HH:mm") + " 更新：" + String(ok) + "/" + String(urls.Count) + " 個行事曆" + (err != "" ? "（" + err + "）" : "")
+                    let errS: String = err != "" ? "（" + err + "）" : ""
+                    let st: String = DateTime.Now.ToString("HH:mm") + " 更新：" + String(ok) + "/" + String(urls.Count) + " 個行事曆" + errS
                     schoolStatus = st
                     nextScan = DateTime.MinValue
                 }
@@ -20617,8 +20652,9 @@ extension World {
         else {
             var parts: [String] = []
             var j = 0
-            while j < fire.Count && j < 3 { parts.append("「" + World.Short(fire[j].Title, 14) + "」" + DueWhen(fire[j].Due)); j += 1 }
-            text = "有 " + String(fire.Count) + " 份作業快截止了：" + string.Join("、", parts) + (fire.Count > 3 ? "…" : "")
+            while j < fire.Count && j < 3 { let sh: String = World.Short(fire[j].Title, 14), wn: String = DueWhen(fire[j].Due); parts.append("「" + sh + "」" + wn); j += 1 }
+            let joined: String = string.Join("、", parts)
+            text = "有 " + String(fire.Count) + " 份作業快截止了：" + joined + (fire.Count > 3 ? "…" : "")
         }
         let ids = List<String>()
         for d in fire { ids.Add(d.Id) }
@@ -20649,14 +20685,21 @@ extension World {
     }
 
     func DeadlineText(_ d: Deadline, _ stage: Int, _ now: Int) -> String {
-        let name: String = "「" + d.Title + "」" + (d.Course != "" ? "（" + World.Short(d.Course, 12) + "）" : "")
+        let title: String = d.Title, course: String = d.Course
+        let cpart: String = course != "" ? "（" + World.Short(course, 12) + "）" : ""
+        let name: String = "「" + title + "」" + cpart
         let left = Double(d.Due - now) / 60000.0
         let days = (World.FromUnixMs(d.Due).Date - SNow().Date).Days
+        let when: String = DueWhen(d.Due), hm: String = World.FromUnixMs(d.Due).ToString("HH:mm")
         switch stage {
-        case 0: return name + " " + DueWhen(d.Due) + " 截止，還有 " + String(Math.Max(1, days)) + " 天"
-        case 1: return name + " " + DueWhen(d.Due) + " 截止！別忘了 📝"
-        case 2: return name + " 再 " + String(Math.Max(1, CInt(Math.Ceiling(left / 60)))) + " 小時就截止了（" + World.FromUnixMs(d.Due).ToString("HH:mm") + "）"
-        default: return name + (left < 55 ? " 剩 " + String(Math.Max(1, CInt(Math.Ceiling(left)))) + " 分鐘！" : " 剩不到 1 小時！") + World.FromUnixMs(d.Due).ToString("HH:mm") + " 截止，趕快交 📝"
+        case 0: return name + " " + when + " 截止，還有 " + String(Math.Max(1, days)) + " 天"
+        case 1: return name + " " + when + " 截止！別忘了 📝"
+        case 2:
+            let hrs: String = String(Math.Max(1, CInt(Math.Ceiling(left / 60))))
+            return name + " 再 " + hrs + " 小時就截止了（" + hm + "）"
+        default:
+            let mins: String = left < 55 ? " 剩 " + String(Math.Max(1, CInt(Math.Ceiling(left)))) + " 分鐘！" : " 剩不到 1 小時！"
+            return name + mins + hm + " 截止，趕快交 📝"
         }
     }
 
@@ -20702,8 +20745,10 @@ extension World {
         PushState()
         let days = (ed.Date - n.Date).Days
         let left = days <= 0 ? "就是今天" : (days == 1 ? "就是明天" : "還有 " + String(days) + " 天")
-        let tail = examNudgeMin >= 0 && days >= 2 ? "。每天 " + World.Hm(examNudgeMin) + " 幫你倒數" : ""
-        Lead().Say("📚 記住了：" + e.Name + "，" + ed.ToString("M/d HH:mm") + "，" + left + tail, 3.2)
+        let tail: String = examNudgeMin >= 0 && days >= 2 ? "。每天 " + World.Hm(examNudgeMin) + " 幫你倒數" : ""
+        let ename: String = e.Name, when: String = ed.ToString("M/d HH:mm")
+        let msg: String = "📚 記住了：" + ename + "，" + when + "，" + left + tail
+        Lead().Say(msg, 3.2)
     }
 
     func DelExam(_ id: String) {
@@ -20751,7 +20796,8 @@ extension World {
         let l: Pet = Lead()
         if morning != nil {
             morning.Morning = true; morning.LastDaily = today; SaveExams()
-            let t = World.ExamPrefix(l.P.Id) + "今天 " + World.FromUnixMs(morning.At).ToString("HH:mm") + "「" + morning.Name + "」，加油！🍀 准考證、文具、學生證帶了嗎？"
+            let pre: String = World.ExamPrefix(l.P.Id), hm: String = World.FromUnixMs(morning.At).ToString("HH:mm"), mname: String = morning.Name
+            let t: String = pre + "今天 " + hm + "「" + mname + "」，加油！🍀 准考證、文具、學生證帶了嗎？"
             App.Log("exam morning: " + morning.Name)
             l.Notify(t, nil, 1, false, false)
             for o in OutPets() { if o !== l { o.React() } }
@@ -20759,12 +20805,15 @@ extension World {
         }
         if before == nil && daily.Count == 0 { return }
         var parts: [String] = []
-        for e in daily { e.LastDaily = today; parts.append("離「" + e.Name + "」還有 " + String((World.FromUnixMs(e.At).Date - n.Date).Days) + " 天") }
-        var text = parts.count > 0 ? string.Join("、", parts) + " 📚 " + World.ExamTail(l.P.Id) : ""
+        for e in daily { e.LastDaily = today; let en: String = e.Name, dd: String = String((World.FromUnixMs(e.At).Date - n.Date).Days); parts.append("離「" + en + "」還有 " + dd + " 天") }
+        let joined: String = string.Join("、", parts)
+        var text: String = parts.count > 0 ? joined + " 📚 " + World.ExamTail(l.P.Id) : ""
         if before != nil {
             // 明天就考：這則優先，其他的倒數接在後面一起講
             before.DayBefore = true; before.LastDaily = today
-            text = World.ExamPrefix(l.P.Id) + "明天 " + World.FromUnixMs(before.At).ToString("HH:mm") + " 就是「" + before.Name + "」了！重點再看一次，今晚早點睡 💤" + (parts.count > 0 ? "（" + string.Join("、", parts) + "）" : "")
+            let pre: String = World.ExamPrefix(l.P.Id), hm: String = World.FromUnixMs(before.At).ToString("HH:mm"), bname: String = before.Name
+            let rest: String = parts.count > 0 ? "（" + joined + "）" : ""
+            text = pre + "明天 " + hm + " 就是「" + bname + "」了！重點再看一次，今晚早點睡 💤" + rest
         }
         SaveExams()
         App.Log("exam nudge: " + text)
@@ -20837,10 +20886,10 @@ extension World {
     func LateExtra(_ n: DateTime) -> String {
         let now = World.UnixMs(n)
         for d in deadlines {
-            if d.Due > now && d.Due - now <= 8 * 3600000 { return "（還在趕「" + World.Short(d.Title, 12) + "」嗎？交完就去睡）" }
+            if d.Due > now && d.Due - now <= 8 * 3600000 { let sh: String = World.Short(d.Title, 12); return "（還在趕「" + sh + "」嗎？交完就去睡）" }
         }
         for e in exams {
-            if e.At > now && e.At - now <= 14 * 3600000 { return "（" + World.FromUnixMs(e.At).ToString("H:mm") + " 還有「" + World.Short(e.Name, 12) + "」，睡飽比熬夜有用）" }
+            if e.At > now && e.At - now <= 14 * 3600000 { let hm: String = World.FromUnixMs(e.At).ToString("H:mm"), sh: String = World.Short(e.Name, 12); return "（" + hm + " 還有「" + sh + "」，睡飽比熬夜有用）" }
         }
         return ""
     }
@@ -20936,7 +20985,9 @@ extension World {
                 let ee = e
                 let days = (World.FromUnixMs(e.At).Date - SNow().Date).Days
                 let left = days <= 0 ? "今天" : (days == 1 ? "明天" : "還有 " + String(days) + " 天")
-                my.DropDownItems.Add(World.FromUnixMs(e.At).ToString("MM/dd HH:mm") + "　" + World.Short(e.Name, 16) + "　" + left + "（點一下取消）", nil) { self.DelExam(ee.Id) }
+                let at: String = World.FromUnixMs(e.At).ToString("MM/dd HH:mm"), sh: String = World.Short(e.Name, 16)
+                let label: String = at + "　" + sh + "　" + left + "（點一下取消）"
+                my.DropDownItems.Add(label, nil) { self.DelExam(ee.Id) }
             }
             items.Add(my)
         }
@@ -20946,9 +20997,11 @@ extension World {
         if week.Count == 0 { let none = ToolStripMenuItem("這週沒有要交的 🎉"); none.Enabled = false; wk.DropDownItems.Add(none) }
         for d in week {
             let dd = d
-            let it = ToolStripMenuItem(DueWhen(d.Due) + "　" + World.Short(d.Title, 16) + (d.Course != "" ? "［" + World.Short(d.Course, 10) + "］" : ""))
+            let course: String = d.Course, when: String = DueWhen(d.Due), sh: String = World.Short(d.Title, 16)
+            let cpart: String = course != "" ? "［" + World.Short(course, 10) + "］" : ""
+            let it = ToolStripMenuItem(when + "　" + sh + cpart)
             if d.Url != nil { it.DropDownItems.Add("打開作業頁", nil) { self.OpenStudyUrl(self.Lead(), dd.Url) } }
-            it.DropDownItems.Add("交了 ✓（不再提醒）", nil) { self.MarkDone(dd.Id, true); self.Lead().Say("好棒！「" + World.Short(dd.Title, 12) + "」交了 🎉", 2.2) }
+            it.DropDownItems.Add("交了 ✓（不再提醒）", nil) { self.MarkDone(dd.Id, true); let sh2: String = World.Short(dd.Title, 12); self.Lead().Say("好棒！「" + sh2 + "」交了 🎉", 2.2) }
             wk.DropDownItems.Add(it)
         }
         items.Add(wk)
@@ -20979,7 +21032,7 @@ extension World {
         for e in exams {
             if e.At <= now { continue }
             let days = (World.FromUnixMs(e.At).Date - SNow().Date).Days
-            if days >= 1 && days <= 14 { parts.Add("離「" + World.Short(e.Name, 10) + "」還有 " + String(days) + " 天") }
+            if days >= 1 && days <= 14 { let sh: String = World.Short(e.Name, 10); parts.Add("離「" + sh + "」還有 " + String(days) + " 天") }
             break
         }
     }
@@ -21023,7 +21076,8 @@ extension World {
         if !haveSchool { return "還沒有學校行事曆" }
         var week = 0; let now = SNowMs()
         for d in deadlines { if d.Due > now && d.Due - now <= 7 * 86400000 { week += 1 } }
-        return (schoolStatus != "" ? schoolStatus + "；" : (lastScan == nil ? "更新中…；" : "")) + "這週 " + String(week) + " 份作業"
+        let head: String = schoolStatus != "" ? schoolStatus + "；" : (lastScan == nil ? "更新中…；" : "")
+        return head + "這週 " + String(week) + " 份作業"
     }
     func ApplyStudySettings(_ urls: List<String>, _ remind: Int, _ autoQuiet: Bool, _ late: Bool, _ lateStart: Int, _ nudge: Int) {
         if !vsKeys.Contains("urls") {
@@ -21039,7 +21093,8 @@ extension World {
         haveSchool = schoolUrls.Count > 0 || testFeeds.Count > 0
         SaveStudyConfig()
         fetchNow = true; replan = true
-        App.Log("study settings: urls=" + String(schoolUrls.Count) + " remind=" + String(classRemind) + " late=" + (lateOn ? World.Hm(lateStartMin) : "off") + " nudge=" + World.Hm(examNudgeMin))
+        let lateS: String = lateOn ? World.Hm(lateStartMin) : "off"
+        App.Log("study settings: urls=" + String(schoolUrls.Count) + " remind=" + String(classRemind) + " late=" + lateS + " nudge=" + World.Hm(examNudgeMin))
         Lead().Say(schoolUrls.Count > 0 ? "🎒 記住了！上課前、作業截止前都會叫你" : "好～設定存好了", 2.4)
     }
 
