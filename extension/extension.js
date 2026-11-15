@@ -17,14 +17,20 @@ const CHARS = {
 	tinky: { emoji: "👜", name: "丁丁", lineup: "teletubbies" },
 	dipsy: { emoji: "🎩", name: "迪西", lineup: "teletubbies" },
 	laalaa: { emoji: "🟠", name: "拉拉", lineup: "teletubbies" },
+	pkred: { emoji: "🔥", name: "紅皮克敏", lineup: "pikmin" },
+	pkyellow: { emoji: "⚡", name: "黃皮克敏", lineup: "pikmin" },
+	pkblue: { emoji: "💧", name: "藍皮克敏", lineup: "pikmin" },
 };
 const LINEUPS = {
 	classic: { name: "經典一櫃", desc: "Spidey、小波、史迪仔、人魚漢頓", ids: ["spidey", "po", "stitch", "hangyodon"] },
 	teletubbies: { name: "天線寶寶一櫃", desc: "丁丁、迪西、拉拉、小波（大格是小波）", ids: ["tinky", "dipsy", "laalaa", "po"] },
+	pikmin: { name: "皮克敏一櫃", desc: "紅、黃、藍皮克敏（大格是休息花）", ids: ["pkred", "pkyellow", "pkblue"] },
 };
-const lineupSetting = () => (vscode.workspace.getConfiguration("deskPals").get("lineup", "classic") === "teletubbies" ? "teletubbies" : "classic");
+const lineupSetting = () => { const v = vscode.workspace.getConfiguration("deskPals").get("lineup", "classic"); return LINEUPS[v] ? v : "classic"; };
 const inLineup = (id, lu) => !!CHARS[id] && (CHARS[id].lineup === "both" || CHARS[id].lineup === lu);
 let current = "spidey";
+let flowerPct = null;   // 皮克敏一櫃：休息花（0 開好開滿 → 100 枯了）
+const flowerMark = () => (flowerPct === null || !CHARS[current] || CHARS[current].lineup !== "pikmin" ? "" : (flowerPct >= 100 ? "🥀" : (flowerPct >= 60 ? "🌼" : "🌸")));
 const E = () => (CHARS[current] || CHARS.spidey).emoji;
 const N = () => (CHARS[current] || CHARS.spidey).name;
 
@@ -41,7 +47,7 @@ function activate(context) {
 		if (Date.now() < flashUntil) return;
 		if (quietEnd > Date.now()) { bar.text = `${E()} 💤 ${Math.ceil((quietEnd - Date.now()) / 60000)} 分`; return; }
 		if (focusEnd > Date.now()) { bar.text = `${E()} 🍅 ${Math.ceil((focusEnd - Date.now()) / 60000)} 分`; return; }
-		bar.text = E() + IDLE[idleIdx++ % IDLE.length];
+		bar.text = E() + flowerMark() + IDLE[idleIdx++ % IDLE.length];
 	}, 700);
 	bar.text = E();
 	bar.show();
@@ -50,6 +56,7 @@ function activate(context) {
 	const desktop = new Desktop(context);
 	desktop.onFocus = (on, mins) => { focusEnd = on ? Date.now() + mins * 60000 : 0; };
 	desktop.onQuiet = (on, mins) => { quietEnd = on ? Date.now() + mins * 60000 : 0; };
+	desktop.onFlower = (pct) => { flowerPct = pct; provider.post({ type: "flower", pct }); };
 	// 桌面版換櫃（小屋「換一櫃」、設定視窗）→ VS Code 的設定跟著改（不再回送給桌面版）
 	desktop.onLineup = (lu) => {
 		if (!LINEUPS[lu] || lu === lineupSetting()) return;
@@ -220,7 +227,7 @@ function activate(context) {
 async function pickCharacter(context, desktop, provider, first) {
 	const now = lineupSetting();
 	const items = [];
-	for (const lu of [now, now === "classic" ? "teletubbies" : "classic"]) {
+	for (const lu of [now, ...Object.keys(LINEUPS).filter((x) => x !== now)]) {
 		items.push({ label: `${LINEUPS[lu].name}${lu === now ? "（現在這一櫃）" : ""}`, kind: vscode.QuickPickItemKind.Separator });
 		for (const id of LINEUPS[lu].ids) {
 			items.push({
@@ -251,8 +258,8 @@ async function pickCharacter(context, desktop, provider, first) {
 // 換一櫃：經典／天線寶寶
 async function pickLineup(desktop) {
 	const now = lineupSetting();
-	const items = ["classic", "teletubbies"].map((lu) => ({
-		label: `${lu === "classic" ? "🕷" : "☀"} ${LINEUPS[lu].name}`,
+	const items = Object.keys(LINEUPS).map((lu) => ({
+		label: `${lu === "classic" ? "🕷" : (lu === "pikmin" ? "🌸" : "☀")} ${LINEUPS[lu].name}`,
 		description: LINEUPS[lu].desc,
 		detail: lu === now ? "現在是這一櫃" : undefined,
 		lineup: lu,
@@ -311,6 +318,7 @@ class Desktop {
 		this.restarting = false;
 		this.onFocus = () => {};
 		this.onQuiet = () => {};
+		this.onFlower = () => {};
 		// macOS 的 socket 放固定位置（開機由 launchd 啟動時 TMPDIR 不一定相同）
 		this.endpoint = process.platform === "win32" ? "\\\\.\\pipe\\" + this.name : path.join(this.home, "spidey.sock");
 	}
@@ -391,6 +399,8 @@ class Desktop {
 				if (lu) { this.lineupAck = lu[1]; this.onLineup(lu[1]); }
 				const m = /^active (\w+)$/.exec(line);
 				if (m) this.onActive(m[1]);
+				const fl = /^flower (\d+)$/.exec(line);
+				if (fl) this.onFlower(+fl[1]);
 				const f = /^focus (on|off)(?: (\d+))?$/.exec(line);
 				if (f) this.onFocus(f[1] === "on", +(f[2] || 0));
 				const q = /^quiet (on|off)(?: (\d+))?$/.exec(line);
@@ -424,7 +434,7 @@ class Desktop {
 		const src = path.join(this.context.extensionPath, "desktop");
 		fs.mkdirSync(this.home, { recursive: true });
 		const files = this.win
-			? ["DeskPals.cs", "desk-pals.ps1", "claude-hook.js", "ci-watch.js"]
+			? ["DeskPals.cs", "DeskPals.Pikmin.cs", "desk-pals.ps1", "claude-hook.js", "ci-watch.js"]
 			: ["DeskPals.swift", this.sh, "claude-hook.js", "ci-watch.js"];
 		const copy = (f, dir) => {
 			const from = path.join(src, f), to = path.join(dir, f);
@@ -497,7 +507,7 @@ class Desktop {
 				// detached 的 powershell 沒有主控台會直接結束；改由短命的 powershell 用 Start-Process 叫一支獨立的起來
 				const lu = lineupSetting();
 				const pet = vscode.workspace.getConfiguration("deskPals").get("character", "spidey");
-				const args = `-NoProfile -WindowStyle Hidden -File "${path.join(this.home, this.ps1)}" -PipeName ${this.name} -Pet ${inLineup(pet, lu) ? pet : (lu === "teletubbies" ? "po" : "spidey")} -Lineup ${lu}`;
+				const args = `-NoProfile -WindowStyle Hidden -File "${path.join(this.home, this.ps1)}" -PipeName ${this.name} -Pet ${inLineup(pet, lu) ? pet : (lu === "teletubbies" ? "po" : (lu === "pikmin" ? "pkred" : "spidey"))} -Lineup ${lu}`;
 				p = cp.spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList $env:SPIDEY_ARGS"],
 					{ stdio: "ignore", windowsHide: true, env: Object.assign({}, process.env, { SPIDEY_ARGS: args }) });
 			} else {

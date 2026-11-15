@@ -3,6 +3,8 @@ param([string]$PipeName = "desk-pals", [string]$Pet = "spidey", [string]$Lineup 
 $ErrorActionPreference = "Stop"
 try {
     $src = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "DeskPals.cs"), [System.Text.Encoding]::UTF8)
+    # Extra partial files (DeskPals.*.cs, e.g. DeskPals.Pikmin.cs) are appended; their usings live inside the namespace
+    foreach ($f in (Get-ChildItem -Path $PSScriptRoot -Filter "DeskPals.*.cs" | Sort-Object Name)) { $src += "`n" + [System.IO.File]::ReadAllText($f.FullName, [System.Text.Encoding]::UTF8) }
     Add-Type -TypeDefinition $src -ReferencedAssemblies System.Windows.Forms, System.Drawing, System.Web.Extensions
     [DeskPals.App]::Run($PipeName, $Pet, $Lineup)   # Lineup: classic / teletubbies; empty = last used (startup shortcut)
 } catch {
