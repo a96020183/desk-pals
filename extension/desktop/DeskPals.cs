@@ -10524,7 +10524,7 @@ namespace DeskPals
             {
                 EnsurePics(lu);
                 int cw = Sc(230), ch = Sc(116), gap = Sc(24), x0 = (W0 - 2 * cw - gap) / 2;
-                Add("mode:shelf", lu == Pal.Pikmin ? "整櫃（三隻＋花）" : "整櫃（四隻）", lu == Pal.Pikmin ? "三隻皮克敏和休息花住在櫃子裡" : "四隻住在公仔櫃裡", new Rectangle(x0, top, cw, ch), 0, mode == "shelf");
+                Add("mode:shelf", lu == Pal.Pikmin ? "整櫃（三隻）" : "整櫃（四隻）", lu == Pal.Pikmin ? "三隻＋一朵休息花" : "四隻住在公仔櫃裡", new Rectangle(x0, top, cw, ch), 0, mode == "shelf");
                 Add("mode:single", "只要一隻", "沒有櫃子，他住在蛋裡", new Rectangle(x0 + cw + gap, top, cw, ch), 0, mode == "single");
                 if (mode == "single")
                 {

@@ -515,7 +515,7 @@ class Desktop {
 			} else {
 				const lu = lineupSetting();
 				const pet = vscode.workspace.getConfiguration("deskPals").get("character", "spidey");
-				p = cp.spawn("/bin/bash", [path.join(this.home, this.sh), this.name, inLineup(pet, lu) ? pet : (lu === "teletubbies" ? "po" : "spidey"), lu], { detached: true, stdio: "ignore" });
+				p = cp.spawn("/bin/bash", [path.join(this.home, this.sh), this.name, inLineup(pet, lu) ? pet : (lu === "teletubbies" ? "po" : (lu === "pikmin" ? "pkred" : "spidey")), lu], { detached: true, stdio: "ignore" });
 			}
 			p.on("error", () => {});
 			p.unref();
