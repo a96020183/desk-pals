@@ -1225,6 +1225,7 @@ namespace DeskPals
 
         static string ExamPrefix(string id)
         {
+            string cu = CuStudy(id, "x_exam_prefix", null, null, null); if (cu != null) return cu;   // 自己做的公仔（DeskPals.Custom.cs）
             switch (id)
             {
                 case "spidey": return "蜘蛛感應：";
@@ -1239,6 +1240,7 @@ namespace DeskPals
 
         static string ExamTail(string id)
         {
+            string cu = CuStudy(id, "x_exam_tail", null, null, null); if (cu != null) return cu;
             switch (id)
             {
                 case "po": return "小波陪你讀書！";
@@ -1292,6 +1294,7 @@ namespace DeskPals
 
         static string LateNightLine(string id, int lv, string hm)
         {
+            string cu = CuStudy(id, "x_late" + Math.Max(0, Math.Min(2, lv)), hm, null, null); if (cu != null) return cu;
             string[] a;
             switch (id)
             {
@@ -1347,6 +1350,7 @@ namespace DeskPals
         // ================= 搶課（Ticket 的 Kind＝course）=================
         static string CourseLine(string id, int stage, Ticket t)
         {
+            string cu = CuStudy(id, "x_course" + Math.Max(0, Math.Min(4, stage)), null, t.Name, (t.Lead / 60) + " 小時"); if (cu != null) return cu;
             string h = (t.Lead / 60) + " 小時", n = t.Name;
             string[] a;
             switch (id)
