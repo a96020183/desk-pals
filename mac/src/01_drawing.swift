@@ -716,14 +716,23 @@ typealias Image = Bitmap
 typealias DeskPalsRectangle = Rectangle
 
 final class ColorMatrix {
-    var Matrix00 = 1.0, Matrix11 = 1.0, Matrix22 = 1.0, Matrix33 = 1.0, Matrix44 = 1.0
+    /// 5×5, GDI+ row-vector convention: [r g b a 1] · M (values 0…1, not premultiplied)
+    var M: [[Double]] = [[1, 0, 0, 0, 0], [0, 1, 0, 0, 0], [0, 0, 1, 0, 0], [0, 0, 0, 1, 0], [0, 0, 0, 0, 1]]
+    var Matrix00: Double { get { return M[0][0] } set { M[0][0] = newValue } }
+    var Matrix11: Double { get { return M[1][1] } set { M[1][1] = newValue } }
+    var Matrix22: Double { get { return M[2][2] } set { M[2][2] = newValue } }
+    var Matrix33: Double { get { return M[3][3] } set { M[3][3] = newValue } }
+    var Matrix44: Double { get { return M[4][4] } set { M[4][4] = newValue } }
     init() {}
+    /// `new ColorMatrix(new float[][] { … })`
+    init(_ rows: [[Double]]) { for i in 0..<Swift.min(5, rows.count) { for j in 0..<Swift.min(5, rows[i].count) { M[i][j] = rows[i][j] } } }
 }
 final class ImageAttributes: IDisposable {
     var alpha = 1.0
     var key: Color? = nil
+    var matrix: ColorMatrix? = nil   // 只有 alpha 的矩陣不用逐像素（見 03_shim_custom_a.swift 的 CuApply）
     init() {}
-    func SetColorMatrix(_ m: ColorMatrix) { alpha = m.Matrix33 }
+    func SetColorMatrix(_ m: ColorMatrix) { alpha = m.Matrix33; matrix = m }
     func SetColorKey(_ lo: Color, _ hi: Color) { key = lo }
     func SetWrapMode(_ m: WrapMode) {}
     func Dispose() {}
@@ -1170,6 +1179,7 @@ final class Graphics: IDisposable {
     }
     func DrawImage(_ b: Bitmap?, _ dest: RectangleF, _ sx: Double, _ sy: Double, _ sw: Double, _ sh: Double, _ unit: GraphicsUnit, _ ia: ImageAttributes?) {
         guard let b = b, let img = crop(b, RectangleF(sx, sy, sw, sh)) else { return }
+        if let ia = ia, ia.CuNeedsPixelPass, let img2 = ia.CuApply(img) { drawImage(img2, dest.cg, 1); return }   // 整個 ColorMatrix（自己做的公仔：白邊上色、晚上變暗）
         drawImage(img, dest.cg, ia?.alpha ?? 1)
     }
     func DrawImage(_ b: Bitmap?, _ dest: Rectangle, _ sx: Int, _ sy: Int, _ sw: Int, _ sh: Int, _ unit: GraphicsUnit) {

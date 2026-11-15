@@ -51,6 +51,7 @@ extension World {
     final class Notice { var Kind: String! = nil, Url: String! = nil, Text: String! = nil; var Pri = 0; var At = DateTime.Now; var By: Pet! = nil; var Expire: Double = 0; var Repeated = false; var NextRound = false; init() {} }
 
     static func Priority(_ kind: String) -> Int {
+        let sp = StudyPriority(kind); if sp >= 0 { return sp }   // 上課、考試、作業死線
         switch kind {
         case "ci-fail", "meeting", "meeting-now", "remind": return 2
         case "ci-ok", "cmd-fail", "jira", "pc-cpu", "pc-ram", "pc-disk", "net-down", "vpn": return 1
@@ -85,7 +86,7 @@ extension World {
         if sharing || fsNow { heldShare.Add(n); return }
         if quietOn {
             // 安靜中：會議、CI 失敗還是說，但只冒泡泡；其他先存著
-            if n.Kind.StartsWith("meeting") || n.Kind == "ci-fail" { DeliverGentle(n); return }
+            if World.MeetingLike(n.Kind) || n.Kind == "ci-fail" { DeliverGentle(n); return }
             heldQuiet.Add(n); return
         }
         if focusOn && n.Pri < 2 { heldFocus.Add(n); return }
@@ -107,7 +108,9 @@ extension World {
     }
 
     static func Flavor(_ id: String, _ kind: String, _ night: Bool) -> String {
-        let pk = PikFlavor(id, kind); if pk != nil { return pk! }
+        let pk = PikFlavor(id, kind) ?? OrigFlavor(id, kind); if pk != nil { return pk! }
+        let cu = CuFlavor(id, kind, night); if cu != nil { return cu! }
+        let sd = StudyFlavor(id, kind); if sd != nil { return sd! }
         let extra = FlavorExtra(id, kind)
         if extra != nil { return extra! }
         if night && kind == "worklog" {
@@ -143,7 +146,7 @@ extension World {
         let text = World.Flavor(l.P.Id, n.Kind, Night) + " " + n.Text
         let hint: String! = n.Url != nil ? "點我打開" : nil
         if n.Pri >= 2 {
-            l.Notify(text, hint, 2, focusOn, n.Kind.StartsWith("meeting"))
+            l.Notify(text, hint, 2, focusOn, World.MeetingLike(n.Kind))
             for p in OutPets() { if p !== l && !focusOn { p.React() } }
             if !repeat_ && !n.Repeated {
                 let nn = n
@@ -164,6 +167,7 @@ extension World {
         p.SetClickableBubble(false)
         if n.NextRound { StartFocus(focusMin); return true }
         if ReminderClicked(p, n) { return true }
+        if StudyClicked(p, n) { return true }   // 作業：打開／交了
         if n.Url != nil {
             if World.OpenUrl(n.Url) { p.Say("好～幫你打開了 👍", 1.4) }
             else { App.Log("open url: failed " + n.Url); p.Say("打不開耶…", 1.4) }
@@ -220,7 +224,7 @@ extension World {
             case "tinky": line = "噓～丁丁抱著袋袋安靜陪你 🤫"
             case "dipsy": line = "噓。帽子拉低，安靜。"
             case "laalaa": line = "噓～拉拉小小聲 🤫"
-            default: line = "好，我安靜待著。"
+            default: line = l.P.Cu ? l.L("x_quiet_on") : "好，我安靜待著。"
             }
             l.Say(line, 2.2)
         }
@@ -241,7 +245,7 @@ extension World {
         case "tinky": line = "安靜時間結束～Eh-oh!"
         case "dipsy": line = "安靜結束。嘿～"
         case "laalaa": line = "安靜時間結束～啦啦啦！"
-        default: line = "安靜時間結束～"
+        default: line = l.P.Cu ? l.L("x_quiet_off") : "安靜時間結束～"
         }
         if heldQuiet.Count == 0 { l.Say(line, 2.4); return }
         // 一次說完：最新一則有網址就可以點
@@ -294,7 +298,7 @@ extension World {
         AbortScene()
         for p in OutPets() { p.QuietDown() }
         let l: Pet = Lead()
-        l.Say(String(focusMin) + " 分鐘專注開始 🍅 我們安靜陪你", 2.4)
+        l.Say(ExamNear() ? String(focusMin) + " 分鐘讀書開始 📚 我們安靜陪你" : String(focusMin) + " 分鐘專注開始 🍅 我們安靜陪你", 2.4)
         lastFocusLeft = FocusLeft()
         BroadcastFocus()
     }
@@ -314,9 +318,9 @@ extension World {
         case "tinky": end = "專注結束！休息 5 分鐘 ☕ 丁丁跳舞給你看"
         case "dipsy": end = "專注結束。休息 5 分鐘 ☕ 你很酷"
         case "laalaa": end = "專注結束！休息 5 分鐘 ☕ 啦啦啦～好棒棒"
-        default: end = "專注結束！休息 5 分鐘 ☕ 你超強的"
+        default: end = l.P.Cu ? l.L("x_focus_end") : "專注結束！休息 5 分鐘 ☕ 你超強的"
         }
-        l.Knock(end + "　今天第 " + String(n) + " 顆 🍅", "high")
+        l.Knock((ExamNear() ? end.Replace("專注結束", "讀書結束") : end) + "　今天第 " + String(n) + " 顆 🍅", "high")
         for p in OutPets() { if p !== l { p.React() } }
         breakOn = true; breakEnd = Now + 300
         FlushFocusHeld(5)
@@ -401,7 +405,8 @@ extension Pet {
 extension World {
     // ---------- 共用：每個角色的開場白 ----------
     static func FlavorExtra(_ id: String, _ kind: String) -> String! {
-        let pk = PikFlavor(id, kind); if pk != nil { return pk! }
+        let pk = PikFlavor(id, kind) ?? OrigFlavor(id, kind); if pk != nil { return pk! }
+        let cu = CuFlavor(id, kind, false); if cu != nil { return cu! }
         let keys: [String] = ["remind", "pc-cpu", "pc-ram", "pc-disk", "net-down", "net-up", "vpn", "download"]
         let sp: [String] = ["⏰ 提醒你：", "蜘蛛感應！電腦好燙：", "蜘蛛感應！記憶體快滿了：", "硬碟快滿了：", "網路斷了！", "網路回來了 👍", "連不到公司網路（VPN 斷了？）", "下載好了："]
         let po: [String] = ["⏰ 小波提醒你：", "電腦好忙好熱喔：", "記憶體要滿滿了：", "硬碟快塞滿了：", "網路斷掉了！嗚…", "網路回來了！Eh-oh!", "連不到公司網路耶（VPN 斷了？）", "下載好了！"]
@@ -795,12 +800,13 @@ extension World {
         var tom = 0; _ = int.TryParse(World.ReadText("tomato-" + DateTime.Now.ToString("yyyyMMdd") + ".txt"), &tom)
         let parts = List<String>()
         if Day("meetings") > 0 { parts.Add("開了 " + String(Day("meetings")) + " 場會") }
-        if tom > 0 { parts.Add("吃了 " + String(tom) + " 顆番茄🍅") }
+        if tom > 0 { parts.Add("吃了 " + String(tom) + " 顆番茄🍅" + World.WeekTomatoNote(tom)) }
         if Day("deploys") > 0 { parts.Add("上版／CI " + String(Day("deploys")) + " 次") }
         if Day("tasks") > 0 { parts.Add("Claude／Codex 幫你做完 " + String(Day("tasks")) + " 件事") }
         if Day("saves") > 0 { parts.Add("存檔 " + String(Day("saves")) + " 次") }
         if Day("reminders") > 0 { parts.Add("完成 " + String(Day("reminders")) + " 個提醒") }
         if Day("pats") > 0 { parts.Add("摸了我們 " + String(Day("pats")) + " 下") }
+        StudyWrapParts(parts)   // 上了幾堂課、這週還有幾份作業、離考試幾天
         let outs: List<Pet> = OutPets()
         let l: Pet = Lead()
         if parts.Count == 0 { l.Say("今天很安靜呢～今天辛苦了 ♥", 4); return }
@@ -812,7 +818,7 @@ extension World {
         case "tinky": intro = "Eh-oh! 丁丁的魔法袋裝了今天的我們："
         case "dipsy": intro = "嘿，今天的我們："
         case "laalaa": intro = "啦啦～今天的我們："
-        default: intro = "今天的我們："
+        default: intro = l.P.Cu ? l.L("x_wrap") : "今天的我們："
         }
         if outs.Count >= 2 && !quietOn {
             // 大家輪流講一句
@@ -896,7 +902,7 @@ class ReminderForm: Form {
 // ================= 搶票提醒 =================
 // 你自己排的：不受安靜／專注影響。開賣前 1～2 小時、30 分、10 分（對時）、1 分、開賣當下，一段一段提醒。
 extension World {
-    final class Ticket { var At = 0; var Lead = 0; var Url: String! = nil, Name: String! = nil; var Stage = 0; init() {} }
+    final class Ticket { var At = 0; var Lead = 0; var Url: String! = nil, Name: String! = nil; var Stage = 0; var Kind = "ticket"; init() {} }   // Kind：ticket｜course（搶課）
 
     func LoadTickets() {
         tickets.Clear()
@@ -905,6 +911,7 @@ extension World {
             var at = 0, lead = 0, stage = 0
             if a.count >= 5 && long.TryParse(a[0], &at) && int.TryParse(a[1], &lead) && int.TryParse(a[3], &stage) {
                 let t = Ticket(); t.At = at; t.Lead = lead; t.Url = a[2] == "-" ? nil : a[2]; t.Stage = stage; t.Name = a[4]
+                if a.count >= 6 && a[5] == "course" { t.Kind = "course" }
                 tickets.Add(t)
             }
         }
@@ -917,15 +924,18 @@ extension World {
             let url: String = t.Url ?? "-"
             let name: String = t.Name.Replace("\t", " ").Replace("\n", " ")
             var line: String = at + "\t" + lead + "\t" + url
-            line += "\t" + stage + "\t" + name + "\n"
+            line += "\t" + stage + "\t" + name + "\t" + t.Kind + "\n"
             sb.Append(line)
         }
         World.WriteText("tickets.txt", sb.ToString())
     }
 
-    func AddTicket(_ at: Int, _ lead: Int, _ url: String, _ name: String!) {
+    func AddTicket(_ at: Int, _ lead: Int, _ url: String, _ name: String!) { AddTicket(at, lead, url, name, "ticket") }
+    func AddTicket(_ at: Int, _ lead: Int, _ url: String, _ name: String!, _ kind: String) {
         let t = Ticket()
-        t.At = at; t.Lead = lead == 60 ? 60 : 120; t.Name = string.IsNullOrEmpty(name) ? "搶票" : name
+        let course = kind == "course"
+        t.Kind = course ? "course" : "ticket"
+        t.At = at; t.Lead = lead == 60 ? 60 : 120; t.Name = string.IsNullOrEmpty(name) ? (course ? "搶課" : "搶票") : name
         t.Url = World.SafeUrl(url)
         if t.Url != nil && !t.Url.StartsWith("http") { t.Url = nil }   // 購票頁只收 http/https
         // 已經過了的階段就不補（例如只剩 20 分鐘才設定，就從 10 分鐘那段開始）
@@ -938,15 +948,17 @@ extension World {
         tickets.Sort { (a: Ticket, b: Ticket) -> Int in a.At < b.At ? -1 : (a.At > b.At ? 1 : 0) }
         SaveTickets()
         let tn: String = t.Name, when: String = World.FromUnixMs(at).ToString("MM/dd HH:mm"), hrs: String = String(t.Lead / 60)
-        let msg: String = "🎫 記住了：" + tn + "，" + when + " 開賣，提前 " + hrs + " 小時叫你"
+        let msg: String = (course ? "🎓 記住了：" : "🎫 記住了：") + tn + "，" + when + (course ? " 開放選課" : " 開賣") + "，提前 " + hrs + " 小時叫你"
         Lead().Say(msg, 3)
     }
 
     static func StagesOf(_ t: Ticket) -> [Int] { return [t.Lead, 30, 10, 1, 0] }
 
     static func TicketLine(_ id: String, _ stage: Int, _ t: Ticket) -> String {
+        if t.Kind == "course" { return CourseLine(id, stage, t) }   // 搶課：52_study.swift
         let h = String(t.Lead / 60) + " 小時", n: String = t.Name
-        let pk = PikTicket(id, stage, n, h); if pk != nil { return pk! }
+        let pk = PikTicket(id, stage, n, h) ?? OrigTicket(id, stage, n, h); if pk != nil { return pk! }
+        let cu = CuTicket(id, stage, n, h); if cu != nil { return cu! }
         let sp: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款", "🎫 " + n + " 再 30 分鐘開賣，網頁先開好", "🎫 " + n + " 剩 10 分鐘！蜘蛛感應全開", "🎫 準備！手指放在按鈕上", "🎫 開搶！！Thwip!"]
         let po: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款喔", "🎫 " + n + " 再 30 分鐘！小波陪你等", "🎫 " + n + " 剩 10 分鐘！好緊張～", "🎫 準備！深呼吸～", "🎫 開搶！！衝衝衝！"]
         let st: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款！ih!", "🎫 " + n + " 30 分鐘！史迪仔幫你顧著", "🎫 " + n + " 10 分鐘！ih-ih-ih!", "🎫 準備！史迪仔也準備好了", "🎫 開搶！！衝啊！"]
@@ -984,7 +996,7 @@ extension World {
         if userHidden { userHidden = false; ApplyHidden() }
         let l: Pet = Lead()
         let text = World.TicketLine(l.P.Id, stage, t)
-        let hint: String! = t.Url != nil ? "點我打開購票頁" : nil
+        let hint: String! = t.Url != nil ? (t.Kind == "course" ? "點我打開選課系統" : "點我打開購票頁") : nil
         if stage == 1 { l.Notify(text, hint, 1, false, false) }
         else if stage == 0 || stage == 2 { l.Notify(text, hint, 2, false, false) }
         else {
@@ -993,7 +1005,7 @@ extension World {
             l.ForceGlass(text, hint, stage == 4)
             if stage == 4 { Fireworks(WA(l.Cx, l.y), 4, CInt(l.Cx)); for p in OutPets() { if p !== l { p.React() } } }
         }
-        if stage == 2 { CheckClock(t.Url) }
+        if stage == 2 { CheckClock(t.Url, t.Kind == "course" ? "搶課" : "搶票") }
         let n = Notice(); n.Kind = "ticket"; n.Url = t.Url; n.Text = t.Name; n.Pri = 2; n.By = l; n.Expire = Now + 600
         if t.Url != nil { current = n; l.SetClickableBubble(true) }
     }
@@ -1005,13 +1017,14 @@ extension World {
         for t in tickets {
             let ms = t.At - now
             if ms > 0 && ms <= 10 * 60000 { let s = (ms + 999) / 1000; return (s / 60).ToString("00") + ":" + (s % 60).ToString("00") }
-            if ms <= 0 && ms > -60000 { return "開搶中！" }
+            if ms <= 0 && ms > -60000 { return t.Kind == "course" ? "開放囉！" : "開搶中！" }
         }
         return nil
     }
 
     // 對時：拿 HTTP 回應的 Date 標頭跟電腦時間比
-    func CheckClock(_ url: String!) {
+    func CheckClock(_ url: String!, _ what: String) {
+        if App.Offscreen { return }   // 離屏測試不連網路
         var target = "https://www.google.com/"
         if url != nil, let u = URL(string: url), let sc = u.scheme, let h = u.host { target = sc + "://" + h + "/" }
         let tgt = target
@@ -1023,7 +1036,7 @@ extension World {
             if Math.Abs(off) <= 2 { return }
             let sec = CInt(Math.Round(Math.Abs(off)))
             let msg = off < 0 ? "電腦時間比標準時間慢 " + String(sec) + " 秒" : "電腦時間比標準時間快 " + String(sec) + " 秒"
-            self.Post { self.Lead().Say("⏱ " + msg + "，搶票要看標準時間喔", 6, true) }
+            self.Post { self.Lead().Say("⏱ " + msg + "，" + what + "要看標準時間喔", 6, true) }
         }.Start()
     }
 
@@ -1063,23 +1076,28 @@ extension World {
         return mid.timeIntervalSince(server.addingTimeInterval(0.5))
     }
 
-    func AddTicketMenus(_ items: ToolStripItemCollection) {
-        items.Add("搶票提醒…", nil) { self.ShowTicketForm() }
-        if tickets.Count > 0 {
-            let my = ToolStripMenuItem("我的搶票（" + String(tickets.Count) + "）")
-            for t in tickets {
+    func AddTicketMenus(_ items: ToolStripItemCollection) { AddTicketMenus(items, "ticket") }
+    func AddTicketMenus(_ items: ToolStripItemCollection, _ kind: String) {
+        let word = kind == "course" ? "搶課" : "搶票"
+        items.Add(word + "提醒…", nil) { self.ShowTicketForm(kind) }
+        let mine: List<Ticket> = tickets.FindAll { (x: Ticket) -> Bool in x.Kind == kind }
+        if mine.Count > 0 {
+            let my = ToolStripMenuItem("我的" + word + "（" + String(mine.Count) + "）")
+            for t in mine {
                 let tt = t
                 my.DropDownItems.Add(World.FromUnixMs(t.At).ToString("MM/dd HH:mm") + "　" + (t.Name.Length > 18 ? t.Name.Substring(0, 18) + "…" : t.Name) + "　（點一下取消）", nil) {
-                    self.tickets.Remove(tt); self.SaveTickets(); self.Lead().Say("取消搶票提醒：" + tt.Name, 1.8)
+                    self.tickets.Remove(tt); self.SaveTickets(); self.Lead().Say("取消" + word + "提醒：" + tt.Name, 1.8)
                 }
             }
             items.Add(my)
         }
     }
 
-    func ShowTicketForm() {
+    func ShowTicketForm() { ShowTicketForm("ticket") }
+    func ShowTicketForm(_ kind: String) {
         if App.Offscreen { return }
-        if ticketForm == nil || ticketForm.IsDisposed { ticketForm = TicketForm(self, Lead().P.Accent) }
+        if ticketForm != nil && !ticketForm.IsDisposed && ticketForm.Kind != kind { ticketForm.Dispose(); ticketForm = nil }
+        if ticketForm == nil || ticketForm.IsDisposed { ticketForm = TicketForm(self, Lead().P.Accent, kind) }
         let c: Point = Cursor.Position
         let wa: Rectangle = WA(Double(c.X), Double(c.Y))
         ticketForm.StartPosition = FormStartPosition.Manual
@@ -1124,27 +1142,34 @@ extension Pet {
                 do { let b = SolidBrush(hot ? Color.FromArgb(240, 0xD8, 0x3A, 0x3A) : Color.FromArgb(235, 0x2A, 0x2F, 0x45)); g.FillPath(b, p) }
                 do { let rim = Pen(Color.FromArgb(220, 255, 255, 255), Math.Max(1.5, k)); g.DrawPath(rim, p) }
             }
-            // 小票券圖示
+            // 小票券圖示（搶課是學士帽）
             let tx: Double = bx + 5 * k, ty: Double = by + bh / 2 - 3.5 * k
-            do { let tb = SolidBrush(Color.FromArgb(0xFF, 0xD8, 0x4A)); g.FillRectangle(tb, tx, ty, iw - 2 * k, 7 * k) }
-            do { let hole = SolidBrush(hot ? Color.FromArgb(0xD8, 0x3A, 0x3A) : Color.FromArgb(0x2A, 0x2F, 0x45)); g.FillEllipse(hole, tx - 1.5 * k, ty + 2.2 * k, 3 * k, 2.6 * k) }
+            if w.BadgeIsCourse() { Pet.DrawCapIcon(g, tx - k, ty, iw, k, hot) }
+            else {
+                do { let tb = SolidBrush(Color.FromArgb(0xFF, 0xD8, 0x4A)); g.FillRectangle(tb, tx, ty, iw - 2 * k, 7 * k) }
+                do { let hole = SolidBrush(hot ? Color.FromArgb(0xD8, 0x3A, 0x3A) : Color.FromArgb(0x2A, 0x2F, 0x45)); g.FillEllipse(hole, tx - 1.5 * k, ty + 2.2 * k, 3 * k, 2.6 * k) }
+            }
             g.TextRenderingHint = TextRenderingHint.AntiAlias
             do { let wb = SolidBrush(Color.White); g.DrawString(cd, use, wb, bx + iw + 7 * k, by + 2 * k) }
         }
     }
 }
 
-// 「搶票提醒…」的小視窗
+// 「搶票提醒…」「搶課提醒…」的小視窗（Kind：ticket｜course）
 class TicketForm: Form {
     var w: World
+    let Kind: String
     let name = TextBox(), time = TextBox(), url = TextBox()
     let date = DateTimePicker()
     let lead1 = RadioButton(), lead2 = RadioButton()
     let hint = Label()
-    init(_ w: World, _ accent: Color) {
+    convenience init(_ w: World, _ accent: Color) { self.init(w, accent, "ticket") }
+    init(_ w: World, _ accent: Color, _ kind: String) {
         self.w = w
+        Kind = kind == "course" ? "course" : "ticket"
         super.init()
-        Text = "🎫 搶票提醒"
+        let course = Kind == "course"
+        Text = course ? "🎓 搶課提醒" : "🎫 搶票提醒"
         FormBorderStyle = FormBorderStyle.FixedToolWindow
         ShowInTaskbar = false; TopMost = true; MaximizeBox = false; MinimizeBox = false
         BackColor = Color.FromArgb(0xFF, 0xFB, 0xF4)
@@ -1152,11 +1177,11 @@ class TicketForm: Form {
         AutoScaleMode = AutoScaleMode.Dpi
         ClientSize = Size(360, 268)
         let y0 = 12
-        AddLabel("要搶什麼？（例如：五月天 演唱會）", y0); name.Location = Point(14, y0 + 22); name.Width = 332; Controls.Add(name)
-        AddLabel("開賣日期與時間", y0 + 56)
+        AddLabel(course ? "要搶哪門課？（例如：通識熱門課、體育羽球）" : "要搶什麼？（例如：五月天 演唱會）", y0); name.Location = Point(14, y0 + 22); name.Width = 332; Controls.Add(name)
+        AddLabel(course ? "選課系統開放日期與時間" : "開賣日期與時間", y0 + 56)
         date.Format = DateTimePickerFormat.Custom; date.CustomFormat = "yyyy-MM-dd"; date.Location = Point(14, y0 + 78); date.Width = 150; Controls.Add(date)
-        time.Location = Point(176, y0 + 78); time.Width = 80; time.Text = "12:00"; Controls.Add(time)
-        AddLabel("購票網址（可以不填）", y0 + 112); url.Location = Point(14, y0 + 134); url.Width = 332; Controls.Add(url)
+        time.Location = Point(176, y0 + 78); time.Width = 80; time.Text = course ? "09:00" : "12:00"; Controls.Add(time)
+        AddLabel(course ? "選課系統網址（可以不填）" : "購票網址（可以不填）", y0 + 112); url.Location = Point(14, y0 + 134); url.Width = 332; Controls.Add(url)
         lead2.Text = "提前 2 小時"; lead2.Checked = true; lead2.Location = Point(14, y0 + 168); lead2.AutoSize = true; Controls.Add(lead2)
         lead1.Text = "提前 1 小時"; lead1.Location = Point(130, y0 + 168); lead1.AutoSize = true; Controls.Add(lead1)
         let ok = Button(); ok.Text = "好，幫我盯著"; ok.Location = Point(206, y0 + 200); ok.Size = Size(140, 34)
@@ -1182,7 +1207,7 @@ class TicketForm: Form {
         let u = url.Text.Trim()
         if u != "" && !(u.StartsWith("http://") || u.StartsWith("https://")) { hint.Text = "網址要 http:// 或 https:// 開頭"; return }
         let ms = World.UnixMs(t)
-        w.AddTicket(ms, lead1.Checked ? 60 : 120, u == "" ? "-" : u, name.Text.Trim())
+        w.AddTicket(ms, lead1.Checked ? 60 : 120, u == "" ? "-" : u, name.Text.Trim(), Kind)
         name.Text = ""; url.Text = ""; hint.Text = ""
         Hide()
     }
@@ -1240,6 +1265,8 @@ extension Pet {
 
     func LunchLine(_ phase: String) -> String {
         if P.Pik { return PikLunchLine(phase) }
+        if P.Orig { return OrigLunchLine(phase) }
+        if P.Cu { return CuLunchLine(phase) }
         switch P.Id {
         case "po":
             if phase == "start" { return "嘟嘟糊！午餐時間！🔔" }
@@ -1311,6 +1338,8 @@ extension Pet {
         if !HoldingFood() || state == "glass" || state == "hug" { return }
         let bite = Step2(2.5) ? 1 : 0   // 一口一口：手上的食物上下動
         if P.Pik { DrawPikLunch(g, f, bx, by, ps, fx, bite); return }
+        if P.Orig { DrawOrigLunch(g, f, bx, by, ps, fx, bite); return }
+        if P.Cu { CuLunch(g, f, bx, by, ps, fx, bite); return }
         switch P.Id {
         case "po":
             DrawAt(g, Pet.CUSTARD, 9, Double(8 + bite + f.AccDy), bx, by, ps, fx, false, true)
@@ -1339,7 +1368,7 @@ extension Pet {
     // 櫃子裡的公仔也拿著午餐
     func DrawLunchShelf(_ g: Graphics, _ bx: Int, _ by: Int, _ ps: Int, _ flip: Bool) {
         if !w.Lunch { return }
-        if P.Pik { return }   // 皮克敏在 DrawPikShelf 裡拿水果
+        if P.Pik || P.Orig { return }   // 皮克敏、續命小隊在自己的櫃子畫法裡拿午餐
         var food: [String]; var col: Double, row: Double
         switch P.Id {
         case "po": food = Pet.CUSTARD; col = 9; row = 8
@@ -1357,6 +1386,7 @@ extension Pet {
 extension Pet {
     // 外出中的格子：淡淡的剪影，櫃子還是他的位置
     func DrawGhost(_ g: Graphics, _ fx: Int, _ fy: Int, _ ps: Int, _ night: Bool) {
+        if P.Cu { CuGhost(g, fx, fy, ps, night); return }
         let rows: [String] = Pal.Stack(A("HEAD"), A("BODY"), A("LEGS_A"))
         let bx = fx - rows[0].Length * ps / 2, by = fy - rows.count * ps
         let c: Color = P.Accent
@@ -1374,6 +1404,8 @@ extension Pet {
     // 在櫃子裡要佔幾列高（腳到最高點：天線、耳朵、帽子、滑板車墊高、晃動）
     func ShelfRows() -> Int {
         if P.Pik { return PikShelfRows() }
+        if P.Orig { return OrigShelfRows() }
+        if P.Cu { return CuShelfRows() }
         let hat = (w.SeasonNow == "xmas" || Level() >= 3) ? 4 : 0
         switch P.Id {
         case "po": return 16 + P.TopRows + 1                             // 扶著停在旁邊的滑板車

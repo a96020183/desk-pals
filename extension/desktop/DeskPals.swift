@@ -3322,14 +3322,23 @@ typealias Image = Bitmap
 typealias DeskPalsRectangle = Rectangle
 
 final class ColorMatrix {
-    var Matrix00 = 1.0, Matrix11 = 1.0, Matrix22 = 1.0, Matrix33 = 1.0, Matrix44 = 1.0
+    /// 5×5, GDI+ row-vector convention: [r g b a 1] · M (values 0…1, not premultiplied)
+    var M: [[Double]] = [[1, 0, 0, 0, 0], [0, 1, 0, 0, 0], [0, 0, 1, 0, 0], [0, 0, 0, 1, 0], [0, 0, 0, 0, 1]]
+    var Matrix00: Double { get { return M[0][0] } set { M[0][0] = newValue } }
+    var Matrix11: Double { get { return M[1][1] } set { M[1][1] = newValue } }
+    var Matrix22: Double { get { return M[2][2] } set { M[2][2] = newValue } }
+    var Matrix33: Double { get { return M[3][3] } set { M[3][3] = newValue } }
+    var Matrix44: Double { get { return M[4][4] } set { M[4][4] = newValue } }
     init() {}
+    /// `new ColorMatrix(new float[][] { … })`
+    init(_ rows: [[Double]]) { for i in 0..<Swift.min(5, rows.count) { for j in 0..<Swift.min(5, rows[i].count) { M[i][j] = rows[i][j] } } }
 }
 final class ImageAttributes: IDisposable {
     var alpha = 1.0
     var key: Color? = nil
+    var matrix: ColorMatrix? = nil   // 只有 alpha 的矩陣不用逐像素（見 03_shim_custom_a.swift 的 CuApply）
     init() {}
-    func SetColorMatrix(_ m: ColorMatrix) { alpha = m.Matrix33 }
+    func SetColorMatrix(_ m: ColorMatrix) { alpha = m.Matrix33; matrix = m }
     func SetColorKey(_ lo: Color, _ hi: Color) { key = lo }
     func SetWrapMode(_ m: WrapMode) {}
     func Dispose() {}
@@ -3776,6 +3785,7 @@ final class Graphics: IDisposable {
     }
     func DrawImage(_ b: Bitmap?, _ dest: RectangleF, _ sx: Double, _ sy: Double, _ sw: Double, _ sh: Double, _ unit: GraphicsUnit, _ ia: ImageAttributes?) {
         guard let b = b, let img = crop(b, RectangleF(sx, sy, sw, sh)) else { return }
+        if let ia = ia, ia.CuNeedsPixelPass, let img2 = ia.CuApply(img) { drawImage(img2, dest.cg, 1); return }   // 整個 ColorMatrix（自己做的公仔：白邊上色、晚上變暗）
         drawImage(img, dest.cg, ia?.alpha ?? 1)
     }
     func DrawImage(_ b: Bitmap?, _ dest: Rectangle, _ sx: Int, _ sy: Int, _ sw: Int, _ sh: Int, _ unit: GraphicsUnit) {
@@ -4669,6 +4679,9 @@ final class FormView: NSView {
         let d = Int((e.scrollingDeltaY * (e.hasPreciseScrollingDeltas ? 4 : 40)).rounded())
         form?.OnMouseWheel(args(e, MouseButtons.None, d))
     }
+    // drag & drop（Form.AllowDrop／DragEnter／DragDrop：04_shim_custom_b.swift）
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { return form?._dragEntered(sender) ?? [] }
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool { return form?._performDrag(sender) ?? false }
 }
 
 class Form: Control {
@@ -5460,6 +5473,260 @@ enum MessageBox {
 
 func _formsNSColor(_ c: Color) -> NSColor {
     return NSColor(srgbRed: CGFloat(c.R) / 255.0, green: CGFloat(c.G) / 255.0, blue: CGFloat(c.B) / 255.0, alpha: CGFloat(c.A) / 255.0)
+}
+
+// ===== 03_shim_custom_a.swift =====
+// 03_shim_custom_a.swift — System.Drawing bits the custom-pal renderer (53_custom.swift) needs:
+// - Matrix(m11, m12, m21, m22, dx, dy) and Matrix.Clone() (Translate/Rotate/Scale already prepend like GDI+, see 01_drawing.swift)
+// - Graphics.DrawImage(img, PointF[3] destParallelogram, srcRect, unit[, ImageAttributes]) — GDI+'s three-point overload
+// - ImageAttributes with a full ColorMatrix: applied per pixel (un-premultiplied, clamped, re-premultiplied) like GDI+
+// - Bitmap.CuReadP / CuWriteP: raw premultiplied ARGB of the device pixels (= C# LockBits Format32bppPArgb on a 1× bitmap)
+import Foundation
+import CoreGraphics
+
+extension Matrix {
+    /// GDI+ `new Matrix(m11, m12, m21, m22, dx, dy)`: (x, y) → (x·m11 + y·m21 + dx, x·m12 + y·m22 + dy)
+    convenience init(_ m11: Double, _ m12: Double, _ m21: Double, _ m22: Double, _ dx: Double, _ dy: Double) {
+        self.init(CGAffineTransform(a: CGFloat(m11), b: CGFloat(m12), c: CGFloat(m21), d: CGFloat(m22), tx: CGFloat(dx), ty: CGFloat(dy)))
+    }
+    func Clone() -> Matrix { return Matrix(t) }
+}
+
+extension Graphics {
+    /// `g.DrawImage(img, new PointF[] { upperLeft, upperRight, lowerLeft }, srcRect, GraphicsUnit.Pixel)`
+    func DrawImage(_ b: Bitmap?, _ pts: [PointF], _ src: RectangleF, _ unit: GraphicsUnit) { DrawImage(b, pts, src, unit, nil) }
+    func DrawImage(_ b: Bitmap?, _ pts: [PointF], _ src: RectangleF, _ unit: GraphicsUnit, _ ia: ImageAttributes?) {
+        guard let b = b, pts.count >= 3, src.Width > 0, src.Height > 0 else { return }
+        let p0 = pts[0], p1 = pts[1], p2 = pts[2]
+        // 把 (0,0)-(w,h) 對到平行四邊形（左上、右上、左下），再接上目前的世界座標
+        let a = CGAffineTransform(a: CGFloat((p1.X - p0.X) / src.Width), b: CGFloat((p1.Y - p0.Y) / src.Width),
+                                  c: CGFloat((p2.X - p0.X) / src.Height), d: CGFloat((p2.Y - p0.Y) / src.Height),
+                                  tx: CGFloat(p0.X), ty: CGFloat(p0.Y))
+        let old = Transform
+        Transform = Matrix(a.concatenating(old.t))
+        DrawImage(b, RectangleF(0, 0, src.Width, src.Height), src.X, src.Y, src.Width, src.Height, unit, ia)
+        Transform = old
+    }
+}
+
+extension ImageAttributes {
+    /// 只有 Matrix33（透明度）不是 1 的話照舊用 setAlpha；其他的（上色、變暗）逐像素算
+    var CuNeedsPixelPass: Bool {
+        guard let m = matrix else { return false }
+        for i in 0..<5 {
+            for j in 0..<5 {
+                if i == 3 && j == 3 { continue }
+                let want: Double = i == j ? 1 : 0
+                if m.M[i][j] != want { return true }
+            }
+        }
+        return false
+    }
+
+    /// GDI+ ColorMatrix: out = [r g b a 1] · M（0…1、不預乘），超出 0…1 就截掉
+    func CuApply(_ img: CGImage) -> CGImage? {
+        guard let m = matrix else { return img }
+        let w = img.width, h = img.height
+        guard let c = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: _gdiColorSpace,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue) else { return nil }
+        c.setBlendMode(.copy)
+        c.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+        guard let data = c.data else { return nil }
+        let p = data.assumingMemoryBound(to: UInt8.self)
+        let bpr = c.bytesPerRow
+        let M = m.M
+        func cl(_ v: Double) -> Double { return v < 0 ? 0 : (v > 1 ? 1 : v) }
+        for y in 0..<h {
+            var o = y * bpr
+            for _ in 0..<w {
+                let a0 = Double(p[o + 3]) / 255
+                var r = 0.0, g = 0.0, b = 0.0
+                if a0 > 0 { b = Double(p[o]) / 255 / a0; g = Double(p[o + 1]) / 255 / a0; r = Double(p[o + 2]) / 255 / a0 }
+                let nr = cl(r * M[0][0] + g * M[1][0] + b * M[2][0] + a0 * M[3][0] + M[4][0])
+                let ng = cl(r * M[0][1] + g * M[1][1] + b * M[2][1] + a0 * M[3][1] + M[4][1])
+                let nb = cl(r * M[0][2] + g * M[1][2] + b * M[2][2] + a0 * M[3][2] + M[4][2])
+                let na = cl(r * M[0][3] + g * M[1][3] + b * M[2][3] + a0 * M[3][3] + M[4][3])
+                p[o] = UInt8((nb * na * 255).rounded()); p[o + 1] = UInt8((ng * na * 255).rounded()); p[o + 2] = UInt8((nr * na * 255).rounded()); p[o + 3] = UInt8((na * 255).rounded())
+                o += 4
+            }
+        }
+        return c.makeImage()
+    }
+}
+
+extension Bitmap {
+    /// 裝置像素（寬 PixelWidth × 高 PixelHeight，第 0 列＝最上面），預乘的 0xAARRGGBB
+    func CuReadP() -> [Int] {
+        let w = ctx.width, h = ctx.height
+        var out = [Int](repeating: 0, count: w * h)
+        guard let d = ctx.data else { return out }
+        let p = d.assumingMemoryBound(to: UInt8.self)
+        let bpr = ctx.bytesPerRow
+        for y in 0..<h {
+            var o = y * bpr
+            for x in 0..<w {
+                out[y * w + x] = (Int(p[o + 3]) << 24) | (Int(p[o + 2]) << 16) | (Int(p[o + 1]) << 8) | Int(p[o])
+                o += 4
+            }
+        }
+        return out
+    }
+    func CuWriteP(_ px: [Int]) {
+        let w = ctx.width, h = ctx.height
+        guard let d = ctx.data, px.count >= w * h else { return }
+        let p = d.assumingMemoryBound(to: UInt8.self)
+        let bpr = ctx.bytesPerRow
+        for y in 0..<h {
+            var o = y * bpr
+            for x in 0..<w {
+                let v = px[y * w + x]
+                p[o] = UInt8(v & 255); p[o + 1] = UInt8((v >> 8) & 255); p[o + 2] = UInt8((v >> 16) & 255); p[o + 3] = UInt8((v >> 24) & 255)
+                o += 4
+            }
+        }
+    }
+}
+
+// ===== 04_shim_custom_b.swift =====
+// 04_shim_custom_b.swift — WinForms bits the custom-pal maker / share / .deskpal port needs (55–57).
+// - Form drag-and-drop (AllowDrop, DragEnter, DragDrop, DragEventArgs, DataFormats.FileDrop, DragDropEffects):
+//   FormView (02_forms.swift) forwards draggingEntered / performDragOperation to Form._dragEntered / _performDrag below.
+//   Form has no room for stored properties in an extension, so the drag settings live in a side table.
+// - OpenFileDialog / SaveFileDialog → NSOpenPanel / NSSavePanel (CuDialogs).
+// - TextBox.PreferredHeight.
+import AppKit
+import UniformTypeIdentifiers
+
+// ---------------------------------------------------------------- drag & drop
+
+enum DataFormats {
+    static let FileDrop = "FileDrop"
+    static let UnicodeText = "UnicodeText"
+}
+enum DragDropEffects { case None, Copy, Move, Link, All }
+
+/// e.Data：只有拖進來的檔案（WinForms 的 FileDrop＝string[] 完整路徑）
+final class DragData {
+    let files: [String]
+    init(_ files: [String]) { self.files = files }
+    func GetDataPresent(_ format: String) -> Bool { return format == DataFormats.FileDrop && files.count > 0 }
+    func GetData(_ format: String) -> Any? { return format == DataFormats.FileDrop ? files : nil }
+}
+
+final class DragEventArgs: EventArgs {
+    let Data: DragData
+    var Effect = DragDropEffects.None
+    init(_ d: DragData) { Data = d; super.init() }
+}
+
+final class _FormDragInfo {
+    var allow = false
+    var enter: ((DragEventArgs) -> Void)? = nil
+    var drop: ((DragEventArgs) -> Void)? = nil
+    var lastEffect = DragDropEffects.None
+}
+var _formDragTable: [ObjectIdentifier: _FormDragInfo] = [:]
+
+extension Form {
+    var _drag: _FormDragInfo {
+        let k = ObjectIdentifier(self)
+        if let d = _formDragTable[k] { return d }
+        let d = _FormDragInfo(); _formDragTable[k] = d
+        return d
+    }
+    var AllowDrop: Bool {
+        get { return _drag.allow }
+        set { _drag.allow = newValue; _applyAllowDrop() }
+    }
+    // C# `DragEnter += delegate(object s, DragEventArgs e) {…}` → `DragEnter = { e in … }`
+    var DragEnter: ((DragEventArgs) -> Void)? {
+        get { return _drag.enter }
+        set { _drag.enter = newValue }
+    }
+    var DragDrop: ((DragEventArgs) -> Void)? {
+        get { return _drag.drop }
+        set { _drag.drop = newValue }
+    }
+    /// 視窗是 Show 的時候才建（_ensure）：顯示之後再呼叫一次，把 FormView 登記成可以放檔案
+    func _applyAllowDrop() {
+        guard let v = view else { return }
+        if _drag.allow { v.registerForDraggedTypes([.fileURL]) } else { v.unregisterDraggedTypes() }
+    }
+    static func _dragFiles(_ s: NSDraggingInfo) -> [String] {
+        let urls = s.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+        return urls.map { $0.path }
+    }
+    func _dragEntered(_ s: NSDraggingInfo) -> NSDragOperation {
+        if !_drag.allow { return [] }
+        let e = DragEventArgs(DragData(Form._dragFiles(s)))
+        _drag.enter?(e)
+        _drag.lastEffect = e.Effect
+        switch e.Effect {
+        case .Copy, .All: return .copy
+        case .Move: return .move
+        case .Link: return .link
+        default: return []
+        }
+    }
+    func _performDrag(_ s: NSDraggingInfo) -> Bool {
+        if !_drag.allow || _drag.lastEffect == .None { return false }
+        let e = DragEventArgs(DragData(Form._dragFiles(s)))
+        e.Effect = _drag.lastEffect
+        // 跟 WinForms 一樣：放下的那一刻在 UI 執行緒上處理（下一輪，讓拖曳動畫先結束）
+        let h = _drag.drop
+        DispatchQueue.main.async { h?(e) }
+        return true
+    }
+}
+
+// ---------------------------------------------------------------- file dialogs
+
+/// mac: OpenFileDialog / SaveFileDialog（Filter 的副檔名 → allowedContentTypes；InitialDirectory → directoryURL）
+enum CuDialogs {
+    static func Types(_ exts: [String]) -> [UTType] {
+        var out: [UTType] = []
+        for e in exts { if let t = UTType(filenameExtension: e) { out.append(t) } }
+        return out
+    }
+    /// 回傳選到的完整路徑；取消回 nil
+    static func Open(_ title: String, _ exts: [String], _ dir: String) -> String? {
+        NSApp.activate(ignoringOtherApps: true)
+        let p = NSOpenPanel()
+        p.title = title; p.message = title
+        p.canChooseFiles = true; p.canChooseDirectories = false; p.allowsMultipleSelection = false
+        let ts = Types(exts)
+        if ts.count > 0 { p.allowedContentTypes = ts }
+        if !dir.isEmpty { p.directoryURL = URL(fileURLWithPath: dir, isDirectory: true) }
+        p.level = .floating
+        let r = p.runModal()
+        Form._maybeDeactivate()
+        if r != .OK { return nil }
+        return p.url?.path
+    }
+    static func Save(_ title: String, _ fileName: String, _ exts: [String], _ dir: String) -> String? {
+        NSApp.activate(ignoringOtherApps: true)
+        let p = NSSavePanel()
+        p.title = title; p.message = title
+        p.nameFieldStringValue = fileName
+        let ts = Types(exts)
+        if ts.count > 0 { p.allowedContentTypes = ts }
+        if !dir.isEmpty { p.directoryURL = URL(fileURLWithPath: dir, isDirectory: true) }
+        p.level = .floating
+        let r = p.runModal()
+        Form._maybeDeactivate()
+        if r != .OK { return nil }
+        return p.url?.path
+    }
+}
+
+// ---------------------------------------------------------------- TextBox
+
+extension TextBox {
+    /// WinForms：字型行高（BorderStyle.None 時沒有外框的空間）
+    var PreferredHeight: Int {
+        let f = _formsNSFont(Font)
+        return Int((f.ascender - f.descender + f.leading).rounded(.up)) + 2
+    }
 }
 
 // ===== 10_platform.swift =====
@@ -6296,6 +6563,12 @@ final class Pal
     var BodyTop: Int = 8                       // 身體第一列在 16 格框的第幾列
     // ---- from 50_pikmin.swift ----
     var Pik: Bool = false                      // 皮克敏（頭上的葉子／花苞／花會長大）
+    // ---- from 51_original.swift ----
+    var Orig: Bool = false                     // 續命小隊
+    // ---- from 53_custom.swift ----
+    var Cu: Bool = false                       // 自己做的公仔
+    var Meta: CuMeta! = nil
+    var Spr: CuSprite! = nil
 
     static func C(_ rgb: Int) -> Color { return Color.FromArgb((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255) }
     func Col(_ c: Character, _ day: Int, _ night: Int) { Day[c] = Pal.C(day); Night[c] = Pal.C(night) }
@@ -6307,6 +6580,8 @@ final class Pal
             let l = List<Pal>()
             for x in [Spidey(), Po(), Stitch(), Hangyodon(), Tinky(), Dipsy(), LaaLaa()] { l.Add(x) }
             l.AddRange(PikminPals())
+            l.AddRange(OrigPals())
+            l.AddRange(CuPals())
             all = l
         }
         return all
@@ -6319,23 +6594,25 @@ final class Pal
 
     // ---- 兩櫃：經典（Spidey、小波、史迪仔、人魚漢頓）／天線寶寶（丁丁、迪西、拉拉、小波；大格是小波）----
     static let Classic = "classic", Teletubbies = "teletubbies"
-    static func NormLineup(_ s: String!) -> String { let t = s == nil ? "" : s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); return t == Teletubbies || t == Pikmin ? t : Classic }
+    static func NormLineup(_ s: String!) -> String { let t = s == nil ? "" : s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); return t == Teletubbies || t == Pikmin || t == Original || (t == Mine && HasCustom()) ? t : Classic }
     static func LineupIds(_ lineup: String!) -> [String]
     {
         if NormLineup(lineup) == Pikmin { return PikminIds }   // 皮克敏一櫃：大格是休息花（50_pikmin.swift）
+        if NormLineup(lineup) == Original { return OriginalIds }   // 續命小隊（51_original.swift）
+        if NormLineup(lineup) == Mine { return MineIds() }                       // 我的櫃：自己做的公仔（53_custom.swift）
         return NormLineup(lineup) == Teletubbies ? ["tinky", "dipsy", "laalaa", "po"] : ["spidey", "po", "stitch", "hangyodon"]
     }
     static func Lineup(_ lineup: String!) -> List<Pal>
     {
         let l = List<Pal>()
-        for id in LineupIds(lineup) { l.Add(Get(id)) }
+        for id in LineupIds(lineup) { if Get(id) != nil { l.Add(Get(id)) } }
         return l
     }
     // 這一櫃預設放在大格的（經典一櫃照用最久的那隻）
-    static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Teletubbies ? "po" : nil }
+    static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Teletubbies ? "po" : (NormLineup(lineup) == Original ? "boba" : nil) }
     // 設定視窗、小屋「換一櫃」列出來的櫃子（之後新增一櫃：這裡加一個 id、LineupIds／LineupName 加一行）
-    static let Lineups: [String] = [Classic, Teletubbies, Pikmin]
-    static func LineupName(_ lineup: String) -> String { let n = NormLineup(lineup); return n == Teletubbies ? "天線寶寶一櫃" : (n == Pikmin ? "皮克敏一櫃" : "經典一櫃") }
+    static let Lineups: [String] = [Original, Classic, Teletubbies, Pikmin]
+    static func LineupName(_ lineup: String) -> String { let n = NormLineup(lineup); return n == Original ? OriginalName : (n == Teletubbies ? "天線寶寶一櫃" : (n == Pikmin ? "皮克敏一櫃" : (n == Mine ? "我的櫃" : "經典一櫃"))) }
 
     func Shared()
     {
@@ -7373,6 +7650,25 @@ final class Pet {
     var PikHold = ""             // 手上拿的（午餐水果、果汁）
     var pikStage = -1; var pikStageDay = ""
     var pendAct: String? = nil; var pendDur: Double = 0; var pendTarget: Double = Double.nan   // 在空中被叫去做事：落地再做（不然會停在半空中）
+    // ---- from 51_original.swift ----
+    var oAct = "", oPose = ""            // 專屬動作（state == "orig"）、串場的姿勢
+    var oT: Double = 0, oWired: Double = 0, oVaultT: Double = 0, oLatteT: Double = 0, oNoteT: Double = 0, oFlyDur: Double = 0
+    var oTx: Double = Double.nan, oFx0: Double = 0, oFy0: Double = 0, oFx1: Double = 0, oFy1: Double = 0, oGlideVx: Double = 0
+    var oGliding = false
+    var oStuckH: IntPtr = 0; var oStuckDx = 0, oStuckDy = 0
+    var oPend: String? = nil; var oPendDur: Double = 0
+    var OHold = ""                       // 手上拿的（串場：mini 小飯糰、paddle 飯匙、marker 麥克筆）
+    var ONoteFace = false                // 醒醒：臉上被貼了「先睡覺」的便條
+    var OPearlLatte = false              // 醒醒：被加了珍珠（珍珠拿鐵）
+    // ---- from 53_custom.swift ----
+    var cuPose = Pet.CuPose()
+    var cuCanvas: Bitmap! = nil
+    var cuAct = "", cuPrev = ""
+    var cuT: Double = 0, cuLandT: Double = 0, cuX: Double = 0, cuIgnoreCd: Double = 0
+    var cuOut: Bitmap! = nil
+    var cuBuf: [Int]! = nil
+    var cuMask: [UInt8]! = nil, cuTmp: [UInt8]! = nil
+    var cuPushDir = 1; var cuPushCd: Double = 0
 
     init(_ w: World, _ p: Pal, _ S: Int, _ seed: Int) {
         self.w = w; P = p; self.S = S
@@ -7406,7 +7702,7 @@ extension Pet {
     func Grounded() -> Bool {
         switch state {
         case "walk", "idle", "sleep", "hug", "seek", "dizzy", "fetch", "dance", "kick", "wave", "pose", "bat", "catch", "header", "capetrip", "elvis", "chomp", "think", "hide", "nudge", "spin", "goto",
-             "plop", "twirl", "hattoss", "juggle", "bagdig", "pik":
+             "plop", "twirl", "hattoss", "juggle", "bagdig", "pik", "orig", "cu":
             return true
         default:
             return false
@@ -7544,6 +7840,7 @@ extension Pet {
             AddHeart(); AddHeart(); AddHeart()
             return
         }
+        if P.Cu && CuPat() { return }
         let line = !Night && Level() >= 4 && rnd.NextDouble() < 0.4 ? L("pats_hi") : L("pats")
         if Is("hangyodon") && !Night && P.Lines["pats"].contains(line) { jokeT = 2.6 }
         if Grounded() { Hug(line, 2.6) }
@@ -7554,6 +7851,8 @@ extension Pet {
     func PatCombo() {
         AddHeart()
         if P.Pik { PikCombo(); return }
+        if P.Orig { OrigCombo(); return }
+        if P.Cu { CuCombo(); return }
         switch P.Id {
         case "po":   // 咯咯笑＋原地轉一圈「再來一次！」
             Say(L("tickle"), 1.8)
@@ -7806,7 +8105,7 @@ extension Pet {
             else if dizzyOnLand { dizzyOnLand = false; SetState("dizzy", 1.6) }
             else if fetching && w.BallOn { SetState("fetch", 15) }
             else if afterLand != "" { LandAction() }
-            else if InScene && (w.TubbyLineup || w.PikLineup) { SetState("idle", 30) }   // 天線寶寶串場：跳一下落地就站好，不要走掉
+            else if InScene && (w.TubbyLineup || w.PikLineup || w.OrigLineup) { SetState("idle", 30) }   // 天線寶寶串場：跳一下落地就站好，不要走掉
             else { SetState("walk", R(2, 5)) }
         }
     }
@@ -7816,6 +8115,7 @@ extension Pet {
     // 站著的那個視窗被拖動 → 跟著走
     func FollowFast() {
         if supH == IntPtr.Zero || !Grounded() { return }
+        if w.CuFake(supH) { return }   // 測試用的假視窗（53_custom.swift）
         var r = W.RECT()
         if !W.IsWindowVisible(supH) || W.IsIconic(supH) || !W.Rect(supH, &r) { Jump(0, 0); Say(Is("hangyodon") ? "哇！地板游走了！" : "哇！地板不見了", 1.2); return }
         let dl = r.L - supWinL
@@ -7971,7 +8271,7 @@ extension Pet {
         Jump(tvx, tvy)
         if speed > 900 * k {
             Say(L("throw"), 0.9)
-            if Is("po") || Is("stitch") || Is("laalaa") { rolling = true }
+            if Is("po") || Is("stitch") || Is("laalaa") || P.Cu { rolling = true }
         }
     }
 
@@ -7983,7 +8283,7 @@ extension Pet {
         fx1 = tfx - Double(SW) / 2.0; fy1 = tfy - Double(SH)
         vx = tvx; vy = tvy; flyT = 0
         supH = IntPtr.Zero; sc = 1; fetching = false; InScene = false
-        rolling = Is("po") || Is("stitch") || Is("laalaa")
+        rolling = Is("po") || Is("stitch") || Is("laalaa") || P.Cu
         SetState("fling", 99)
     }
 
@@ -8014,7 +8314,8 @@ extension Pet {
         case "dipsy": line = "進球。🏀 帽子還在，酷。"
         case "laalaa": line = "進球！🏀 啦啦啦～"
         case "pkred", "pkyellow", "pkblue": line = PikLine("goal")
-        default: line = "進球！🏀 Thwip!"
+        case "boba", "coffee", "onigiri", "sticky": line = OrigLine("goal")
+        default: line = P.Cu ? L("x_goal") : "進球！🏀 Thwip!"
         }
         Say(line, 2.4)
         Burst(14)
@@ -8033,7 +8334,8 @@ extension Pet {
         case "dipsy": line = "酷！"
         case "laalaa": line = "啦啦～進了！"
         case "pkred", "pkyellow", "pkblue": line = PikLine("cheer")
-        default: line = "好球！"
+        case "boba", "coffee", "onigiri", "sticky": line = OrigLine("cheer")
+        default: line = P.Cu ? L("x_cheer") : "好球！"
         }
         Say(line, 1.4)
         Mark(0)
@@ -8049,9 +8351,10 @@ extension Pet {
         case "dipsy": return "沒進…但帽子很帥"
         case "laalaa": return "差一點！再來一次！"
         case "pkred", "pkyellow", "pkblue": return PikLine("miss")
+        case "boba", "coffee", "onigiri", "sticky": return OrigLine("miss")
         default: break
         }
-        return "差一點！再一次？"
+        return P.Cu ? L("x_miss") : "差一點！再一次？"
     }
 
     // ================= 公仔櫃：回櫃子／出來 =================
@@ -8115,6 +8418,7 @@ extension Pet {
         if Is("hangyodon") { StartSwim(tx, Double(wa.Bottom), false); return }
         BallisticTo(tx, Double(wa.Bottom))
         if Is("stitch") { rolling = true }
+        if P.Orig { OrigExit() }
         if P.Pik { afterLand = "pksprout" }                                     // 皮克敏：落地先種在土裡，再「噗！」拔出來
         if Is("tinky") && rnd.NextDouble() < 0.3 { afterLand = "plop" }          // 丁丁跳出來常常跌坐
         else if Is("laalaa") && rnd.NextDouble() < 0.4 { afterLand = "twirl" }   // 拉拉落地轉一圈
@@ -8172,6 +8476,8 @@ extension Pet {
         if ballXp < 20 { ballXp += 2; AddXp(2) }
         Burst(6)
         if P.Pik { PikBall(); return true }
+        if P.Orig { OrigBall(); return true }
+        if P.Cu { CuBall(); return true }
         switch P.Id {
         case "po": PoBall(); return true
         case "stitch": StitchBall(); return true
@@ -8218,6 +8524,8 @@ extension Pet {
             else if Is("dipsy") && Grounded() { poseKind = "hatdown"; SetState("pose", 2.6) }
             else if Is("laalaa") && hideFrom != nil && Grounded() { HideBehindPet(hideFrom!) }
             else if P.Pik && Grounded() { PikReact("errors") }
+            else if P.Orig && Grounded() { OrigReact("errors") }
+            else if P.Cu && Grounded() { CuReact("errors") }
             else if state == "walk" { SetState("idle", 3) }
             Say(line, 3, true)
         }
@@ -8256,7 +8564,7 @@ extension Pet {
         else {
             let was = state == "sleep"
             WakeIfSleep()
-            if was && Out { Knock(L("welcome"), "ambient") }
+            if was && Out && !(P.Cu && CuWelcome()) { Knock(L("welcome"), "ambient") }
         }
     }
 
@@ -8347,7 +8655,7 @@ extension Pet {
                 if Is("po") { SetState("wave", 1.6) }
                 else if Is("hangyodon") { poseKind = "hero"; SetState("pose", 1.4) }
                 else if Is("dipsy") { poseKind = "hattip"; SetState("pose", 1.6) }
-                else if P.Tubby { SetState("wave", 1.6) }
+                else if P.Tubby || P.Orig { SetState("wave", 1.6) }
                 else { Jump(0, -260 * k) }
             }
             Say(L("hi"), 2.4)
@@ -8381,6 +8689,7 @@ extension Pet {
         case "tinky": if Grounded() { TinkyBag("star", true) }; Say(line, 4); Burst(10)
         case "dipsy": if Grounded() { HatToss(true) }; Say(line, 4); Burst(8)
         case "laalaa": if Grounded() { SetState("twirl", 2.4) }; Say(line, 4); for _ in 0..<4 { Mark(0) }; Burst(8)
+        case "boba", "coffee", "onigiri", "sticky": OrigCelebrate(line, lead)
         default:
             if lead { w.Fireworks(w.WA(Cx, y + Double(SH) / 2.0), 10, -1) }
             if Grounded() { SetState("dance", 3.5) }
@@ -8431,6 +8740,8 @@ extension Pet {
         if HoldToast && rnd.NextDouble() < dt * 2.5 && notes.Count < 10 { notes.Add(Arr<Double>([R(-8, 8) * k, 0, 7])) }   // 吐司屑屑
         if P.Tubby && TubbyStep(dt) { return true }
         if P.Pik && PikStep(dt) { return true }
+        if P.Orig && OrigStep(dt) { return true }
+        if P.Cu && CuStep(dt) { return true }
         switch state {
         case "plop":
             sT += dt
@@ -8485,6 +8796,8 @@ extension Pet {
     // 走到視窗邊緣：0＝照預設跳下去、1＝回頭、2＝換狀態了
     func EdgeOfWindow(_ right: Bool) -> Int {
         if P.Pik { return PikEdge(right) }
+        if P.Orig { return OrigEdge(right) }
+        if P.Cu { return CuEdge(right) }
         switch P.Id {
         case "spidey":
             if !goClimb && rnd.NextDouble() < 0.55 { dir = -dir; if rnd.NextDouble() < 0.3 { SpinWeb(supH, right) }; return 1 }
@@ -8547,6 +8860,7 @@ extension Pet {
     // 落地時的特別反應：true＝處理掉了
     func Landed(_ wasRolling: Bool, _ landVx: Double) -> Bool {
         if P.Pik && PikLanded(wasRolling) { return true }
+        if P.Orig && OrigLanded(wasRolling) { return true }
         if Is("stitch") && wasRolling { vx = landVx * 0.8; if Math.Abs(vx) < 60 * k { vx = Double(dir) * 120 * k }; SetState("curl", R(0.8, 1.4)); return true }
         if Is("po") && wasRolling && state != "spin" { SetState("dizzy", 0.8); Say(Pick(["轉圈圈～", "再來一次！"]), 1.2); return true }
         if Is("po") && state == "spin" { SetState("spin", 0.4); return true }
@@ -8558,6 +8872,8 @@ extension Pet {
     func LandAction() {
         let a = afterLand; afterLand = ""
         if P.Pik && PikLand(a) { return }
+        if P.Orig && OrigLand(a) { return }
+        if P.Cu && CuLand(a) { return }
         switch a {
         case "wave": SetState("wave", 1.8); Say("Eh-oh!", 1.6)
         case "sniff": poseKind = "grin"; SetState("pose", 1.6); Mark(2); Say(Pick(["（聞聞）ih?", "嘻嘻，這個好玩", "ih-ih! 史迪仔的！"]), 1.6)
@@ -8583,6 +8899,8 @@ extension Pet {
         }
         if w.OutCount() > 1 && rnd.NextDouble() < 0.12 && VisitFriend() { return }
         if P.Pik { PikDecide(r, wa); return }
+        if P.Orig { OrigDecide(r, wa); return }
+        if P.Cu { CuDecide(r, wa); return }
         let lateOk: () -> Bool = { self.lateCd <= 0 && self.LateLine() != nil }
         switch P.Id {
         case "spidey":
@@ -8700,6 +9018,8 @@ extension Pet {
     func Signature() {
         if !Out { return }
         if P.Pik { PikSignature(); return }
+        if P.Orig { OrigSignature(); return }
+        if P.Cu { CuSignature(); return }
         switch P.Id {
         case "spidey": if !ShootTo("swing") { Say("這裡太低了，甩不起來", 1.6) }
         case "po": if !JumpToPlatform() { Jump(Double(dir) * 200 * k, -520 * k); Say("咻～～", 1) } else { Say("咻～～再來一次！", 1.4) }
@@ -8733,6 +9053,8 @@ extension Pet {
 
     func ActSpecial(_ a: String) {
         if P.Pik && PikAct(a) { return }
+        if P.Orig && OrigAct(a) { return }
+        if P.Cu && CuAct(a) { return }
         switch a {
         case "swing": if Is("spidey") { if !ShootTo("swing") { Say("這裡太低了，甩不起來", 1.6) } } else { Signature() }
         case "hang": if Is("spidey") { if !ShootTo("hang") { Say("上面沒地方黏", 1.6) } }
@@ -8762,10 +9084,11 @@ extension Pet {
     // 新視窗跳出來
     func ReactNewWindow(_ win: WinInfo) {
         if !Grounded() || sleepMode || state == "hug" || InScene || fetching { return }
+        if P.Orig { OrigNewWindow(win); return }
         switch P.Id {
         case "spidey": if !ZipToWindow(win, L("newwin")) { Say("有新視窗！👀", 1.5) }
         default:
-            let after: String = Is("po") || Is("tinky") ? "wave" : (Is("hangyodon") ? "bubbles" : (Is("dipsy") ? "hattip" : (Is("laalaa") ? "twirl" : "sniff")))
+            let after: String = Is("po") || Is("tinky") ? "wave" : (Is("hangyodon") ? "bubbles" : (Is("dipsy") ? "hattip" : (Is("laalaa") ? "twirl" : (P.Cu ? "" : "sniff"))))
             if !GoToWindow(win, L("newwin"), after) { Say(L("newwin"), 1.5) }
         }
     }
@@ -9212,7 +9535,7 @@ extension Pet {
     // 走到／跳到另一隻旁邊（串場前先湊在一起）；回傳大概要幾秒
     @discardableResult
     func ComeNear(_ o: Pet) -> Double {
-        let mul: Double = P.Tubby || o.P.Tubby ? 2.0 : 1.35   // 天線寶寶比較寬（16 格＋道具）
+        let mul: Double = P.Tubby || o.P.Tubby ? 2.0 : (P.Orig ? 1.6 : 1.35)   // 天線寶寶比較寬（16 格＋道具）
         var tx = o.Cx + (Cx > o.Cx ? 1.0 : -1.0) * Double(o.SW) * mul
         let wa = w.WA(o.Cx, o.Foot - 4)
         tx = Pet.Clamp(tx, Double(wa.Left + SW), Double(wa.Right - SW))
@@ -9712,6 +10035,8 @@ extension Pet
     func Frame() -> Fr
     {
         if P.Pik { return FramePik() }
+        if P.Orig { return FrameOrig() }
+        if P.Cu { return FrameCu() }
         switch P.Id
         {
             case "po": return FramePo()
@@ -10038,6 +10363,7 @@ extension Pet
         if Is("hangyodon") && state == "sleep" { DrawSleepBubble(g, bx, by, ps, false) }
         if P.Tubby { DrawTubbyBehind(g, f, bx, by, ps, fx) }
         if P.Pik { DrawPikBehind(g, f, bx, by, ps, fx) }
+        if P.Orig { DrawOrigBehind(g, f, bx, by, ps, fx) }
     }
 
     // 人魚漢頓睡在泡泡裡（先畫泡泡底，身體畫完再畫亮面）
@@ -10109,6 +10435,7 @@ extension Pet
         if Is("spidey") && w.Holder === self { DrawAt(g, w.BallKind == "baseball" ? Pet.BALLART : Pet.TBALL, 9, 4, bx, by, ps, fx, false, true) }
         if P.Tubby { DrawTubbyFront(g, f, bx, by, ps, fx) }
         if P.Pik { DrawPikFront(g, f, bx, by, ps, fx) }
+        if P.Orig { DrawOrigFront(g, f, bx, by, ps, fx) }
         if HoldToast && f.Rot == 0 && !f.Fy { DrawAt(g, Pet.TOAST, Is("po") ? 9.5 : 10.5, P.BodyTop + 1 + f.AccDy, bx, by, ps, fx, false, true) }
     }
 
@@ -10118,7 +10445,7 @@ extension Pet
         l = Math.Min(l, px); r = Math.Max(r, px); tp = Math.Min(tp, py); b = Math.Max(b, py)
     }
     func SilkVisible() -> Bool { return state == "swing" || state == "hang" || state == "zip" || state == "shoot" || state == "webcatch" || state == "sling" }
-    func Bob() -> Double { if P.Pik { return PikBob() }; if P.Tubby { return TubbyBob() }; return state == "dance" || state == "elvis" ? Math.Abs(Math.Sin(anim * 8)) * 6 * k : (Is("hangyodon") && state == "walk" ? (Step2(4) ? k : 0) : 0) }
+    func Bob() -> Double { if P.Cu { return 0 }; if P.Pik { return PikBob() }; if P.Orig { return OrigBob() }; if P.Tubby { return TubbyBob() }; return state == "dance" || state == "elvis" ? Math.Abs(Math.Sin(anim * 8)) * 6 * k : (Is("hangyodon") && state == "walk" ? (Step2(4) ? k : 0) : 0) }
 
     func Render()
     {
@@ -10134,7 +10461,7 @@ extension Pet
         for sp in sparks { Grow(&l, &tp, &r, &b, sp[0], sp[1]) }
         for f in flakes { Grow(&l, &tp, &r, &b, f[0], f[1]) }
         if w.Lead() === self && w.TicketCountdown() != nil { tp = Math.Min(tp, y - Double((P.TopRows + 16) * S)); l = Math.Min(l, Cx - 60 * k); r = Math.Max(r, Cx + 60 * k) }
-        if P.Tubby || WearHat || HoldToast || P.Pik { tp = Math.Min(tp, y - Double((P.TopRows + (state == "juggle" || state == "hattoss" || state == "bagdig" ? 16 : 9)) * S)) }
+        if P.Tubby || WearHat || HoldToast || P.Pik || P.Orig { tp = Math.Min(tp, y - Double((P.TopRows + (state == "juggle" || state == "hattoss" || state == "bagdig" ? 16 : 9)) * S)) }
         let pad = 6 + CInt(5 * k)
         let nb = Rectangle.FromLTRB(CInt(Math.Floor(l)) - pad, CInt(Math.Floor(tp)) - pad, CInt(Math.Ceiling(r)) + pad, CInt(Math.Ceiling(b)) + pad)
         if frameBmp == nil || frameBmp.Width != nb.Width || frameBmp.Height != nb.Height
@@ -10347,6 +10674,7 @@ extension Pet
     // 畫一隻（身體＋前後道具＋配件＋肚子螢幕）；櫃子裡也用這個
     func DrawFigure(_ g: Graphics, _ f: Fr, _ sbx: Int, _ sby: Int, _ sps: Int, _ fx: Bool, _ extras: Bool)
     {
+        if P.Cu { DrawFigureCu(g, f, sbx, sby, sps, fx, extras); return }   // 自己做的公仔（53_custom.swift）
         // 圖一律貼齊 16 格框的底（比較高的角色往上長），Top 再額外上下移
         var rows = f.Rows
         var top = f.Top + 16 - rows.count
@@ -10385,6 +10713,8 @@ final class ShelfForm: OverlayForm
     var Tubby = false                   // 天線寶寶一櫃：格子裡是藍天綠山丘，大格有太陽寶寶
     // ---- from 50_pikmin.swift ----
     var Pik = false                     // 皮克敏一櫃：格子底下是土和草，大格種一朵休息花
+    // ---- from 51_original.swift ----
+    var Orig = false                    // 續命小隊：格子背板是淡淡的方格紙，大格釘一張小便利貼
     var hover = -1
     var bmp: Bitmap! = nil, bg: Bitmap! = nil
     var bgKey = ""
@@ -10639,6 +10969,7 @@ final class ShelfForm: OverlayForm
             g.FillRectangle(LinearGradientBrush(inner, Mix(panel, Color.White, 0.35), Mix(panel, C(0x6B4A30), 0.25), 90.0), inner)
             if Tubby { DrawHills(g, inner, i == 0) }
             if Pik { DrawSoil(g, inner, i == 0) }
+            if Orig { DrawGridPaper(g, inner, i == 0) }
             // 頂上的展示燈
             do
             {
@@ -10933,7 +11264,7 @@ final class ShelfForm: OverlayForm
 
     func Cabinet(_ who: [Pet?], _ outNow: [Bool], _ t: Double) -> Bitmap
     {
-        var key = "\(Night)|\(Tubby)|\(Pik)|\(Area.Width)x\(Area.Height)"
+        var key = "\(Night)|\(Tubby)|\(Pik)|\(Orig)|\(Area.Width)x\(Area.Height)"
         for i in 0..<4 { key += "|" + (who[i] == nil ? "-" : who[i]!.P.Id) }
         if key != bgKey || bg == nil { bgKey = key; BuildBg(who, outNow) }
         if bmp == nil || bmp.Width != bg.Width || bmp.Height != bg.Height { if bmp != nil { bmp.Dispose() }; bmp = Bitmap(bg.Width, bg.Height) }
@@ -11084,6 +11415,7 @@ extension Pet
         let flip = (Math.Floor(tt / 9) % 2) == 1
         let dps = Double(ps)
         var head = A("HEAD")
+        if P.Cu { DrawCuShelf(g, fx, fy, ps, cell, tt) } else {
         switch P.Id
         {
             case "spidey":
@@ -11155,13 +11487,16 @@ extension Pet
                 DrawTubbyShelf(g, head, fx, bx, by, ps, flip, tt, blink)
             case "pkred", "pkyellow", "pkblue":
                 DrawPikShelf(g, fx, bx, by, ps, flip, tt, blink, cell)
+            case "boba", "coffee", "onigiri", "sticky":
+                DrawOrigShelf(g, fx, bx, by, ps, flip, tt, blink, cell)
             default:
                 if blink { ReplaceFace(&head, "SLEEPY") }
                 do { let rows = Pal.Stack(head, A("BODY"), A("LEGS_A")); DrawPix(g, rows, bx - (rows[0].utf8.count - 12) / 2 * ps, by + (16 - rows.count) * ps, ps, flip, false, true) }
                 DrawAccessories(g, bx, by, ps, flip, 0, true)
         }
+        }
         // 午餐時間：櫃子裡的公仔也拿著午餐
-        if w.Lunch && !(Is("spidey") && (tt % 11) < 8) { DrawLunchShelf(g, bx, by, ps, flip) }
+        if w.Lunch && !P.Cu && !(Is("spidey") && (tt % 11) < 8) { DrawLunchShelf(g, bx, by, ps, flip) }
         // 剛回櫃子：一圈小星星
         if ShelfFx < 1
         {
@@ -11315,7 +11650,7 @@ final class World: Form {
     init(_ pipeName: String, _ pet: String, _ lineupArg: String) {
         self.pipeName = pipeName
         // 哪一櫃：有傳就用（並記住），沒傳（開機捷徑）就照上次的
-        lineup = Pal.NormLineup(lineupArg.isEmpty ? World.ReadText("lineup.txt") : lineupArg)
+        lineup = Pal.NormLineup(lineupArg.isEmpty ? World.StartLineup() : lineupArg)   // 全新安裝：續命小隊（51_original.swift）
         if !lineupArg.isEmpty { World.WriteText("lineup.txt", lineup) }
         // mac: 用 point，dpi 一律當 96
         let dpi: Double = 96
@@ -11406,8 +11741,7 @@ final class World: Form {
     var lunchChecked = -1
     // ---- from 43_ui.swift ----
     let feats = Dict<String, Bool>()
-    // ---- 你是？（profile.txt：student｜work）、擺法（mode.txt：shelf｜single <id>）----
-    var Student = false                           // 大學生（之後會有大學生的內容；現在先記著）
+    // ---- 設定過了沒（profile.txt）、擺法（mode.txt：shelf｜single <id>）----
     var Single = false                            // 只要一隻：沒有櫃子，那隻的家是蛋，其他隻不出來
     var singleId = ""
     // ---- 設定視窗 ----
@@ -11428,12 +11762,53 @@ final class World: Form {
     var carryProp: World.Prop! = nil; var carriers: List<Pet>! = nil
     var carryX: Double = 0, carryTarget: Double = 0, carryLift: Double = 0; var carryWhat = ""
     var marchX: Double = 0, marchDir: Double = 0; var marchOn = false
+    // ---- from 51_original.swift ----
+    var oLunchSeen = "", oTeaDay = ""
+    // ---- from 52_study.swift ----
+    // ---------- 測試用時鐘、閒置（離屏測試才會用到）----------
+    var studyShift = TimeSpan.Zero
+    var studyIdleFake: Double = -1
+    var exams = List<Exam>()
+    var deadlines = List<Deadline>()
+    let studyDone = HashSet<String>()
+    let deadlineNotes = Dict<String, List<String>>()   // 通知的字 → 哪幾份作業（點了可以標成交了）
+    var studyLoaded = false, haveSchool = false
+    var studyNext: Double = 0
+    // ---------- 設定（study-config.txt；VS Code 推過來的那幾項以 VS Code 為準）----------
+    let schoolUrls = List<String>()
+    var classRemind = 10
+    var classAutoQuiet = true, lateOn = true
+    var lateStartMin = 60, examNudgeMin = 20 * 60      // 熬夜提醒幾點開始、考試倒數幾點講（-1＝關掉）
+    var workCal = ""                                   // VS Code 開會提醒用的行事曆：學校這邊就不重複提醒
+    let vsKeys = HashSet<String>()
+    var lateKey = ""; var lateLevel = -1; var lateAsleep = false
+    // ---------- 給 VS Code 的狀態 ----------
+    var lastState = ""
+    // ---------- 抓學校行事曆 ----------
+    let testFeeds = List<KeyValuePair<String, String>>()   // 測試用：網址 → ICS 內容
+    var fetchNow = true, replan = false                    // C#：volatile
+    var fetchStarted = false
+    var schoolStatus = ""                                 // 給設定視窗：上次更新的狀況
+    var plan = List<SchoolPlanItem>()
+    let planFired = HashSet<String>()
+    var lastScan: SchoolScan! = nil
+    // ---------- 小視窗 ----------
+    var examForm: ExamForm! = nil
+    var studyForm: StudySettingsForm! = nil
+    // ---- from 53_custom.swift ----
+    let cuFakeH: IntPtr = 0x7FFF0F01
+    var cuFakeR = Rectangle.Empty
+    // ---- from 56_custom_make.swift ----
+    var maker: CuMaker! = nil
+    // ---- from 57_share.swift ----
+    var sharing2 = false
 }
 
 extension World {
     func DefaultPetFor(_ pet: String) -> String {
         for id in Pal.LineupIds(lineup) { if id == pet { return pet } }
-        return lineup == Pal.Teletubbies ? "po" : (lineup == Pal.Pikmin ? "pkred" : "spidey")
+        if lineup == Pal.Mine { let mi = Pal.MineIds(); if mi.count > 0 { return mi[0] } }
+        return lineup == Pal.Teletubbies ? "po" : (lineup == Pal.Pikmin ? "pkred" : (lineup == Pal.Original ? "boba" : "spidey"))
     }
 
     // 每一櫃各自記：誰在外面、最近一隻、最愛（經典一櫃沿用原本的檔名）
@@ -11480,7 +11855,7 @@ extension World {
             delay += 0.5
         }
         active = Get(ids.Count > 0 ? ids[ids.Count - 1] : defaultPet) ?? Get(defaultPet)
-        if ids.Count == 0 && active != nil { active.Say(TubbyLineup ? "Eh-oh! 天線寶寶一櫃 ☀" : "經典一櫃回來囉！", 2.4) }
+        if ids.Count == 0 && active != nil { active.Say(OrigLineup ? "續命小隊，報到！🥤" : (TubbyLineup ? "Eh-oh! 天線寶寶一櫃 ☀" : (CuLineup ? "我的櫃！大家都在 🧸" : "經典一櫃回來囉！")), 2.4) }
         Broadcast()
         lock(clients) { for c in clients { World.Send(c, "lineup " + lineup + "\n") } }   // 在桌面換櫃（小屋、設定）：VS Code 跟著改設定
         App.Log("lineup " + lineup)
@@ -11540,7 +11915,7 @@ extension World {
         timer.Interval = 30
         timer.Tick = { self.Tick() }
         timer.Start()
-        if !FileManager.default.fileExists(atPath: World.FilePath("profile.txt")) { Later(1.2) { self.ShowSetup(true) } }   // 第一次：設定視窗（你是？選一櫃、擺法）
+        if !FileManager.default.fileExists(atPath: World.FilePath("profile.txt")) { Later(1.2) { self.ShowSetup(true) } }   // 第一次：設定視窗（做一隻自己的或選一櫃、擺法）
         App.Log("started pipe=" + pipeName + " lineup=" + lineup + " out=" + outIds.ToArray().joined(separator: ",") + " data=" + World.DataDir)
     }
 
@@ -11691,7 +12066,7 @@ extension World {
         for i in 0..<4 { o[i] = c[i] != nil && c[i]!.Out }
         var hot = false, over = false
         for p in Pets { if p.Out && p.Dragging { hot = true; if InShelf(p.Cx, p.y + Double(p.SH) / 2.0) { over = true } } }
-        shelf.Hot = hot; shelf.Over = over; shelf.Night = Night; shelf.Tubby = TubbyLineup; shelf.Pik = PikLineup; shelf.Lunch = Lunch; shelf.Attention = EggAttention()
+        shelf.Hot = hot; shelf.Over = over; shelf.Night = Night; shelf.Tubby = TubbyLineup; shelf.Pik = PikLineup; shelf.Orig = OrigLineup; shelf.Lunch = Lunch; shelf.Attention = EggAttention()
         shelf.Render(c, o, Now)
         if !W.Shown(shelf) { shelf.Show(); Zorder() }
     }
@@ -11809,6 +12184,7 @@ extension World {
         QuietTick()
         ReminderTick()
         TicketTick()
+        StudyTick()          // 讀書小幫手（52_study.swift）：學校行事曆、作業死線、考試倒數、熬夜
         DownloadTick(dt)
         ExpireNotice()
         MenuWatch()
@@ -11821,6 +12197,7 @@ extension World {
         UpdateBall(dt)
         StepProps(dt)
         PikTick(dt)
+        OrigTick(dt)
         if fx != nil { fx.Step(dt) }
         StepScene(dt)
         proxT -= dt
@@ -11910,6 +12287,7 @@ extension World {
                 if s[1] - s[0] >= SW { let p = Plat(); p.H = wi.H; p.Top = wi.T; p.Left = s[0]; p.Right = s[1]; p.WinLeft = wi.L; np.Add(p) }
             }
         }
+        CuFakeWins(nw, nc, np)   // 測試用的假視窗（只有離屏隔離模式）
         Wins = nw; Cands = nc; Plats = np
         if shareFound != sharing {
             sharing = shareFound
@@ -12270,7 +12648,7 @@ extension World {
     // ================= 右鍵選單 =================
     func FillMenu(_ p: Pet, _ m: ContextMenuStrip) {
         m.Items.Clear()
-        var items: [[String]]! = p.P.Pik ? PikMenuItems(p) : nil
+        var items: [[String]]! = p.P.Pik ? PikMenuItems(p) : (p.P.Orig ? OrigMenuItems(p) : (p.P.Cu ? p.CuMenuItems() : nil))
         if items == nil { switch p.P.Id {
         case "po":
             items = [["大抱抱 ♥", "hug"], ["打招呼 Eh-oh!", "hi"], ["敲敲螢幕", "knock"], ["騎車兜風", "ride"],
@@ -12300,6 +12678,7 @@ extension World {
             m.Items.Add(it[0], nil, { if a == "ball" { self.StartBall() } else { p.Act(a) } })
         }
         m.Items.Add(p.P.Name + " 的好感度 ♥", nil, { p.ShowBond() })
+        CuPetMenu(p, m)
         m.Items.Add(ToolStripSeparator())
         let help = ToolStripMenuItem("小幫手（專注、安靜、提醒）")
         AddHelpers(help.DropDownItems)
@@ -12315,6 +12694,7 @@ extension World {
             m.Items.Add(grp)
         }
         if PikLineup { AddPikMenu(m) }
+        if OrigLineup && !Single { AddOrigMenu(m) }
         if !Single {
             let sw = ToolStripMenuItem("換角色")
             for o in Pets {
@@ -12338,10 +12718,11 @@ extension World {
     // 專注、安靜、提醒、搶票、今天的小結（公仔、櫃子、小屋的選單都有）
     func AddHelpers(_ items: ToolStripItemCollection) {
         if focusOn { items.Add("結束專注（還剩 " + String(FocusLeft()) + " 分）", nil, { self.StopFocus(false) }) }
-        else { items.Add("專注 25 分鐘 🍅", nil, { self.StartFocus(25) }) }
+        else { items.Add(ExamNear() ? "讀書 25 分鐘 📚" : "專注 25 分鐘 🍅", nil, { self.StartFocus(25) }) }   // 7 天內有考試：讀書
         AddQuietMenu(items)
         AddReminderMenus(items)
         AddTicketMenus(items)
+        AddStudyMenus(items)   // 搶課、考試倒數、這週要交的
         items.Add("今天的小結", nil, { self.DailyWrap(true) })
     }
 
@@ -12565,7 +12946,8 @@ extension World {
         let l: Pet = Lead()
         let outs = OutPets()
         switch p[0] {
-        case "hello": if active != nil { World.Send(c, "active " + active.P.Id + "\n") }; World.Send(c, "lineup " + lineup + "\n")   // 櫃子以桌面版為準（第一次設定在桌面做）
+        case "hello": CuHello(c); if active != nil { World.Send(c, "active " + active.P.Id + "\n") }; World.Send(c, "lineup " + lineup + "\n")   // 櫃子以桌面版為準（第一次設定在桌面做）
+        case "custom": CuMsg(c, line)   // 自己做的公仔（53_custom.swift／56_custom_make.swift）
         case "save":
             Count("saves")
             for x in outs { x.OnSave(x === l) }
@@ -12638,7 +13020,7 @@ extension World {
                 }
             }
         case "quit": QuitAll()
-        default: break
+        default: StudyMsg(c, p, line)   // course／exam／study-…（52_study.swift）
         }
     }
 
@@ -12655,6 +13037,7 @@ extension World {
         case "shelf": if l.Out { l.StowToShelf(true) }; return
         case "ball": StartBall(arg == "here"); return
         case "hide": ToggleHide(); return
+        case "show": if userHidden { ToggleHide() } else { l.Act("hi") }; return   // 獨立版又被打開一次（Dock）：躲起來的就出來，不然打個招呼
         case "fireworks": for x in OutPets() { x.Celebrate("dev", x === l) }; if OutCount() == 0 { l.Celebrate("dev", true) }; return
         case "dark", "night": forceNight = 1; nightChecked = -1; CheckNight(); return
         case "light", "day": forceNight = 0; nightChecked = -1; CheckNight(); return
@@ -13156,7 +13539,7 @@ extension World {
         if outs.Count < 2 { return }
         let free = List<Pet>()
         for p in outs { if p.Free() { free.Add(p) } }
-        if free.Count >= 3 && groupCd <= 0 && rnd.NextDouble() < (TubbyLineup && free.Count >= 4 ? 0.04 : 0.02) { groupCd = 600; if TubbyLineup { TubbyGroup(free.Count) } else if PikLineup { PikGroup(free.Count) } else if rnd.NextDouble() < 0.6 { GroupPhoto() } else { GroupHug() }; return }
+        if free.Count >= 3 && groupCd <= 0 && rnd.NextDouble() < (TubbyLineup && free.Count >= 4 ? 0.04 : 0.02) { groupCd = 600; if TubbyLineup { TubbyGroup(free.Count) } else if PikLineup { PikGroup(free.Count) } else if OrigLineup { OrigGroup(free.Count) } else if rnd.NextDouble() < 0.6 { GroupPhoto() } else { GroupHug() }; return }
         var i = 0
         while i < free.Count {
             var j = i + 1
@@ -13185,6 +13568,7 @@ extension World {
         var ids = key.components(separatedBy: "-")
         if ids.count == 1 && (key == "photo" || key == "group") { GroupPhoto(); return }
         if ids.count == 1 && PikLineup { PikScene(key); return }
+        if ids.count == 1 && OrigLineup { OrigScene(key); return }
         if ids.count == 1 {
             switch key {
             case "bighug": SceneBigHug(); return
@@ -13205,7 +13589,7 @@ extension World {
         pairCd[k2] = Now + 180 + rnd.NextDouble() * 120
         let d0: Double = a.Out && b.Out && a.state != "exit" && b.state != "exit" ? 0 : 1.6
         // 離太遠：先湊到一起再演
-        if TubbyLineup || PikLineup { Later(d0) { [self] in GatherPair(k2, a, b, 0) }; return }
+        if TubbyLineup || PikLineup || OrigLineup { Later(d0) { [self] in GatherPair(k2, a, b, 0) }; return }
         Later(d0) { [self] in
             if !Pets.Contains(a) || !Pets.Contains(b) { return }   // 中間換櫃了
             AbortScene()
@@ -13249,7 +13633,7 @@ extension World {
         case "po-tinky": if let x = g("po"), let y = g("tinky") { SceneScooterRide(x, y) }
         case "dipsy-po": if let x = g("po"), let y = g("dipsy") { SceneHatBaseball(x, y) }
         case "laalaa-po": if let x = g("laalaa"), let y = g("po") { SceneBallFetch(x, y) }
-        default: if PikLineup { PikPairScene(key) }
+        default: if PikLineup { PikPairScene(key) } else if OrigLineup { OrigPairScene(key) } else if a.P.Cu || b.P.Cu { CuPairScene(key, a, b) }
         }
     }
 
@@ -13338,6 +13722,7 @@ extension World {
 
     // 三隻以上：大合照（排一排、閃光、笑一個）
     func GroupPhoto() {
+        if OrigLineup { OrigPhoto(); return }
         let outs = OutPets()
         if outs.Count < 2 { AllOut(); Later(2.5) { [self] in GroupPhoto() }; return }
         let l: Pet = Lead()
@@ -13387,7 +13772,7 @@ extension World {
                 case "stitch": p.Say("Ohana！", 1.8)
                 case "hangyodon": p.Say("我有被拍進去嗎？嘴唇太大了嗎？", 1.8)
                 case "pkred", "pkyellow", "pkblue": p.Say("噗咿！", 1.8)
-                default: p.Say("帥！", 1.8)
+                default: p.Say(p.P.Cu ? p.L("x_photo") : "帥！", 1.8)
                 }
             }
         }
@@ -13417,6 +13802,7 @@ extension World {
     func StartRollCall(_ ids: List<String>) {
         if TubbyLineup { TubbyRollCall(ids); return }
         if PikLineup { PikRollCall(ids); return }
+        if OrigLineup { OrigRollCall(ids); return }
         var d = 0.4
         for id in ids {
             guard let p = Get(id) else { continue }
@@ -13431,6 +13817,7 @@ extension World {
     func NightRitual() {
         if TubbyLineup { SceneByeBye(true); return }
         if PikLineup { PikNight(true); return }
+        if OrigLineup { OrigNight(true); return }
         let outs = OutPets()
         // C# List.Sort（不穩定）；這裡穩定排序：人魚漢頓排第一
         let sorted = outs.ToArray().enumerated().sorted { a, b in
@@ -13936,6 +14323,8 @@ extension World {
         if flowerBub != nil && flowerBub.VVisible { flowerBub.PaintTo(g) }
         if flash != nil && flash.VVisible { flash.PaintTo(g) }
         if setupForm != nil && !setupForm.IsDisposed && setupForm.VVisible { setupForm.PaintTo(g) }
+        StudySnap(g)
+        CuSnap(g)
         if pmenu != nil && pmenu.VVisible { pmenu.PaintTo(g) }
         // 游標位置（只畫一個小十字，方便看）
         let c = World.CursorPos()
@@ -13992,6 +14381,7 @@ extension World {
     final class Notice { var Kind: String! = nil, Url: String! = nil, Text: String! = nil; var Pri = 0; var At = DateTime.Now; var By: Pet! = nil; var Expire: Double = 0; var Repeated = false; var NextRound = false; init() {} }
 
     static func Priority(_ kind: String) -> Int {
+        let sp = StudyPriority(kind); if sp >= 0 { return sp }   // 上課、考試、作業死線
         switch kind {
         case "ci-fail", "meeting", "meeting-now", "remind": return 2
         case "ci-ok", "cmd-fail", "jira", "pc-cpu", "pc-ram", "pc-disk", "net-down", "vpn": return 1
@@ -14026,7 +14416,7 @@ extension World {
         if sharing || fsNow { heldShare.Add(n); return }
         if quietOn {
             // 安靜中：會議、CI 失敗還是說，但只冒泡泡；其他先存著
-            if n.Kind.StartsWith("meeting") || n.Kind == "ci-fail" { DeliverGentle(n); return }
+            if World.MeetingLike(n.Kind) || n.Kind == "ci-fail" { DeliverGentle(n); return }
             heldQuiet.Add(n); return
         }
         if focusOn && n.Pri < 2 { heldFocus.Add(n); return }
@@ -14048,7 +14438,9 @@ extension World {
     }
 
     static func Flavor(_ id: String, _ kind: String, _ night: Bool) -> String {
-        let pk = PikFlavor(id, kind); if pk != nil { return pk! }
+        let pk = PikFlavor(id, kind) ?? OrigFlavor(id, kind); if pk != nil { return pk! }
+        let cu = CuFlavor(id, kind, night); if cu != nil { return cu! }
+        let sd = StudyFlavor(id, kind); if sd != nil { return sd! }
         let extra = FlavorExtra(id, kind)
         if extra != nil { return extra! }
         if night && kind == "worklog" {
@@ -14084,7 +14476,7 @@ extension World {
         let text = World.Flavor(l.P.Id, n.Kind, Night) + " " + n.Text
         let hint: String! = n.Url != nil ? "點我打開" : nil
         if n.Pri >= 2 {
-            l.Notify(text, hint, 2, focusOn, n.Kind.StartsWith("meeting"))
+            l.Notify(text, hint, 2, focusOn, World.MeetingLike(n.Kind))
             for p in OutPets() { if p !== l && !focusOn { p.React() } }
             if !repeat_ && !n.Repeated {
                 let nn = n
@@ -14105,6 +14497,7 @@ extension World {
         p.SetClickableBubble(false)
         if n.NextRound { StartFocus(focusMin); return true }
         if ReminderClicked(p, n) { return true }
+        if StudyClicked(p, n) { return true }   // 作業：打開／交了
         if n.Url != nil {
             if World.OpenUrl(n.Url) { p.Say("好～幫你打開了 👍", 1.4) }
             else { App.Log("open url: failed " + n.Url); p.Say("打不開耶…", 1.4) }
@@ -14161,7 +14554,7 @@ extension World {
             case "tinky": line = "噓～丁丁抱著袋袋安靜陪你 🤫"
             case "dipsy": line = "噓。帽子拉低，安靜。"
             case "laalaa": line = "噓～拉拉小小聲 🤫"
-            default: line = "好，我安靜待著。"
+            default: line = l.P.Cu ? l.L("x_quiet_on") : "好，我安靜待著。"
             }
             l.Say(line, 2.2)
         }
@@ -14182,7 +14575,7 @@ extension World {
         case "tinky": line = "安靜時間結束～Eh-oh!"
         case "dipsy": line = "安靜結束。嘿～"
         case "laalaa": line = "安靜時間結束～啦啦啦！"
-        default: line = "安靜時間結束～"
+        default: line = l.P.Cu ? l.L("x_quiet_off") : "安靜時間結束～"
         }
         if heldQuiet.Count == 0 { l.Say(line, 2.4); return }
         // 一次說完：最新一則有網址就可以點
@@ -14235,7 +14628,7 @@ extension World {
         AbortScene()
         for p in OutPets() { p.QuietDown() }
         let l: Pet = Lead()
-        l.Say(String(focusMin) + " 分鐘專注開始 🍅 我們安靜陪你", 2.4)
+        l.Say(ExamNear() ? String(focusMin) + " 分鐘讀書開始 📚 我們安靜陪你" : String(focusMin) + " 分鐘專注開始 🍅 我們安靜陪你", 2.4)
         lastFocusLeft = FocusLeft()
         BroadcastFocus()
     }
@@ -14255,9 +14648,9 @@ extension World {
         case "tinky": end = "專注結束！休息 5 分鐘 ☕ 丁丁跳舞給你看"
         case "dipsy": end = "專注結束。休息 5 分鐘 ☕ 你很酷"
         case "laalaa": end = "專注結束！休息 5 分鐘 ☕ 啦啦啦～好棒棒"
-        default: end = "專注結束！休息 5 分鐘 ☕ 你超強的"
+        default: end = l.P.Cu ? l.L("x_focus_end") : "專注結束！休息 5 分鐘 ☕ 你超強的"
         }
-        l.Knock(end + "　今天第 " + String(n) + " 顆 🍅", "high")
+        l.Knock((ExamNear() ? end.Replace("專注結束", "讀書結束") : end) + "　今天第 " + String(n) + " 顆 🍅", "high")
         for p in OutPets() { if p !== l { p.React() } }
         breakOn = true; breakEnd = Now + 300
         FlushFocusHeld(5)
@@ -14339,7 +14732,8 @@ extension Pet {
 extension World {
     // ---------- 共用：每個角色的開場白 ----------
     static func FlavorExtra(_ id: String, _ kind: String) -> String! {
-        let pk = PikFlavor(id, kind); if pk != nil { return pk! }
+        let pk = PikFlavor(id, kind) ?? OrigFlavor(id, kind); if pk != nil { return pk! }
+        let cu = CuFlavor(id, kind, false); if cu != nil { return cu! }
         let keys: [String] = ["remind", "pc-cpu", "pc-ram", "pc-disk", "net-down", "net-up", "vpn", "download"]
         let sp: [String] = ["⏰ 提醒你：", "蜘蛛感應！電腦好燙：", "蜘蛛感應！記憶體快滿了：", "硬碟快滿了：", "網路斷了！", "網路回來了 👍", "連不到公司網路（VPN 斷了？）", "下載好了："]
         let po: [String] = ["⏰ 小波提醒你：", "電腦好忙好熱喔：", "記憶體要滿滿了：", "硬碟快塞滿了：", "網路斷掉了！嗚…", "網路回來了！Eh-oh!", "連不到公司網路耶（VPN 斷了？）", "下載好了！"]
@@ -14733,12 +15127,13 @@ extension World {
         var tom = 0; _ = int.TryParse(World.ReadText("tomato-" + DateTime.Now.ToString("yyyyMMdd") + ".txt"), &tom)
         let parts = List<String>()
         if Day("meetings") > 0 { parts.Add("開了 " + String(Day("meetings")) + " 場會") }
-        if tom > 0 { parts.Add("吃了 " + String(tom) + " 顆番茄🍅") }
+        if tom > 0 { parts.Add("吃了 " + String(tom) + " 顆番茄🍅" + World.WeekTomatoNote(tom)) }
         if Day("deploys") > 0 { parts.Add("上版／CI " + String(Day("deploys")) + " 次") }
         if Day("tasks") > 0 { parts.Add("Claude／Codex 幫你做完 " + String(Day("tasks")) + " 件事") }
         if Day("saves") > 0 { parts.Add("存檔 " + String(Day("saves")) + " 次") }
         if Day("reminders") > 0 { parts.Add("完成 " + String(Day("reminders")) + " 個提醒") }
         if Day("pats") > 0 { parts.Add("摸了我們 " + String(Day("pats")) + " 下") }
+        StudyWrapParts(parts)   // 上了幾堂課、這週還有幾份作業、離考試幾天
         let outs: List<Pet> = OutPets()
         let l: Pet = Lead()
         if parts.Count == 0 { l.Say("今天很安靜呢～今天辛苦了 ♥", 4); return }
@@ -14750,7 +15145,7 @@ extension World {
         case "tinky": intro = "Eh-oh! 丁丁的魔法袋裝了今天的我們："
         case "dipsy": intro = "嘿，今天的我們："
         case "laalaa": intro = "啦啦～今天的我們："
-        default: intro = "今天的我們："
+        default: intro = l.P.Cu ? l.L("x_wrap") : "今天的我們："
         }
         if outs.Count >= 2 && !quietOn {
             // 大家輪流講一句
@@ -14834,7 +15229,7 @@ class ReminderForm: Form {
 // ================= 搶票提醒 =================
 // 你自己排的：不受安靜／專注影響。開賣前 1～2 小時、30 分、10 分（對時）、1 分、開賣當下，一段一段提醒。
 extension World {
-    final class Ticket { var At = 0; var Lead = 0; var Url: String! = nil, Name: String! = nil; var Stage = 0; init() {} }
+    final class Ticket { var At = 0; var Lead = 0; var Url: String! = nil, Name: String! = nil; var Stage = 0; var Kind = "ticket"; init() {} }   // Kind：ticket｜course（搶課）
 
     func LoadTickets() {
         tickets.Clear()
@@ -14843,6 +15238,7 @@ extension World {
             var at = 0, lead = 0, stage = 0
             if a.count >= 5 && long.TryParse(a[0], &at) && int.TryParse(a[1], &lead) && int.TryParse(a[3], &stage) {
                 let t = Ticket(); t.At = at; t.Lead = lead; t.Url = a[2] == "-" ? nil : a[2]; t.Stage = stage; t.Name = a[4]
+                if a.count >= 6 && a[5] == "course" { t.Kind = "course" }
                 tickets.Add(t)
             }
         }
@@ -14855,15 +15251,18 @@ extension World {
             let url: String = t.Url ?? "-"
             let name: String = t.Name.Replace("\t", " ").Replace("\n", " ")
             var line: String = at + "\t" + lead + "\t" + url
-            line += "\t" + stage + "\t" + name + "\n"
+            line += "\t" + stage + "\t" + name + "\t" + t.Kind + "\n"
             sb.Append(line)
         }
         World.WriteText("tickets.txt", sb.ToString())
     }
 
-    func AddTicket(_ at: Int, _ lead: Int, _ url: String, _ name: String!) {
+    func AddTicket(_ at: Int, _ lead: Int, _ url: String, _ name: String!) { AddTicket(at, lead, url, name, "ticket") }
+    func AddTicket(_ at: Int, _ lead: Int, _ url: String, _ name: String!, _ kind: String) {
         let t = Ticket()
-        t.At = at; t.Lead = lead == 60 ? 60 : 120; t.Name = string.IsNullOrEmpty(name) ? "搶票" : name
+        let course = kind == "course"
+        t.Kind = course ? "course" : "ticket"
+        t.At = at; t.Lead = lead == 60 ? 60 : 120; t.Name = string.IsNullOrEmpty(name) ? (course ? "搶課" : "搶票") : name
         t.Url = World.SafeUrl(url)
         if t.Url != nil && !t.Url.StartsWith("http") { t.Url = nil }   // 購票頁只收 http/https
         // 已經過了的階段就不補（例如只剩 20 分鐘才設定，就從 10 分鐘那段開始）
@@ -14876,15 +15275,17 @@ extension World {
         tickets.Sort { (a: Ticket, b: Ticket) -> Int in a.At < b.At ? -1 : (a.At > b.At ? 1 : 0) }
         SaveTickets()
         let tn: String = t.Name, when: String = World.FromUnixMs(at).ToString("MM/dd HH:mm"), hrs: String = String(t.Lead / 60)
-        let msg: String = "🎫 記住了：" + tn + "，" + when + " 開賣，提前 " + hrs + " 小時叫你"
+        let msg: String = (course ? "🎓 記住了：" : "🎫 記住了：") + tn + "，" + when + (course ? " 開放選課" : " 開賣") + "，提前 " + hrs + " 小時叫你"
         Lead().Say(msg, 3)
     }
 
     static func StagesOf(_ t: Ticket) -> [Int] { return [t.Lead, 30, 10, 1, 0] }
 
     static func TicketLine(_ id: String, _ stage: Int, _ t: Ticket) -> String {
+        if t.Kind == "course" { return CourseLine(id, stage, t) }   // 搶課：52_study.swift
         let h = String(t.Lead / 60) + " 小時", n: String = t.Name
-        let pk = PikTicket(id, stage, n, h); if pk != nil { return pk! }
+        let pk = PikTicket(id, stage, n, h) ?? OrigTicket(id, stage, n, h); if pk != nil { return pk! }
+        let cu = CuTicket(id, stage, n, h); if cu != nil { return cu! }
         let sp: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款", "🎫 " + n + " 再 30 分鐘開賣，網頁先開好", "🎫 " + n + " 剩 10 分鐘！蜘蛛感應全開", "🎫 準備！手指放在按鈕上", "🎫 開搶！！Thwip!"]
         let po: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款喔", "🎫 " + n + " 再 30 分鐘！小波陪你等", "🎫 " + n + " 剩 10 分鐘！好緊張～", "🎫 準備！深呼吸～", "🎫 開搶！！衝衝衝！"]
         let st: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款！ih!", "🎫 " + n + " 30 分鐘！史迪仔幫你顧著", "🎫 " + n + " 10 分鐘！ih-ih-ih!", "🎫 準備！史迪仔也準備好了", "🎫 開搶！！衝啊！"]
@@ -14922,7 +15323,7 @@ extension World {
         if userHidden { userHidden = false; ApplyHidden() }
         let l: Pet = Lead()
         let text = World.TicketLine(l.P.Id, stage, t)
-        let hint: String! = t.Url != nil ? "點我打開購票頁" : nil
+        let hint: String! = t.Url != nil ? (t.Kind == "course" ? "點我打開選課系統" : "點我打開購票頁") : nil
         if stage == 1 { l.Notify(text, hint, 1, false, false) }
         else if stage == 0 || stage == 2 { l.Notify(text, hint, 2, false, false) }
         else {
@@ -14931,7 +15332,7 @@ extension World {
             l.ForceGlass(text, hint, stage == 4)
             if stage == 4 { Fireworks(WA(l.Cx, l.y), 4, CInt(l.Cx)); for p in OutPets() { if p !== l { p.React() } } }
         }
-        if stage == 2 { CheckClock(t.Url) }
+        if stage == 2 { CheckClock(t.Url, t.Kind == "course" ? "搶課" : "搶票") }
         let n = Notice(); n.Kind = "ticket"; n.Url = t.Url; n.Text = t.Name; n.Pri = 2; n.By = l; n.Expire = Now + 600
         if t.Url != nil { current = n; l.SetClickableBubble(true) }
     }
@@ -14943,13 +15344,14 @@ extension World {
         for t in tickets {
             let ms = t.At - now
             if ms > 0 && ms <= 10 * 60000 { let s = (ms + 999) / 1000; return (s / 60).ToString("00") + ":" + (s % 60).ToString("00") }
-            if ms <= 0 && ms > -60000 { return "開搶中！" }
+            if ms <= 0 && ms > -60000 { return t.Kind == "course" ? "開放囉！" : "開搶中！" }
         }
         return nil
     }
 
     // 對時：拿 HTTP 回應的 Date 標頭跟電腦時間比
-    func CheckClock(_ url: String!) {
+    func CheckClock(_ url: String!, _ what: String) {
+        if App.Offscreen { return }   // 離屏測試不連網路
         var target = "https://www.google.com/"
         if url != nil, let u = URL(string: url), let sc = u.scheme, let h = u.host { target = sc + "://" + h + "/" }
         let tgt = target
@@ -14961,7 +15363,7 @@ extension World {
             if Math.Abs(off) <= 2 { return }
             let sec = CInt(Math.Round(Math.Abs(off)))
             let msg = off < 0 ? "電腦時間比標準時間慢 " + String(sec) + " 秒" : "電腦時間比標準時間快 " + String(sec) + " 秒"
-            self.Post { self.Lead().Say("⏱ " + msg + "，搶票要看標準時間喔", 6, true) }
+            self.Post { self.Lead().Say("⏱ " + msg + "，" + what + "要看標準時間喔", 6, true) }
         }.Start()
     }
 
@@ -15001,23 +15403,28 @@ extension World {
         return mid.timeIntervalSince(server.addingTimeInterval(0.5))
     }
 
-    func AddTicketMenus(_ items: ToolStripItemCollection) {
-        items.Add("搶票提醒…", nil) { self.ShowTicketForm() }
-        if tickets.Count > 0 {
-            let my = ToolStripMenuItem("我的搶票（" + String(tickets.Count) + "）")
-            for t in tickets {
+    func AddTicketMenus(_ items: ToolStripItemCollection) { AddTicketMenus(items, "ticket") }
+    func AddTicketMenus(_ items: ToolStripItemCollection, _ kind: String) {
+        let word = kind == "course" ? "搶課" : "搶票"
+        items.Add(word + "提醒…", nil) { self.ShowTicketForm(kind) }
+        let mine: List<Ticket> = tickets.FindAll { (x: Ticket) -> Bool in x.Kind == kind }
+        if mine.Count > 0 {
+            let my = ToolStripMenuItem("我的" + word + "（" + String(mine.Count) + "）")
+            for t in mine {
                 let tt = t
                 my.DropDownItems.Add(World.FromUnixMs(t.At).ToString("MM/dd HH:mm") + "　" + (t.Name.Length > 18 ? t.Name.Substring(0, 18) + "…" : t.Name) + "　（點一下取消）", nil) {
-                    self.tickets.Remove(tt); self.SaveTickets(); self.Lead().Say("取消搶票提醒：" + tt.Name, 1.8)
+                    self.tickets.Remove(tt); self.SaveTickets(); self.Lead().Say("取消" + word + "提醒：" + tt.Name, 1.8)
                 }
             }
             items.Add(my)
         }
     }
 
-    func ShowTicketForm() {
+    func ShowTicketForm() { ShowTicketForm("ticket") }
+    func ShowTicketForm(_ kind: String) {
         if App.Offscreen { return }
-        if ticketForm == nil || ticketForm.IsDisposed { ticketForm = TicketForm(self, Lead().P.Accent) }
+        if ticketForm != nil && !ticketForm.IsDisposed && ticketForm.Kind != kind { ticketForm.Dispose(); ticketForm = nil }
+        if ticketForm == nil || ticketForm.IsDisposed { ticketForm = TicketForm(self, Lead().P.Accent, kind) }
         let c: Point = Cursor.Position
         let wa: Rectangle = WA(Double(c.X), Double(c.Y))
         ticketForm.StartPosition = FormStartPosition.Manual
@@ -15062,27 +15469,34 @@ extension Pet {
                 do { let b = SolidBrush(hot ? Color.FromArgb(240, 0xD8, 0x3A, 0x3A) : Color.FromArgb(235, 0x2A, 0x2F, 0x45)); g.FillPath(b, p) }
                 do { let rim = Pen(Color.FromArgb(220, 255, 255, 255), Math.Max(1.5, k)); g.DrawPath(rim, p) }
             }
-            // 小票券圖示
+            // 小票券圖示（搶課是學士帽）
             let tx: Double = bx + 5 * k, ty: Double = by + bh / 2 - 3.5 * k
-            do { let tb = SolidBrush(Color.FromArgb(0xFF, 0xD8, 0x4A)); g.FillRectangle(tb, tx, ty, iw - 2 * k, 7 * k) }
-            do { let hole = SolidBrush(hot ? Color.FromArgb(0xD8, 0x3A, 0x3A) : Color.FromArgb(0x2A, 0x2F, 0x45)); g.FillEllipse(hole, tx - 1.5 * k, ty + 2.2 * k, 3 * k, 2.6 * k) }
+            if w.BadgeIsCourse() { Pet.DrawCapIcon(g, tx - k, ty, iw, k, hot) }
+            else {
+                do { let tb = SolidBrush(Color.FromArgb(0xFF, 0xD8, 0x4A)); g.FillRectangle(tb, tx, ty, iw - 2 * k, 7 * k) }
+                do { let hole = SolidBrush(hot ? Color.FromArgb(0xD8, 0x3A, 0x3A) : Color.FromArgb(0x2A, 0x2F, 0x45)); g.FillEllipse(hole, tx - 1.5 * k, ty + 2.2 * k, 3 * k, 2.6 * k) }
+            }
             g.TextRenderingHint = TextRenderingHint.AntiAlias
             do { let wb = SolidBrush(Color.White); g.DrawString(cd, use, wb, bx + iw + 7 * k, by + 2 * k) }
         }
     }
 }
 
-// 「搶票提醒…」的小視窗
+// 「搶票提醒…」「搶課提醒…」的小視窗（Kind：ticket｜course）
 class TicketForm: Form {
     var w: World
+    let Kind: String
     let name = TextBox(), time = TextBox(), url = TextBox()
     let date = DateTimePicker()
     let lead1 = RadioButton(), lead2 = RadioButton()
     let hint = Label()
-    init(_ w: World, _ accent: Color) {
+    convenience init(_ w: World, _ accent: Color) { self.init(w, accent, "ticket") }
+    init(_ w: World, _ accent: Color, _ kind: String) {
         self.w = w
+        Kind = kind == "course" ? "course" : "ticket"
         super.init()
-        Text = "🎫 搶票提醒"
+        let course = Kind == "course"
+        Text = course ? "🎓 搶課提醒" : "🎫 搶票提醒"
         FormBorderStyle = FormBorderStyle.FixedToolWindow
         ShowInTaskbar = false; TopMost = true; MaximizeBox = false; MinimizeBox = false
         BackColor = Color.FromArgb(0xFF, 0xFB, 0xF4)
@@ -15090,11 +15504,11 @@ class TicketForm: Form {
         AutoScaleMode = AutoScaleMode.Dpi
         ClientSize = Size(360, 268)
         let y0 = 12
-        AddLabel("要搶什麼？（例如：五月天 演唱會）", y0); name.Location = Point(14, y0 + 22); name.Width = 332; Controls.Add(name)
-        AddLabel("開賣日期與時間", y0 + 56)
+        AddLabel(course ? "要搶哪門課？（例如：通識熱門課、體育羽球）" : "要搶什麼？（例如：五月天 演唱會）", y0); name.Location = Point(14, y0 + 22); name.Width = 332; Controls.Add(name)
+        AddLabel(course ? "選課系統開放日期與時間" : "開賣日期與時間", y0 + 56)
         date.Format = DateTimePickerFormat.Custom; date.CustomFormat = "yyyy-MM-dd"; date.Location = Point(14, y0 + 78); date.Width = 150; Controls.Add(date)
-        time.Location = Point(176, y0 + 78); time.Width = 80; time.Text = "12:00"; Controls.Add(time)
-        AddLabel("購票網址（可以不填）", y0 + 112); url.Location = Point(14, y0 + 134); url.Width = 332; Controls.Add(url)
+        time.Location = Point(176, y0 + 78); time.Width = 80; time.Text = course ? "09:00" : "12:00"; Controls.Add(time)
+        AddLabel(course ? "選課系統網址（可以不填）" : "購票網址（可以不填）", y0 + 112); url.Location = Point(14, y0 + 134); url.Width = 332; Controls.Add(url)
         lead2.Text = "提前 2 小時"; lead2.Checked = true; lead2.Location = Point(14, y0 + 168); lead2.AutoSize = true; Controls.Add(lead2)
         lead1.Text = "提前 1 小時"; lead1.Location = Point(130, y0 + 168); lead1.AutoSize = true; Controls.Add(lead1)
         let ok = Button(); ok.Text = "好，幫我盯著"; ok.Location = Point(206, y0 + 200); ok.Size = Size(140, 34)
@@ -15120,7 +15534,7 @@ class TicketForm: Form {
         let u = url.Text.Trim()
         if u != "" && !(u.StartsWith("http://") || u.StartsWith("https://")) { hint.Text = "網址要 http:// 或 https:// 開頭"; return }
         let ms = World.UnixMs(t)
-        w.AddTicket(ms, lead1.Checked ? 60 : 120, u == "" ? "-" : u, name.Text.Trim())
+        w.AddTicket(ms, lead1.Checked ? 60 : 120, u == "" ? "-" : u, name.Text.Trim(), Kind)
         name.Text = ""; url.Text = ""; hint.Text = ""
         Hide()
     }
@@ -15178,6 +15592,8 @@ extension Pet {
 
     func LunchLine(_ phase: String) -> String {
         if P.Pik { return PikLunchLine(phase) }
+        if P.Orig { return OrigLunchLine(phase) }
+        if P.Cu { return CuLunchLine(phase) }
         switch P.Id {
         case "po":
             if phase == "start" { return "嘟嘟糊！午餐時間！🔔" }
@@ -15249,6 +15665,8 @@ extension Pet {
         if !HoldingFood() || state == "glass" || state == "hug" { return }
         let bite = Step2(2.5) ? 1 : 0   // 一口一口：手上的食物上下動
         if P.Pik { DrawPikLunch(g, f, bx, by, ps, fx, bite); return }
+        if P.Orig { DrawOrigLunch(g, f, bx, by, ps, fx, bite); return }
+        if P.Cu { CuLunch(g, f, bx, by, ps, fx, bite); return }
         switch P.Id {
         case "po":
             DrawAt(g, Pet.CUSTARD, 9, Double(8 + bite + f.AccDy), bx, by, ps, fx, false, true)
@@ -15277,7 +15695,7 @@ extension Pet {
     // 櫃子裡的公仔也拿著午餐
     func DrawLunchShelf(_ g: Graphics, _ bx: Int, _ by: Int, _ ps: Int, _ flip: Bool) {
         if !w.Lunch { return }
-        if P.Pik { return }   // 皮克敏在 DrawPikShelf 裡拿水果
+        if P.Pik || P.Orig { return }   // 皮克敏、續命小隊在自己的櫃子畫法裡拿午餐
         var food: [String]; var col: Double, row: Double
         switch P.Id {
         case "po": food = Pet.CUSTARD; col = 9; row = 8
@@ -15295,6 +15713,7 @@ extension Pet {
 extension Pet {
     // 外出中的格子：淡淡的剪影，櫃子還是他的位置
     func DrawGhost(_ g: Graphics, _ fx: Int, _ fy: Int, _ ps: Int, _ night: Bool) {
+        if P.Cu { CuGhost(g, fx, fy, ps, night); return }
         let rows: [String] = Pal.Stack(A("HEAD"), A("BODY"), A("LEGS_A"))
         let bx = fx - rows[0].Length * ps / 2, by = fy - rows.count * ps
         let c: Color = P.Accent
@@ -15312,6 +15731,8 @@ extension Pet {
     // 在櫃子裡要佔幾列高（腳到最高點：天線、耳朵、帽子、滑板車墊高、晃動）
     func ShelfRows() -> Int {
         if P.Pik { return PikShelfRows() }
+        if P.Orig { return OrigShelfRows() }
+        if P.Cu { return CuShelfRows() }
         let hat = (w.SeasonNow == "xmas" || Level() >= 3) ? 4 : 0
         switch P.Id {
         case "po": return 16 + P.TopRows + 1                             // 扶著停在旁邊的滑板車
@@ -15494,8 +15915,8 @@ extension World {
     }
 
     func LoadMode() {
-        Student = World.ReadText("profile.txt") == "student"
-        let m = World.ReadText("mode.txt")
+        var m = World.ReadText("mode.txt")
+        if m == "" && !File.Exists(World.FilePath("profile.txt")) { m = "single" }   // 第一次（還沒設定）：預設只要一隻
         Single = m.StartsWith("single")
         singleId = Single && m.Length > 6 ? m.Substring(6).Trim() : ""
     }
@@ -15534,7 +15955,7 @@ extension World {
         m.Items.Add(Single ? "叫" + Get(SinglePet()).P.Name + "出來" : "全部出來", nil, { self.AllOut() })
         m.Items.Add(Single ? "回蛋裡" : "全部回家", nil, { self.AllHome() })
         let sw = ToolStripMenuItem("換一櫃")
-        for lu in Pal.Lineups {
+        for lu in Pal.LineupsNow() {
             let l2 = lu
             let li = ToolStripMenuItem(Pal.LineupName(lu), nil, { self.SwitchLineup(l2, self.Single ? self.singleId : "") })
             li.Checked = lu == lineup
@@ -15542,7 +15963,9 @@ extension World {
         }
         m.Items.Add(sw)
         m.Items.Add("重新設定…", nil, { self.ShowSetup(false) })
+        m.Items.Add("讀書小幫手設定（學校行事曆、熬夜）…", nil, { self.ShowStudySettings() })
         m.Items.Add("躲起來（⌃⌥S）", nil, { self.ToggleHide() })
+        CuHouseMenu(m)   // 自己做的公仔、分享短片（53_custom.swift）
         m.Items.Add(ToolStripSeparator())
         m.Items.Add("收工（關掉 Desk Pals）", nil, { self.QuitAll() })
         ShowMenu(m, "公仔小屋", true, at)
@@ -15563,7 +15986,7 @@ extension World {
 
     func ShowSetup(_ first: Bool) {
         if setupForm == nil || setupForm.IsDisposed {
-            setupForm = SetupForm(self, first, World.ReadText("profile.txt"), lineup, Single, Single ? SinglePet() : "")
+            setupForm = SetupForm(self, first, lineup, Single || first, Single ? SinglePet() : "")
         }
         let wa: Rectangle = App.Offscreen ? screens[0].WorkingArea : Screen.FromPoint(Cursor.Position).WorkingArea
         setupForm.Location = Point(wa.Left + (wa.Width - setupForm.Width) / 2, wa.Top + Math.Max(0, (wa.Height - setupForm.Height) / 2))
@@ -15575,15 +15998,14 @@ extension World {
     }
 
     // 設定好了：馬上套用（不用重開）
-    func ApplySetup(_ prof: String, _ lu0: String, _ single: Bool, _ pet: String, _ first: Bool) {
-        World.WriteText("profile.txt", prof == "student" ? "student" : "work")
-        Student = prof == "student"
+    func ApplySetup(_ lu0: String, _ single: Bool, _ pet: String, _ first: Bool) {
+        World.WriteText("profile.txt", "done")
         let lu = Pal.NormLineup(lu0)
         let wasSingle = Single
         Single = single
         singleId = single ? pet : ""
         World.WriteText("mode.txt", single ? "single " + pet : "shelf")
-        App.Log("setup profile=" + prof + " lineup=" + lu + " mode=" + (single ? "single " + pet : "shelf"))
+        App.Log("setup lineup=" + lu + " mode=" + (single ? "single " + pet : "shelf"))
         if single {
             if !shelf.Collapsed { shelf.Collapsed = true; World.WriteText("shelf-state.txt", "egg") }
             if lu != lineup { SwitchLineup(lu, pet) }
@@ -15602,7 +16024,7 @@ extension World {
     // 設定視窗用：這一櫃的櫃子縮圖（預覽用的 World 才叫這個，不開視窗）
     func SetupShelfPic() -> Bitmap {
         shelf = ShelfForm(self, S)
-        shelf.Tubby = TubbyLineup; shelf.Pik = PikLineup
+        shelf.Tubby = TubbyLineup; shelf.Pik = PikLineup; shelf.Orig = OrigLineup
         shelf.Night = false
         shelf.Place(Rectangle(0, 0, 2000, 2000))
         let b = shelf.Snapshot(CellPets(), [false, false, false, false], 1.0)
@@ -16062,7 +16484,7 @@ class SetupForm: Form {
     let d: Double
     let U: Int
     var step = 0
-    var prof: String, lu: String, mode: String, pet: String
+    var lu: String, mode: String, pet: String
     let btns = List<Btn>()
     var hoverId = ""
     var titleF: FontT! = nil, qF: FontT! = nil, bigF: FontT! = nil, subF: FontT! = nil, btnF: FontT! = nil
@@ -16070,45 +16492,27 @@ class SetupForm: Form {
     let petPics = Dict<String, Bitmap>()
     var VVisible = false
 
-    static let STUDENT: [String] = [
-        "......kkkk......",
-        "....kkddddkk....",
-        "..kkddddddddkk..",
-        "kkddddddddddddkk",
-        "..kkddddddddkkY.",
-        "....kkddddkk..Y.",
-        "....kDDDDDDk..Y.",
-        "....kDDDDDDk.YYY",
-        "....kkkkkkkk.YYY",
-        "................",
-        "kkkkkkk..kkkkkkk",
-        "kwwwwwwkkwwwwwwk",
-        "kwlllwwkkwlllwwk",
-        "kwwwwwwkkwwwwwwk",
-        "kwllwwwkkwllwwwk",
+    // 「做一隻自己的公仔」那張卡的小圖：相框裡一個貓掌
+    static let MAKE: [String] = [
+        "kkkkkkkkkkkkkkkk",
+        "kwwwwwwwwwwwwwwk",
+        "kwbbbbbbbbbbbbwk",
+        "kwbbkkbbbbkkbbwk",
+        "kwbkppkbbkppkbwk",
+        "kwbkppkbbkppkbwk",
+        "kwbbkkbkkbkkbbwk",
+        "kwbbbbkppkbbbbwk",
+        "kwbbbkppppkbbbwk",
+        "kwbbkppppppkbbwk",
+        "kwbbkppppppkbbwk",
+        "kwbbbkkkkkkbbbwk",
+        "kwbbbbbbbbbbbbwk",
+        "kwwwwwwwwwwwwwwk",
         "kkkkkkkkkkkkkkkk"]
-    static let WORK: [String] = [
-        "................",
-        ".....kkkkkk.....",
-        "....kk....kk....",
-        "....k......k....",
-        ".kkkkkkkkkkkkkk.",
-        "kBBBBBBBBBBBBBBk",
-        "kbbbbbbbbbbbbbbk",
-        "kbbbbbbYYbbbbbbk",
-        "kkkkkkkYYkkkkkkk",
-        "kbbbbbbbbbbbbbbk",
-        "kbbbbbbbbbbbbbbk",
-        "kbbbbbbbbbbbbbbk",
-        "kbbbbbbbbbbbbbbk",
-        "kssssssssssssssk",
-        ".kkkkkkkkkkkkkk.",
-        "................"]
 
-    init(_ w: World, _ first: Bool, _ prof: String, _ lu: String, _ single: Bool, _ pet: String?) {
+    init(_ w: World, _ first: Bool, _ lu: String, _ single: Bool, _ pet: String?) {
         self.w = w; self.first = first
-        self.prof = prof == "student" || prof == "work" ? prof : ""
-        self.lu = Pal.NormLineup(lu)
+        self.lu = first ? Pal.Original : Pal.NormLineup(lu)   // 第一次：先選好續命小隊（上面還有「做一隻自己的」）
         mode = single ? "single" : "shelf"
         self.pet = pet ?? ""
         d = Double(w.S) / 4.0
@@ -16126,7 +16530,7 @@ class SetupForm: Form {
         bigF = FontT("Microsoft JhengHei UI", 13, FontStyle.Bold)
         subF = FontT("Microsoft JhengHei UI", 9, FontStyle.Bold)
         btnF = FontT("Microsoft JhengHei UI", 11, FontStyle.Bold)
-        ClientSize = SizeT(Sc(580), Sc(520))
+        ClientSize = SizeT(Sc(620), Sc(560))
         KeyPreview = true
         KeyDown = { [unowned self] (e: KeyEventArgs) in if e.KeyCode == Keys.Escape { self.Close() } }
         LayoutBtns()
@@ -16150,11 +16554,11 @@ class SetupForm: Form {
     func InLineup(_ id: String) -> Bool { for x in Pal.LineupIds(lu) { if x == id { return true } }; return false }
     static func Members(_ id: String) -> String {
         var names: [String] = []
-        for x in Pal.LineupIds(id) { names.append(Pal.Get(x).Name) }
+        for x in Pal.LineupIds(id) { let p: Pal! = Pal.Get(x); if p != nil { names.append(p.Name) } }
         if Pal.NormLineup(id) == Pal.Pikmin { names.append("休息花") }
         return names.joined(separator: "・")
     }
-    func CanNext() -> Bool { return step == 0 ? prof != "" : (step == 1 || mode == "shelf" || InLineup(pet)) }
+    func CanNext() -> Bool { return step == 0 ? lu != "" : (mode == "shelf" || InLineup(pet)) }
 
     @discardableResult func Add(_ id: String, _ text: String, _ sub: String, _ r: Rectangle, _ kind: Int, _ on: Bool) -> Btn {
         let b = Btn()
@@ -16168,42 +16572,44 @@ class SetupForm: Form {
         btns.Clear()
         let W0 = ClientSize.Width, H0 = ClientSize.Height, top = Sc(154), bottom = H0 - Sc(72)
         if step == 0 {
-            let cw = Sc(220), ch = Sc(230), gap = Sc(28), x0 = (W0 - 2 * cw - gap) / 2
-            Add("student", "大學生", "上課・報告・期末考", Rectangle(x0, top, cw, ch), 0, prof == "student")
-            Add("work", "上班族", "上班・開會・準時下班", Rectangle(x0 + cw + gap, top, cw, ch), 0, prof == "work")
-        }
-        else if step == 1 {
-            let n = Pal.Lineups.count, gap = Sc(24), cw = Math.Min(Sc(240), (W0 - Sc(48) - (n - 1) * gap) / n), ch = bottom - top - Sc(8)
+            // 主打：用自己的照片做一隻；下面是現成的幾櫃
+            let hero = Rectangle(Sc(30), top, W0 - Sc(60), Sc(108))
+            Add("make", "把你家的貓狗（或任何照片）變成桌面公仔", "選一張照片 → 去背 → 取名字、選個性，一分鐘做好。照片只存在你的電腦裡。", hero, 0, false)
+            Add("import", "匯入朋友的公仔…", "", Rectangle(W0 - Sc(30) - Sc(190), hero.Bottom + Sc(10), Sc(190), Sc(32)), 2, false)
+            let lus = Pal.LineupsNow()
+            let n = lus.count, gap = Sc(16), ly = hero.Bottom + Sc(52), cw = (W0 - Sc(60) - (n - 1) * gap) / n, ch = bottom - ly - Sc(6)
             let x0 = (W0 - n * cw - (n - 1) * gap) / 2
             for i in 0..<n {
-                let id = Pal.Lineups[i]
+                let id = lus[i]
                 EnsurePics(id)
-                Add("lu:" + id, Pal.LineupName(id), SetupForm.Members(id), Rectangle(x0 + i * (cw + gap), top, cw, ch), 0, lu == id)
+                Add("lu:" + id, Pal.LineupName(id), SetupForm.Members(id), Rectangle(x0 + i * (cw + gap), ly, cw, ch), 0, lu == id)
             }
         }
         else {
             EnsurePics(lu)
-            let cw = Sc(230), ch = Sc(116), gap = Sc(24), x0 = (W0 - 2 * cw - gap) / 2
-            Add("mode:shelf", lu == Pal.Pikmin ? "整櫃（三隻）" : "整櫃（四隻）", lu == Pal.Pikmin ? "三隻＋一朵休息花" : "四隻住在公仔櫃裡", Rectangle(x0, top, cw, ch), 0, mode == "shelf")
-            Add("mode:single", "只要一隻", "沒有櫃子，他住在蛋裡", Rectangle(x0 + cw + gap, top, cw, ch), 0, mode == "single")
+            let cw = Sc(240), ch = Sc(116), gap = Sc(24), x0 = (W0 - 2 * cw - gap) / 2
+            Add("mode:single", "只要一隻", "沒有櫃子，他住在右下角的蛋裡", Rectangle(x0, top, cw, ch), 0, mode == "single")
+            Add("mode:shelf", lu == Pal.Pikmin ? "整櫃（三隻＋花）" : "整櫃", lu == Pal.Pikmin ? "三隻皮克敏和休息花住在櫃子裡" : "大家住在公仔櫃裡，點格子叫他們出來", Rectangle(x0 + cw + gap, top, cw, ch), 0, mode == "shelf")
             if mode == "single" {
                 let ids = Pal.LineupIds(lu)
                 let pw = Sc(100), pg = Sc(14), px0 = (W0 - ids.count * pw - (ids.count - 1) * pg) / 2, py = top + ch + Sc(34)
                 for i in 0..<ids.count {
-                    Add("pet:" + ids[i], Pal.Get(ids[i]).Name, "", Rectangle(px0 + i * (pw + pg), py, pw, Math.Min(Sc(118), bottom - py - Sc(4))), 1, pet == ids[i])
+                    let pp: Pal! = Pal.Get(ids[i])
+                    if pp == nil { continue }
+                    Add("pet:" + ids[i], pp.Name, "", Rectangle(px0 + i * (pw + pg), py, pw, Math.Min(Sc(130), bottom - py - Sc(4))), 1, pet == ids[i])
                 }
             }
         }
         let by = H0 - Sc(64), bh = Sc(44)
         if step > 0 { Add("back", "上一步", "", Rectangle(Sc(30), by, Sc(130), bh), 2, false) }
         else if first { Add("skip", "以後再說", "", Rectangle(Sc(30), by, Sc(130), bh), 2, false) }
-        let nx = Add("next", step < 2 ? "下一步" : "完成！", "", Rectangle(W0 - Sc(30) - Sc(160), by, Sc(160), bh), 3, false)
+        let nx = Add("next", step < 1 ? "下一步" : "完成！", "", Rectangle(W0 - Sc(30) - Sc(160), by, Sc(160), bh), 3, false)
         nx.Enabled = CanNext()
     }
 
     // 每一櫃：櫃子縮圖、每一隻的小照片（用預覽用的 World 畫，不開視窗）
     func EnsurePics(_ id: String) {
-        if shelfPics.ContainsKey(id) { return }
+        if id == "" || shelfPics.ContainsKey(id) { return }
         let pv = World(Math.Max(3, CInt(Math.Round(3 * d))), id)
         shelfPics[id] = pv.SetupShelfPic()
         for p in pv.Pets { petPics[id + ":" + p.P.Id] = p.IconPic() }
@@ -16216,13 +16622,14 @@ class SetupForm: Form {
     func Press(_ id: String) {
         let b = Find(id)
         if b != nil && !b!.Enabled { return }
-        if id == "student" || id == "work" { prof = id }
-        else if id.StartsWith("lu:") { lu = Pal.NormLineup(id.Substring(3)); if !InLineup(pet) { pet = "" } }
+        if id == "make" { let f = first; Close(); w.CuOpenMaker(nil, f); return }
+        if id == "import" { let f = first; Close(); w.CuImportDialog(f); return }
+        if id.StartsWith("lu:") { lu = Pal.NormLineup(id.Substring(3)); if !InLineup(pet) { let ids = Pal.LineupIds(lu); pet = ids.count > 0 ? ids[0] : "" } }
         else if id == "mode:shelf" { mode = "shelf" }
         else if id == "mode:single" { mode = "single"; if !InLineup(pet) { pet = Pal.LineupIds(lu)[0] } }
         else if id.StartsWith("pet:") { pet = id.Substring(4); mode = "single" }
         else if id == "back" { if step > 0 { step -= 1 } }
-        else if id == "next" { if step < 2 { step += 1 } else { w.ApplySetup(prof, lu, mode == "single", pet, first); Close(); return } }
+        else if id == "next" { if step < 1 { step += 1 } else { w.ApplySetup(lu, mode == "single", pet, first); Close(); return } }
         else if id == "skip" || id == "close" { Close(); return }
         else { return }
         LayoutBtns()
@@ -16258,22 +16665,26 @@ class SetupForm: Form {
         Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.X - 9 * U, pr.Y + plh / 2 - 2 * U, U)
         Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.Right + 4 * U, pr.Y + plh / 2 - 2 * U, U)
         Steps(g, W0, Sc(68))
-        let q = step == 0 ? "你是？" : (step == 1 ? "選一櫃公仔" : "怎麼擺？")
-        let hint = step == 0 ? "公仔們會照你的生活陪你（之後在小屋可以改）" : (step == 1 ? "兩櫃都很可愛，之後隨時能換" : (mode == "single" ? "選一隻，他會住在右下角的蛋裡" : "公仔櫃放在右下角，點格子就叫他們出來"))
+        let q = step == 0 ? "選你的公仔" : "怎麼擺？"
+        let hint = step == 0 ? "用自己的照片做一隻，或選一櫃現成的（之後在小屋都能換、能再做）" : (mode == "single" ? "選一隻，他會住在右下角的蛋裡" : "公仔櫃放在右下角，點格子就叫他們出來")
         TextRenderer.DrawText(g, q, qF, Rectangle(0, Sc(100), W0, Sc(30)), Pix.TextC, Pix.Mid)
         TextRenderer.DrawText(g, hint, subF, Rectangle(0, Sc(130), W0, Sc(18)), Pix.C(0x9A6338), Pix.Mid)
-        if step == 2 && mode == "single" {
+        if step == 0 {
+            let im = Find("import")
+            if im != nil { TextRenderer.DrawText(g, "或選一櫃現成的：", btnF, Rectangle(Sc(32), im!.R.Y, Sc(300), im!.R.Height), Pix.TextC, Pix.LeftMid) }
+        }
+        if step == 1 && mode == "single" {
             let first2 = Find("mode:shelf")
             if first2 != nil { TextRenderer.DrawText(g, "選哪一隻？", btnF, Rectangle(0, first2!.R.Bottom + Sc(6), W0, Sc(26)), Pix.TextC, Pix.Mid) }
         }
         for b in btns { DrawBtn(g, b) }
     }
 
-    // 上面的三個步驟：現在這步黃色、做完的綠色打勾
+    // 上面的兩個步驟：現在這步黃色、做完的綠色打勾
     func Steps(_ g: Graphics, _ W0: Int, _ y: Int) {
-        let names: [String] = ["你是？", "選一櫃", "怎麼擺"]
-        let pw = Sc(112), ph = Sc(26), gap = Sc(18), x0 = (W0 - 3 * pw - 2 * gap) / 2
-        for i in 0..<3 {
+        let names: [String] = ["選公仔", "怎麼擺"]
+        let n = names.count, pw = Sc(112), ph = Sc(26), gap = Sc(18), x0 = (W0 - n * pw - (n - 1) * gap) / 2
+        for i in 0..<n {
             let x = x0 + i * (pw + gap)
             if i > 0 { var sx = x - gap + U; while sx + U <= x - U { Pix.Box(g, Pix.C(0xD8BF94), sx, y + ph / 2 - U / 2, U, U); sx += 2 * U } }
             Pix.Round(g, i == step ? Pix.C(0x8A5A2A) : Pix.C(0xC9B08A), x, y, pw, ph, U)
@@ -16297,26 +16708,28 @@ class SetupForm: Form {
             Pix.Box(g, face, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U)
             Pix.Box(g, shade, r.X + U, r.Bottom - 3 * U, r.Width - 2 * U, 2 * U)
             if b.Enabled { Pix.Box(g, Pix.Mix(face, Color.White, 0.6), r.X + 2 * U, r.Y + U, r.Width - 4 * U, U) }
-            let tw = Pix.TextW(b.Text, btnF), ax = 7 * U
+            let bf: FontT! = r.Height < Sc(40) ? subF : btnF
+            let tw = Pix.TextW(b.Text, bf), ax = 7 * U
             var tx = r.X + (r.Width - tw - (b.Id == "back" || b.Id == "next" ? ax : 0)) / 2
             let cy = r.Y + (r.Height - 2 * U) / 2
             let tc = b.Enabled ? Pix.TextC : Pix.Dim
             if b.Id == "back" { Arrow(g, tx + U, cy, -1, tc); tx += ax }
-            TextRenderer.DrawText(g, b.Text, btnF, Rectangle(tx, r.Y, tw + 4, r.Height - 2 * U), tc, Pix.LeftMid)
-            if b.Id == "next" && step < 2 { Arrow(g, tx + tw + 2 * U, cy, 1, tc) }
+            TextRenderer.DrawText(g, b.Text, bf, Rectangle(tx, r.Y, tw + 4, r.Height - 2 * U), tc, Pix.LeftMid)
+            if b.Id == "next" && step < 1 { Arrow(g, tx + tw + 2 * U, cy, 1, tc) }
             return
         }
-        // 卡片：底下一層影子；選到的是金色粗框、右上角綠色勾勾
-        let edge = b.On ? Pix.C(0xC08A2C) : Pix.C(0x8A6A4A)
-        let fill = b.On ? Pix.C(0xFFEDB8) : (hot ? Pix.C(0xFFF6DE) : Pix.C(0xFFFDF7))
+        // 卡片：底下一層影子；選到的是金色粗框、右上角綠色勾勾；「做一隻自己的」是暖黃色的主打卡
+        let hero = b.Id == "make"
+        let edge = b.On || hero ? Pix.C(0xC08A2C) : Pix.C(0x8A6A4A)
+        let fill = hero ? (hot ? Pix.C(0xFFE9A8) : Pix.C(0xFFF0C4)) : (b.On ? Pix.C(0xFFEDB8) : (hot ? Pix.C(0xFFF6DE) : Pix.C(0xFFFDF7)))
         Pix.Round(g, Pix.C(0xE6D3B0), r.X + 2 * U, r.Y + 2 * U, r.Width, r.Height, U)
         Pix.Round(g, edge, r.X, r.Y, r.Width, r.Height, U)
-        let ins = b.On ? 2 * U : U
-        if b.On { Pix.Box(g, edge, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U) }
+        let ins = b.On || hero ? 2 * U : U
+        if b.On || hero { Pix.Box(g, edge, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U) }
         Pix.Box(g, fill, r.X + ins, r.Y + ins, r.Width - 2 * ins, r.Height - 2 * ins)
-        if hot && !b.On { Pix.Box(g, Pix.C(0xF6C453), r.X + ins, r.Bottom - ins - U, r.Width - 2 * ins, U) }
+        if hot && !b.On && !hero { Pix.Box(g, Pix.C(0xF6C453), r.X + ins, r.Bottom - ins - U, r.Width - 2 * ins, U) }
         if b.Kind == 1 { DrawPetCard(g, b) }
-        else if b.Id == "student" || b.Id == "work" { DrawIconCard(g, b, b.Id == "student" ? SetupForm.STUDENT : SetupForm.WORK) }
+        else if hero { DrawMakeCard(g, b) }
         else if b.Id.StartsWith("lu:") { DrawShelfCard(g, b, b.Id.Substring(3)) }
         else { DrawModeCard(g, b) }
         if b.On {
@@ -16334,19 +16747,15 @@ class SetupForm: Form {
         }
     }
 
-    func IconPal() -> Dict<Character, Color> {
-        let p = Dict<Character, Color>()
-        p["k"] = Pix.Ink; p["d"] = Pix.C(0x3D4A6B); p["D"] = Pix.C(0x2C3550); p["Y"] = Pix.C(0xF2C14E)
-        p["w"] = Pix.C(0xFFFDF7); p["l"] = Pix.C(0xA9B8D0); p["b"] = Pix.C(0xA0643A); p["B"] = Pix.C(0xC8844E); p["s"] = Pix.C(0x7E4A28)
-        return p
-    }
-
-    func DrawIconCard(_ g: Graphics, _ b: Btn, _ art: [String]) {
+    func DrawMakeCard(_ g: Graphics, _ b: Btn) {
         let r = b.R
-        let c = Math.Max(3, Sc(6)), aw = art[0].count * c
-        Pix.Art(g, art, IconPal(), r.X + (r.Width - aw) / 2, r.Y + Sc(26), c)
-        TextRenderer.DrawText(g, b.Text, bigF, Rectangle(r.X, r.Y + Sc(140), r.Width, Sc(32)), Pix.TextC, Pix.Mid)
-        TextRenderer.DrawText(g, b.Sub, subF, Rectangle(r.X, r.Y + Sc(174), r.Width, Sc(22)), Pix.C(0x9A6338), Pix.Mid)
+        let pal = Dict<Character, Color>()
+        pal["k"] = Pix.Ink; pal["w"] = Pix.C(0xFFFDF7); pal["b"] = Pix.C(0xBFE3F2); pal["p"] = Pix.C(0xF27A90)
+        let c = Math.Max(3, Sc(5)), aw = SetupForm.MAKE[0].count * c, ah = SetupForm.MAKE.count * c, ix = r.X + Sc(22)
+        Pix.Art(g, SetupForm.MAKE, pal, ix, r.Y + (r.Height - ah) / 2, c)
+        let tx = ix + aw + Sc(18)
+        TextRenderer.DrawText(g, b.Text, bigF, Rectangle(tx, r.Y + Sc(18), r.Right - tx - Sc(12), Sc(30)), Pix.TextC, Pix.LeftMid)
+        TextRenderer.DrawText(g, b.Sub, subF, Rectangle(tx, r.Y + Sc(52), r.Right - tx - Sc(16), Sc(40)), Pix.C(0x9A6338), [TextFormatFlags.Left, TextFormatFlags.Top, TextFormatFlags.WordBreak, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix])
     }
 
     func DrawShelfCard(_ g: Graphics, _ b: Btn, _ id: String) {
@@ -16354,12 +16763,17 @@ class SetupForm: Form {
         var pic: Bitmap! = nil
         var textY = r.Y + Sc(12)
         if shelfPics.TryGetValue(id, &pic) {
-            let avail = r.Height - Sc(72), ph = Math.Min(pic.Height, avail), pw = pic.Width * ph / pic.Height
-            g.DrawImage(pic, r.X + (r.Width - pw) / 2, r.Y + Sc(12), pw, ph)
-            textY = r.Y + Sc(16) + ph
+            let avail = r.Height - Sc(86)
+            var ph = Math.Min(pic.Height, avail), pw = pic.Width * ph / pic.Height
+            if pw > r.Width - Sc(16) { pw = r.Width - Sc(16); ph = pic.Height * pw / pic.Width }
+            let im = g.InterpolationMode
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic
+            g.DrawImage(pic, r.X + (r.Width - pw) / 2, r.Y + Sc(10), pw, ph)
+            g.InterpolationMode = im
+            textY = r.Y + Sc(14) + ph
         }
         TextRenderer.DrawText(g, b.Text, bigF, Rectangle(r.X, textY, r.Width, Sc(30)), Pix.TextC, Pix.Mid)
-        TextRenderer.DrawText(g, b.Sub, subF, Rectangle(r.X + Sc(6), textY + Sc(30), r.Width - Sc(12), Sc(20)), Pix.C(0x9A6338), Pix.Mid)
+        TextRenderer.DrawText(g, b.Sub, subF, Rectangle(r.X + Sc(6), textY + Sc(28), r.Width - Sc(12), Sc(38)), Pix.C(0x9A6338), [TextFormatFlags.HorizontalCenter, TextFormatFlags.Top, TextFormatFlags.WordBreak, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix])   // 四櫃並排時名單換行，不要被切掉
     }
 
     func DrawModeCard(_ g: Graphics, _ b: Btn) {
@@ -16384,7 +16798,7 @@ class SetupForm: Form {
         }
         let tx = ix + iconW + Sc(8)
         TextRenderer.DrawText(g, b.Text, bigF, Rectangle(tx, r.Y + r.Height / 2 - Sc(30), r.Right - tx - Sc(8), Sc(30)), Pix.TextC, Pix.LeftMid)
-        TextRenderer.DrawText(g, b.Sub, subF, Rectangle(tx, r.Y + r.Height / 2 + Sc(2), r.Right - tx - Sc(8), Sc(22)), Pix.C(0x9A6338), Pix.LeftMid)
+        TextRenderer.DrawText(g, b.Sub, subF, Rectangle(tx, r.Y + r.Height / 2 + Sc(2), r.Right - tx - Sc(8), Sc(40)), Pix.C(0x9A6338), [TextFormatFlags.Left, TextFormatFlags.Top, TextFormatFlags.WordBreak, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix])
     }
 
     func DrawPetCard(_ g: Graphics, _ b: Btn) {
@@ -16392,10 +16806,12 @@ class SetupForm: Form {
         var pic: Bitmap! = nil
         let nameH = Sc(24)
         if petPics.TryGetValue(lu + ":" + b.Id.Substring(4), &pic) {
-            let avail = r.Height - nameH - Sc(8), ph = Math.Min(pic.Height, avail), pw = pic.Width * ph / pic.Height
+            let avail = r.Height - nameH - Sc(8)
+            var ph = Math.Min(pic.Height, avail), pw = pic.Width * ph / pic.Height
+            if pw > r.Width - Sc(8) { pw = r.Width - Sc(8); ph = pic.Height * pw / pic.Width }
             g.DrawImage(pic, r.X + (r.Width - pw) / 2, r.Y + Sc(6) + (avail - ph), pw, ph)
         }
-        TextRenderer.DrawText(g, b.Text, btnF, Rectangle(r.X, r.Bottom - nameH - Sc(4), r.Width, nameH), Pix.TextC, Pix.Mid)
+        TextRenderer.DrawText(g, b.Text, btnF, Rectangle(r.X, r.Bottom - nameH - Sc(4), r.Width, nameH), Pix.TextC, Pix.Mid.union(TextFormatFlags.EndEllipsis))
     }
 }
 
@@ -17638,6 +18054,7897 @@ extension World {
         if arg == "wilt" { PikWiltAlarm(); return }
         if arg.StartsWith("stage") && arg.Length == 6 { let s = Int(Array(arg)[5].asciiValue ?? 48) - 48; for p in Pets { p.PikSetStage(s) }; return }
         if double.TryParse(arg, NumberStyles.Float, CultureInfo.InvariantCulture, &m) { flowerRecover = -1; flowerStart = Now - m * 60 }
+    }
+}
+
+// ===== 51_original.swift =====
+// 51_original.swift — port of extension/desktop/DeskPals.Original.cs
+// Desk Pals：續命小隊（半糖・醒醒・糰糰・貼貼）——原創角色。新安裝的預設一櫃，也是對外宣傳用的門面。
+// 半糖＝珍奶（吸管撐竿跳、噗珍珠）、醒醒＝咖啡馬克杯（白天想睡、續杯就衝、晚上反而清醒）、
+// 糰糰＝三角飯糰（海苔衝浪、飯匙打球、滾來滾去）、貼貼＝便利貼（貼在視窗上、寫便條、像紙一樣飄下來）。
+// 像素圖的原始檔在 tools/original_art/final_art.py（C# 那份由 export_cs.py 產生；這裡的「像素圖」一段是照 C# 逐字轉過來的，別手改）。
+import Foundation
+
+// ================= 角色資料 =================
+
+extension Pal {
+    static let Original = "original"
+    static let OriginalName = "續命小隊"
+    static let OriginalIds: [String] = ["boba", "coffee", "onigiri", "sticky"]
+
+    static func OrigPals() -> List<Pal> { return List<Pal>([Boba(), Coffee(), Onigiri(), Sticky()]) }
+
+    // 共用：算出頭頂超出 16 格的列數、頭和身體在 16 格框的哪一列
+    static func OrigBase(_ id: String, _ name: String, _ headTopInArt: Int) -> Pal
+    {
+        let p = Pal()
+        p.Id = id; p.Name = name; p.Orig = true; p.BallKind = "tennis"; p.Halo = Color.White; p.EyeRow = -1; p.HatCol = 0
+        switch id
+        {
+        case "boba": ArtBoba(p)
+        case "coffee": ArtCoffee(p)
+        case "onigiri": ArtOnigiri(p)
+        default: ArtSticky(p)
+        }
+        let total = p.Art["HEAD"].count + p.Art["BODY"].count + p.Art["LEGS_A"].count
+        p.TopRows = Math.Max(0, total - 16)
+        p.HeadTop = headTopInArt - p.TopRows
+        p.BodyTop = p.Art["HEAD"].count - p.TopRows
+        return p
+    }
+
+    // ---------------- 半糖：珍奶。甜甜的、愛揪團；粗吸管是她的招牌（撐竿跳、噗珍珠）----------------
+    static func Boba() -> Pal
+    {
+        let p = OrigBase("boba", "半糖", 4)
+        p.Move = "hop"; p.NightStyle = "sleepy"; p.NightBubble = 2
+        p.Accent = C(0xC98E55); p.Panel = C(0xFFE6CC); p.HaloNight = C(0xFFC58F)
+        p.HatRow = 1; p.ScarfRow = 8; p.GlassRow = 3; p.BadgeRow = 9; p.BadgeCol = 5; p.SideRow = 9
+        p.Speed = 50
+        p.Say("talk", "今天也要甜甜的～", "半糖剛剛好，人生也是～", "要不要揪一杯？我請客（騙你的）", "珍珠 Q 彈 Q 彈～", "微糖去冰，是我的人生態度", "喝口水再繼續吧 🥤", "你是我最喜歡的客人～")
+        p.Say("talk_d", "冰塊都融化了…你也該回家了", "半糖要打烊了喔～", "下班了！明天再揪～", "天黑了，甜度降一點，早點睡", "再待下去珍珠都要變硬了…")
+        p.Say("save", "存好了！甜度滿分 🥤", "Q 彈存檔～", "收好了！給你一顆珍珠當獎勵", "存檔成功～半糖少冰！")
+        p.Say("save_d", "存好了～那就打烊吧", "存了！快回家喝杯熱的", "收好了…晚安～")
+        p.Say("pats", "嘿嘿～好甜", "被摸摸，珍珠都在跳～", "你今天也很努力喔", "半糖最喜歡你了 ♥", "辛苦了，給你吸一口（不行）", "慢慢來，甜度剛好就好", "摸摸頭～你也是半糖的寶", "有我在，不會苦的")
+        p.Say("pats_d", "嗯…半糖想打烊了", "摸完就回家喔～", "晚上喝太多會睡不著，回家吧", "你辛苦了，明天見～")
+        p.Say("pats_hi", "能遇到你，是今天最甜的事", "你是我的全糖 ♥", "我們是最佳組合！", "每天都想跟你揪～")
+        p.Say("hugs", "抱抱～冰冰涼涼的", "Q 彈抱抱！", "(つ´ω`)つ 半糖抱抱", "抱緊一點～珍珠會掉")
+        p.Say("hugs_d", "抱抱…然後回家喔", "晚安抱抱～", "抱完就打烊囉")
+        p.Say("knock", "叩叩！外送到了～🥤", "嗨嗨～玻璃外面的你！", "半糖可以出去玩嗎？", "（用吸管敲敲）叩叩～")
+        p.Say("knock_d", "叩叩…打烊時間到囉", "還在加班？甜度不夠了啦", "回家吧～明天再揪")
+        p.Say("newwin", "新視窗！去看看～", "咦～這是什麼新口味？", "半糖來了～")
+        p.Say("newwin_d", "又開新的？明天再看嘛～", "打烊了，不要再開了啦")
+        p.Say("hi", "嗨～我是半糖，甜度剛好的那種 🥤"); p.Say("hi_d", "嗨…打烊時間到了耶")
+        p.Say("wake", "嗯…是你呀～半糖醒了 ♥"); p.Say("wake_d", "嗯…還沒打烊嗎？")
+        p.Say("dizzy", "轉轉轉～珍珠都暈了 @@"); p.Say("dizzy_d", "暈…想打烊了…")
+        p.Say("dizzy_ok", "好了好了～珍珠歸位！"); p.Say("dizzy_ok_d", "好了…回家吧")
+        p.Say("tickle", "噗噗噗！珍珠噴出來了～", "哈哈好癢～Q 彈 Q 彈", "再搖下去要變奶泡了啦"); p.Say("tickle_d", "噗…最後一次喔")
+        p.Say("pat10", "今天第 {n} 次摸摸了！甜度破表 ♥"); p.Say("pat10_d", "第 {n} 次了…摸完就回家喔")
+        p.Say("levelup", "好感度 Lv{n}！半糖拿到「{u}」了～加料！"); p.Say("levelup_d", "Lv{n}…「{u}」…明天戴給你看")
+        p.Say("missed", "你好久沒來點我了…珍珠都要硬掉了 🥺"); p.Say("missed_d", "好久沒摸了…明天要記得喔")
+        p.Say("hover", "要點餐嗎？還是摸摸～")
+        p.Say("seek", "咦？那是什麼？"); p.Say("seek_lost", "跑掉了…"); p.Say("seek_got", "抓到滑鼠了！吸～（不是啦）")
+        p.Say("drag", "哇～要灑出來了！"); p.Say("throw", "珍珠～～飛～")
+        p.Say("shelf_in", "半糖回櫃子冰著囉～"); p.Say("shelf_in_d", "打烊囉，半糖回櫃子睡覺")
+        p.Say("shelf_out", "半糖出杯囉！🥤"); p.Say("shelf_out_d", "出來了…天黑了耶，你怎麼還在？")
+        p.Say("ball_go", "球！好像一顆大珍珠！", "我來吸！", "等我～"); p.Say("ball_go_d", "最後一顆喔…")
+        p.Say("ball_catch", "吸～噗！還你～", "好大的珍珠！噴回去～", "Q 彈回擊！"); p.Say("ball_catch_d", "噗…還你，該回家囉")
+        p.Say("ball_end", "不玩了嗎？下次再揪 🥤"); p.Say("ball_end_d", "不玩了…那就打烊吧")
+        p.Say("ball_far", "球滾太遠了啦～")
+        p.Say("back", "半糖回來了～"); p.Say("back_d", "回來了…")
+        p.Say("share_end", "分享完了～半糖回來囉")
+        p.Say("welcome", "你回來了！要不要來一杯？♥"); p.Say("welcome_d", "你回來了…是要來打烊的吧？")
+        p.Say("rest", "已經 {n} 分鐘了，起來喝口水、伸個懶腰～🥤"); p.Say("rest_d", "{n} 分鐘了…喝完這杯就下班吧")
+        p.Say("night_on", "打烊時間到了～下班囉"); p.Say("night_off", "早安～今天也要甜甜的 ☀")
+        p.Say("sleep", "半糖要瞇一下…"); p.Say("sleep_d", "晚安…你也去睡")
+        p.Say("jump", "嘿！"); p.Say("nojump", "附近沒有可以跳的地方耶")
+        p.Say("errors", "嗚…有 {n} 個錯誤，甜度不夠了"); p.Say("errors_d", "{n} 個錯誤…明天再修，回家吧")
+        p.Say("errors_ok", "錯誤都清光了！加珍珠慶祝～"); p.Say("errors_ok_d", "修好了！那就打烊吧")
+        p.Say("typing", "打好快！手搖都沒你快～", "加油加油！給你加料！", "鍵盤在跳舞耶 ♪"); p.Say("typing_d", "打這麼快，是想快點下班吧")
+        p.Say("done", "{who} 做完了！來一杯慶祝 🥤"); p.Say("done_d", "{who} 做完了～那就下班吧")
+        p.Say("wait", "{who} 在等你回答喔～"); p.Say("wait_d", "{who} 在等你…回完就回家")
+        p.Say("ask", "{who} 有問題要問你喔 🙋"); p.Say("ask_d", "{who} 在問你…回完就下班")
+        p.Say("stuck_tool", "{who} 停在「{tool}」{n} 分鐘了，要你按允許嗎？"); p.Say("stuck_tool_d", "{who} 停了 {n} 分鐘…按一下就回家")
+        p.Say("stuck", "{who} 好像卡住了…{n} 分鐘沒動，去看看？"); p.Say("stuck_d", "{who} 卡住 {n} 分鐘了…看一眼就回家")
+        p.Say("unstuck", "{who} 又動了！甜～"); p.Say("unstuck_d", "{who} 動了…")
+        p.Say("tag", "上版成功！加珍珠慶祝 🎉"); p.Say("tag_dev", "測試機上好了～半糖少冰！"); p.Say("tag_prod", "正式機上線！全糖慶祝 🎉"); p.Say("tag_d", "上版成功…那就打烊吧")
+        p.Say("late23", "好晚了…喝杯熱的去睡覺吧 🌙"); p.Say("late12", "午餐吃了沒？配一杯？"); p.Say("late15", "三點了！下午茶時間 🥤")
+        p.Say("late_d", "早就打烊了喔"); p.Say("late_dd", "這麼晚了…回家睡覺")
+        p.Say("g_late", "這麼晚還在？半糖陪你一下 🌙"); p.Say("g_morning", "早安～今天也要甜甜的 ☀"); p.Say("g_noon", "午安～吃飽了嗎？")
+        p.Say("g_evening", "晚上了～辛苦了"); p.Say("g_day", "半糖出杯囉～🥤"); p.Say("g_d", "打烊時間了…你怎麼還在？")
+        p.Say("app_browser", "在逛什麼？有新的飲料店嗎？"); p.Say("app_code", "寫 code 呀～半糖陪你"); p.Say("app_excel", "好多格子…像在算飲料錢")
+        p.Say("app_ppt", "做簡報～記得配一杯"); p.Say("app_word", "在寫報告～慢慢來"); p.Say("app_chat", "有人揪飲料嗎？"); p.Say("app_files", "在找檔案嗎？")
+        p.Say("app_other", "這是什麼？半糖也要看～")
+        p.Say("app_code_d", "還在寫…打烊了啦"); p.Say("app_chat_d", "下班了，明天再回嘛"); p.Say("app_office_d", "這份明天做好不好～"); p.Say("app_other_d", "打烊時間到囉～")
+        p.Say("s_birthday", "生日快樂！今天全糖加滿 🎂", "生日快樂～半糖請你喝一杯！")
+        p.Say("s_cny", "新年快樂！紅包拿來買飲料 🧧", "恭喜發財，杯杯大杯！")
+        p.Say("s_xmas", "聖誕快樂！🎄 熱的半糖好溫暖", "叮叮噹～聖誕限定口味！")
+        p.Say("s_newyear", "新年快樂！今年也甜甜的 ✨")
+        p.Say("s_halloween", "不給糖就…給我半糖！🎃", "我扮成…全糖！")
+        p.Say("s_friday", "星期五了！下班揪一杯！", "小週末～甜度加倍！")
+        p.Say("morning", "半糖！早安～🥤", "半糖報到！")
+        p.Say("goodnight", "打烊囉～半糖回櫃子睡覺 🌙", "晚安～明天再揪！")
+        p.Say("nag", "打烊了，回家吧～", "冰塊都融了…下班！", "回家喝杯熱的，早點睡")
+        p.Say("react", "咦？", "怎麼了？", "珍珠嚇一跳！")
+        p.Shared()
+        return p
+    }
+
+    // ---------------- 醒醒：咖啡馬克杯。白天永遠沒睡醒，續杯才開機；晚上反而精神超好（但會叫你去睡）----------------
+    static func Coffee() -> Pal
+    {
+        let p = OrigBase("coffee", "醒醒", 4)
+        p.Move = "shuffle"; p.NightStyle = "wired"; p.NightBubble = 1
+        p.Accent = C(0x2F8AA0); p.Panel = C(0xD6F0F4); p.HaloNight = C(0xA8D8F0)
+        p.HatRow = 2; p.ScarfRow = 11; p.GlassRow = 6; p.BadgeRow = 11; p.BadgeCol = 4; p.SideRow = 9; p.NoGlasses = true
+        p.Speed = 28
+        p.Say("talk", "……還沒開機", "讓我先醒醒…", "續杯，拜託", "人生需要咖啡因", "我醒了。大概。", "早上的會議…是夢吧", "（打哈欠）呼啊～")
+        p.Say("talk_d", "晚上我反而精神超好…但你要睡", "熬夜是我的工作，不是你的", "我是咖啡，我不用睡。你要。", "再撐下去，明天會更累喔", "關機。去睡。")
+        p.Say("save", "存好了。（點頭）", "……存了。很好。", "存檔完成，可以續杯了吧", "穩。")
+        p.Say("save_d", "存了就快睡", "存好了。關機吧。", "……存了。晚安。")
+        p.Say("pats", "……（瞇眼）好舒服", "摸摸…讓我醒一點", "你今天也辛苦了", "嗯…再一下", "有你在，我比較醒", "慢慢來，我陪你熬…不對，陪你做", "被摸了，咖啡因 +1")
+        p.Say("pats_d", "……摸完就去睡", "我不睏，但你很睏", "晚上的你需要的是床，不是我", "好啦…晚安")
+        p.Say("pats_hi", "你比咖啡還讓我清醒", "跟你在一起，不用續杯", "我們是最佳搭檔", "……謝謝你每天陪我")
+        p.Say("hugs", "抱抱…暖暖的", "小心燙～抱抱", "(つ´ω`)つ 熱咖啡抱抱", "……再抱一下，我還沒醒")
+        p.Say("hugs_d", "抱完去睡", "熱抱抱…然後關機", "晚安抱抱")
+        p.Say("knock", "叩叩…你醒著嗎？我不太醒", "（蒸氣貼玻璃）呼～", "可以出去曬太陽嗎…", "續杯！叩叩！")
+        p.Say("knock_d", "叩叩。睡覺時間。", "我看到了，你還在熬夜", "關機。現在。")
+        p.Say("newwin", "……又一個視窗", "新的？讓我醒醒再看", "（慢慢晃過去）")
+        p.Say("newwin_d", "這個明天再開", "不准再開了，去睡")
+        p.Say("hi", "……嗨。我是醒醒。還沒醒。☕"); p.Say("hi_d", "嗨！晚上我很清醒——但你該睡了")
+        p.Say("wake", "……嗯？我沒睡，我在閉目養神"); p.Say("wake_d", "我沒睡！咖啡從來不睡！")
+        p.Say("dizzy", "轉、轉太多圈…咖啡要灑了 @@"); p.Say("dizzy_d", "暈…但還是很清醒…")
+        p.Say("dizzy_ok", "……好了。醒了。"); p.Say("dizzy_ok_d", "好了。去睡。")
+        p.Say("tickle", "醒了醒了！我醒了！", "哈…哈啾！（蒸氣噴出來）", "別搖！會灑出來！"); p.Say("tickle_d", "……好癢。不准笑。")
+        p.Say("pat10", "今天第 {n} 次了…我好像真的醒了 ♥"); p.Say("pat10_d", "第 {n} 次…晚上就別一直摸了，去睡")
+        p.Say("levelup", "好感度 Lv{n}…拿到「{u}」。醒了，真的醒了"); p.Say("levelup_d", "Lv{n}。「{u}」。明天戴。")
+        p.Say("missed", "你好幾天沒來了…我差點睡死 🥺"); p.Say("missed_d", "好久沒摸了…")
+        p.Say("hover", "……是你在摸我嗎？")
+        p.Say("seek", "……那是什麼？"); p.Say("seek_lost", "跑了。算了。"); p.Say("seek_got", "抓到了…可以回去睡了嗎")
+        p.Say("drag", "哇、哇！會灑出來！"); p.Say("throw", "咖～啡～灑～了～")
+        p.Say("shelf_in", "我回櫃子補眠了…"); p.Say("shelf_in_d", "回櫃子了。你也去睡。")
+        p.Say("shelf_out", "……（被叫醒）我出來了"); p.Say("shelf_out_d", "出來了！晚上我精神很好——但你不該在")
+        p.Say("ball_go", "球…好吧，我追", "等、等我醒一下", "我接…我接"); p.Say("ball_go_d", "最後一顆。")
+        p.Say("ball_catch", "接到了…（咖啡濺出來）", "掉進杯子裡了，還你", "好球…我醒了"); p.Say("ball_catch_d", "還你。去睡。")
+        p.Say("ball_end", "不玩了？太好了，補眠"); p.Say("ball_end_d", "不玩了就去睡")
+        p.Say("ball_far", "太遠了…不想動")
+        p.Say("back", "……我回來了"); p.Say("back_d", "回來了。")
+        p.Say("share_end", "分享完了？我醒著喔（假的）")
+        p.Say("welcome", "你回來了…我剛剛沒有睡"); p.Say("welcome_d", "你回來了。來關機的吧？")
+        p.Say("rest", "{n} 分鐘了，站起來走走、喝口水 ☕（不是叫你續杯）"); p.Say("rest_d", "{n} 分鐘了…不要再熬了")
+        p.Say("night_on", "下班了。……我反而醒了。"); p.Say("night_off", "早安…（還沒醒）☀")
+        p.Say("sleep", "補眠…zZ"); p.Say("sleep_d", "我不睏…zZ…（睡著了）")
+        p.Say("jump", "嘿…咻"); p.Say("nojump", "沒地方跳…也不想跳")
+        p.Say("errors", "{n} 個錯誤。……我醒了。"); p.Say("errors_d", "{n} 個錯誤…明天精神好再修")
+        p.Say("errors_ok", "錯誤清光了。可以續杯了"); p.Say("errors_ok_d", "修完了。去睡。")
+        p.Say("typing", "打這麼快…你喝了幾杯？", "手速驚人，我醒了", "加油，咖啡因與你同在"); p.Say("typing_d", "打快一點，早點睡")
+        p.Say("done", "{who} 做完了。……我醒著看到了"); p.Say("done_d", "{who} 做完了。你也收工吧")
+        p.Say("wait", "{who} 在等你回答…"); p.Say("wait_d", "{who} 在等你。回完去睡")
+        p.Say("ask", "{who} 在問你問題…"); p.Say("ask_d", "{who} 在問你。回完關機")
+        p.Say("stuck_tool", "{who} 停在「{tool}」{n} 分鐘了，是不是在等你按允許？"); p.Say("stuck_tool_d", "{who} 停 {n} 分鐘了。按一下，然後睡")
+        p.Say("stuck", "{who} 好像睡著了…{n} 分鐘沒動靜，跟我一樣"); p.Say("stuck_d", "{who} 卡 {n} 分鐘了。看一眼就去睡")
+        p.Say("unstuck", "{who} 醒了。比我早"); p.Say("unstuck_d", "{who} 動了。")
+        p.Say("tag", "上版成功。乾杯 ☕"); p.Say("tag_dev", "測試機上好了…續一杯慶祝"); p.Say("tag_prod", "正式機上線！我徹底醒了 🎉"); p.Say("tag_d", "上版成功。那現在可以睡了吧")
+        p.Say("late23", "很晚了。咖啡因留給明天，你去睡 🌙"); p.Say("late12", "午餐…吃了嗎？我只喝咖啡（不要學）"); p.Say("late15", "三點…續杯時間 ☕")
+        p.Say("late_d", "下班時間過了喔"); p.Say("late_dd", "這麼晚了。關機。睡覺。")
+        p.Say("g_late", "這麼晚…我精神很好，但你不行 🌙"); p.Say("g_morning", "早…安…（開機中）☕"); p.Say("g_noon", "午安…吃飽會想睡，我懂")
+        p.Say("g_evening", "晚上了…我開始醒了"); p.Say("g_day", "我出來了…慢慢的 ☕"); p.Say("g_d", "下班時間了。你為什麼還開著電腦？")
+        p.Say("app_browser", "在逛什麼…我也看看"); p.Say("app_code", "寫 code…需要續杯嗎"); p.Say("app_excel", "好多數字…我眼睛花了")
+        p.Say("app_ppt", "簡報…開會的時候我會睡著"); p.Say("app_word", "寫報告…慢慢來"); p.Say("app_chat", "有人找你…不是找我吧"); p.Say("app_files", "在找檔案…")
+        p.Say("app_other", "……這是什麼？")
+        p.Say("app_code_d", "還在寫？去睡"); p.Say("app_chat_d", "訊息明天再回"); p.Say("app_office_d", "這份明天做"); p.Say("app_other_d", "……關機吧")
+        p.Say("s_birthday", "生日快樂…我醒著幫你唱 🎂", "生日快樂！今天我請你一杯")
+        p.Say("s_cny", "新年快樂…紅包可以買很多咖啡 🧧", "恭喜發財，杯杯都醒")
+        p.Say("s_xmas", "聖誕快樂…熱咖啡配聖誕節 🎄", "聖誕老公公也需要咖啡")
+        p.Say("s_newyear", "新年快樂…今年也要醒著 ✨")
+        p.Say("s_halloween", "不給糖就…給我咖啡 🎃", "我扮成…睡飽的人（很難）")
+        p.Say("s_friday", "星期五…撐住，快醒了", "週末可以睡到自然醒")
+        p.Say("morning", "醒醒…（還沒醒）報到 ☕", "醒醒報到…呼啊～")
+        p.Say("goodnight", "晚安…我回櫃子補眠了", "……今天辛苦了。晚安。")
+        p.Say("nag", "關機。睡覺。", "熬夜交給我，你去睡", "咖啡不能代替睡覺喔")
+        p.Say("react", "……！", "醒、醒了！", "嗯？")
+        p.Shared()
+        return p
+    }
+
+    // ---------------- 糰糰：三角飯糰。憨厚、愛吃、力氣大，見人就問「吃飽沒？」----------------
+    static func Onigiri() -> Pal
+    {
+        let p = OrigBase("onigiri", "糰糰", 0)
+        p.Move = "waddle"; p.NightStyle = "sleepy"; p.NightBubble = 4
+        p.Accent = C(0x45604F); p.Panel = C(0xE0ECD6); p.HaloNight = C(0xC8D8B8)
+        p.HatRow = 4; p.ScarfRow = 10; p.GlassRow = 5; p.BadgeRow = 12; p.BadgeCol = 5; p.SideRow = 9
+        p.Speed = 40
+        p.Say("talk", "吃飽沒？", "嘿嘿，飯糰最強！", "今天的海苔很脆喔", "吃飽才有力氣寫 code！", "鮪魚口味是我的驕傲", "我圓圓的…啊不對，三角形的", "肚子餓的話，要說喔")
+        p.Say("talk_d", "天黑了…該回家吃晚餐了", "晚餐吃了沒？回家吃熱的", "糰糰想睡了…你也回家吧", "吃飽、睡飽，明天再拚", "海苔要軟掉了…下班吧")
+        p.Say("save", "存好了！嘿嘿", "收好了，跟海苔包一樣緊", "存檔！飯糰力 +1", "穩穩的～")
+        p.Say("save_d", "存好了！回家吃飯吧", "存了～那就下班吧", "收好了…晚安")
+        p.Say("pats", "嘿嘿～好開心", "飯粒都在笑了", "你今天吃飽了嗎？", "辛苦了，摸摸～", "糰糰最喜歡你了 ♥", "加油！吃飽再拚！", "慢慢來，我一直都在", "被摸摸，海苔都捲起來了")
+        p.Say("pats_d", "嗯…糰糰想睡了", "摸完就回家吃飯喔", "你已經很努力了，休息吧", "晚安…明天見")
+        p.Say("pats_hi", "你是我最重要的配料 ♥", "跟你在一起，每天都飽飽的", "我們是最佳拍檔！", "我會一直陪你的！")
+        p.Say("hugs", "大抱抱！軟綿綿的", "抱抱～（飯粒黏到你了）", "(つ´ω`)つ 飯糰抱抱", "抱緊緊！")
+        p.Say("hugs_d", "抱抱…然後回家吃飯", "晚安抱抱～", "抱完就下班囉")
+        p.Say("knock", "叩叩！吃飽沒？👀", "嗨～玻璃外面的你！", "糰糰可以出去玩嗎？", "（臉貼玻璃）飯粒黏上去了")
+        p.Say("knock_d", "叩叩…該回家吃晚餐了", "還在加班？肚子會餓喔", "回家吧～明天再拚")
+        p.Say("newwin", "新視窗！我去看看！", "咦？那是什麼？", "糰糰出動！")
+        p.Say("newwin_d", "又開新的？明天再看吧", "天黑了，關掉吧")
+        p.Say("hi", "嗨！我是糰糰，吃飽沒？🍙"); p.Say("hi_d", "嗨…天黑了耶，吃晚餐了嗎？")
+        p.Say("wake", "嗯…是你呀！吃飽沒？"); p.Say("wake_d", "嗯…糰糰在睡覺…你也去睡")
+        p.Say("dizzy", "滾太多圈了…頭暈 @@"); p.Say("dizzy_d", "暈…想睡…")
+        p.Say("dizzy_ok", "好了！嘿嘿"); p.Say("dizzy_ok_d", "好了…回家吧")
+        p.Say("tickle", "咕嚕咕嚕～滾滾滾！", "哈哈好癢！飯粒要掉了", "嘿嘿嘿～再一次！"); p.Say("tickle_d", "嘿…最後一次喔")
+        p.Say("pat10", "今天第 {n} 次摸摸！糰糰好開心 ♥"); p.Say("pat10_d", "第 {n} 次了…摸完回家吃飯喔")
+        p.Say("levelup", "好感度 Lv{n}！糰糰拿到「{u}」了！"); p.Say("levelup_d", "Lv{n}…「{u}」…明天戴給你看")
+        p.Say("missed", "你好幾天沒來了…糰糰都要變冷飯了 🥺"); p.Say("missed_d", "好久沒摸了…明天要記得喔")
+        p.Say("hover", "嘿嘿，你在摸我嗎？")
+        p.Say("seek", "咦？那是什麼？"); p.Say("seek_lost", "跑掉了…"); p.Say("seek_got", "抓到了！糰糰最強！")
+        p.Say("drag", "哇～飯粒要掉了！"); p.Say("throw", "咕嚕咕嚕咕嚕～～")
+        p.Say("shelf_in", "糰糰回櫃子保溫囉～"); p.Say("shelf_in_d", "回櫃子睡覺了，晚安")
+        p.Say("shelf_out", "糰糰出爐！吃飽沒？"); p.Say("shelf_out_d", "出來了…天黑了，你吃晚餐了嗎？")
+        p.Say("ball_go", "球！我來打！", "飯匙準備好了！", "看我的！"); p.Say("ball_go_d", "最後一球喔…")
+        p.Say("ball_catch", "殺球！還你～", "飯匙回擊！", "嘿嘿，好球吧？"); p.Say("ball_catch_d", "打回去…然後回家")
+        p.Say("ball_end", "不玩了？下次再打！"); p.Say("ball_end_d", "不玩了…回家吃飯吧")
+        p.Say("ball_far", "球滾太遠了～")
+        p.Say("back", "糰糰回來了！"); p.Say("back_d", "回來了…")
+        p.Say("share_end", "分享完了？糰糰回來了！")
+        p.Say("welcome", "你回來了！吃飽沒？"); p.Say("welcome_d", "你回來了…晚餐吃了嗎？")
+        p.Say("rest", "已經 {n} 分鐘了！起來走走、喝口水、吃點東西 🍙"); p.Say("rest_d", "{n} 分鐘了…回家吃飯吧")
+        p.Say("night_on", "天黑了…該回家吃晚餐囉"); p.Say("night_off", "早安！早餐吃了沒？☀")
+        p.Say("sleep", "吃飽睡覺覺…zZ"); p.Say("sleep_d", "晚安…你也去睡")
+        p.Say("jump", "嘿咻！"); p.Say("nojump", "附近沒有可以跳的地方耶")
+        p.Say("errors", "有 {n} 個錯誤！糰糰來打！"); p.Say("errors_d", "{n} 個錯誤…明天吃飽再修")
+        p.Say("errors_ok", "錯誤都打光了！嘿嘿"); p.Say("errors_ok_d", "修好了！回家吃飯吧")
+        p.Say("typing", "打好快！吃飽的力量！", "加油加油！", "手指好有力～"); p.Say("typing_d", "打快一點，早點回家吃飯")
+        p.Say("done", "{who} 做完了！吃個飯慶祝！"); p.Say("done_d", "{who} 做完了～回家吃飯吧")
+        p.Say("wait", "{who} 在等你回答喔～"); p.Say("wait_d", "{who} 在等你…回完回家吃飯")
+        p.Say("ask", "{who} 有問題要問你！"); p.Say("ask_d", "{who} 在問你…回完就下班")
+        p.Say("stuck_tool", "{who} 停在「{tool}」{n} 分鐘了，要不要按一下？"); p.Say("stuck_tool_d", "{who} 停 {n} 分鐘…按一下就回家")
+        p.Say("stuck", "{who} 好像卡住了…{n} 分鐘了，是不是餓了？"); p.Say("stuck_d", "{who} 卡 {n} 分鐘…看一下就回家")
+        p.Say("unstuck", "{who} 動了！吃飽了吧"); p.Say("unstuck_d", "{who} 動了…")
+        p.Say("tag", "上版成功！加一顆滷蛋慶祝 🎉"); p.Say("tag_dev", "測試機上好了！嘿嘿"); p.Say("tag_prod", "正式機上線！今晚加菜 🎉"); p.Say("tag_d", "上版成功…回家吃飯吧")
+        p.Say("late23", "好晚了…宵夜少吃，早點睡 🌙"); p.Say("late12", "午餐時間！吃飽沒？"); p.Say("late15", "下午了～肚子餓的話吃點東西")
+        p.Say("late_d", "下班時間過了喔"); p.Say("late_dd", "好晚了…回家睡覺")
+        p.Say("g_late", "這麼晚了…糰糰陪你 🌙"); p.Say("g_morning", "早安！早餐吃了沒？☀"); p.Say("g_noon", "午安～吃飽沒？")
+        p.Say("g_evening", "晚上了！晚餐吃了沒？"); p.Say("g_day", "糰糰來了！吃飽沒？🍙"); p.Say("g_d", "天黑了…你怎麼還在？")
+        p.Say("app_browser", "在看什麼？美食嗎？"); p.Say("app_code", "寫 code！糰糰幫你加油"); p.Say("app_excel", "好多格子，像便當盒")
+        p.Say("app_ppt", "做簡報～加油！"); p.Say("app_word", "寫文件～慢慢來"); p.Say("app_chat", "有人約吃飯嗎？"); p.Say("app_files", "在找東西嗎？我幫你")
+        p.Say("app_other", "這是什麼？")
+        p.Say("app_code_d", "還在寫…回家吃飯吧"); p.Say("app_chat_d", "明天再回吧"); p.Say("app_office_d", "明天再做也可以的"); p.Say("app_other_d", "回家吧～")
+        p.Say("s_birthday", "生日快樂！今天加兩顆滷蛋 🎂", "生日快樂！糰糰請你吃大餐！")
+        p.Say("s_cny", "新年快樂！年菜吃飽飽 🧧", "恭喜發財！紅包換飯糰！")
+        p.Say("s_xmas", "聖誕快樂！🎄", "聖誕大餐要吃飽喔")
+        p.Say("s_newyear", "新年快樂！今年也要吃飽飽 ✨")
+        p.Say("s_halloween", "不給糖就…給我飯糰！🎃", "我扮成…御飯糰（本來就是）")
+        p.Say("s_friday", "星期五了！週末吃好料！", "快放假了～嘿嘿")
+        p.Say("morning", "糰糰！早餐吃了沒？", "糰糰報到！")
+        p.Say("goodnight", "晚安～糰糰回櫃子保溫", "今天辛苦了，晚安！")
+        p.Say("nag", "回家吃晚餐吧", "下班了！吃飽睡飽", "天黑了，回家囉")
+        p.Say("react", "咦？", "怎麼了？", "嘿？")
+        p.Shared()
+        return p
+    }
+
+    // ---------------- 貼貼：便利貼。黏人、細心、什麼都幫你記下來（有點容易緊張）----------------
+    static func Sticky() -> Pal
+    {
+        let p = OrigBase("sticky", "貼貼", 2)
+        p.Move = "flutter"; p.NightStyle = "sleepy"; p.NightBubble = 3
+        p.Accent = C(0xC9A62A); p.Panel = C(0xE6E2F6); p.HaloNight = C(0xF0E0A0)
+        p.HatRow = 3; p.ScarfRow = 10; p.GlassRow = 5; p.BadgeRow = 12; p.BadgeCol = 5; p.SideRow = 10
+        p.Speed = 45
+        p.Say("talk", "貼貼～", "有什麼要我記下來的嗎？", "別忘了喝水喔！", "今天的待辦，一起完成！", "我的背面有黏膠，所以很黏人", "截止日我都記得喔", "做完一件，撕掉一張～")
+        p.Say("talk_d", "今天的待辦…明天再說", "下班！我已經寫好了", "回家吧～我幫你記著", "天黑了，黏膠也要休息", "明天的事，我都記下來了")
+        p.Say("save", "存好了！我也記下來了 ✍", "存檔 ✓ 打勾！", "收好了～貼貼！", "記住了！")
+        p.Say("save_d", "存好了～下班吧", "存了！我幫你記著，回家吧", "收好了…晚安")
+        p.Say("pats", "貼貼～♥", "嘿嘿，被摸摸了", "你今天也很努力喔", "辛苦了，我都記得", "貼緊緊～", "慢慢來，一件一件做", "有我在，不會忘記的", "被摸摸，角都翹起來了")
+        p.Say("pats_d", "嗯…貼貼想睡了", "摸完就回家喔", "你已經很棒了，剩下明天", "晚安貼貼～")
+        p.Say("pats_hi", "想一直貼著你 ♥", "你是我最重要的待辦事項", "我們是最佳拍檔！", "每天都要一起喔")
+        p.Say("hugs", "貼貼～！", "抱緊緊，黏住了！", "(つ´ω`)つ 貼貼", "抱抱～撕不下來了")
+        p.Say("hugs_d", "貼貼…然後回家", "晚安貼貼～", "抱完就下班囉")
+        p.Say("knock", "叩叩！有事要提醒你！👀", "嗨～玻璃外面的你！", "我可以貼在你的螢幕上嗎？", "（貼在玻璃上）黏住了～")
+        p.Say("knock_d", "叩叩…下班時間到了", "還在加班？我要寫你名字了", "回家吧～待辦明天再做")
+        p.Say("newwin", "新視窗！要記下來嗎？", "咦？新的！", "貼過去看看～")
+        p.Say("newwin_d", "又開新的？明天再看嘛", "天黑了，不要再開了")
+        p.Say("hi", "嗨！我是貼貼，什麼都幫你記 📝"); p.Say("hi_d", "嗨…下班時間到了喔")
+        p.Say("wake", "嗯…是你呀！有什麼要記的嗎？"); p.Say("wake_d", "嗯…貼貼在睡覺…你也去睡")
+        p.Say("dizzy", "轉轉轉～黏膠要掉了 @@"); p.Say("dizzy_d", "暈…想睡…")
+        p.Say("dizzy_ok", "好了！重新貼好！"); p.Say("dizzy_ok_d", "好了…回家吧")
+        p.Say("tickle", "哈哈好癢！角翹起來了～", "貼貼貼貼～！", "不要撕我啦～嘻嘻"); p.Say("tickle_d", "嘻…最後一次喔")
+        p.Say("pat10", "今天第 {n} 次摸摸！我記下來了 ♥"); p.Say("pat10_d", "第 {n} 次了…摸完就回家喔")
+        p.Say("levelup", "好感度 Lv{n}！貼貼拿到「{u}」了！記下來！"); p.Say("levelup_d", "Lv{n}…「{u}」…明天戴給你看")
+        p.Say("missed", "你好幾天沒來了…我的黏膠都快乾了 🥺"); p.Say("missed_d", "好久沒摸了…明天要記得喔")
+        p.Say("hover", "你在摸我嗎？貼貼～")
+        p.Say("seek", "咦？那是什麼？"); p.Say("seek_lost", "跑掉了…記下來"); p.Say("seek_got", "抓到滑鼠了！貼住！")
+        p.Say("drag", "哇～要被風吹走了！"); p.Say("throw", "飄～～～")
+        p.Say("shelf_in", "貼貼回櫃子囉～"); p.Say("shelf_in_d", "回櫃子睡覺了，晚安")
+        p.Say("shelf_out", "貼貼出來了！有事要提醒嗎？"); p.Say("shelf_out_d", "出來了…下班時間到了耶")
+        p.Say("ball_go", "球！我來黏！", "等我～", "看我的！"); p.Say("ball_go_d", "最後一球喔…")
+        p.Say("ball_catch", "黏住了！撕下來還你～", "接到了！貼貼！", "嘿嘿，黏得好吧"); p.Say("ball_catch_d", "還你…回家吧")
+        p.Say("ball_end", "不玩了嗎？我記下來，下次再玩"); p.Say("ball_end_d", "不玩了…回家吧")
+        p.Say("ball_far", "球跑太遠了～")
+        p.Say("back", "貼貼回來了！"); p.Say("back_d", "回來了…")
+        p.Say("share_end", "分享完了～貼貼回來了")
+        p.Say("welcome", "你回來了！我都幫你記著喔"); p.Say("welcome_d", "你回來了…是要下班了嗎？")
+        p.Say("rest", "已經 {n} 分鐘了！提醒：起來喝水、伸展一下 📝"); p.Say("rest_d", "{n} 分鐘了…今天的待辦先到這裡吧")
+        p.Say("night_on", "下班時間到了！待辦明天再說"); p.Say("night_off", "早安！今天的待辦我都寫好了 ☀")
+        p.Say("sleep", "貼貼睡一下…zZ"); p.Say("sleep_d", "晚安…你也去睡")
+        p.Say("jump", "飄～"); p.Say("nojump", "附近沒有可以貼的地方耶")
+        p.Say("errors", "有 {n} 個錯誤！我先記下來！"); p.Say("errors_d", "{n} 個錯誤…記下來了，明天修")
+        p.Say("errors_ok", "錯誤清光了！打勾 ✓"); p.Say("errors_ok_d", "修好了！回家吧")
+        p.Say("typing", "打好快！我記都記不完！", "加油加油！", "手指在飛耶！"); p.Say("typing_d", "打快一點，早點下班")
+        p.Say("done", "{who} 做完了！打勾 ✓"); p.Say("done_d", "{who} 做完了～打勾，下班！")
+        p.Say("wait", "{who} 在等你回答！記得喔"); p.Say("wait_d", "{who} 在等你…回完就回家")
+        p.Say("ask", "{who} 有問題要問你！別忘了！"); p.Say("ask_d", "{who} 在問你…回完就下班")
+        p.Say("stuck_tool", "{who} 停在「{tool}」{n} 分鐘了，是不是在等你按允許？"); p.Say("stuck_tool_d", "{who} 停 {n} 分鐘了…按一下就回家")
+        p.Say("stuck", "{who} 好像卡住了…{n} 分鐘了，去看看？"); p.Say("stuck_d", "{who} 卡 {n} 分鐘了…看一下就回家")
+        p.Say("unstuck", "{who} 又動了！打勾 ✓"); p.Say("unstuck_d", "{who} 動了…")
+        p.Say("tag", "上版成功！打勾 ✓🎉"); p.Say("tag_dev", "測試機上好了！記下來！"); p.Say("tag_prod", "正式機上線！今天的待辦全打勾 🎉"); p.Say("tag_d", "上版成功…那就下班吧")
+        p.Say("late23", "很晚了…提醒：該睡了 🌙"); p.Say("late12", "提醒：午餐時間！"); p.Say("late15", "提醒：下午三點，喝水時間 💧")
+        p.Say("late_d", "提醒：下班時間過了"); p.Say("late_dd", "提醒：這麼晚了，關機睡覺")
+        p.Say("g_late", "這麼晚了…貼貼陪你 🌙"); p.Say("g_morning", "早安！今天的待辦我寫好了 ☀"); p.Say("g_noon", "午安～午餐吃了嗎？")
+        p.Say("g_evening", "晚上了～辛苦了"); p.Say("g_day", "貼貼來了！有事要提醒嗎？📝"); p.Say("g_d", "下班時間了…你怎麼還在？")
+        p.Say("app_browser", "在逛網頁？要記下什麼嗎？"); p.Say("app_code", "寫 code！TODO 我幫你記"); p.Say("app_excel", "好多格子…我也是方的")
+        p.Say("app_ppt", "做簡報？我幫你記重點"); p.Say("app_word", "在寫報告～截止日我記得"); p.Say("app_chat", "有人找你？要回喔！"); p.Say("app_files", "在找檔案？我記得你上次放在…")
+        p.Say("app_other", "這是什麼？記下來！")
+        p.Say("app_code_d", "還在寫？TODO 明天再做"); p.Say("app_chat_d", "明天再回吧，我記著"); p.Say("app_office_d", "這份明天做也來得及"); p.Say("app_other_d", "下班了喔～")
+        p.Say("s_birthday", "生日快樂！今天的待辦只有一件：開心 🎂", "生日快樂！我早就記在行事曆了")
+        p.Say("s_cny", "新年快樂！紅包記得收好 🧧", "恭喜發財！")
+        p.Say("s_xmas", "聖誕快樂！🎄", "聖誕願望清單我幫你寫好了")
+        p.Say("s_newyear", "新年快樂！新年新希望寫好了嗎？✨")
+        p.Say("s_halloween", "不給糖就…把你貼起來！🎃", "我扮成…待辦清單（好可怕）")
+        p.Say("s_friday", "星期五了！週末的待辦只有休息", "快放假了！撐住！")
+        p.Say("morning", "貼貼！今天的待辦寫好了！", "貼貼報到！")
+        p.Say("goodnight", "晚安～貼貼回櫃子了 📝", "今天辛苦了，晚安！")
+        p.Say("nag", "提醒：下班時間到了", "回家吧～我幫你記著", "待辦明天再做，現在去休息")
+        p.Say("react", "！", "咦？", "要記下來嗎？")
+        p.Shared()
+        return p
+    }
+
+    // ==== 像素圖（由 tools/original_art/final_art.py 產生，別手改）====
+    static func ArtBoba(_ p: Pal)
+    {
+        p.Col("F", 0xFF8FB5, 0xC77AA0)
+        p.Col("G", 0xF0B248, 0xC08A40)
+        p.Col("H", 0xF3D2A8, 0xC2A488)
+        p.Col("M", 0xC98E55, 0x946A44)
+        p.Col("N", 0xBFA27A, 0x8E785C)
+        p.Col("O", 0xB8742A, 0x8A5420)
+        p.Col("Q", 0xA58472, 0x7A6458)
+        p.Col("b", 0xF79A9A, 0xC07A86)
+        p.Col("e", 0x2A1810, 0x1E120E)
+        p.Col("f", 0xFFFFFF, 0xE6DDF0)
+        p.Col("h", 0xFBEBD4, 0xD8C2AE)
+        p.Col("j", 0x2E1C16, 0x1E120E)
+        p.Col("k", 0x4A2C1C, 0x2E1A14)
+        p.Col("m", 0xE8B57C, 0xB98A62)
+        p.Col("n", 0xE2C8A0, 0xB49E80)
+        p.Col("o", 0x7A3A2A, 0x5A2A20)
+        p.Col("s", 0xFF7AAE, 0xD86A9A)
+        p.Col("w", 0xFFFFFF, 0xF0E8F4)
+        p.Col("x", 0xFF6F9C, 0xC85A80)
+        p.Col("z", 0xD2508A, 0xA84878)
+        p.Art["HEAD"] = ["...........sz..", "..........sz...", ".........sz....", "........sz.....", "kkkkkkkkszkkkkk", "kfFfFfFszFfFfFk", "kkkkkkkkkkkkkkk", ".khmmmmmmmmmMk.", ".khmwemmmwemMk.", ".khmeemmmeemMk.", ".khbmmooommbMk.", ".khmmmmxmmmmMk."]
+        p.Art["HEAD_UP"] = ["...........sz..", "..........sz...", ".........sz....", "........sz.....", "kkkkkkkkszkkkkk", "kfFfFfFszFfFfFk", "kkkkkkkkkkkkkkk", ".khmmmmmmmmmMk.", "kkhmwemmmwemMkk", "kkhmeemmmeemMkk", ".khbmmooommbMk.", ".khmmmmxmmmmMk."]
+        p.Art["BODY"] = ["kkhmmmmmmmmmMkk", ".khmmmmmmmmmMk.", ".khjQmjQmjQmMk.", ".khjjmjjmjjmMk.", ".kHHHHHHHHHHHk.", "..kkkkkkkkkkk.."]
+        p.Art["BODY_J"] = ["kkhmmmmmmmmmMkk", ".khjQmjQmjQmMk.", ".khjjmjjmjjmMk.", ".khmmmmmmmmmMk.", ".kHHHHHHHHHHHk.", "..kkkkkkkkkkk.."]
+        p.Art["BODY_UP"] = [".khmmmmmmmmmMk.", ".khmmmmmmmmmMk.", ".khjQmjQmjQmMk.", ".khjjmjjmjjmMk.", ".kHHHHHHHHHHHk.", "..kkkkkkkkkkk.."]
+        p.Art["BODY_HUG"] = ["kkhmmmmmmmmmMkk", "kkhmmmmmmmmmMkk", ".khjQmjQmjQmMk.", ".khjjmjjmjjmMk.", ".kHHHHHHHHHHHk.", "..kkkkkkkkkkk.."]
+        p.Art["LEGS_A"] = ["...kk.....kk...", "...kk.....kk..."]
+        p.Art["LEGS_B"] = ["..kk.......kk..", "..kk.......kk.."]
+        p.Art["LEGS_SIT"] = ["..kkk.....kkk..", "..............."]
+        p.Art["F_SLEEPY"] = [".khmmmmmmmmmMk.", ".khmkkmmmkkmMk.", ".khbmmmmmmmbMk.", ".khmmmmommmmMk."]
+        p.Art["F_HAPPY"] = [".khmemmmmmemMk.", ".khememmmemeMk.", ".khbmmooommbMk.", ".khmmmmxmmmmMk."]
+        p.Art["F_DIZZY"] = [".khmemmmmmemMk.", ".khmmemmmemmMk.", ".khbemmmmmebMk.", ".khmmmooommmMk."]
+        p.Art["F_SQUISH"] = [".khmkkmmmkkmMk.", ".khmmkmmmkmmMk.", ".khbmmooommbMk.", ".khmmmooommmMk."]
+        p.Art["F_BLOW"] = [".khmwemmmwemMk.", ".khmeemmmeemMk.", ".khbmmmommmbMk.", ".khmmmmommmmMk."]
+        p.Art["F_WORRY"] = [".khmwemmmwemMk.", ".khmeemmmeemMk.", ".khbmmmommmbMk.", ".khmmmomommmMk."]
+        p.Art["PEARL"] = [".jj.", "jQjj", "jjjj", ".jj."]
+        p.Art["CHICKEN"] = [".GOGGG..", "GGGOGGG.", "GOGGGOGk", ".GGOGGGk", "knnnnnnk", "knNnnNnk", "knnnnnnk", ".kkkkkk."]
+        p.Art["DRINK"] = ["....s.", "...s..", "kkkskk", "kfFfFk", "kmmmMk", "kjmjMk", ".kkkk."]
+        p.Art["TAG"] = [".kkkkkkkkkkkk", "kSSSSSSSSSSSk", "kSSSWSWSWWWSk", "kSSSWSWSWSWSk", "kwSSWWWSWWWSk", "kSSSSSWSSSWSk", "kSSSSSWSWWWSk", "kSSSSSSSSSSSk", ".kkkkkkkkkkkk"]
+        p.FaceRow = 8
+    }
+    static func ArtCoffee(_ p: Pal)
+    {
+        p.Col("C", 0x5A3018, 0x402212)
+        p.Col("G", 0x9FB8C8, 0x7088A0)
+        p.Col("O", 0xBC7A30, 0x8A5428)
+        p.Col("T", 0x2F8AA0, 0x245E70)
+        p.Col("V", 0xC8D4E2, 0x8E98B8)
+        p.Col("b", 0xF2A0A0, 0xB87A8A)
+        p.Col("c", 0x8A5432, 0x6A4026)
+        p.Col("d", 0x2A5A6E, 0x14303E)
+        p.Col("e", 0x1E2A3A, 0x0E1420)
+        p.Col("g", 0xDCEBF2, 0xA8B8D0)
+        p.Col("k", 0x1E2A3A, 0x101824)
+        p.Col("l", 0xA8E6EE, 0x7CB4C4)
+        p.Col("o", 0xF2B25E, 0xC08A50)
+        p.Col("p", 0xFFE2C8, 0xD8C0A8)
+        p.Col("t", 0x4FB6C8, 0x3A8A9E)
+        p.Col("v", 0xF2F6FA, 0xC8D0E8)
+        p.Col("w", 0xFFFFFF, 0xE8F0F8)
+        p.Col("z", 0x6A4ADA, 0x5A3ABA)
+        p.Art["HEAD"] = [".....v.....v.....", "....v.....v......", ".....V.....V.....", "......V.....V....", "..kkkkkkkkkkkk...", ".kwcccccccccCwk..", ".kwccpppcccCCwk..", ".kwwCCpcccCCwwk..", ".kltttttttttttkkk", ".klttttttttttTkTk", ".klttwwttttwwtkTk", ".klttetttttettkTk"]
+        p.Art["HEAD_UP"] = [".....v.....v.....", "....v.....v......", ".....V.....V.....", "......V.....V....", "..kkkkkkkkkkkk...", ".kwcccccccccCwk..", ".kwccpppcccCCwk..", ".kwwCCpcccCCwwk..", "kkltttttttttttkkk", "ktltttttttttTTkTk", "kklttwwttttwwtkTk", ".klttetttttettkTk"]
+        p.Art["STEAM_B"] = ["....v.....v......", ".....v.....v.....", "....V.....V......", ".....V.....V....."]
+        p.Art["BODY"] = [".kltbtttttttbtkkk", ".kltttttkktttTk..", ".klttttttttttTk..", "..kTTTTTTTTTTk...", "...kkkkkkkkkk...."]
+        p.Art["BODY_UP"] = [".kltbtttttttbtkkk", ".kltttttkktttTk..", ".klttttttttttTk..", "..kTTTTTTTTTTk...", "...kkkkkkkkkk...."]
+        p.Art["BODY_HUG"] = [".kktbtttttttbkkkk", ".ktkkttttttkkTk..", ".klttttttttttTk..", "..kTTTTTTTTTTk...", "...kkkkkkkkkk...."]
+        p.Art["ARMS_UP_L"] = ["k.", "tk", "kt"]
+        p.Art["LEGS_A"] = ["....kk....kk.....", "....kk....kk....."]
+        p.Art["LEGS_B"] = ["...kk......kk....", "...kk......kk...."]
+        p.Art["LEGS_SIT"] = ["...kkk....kkk....", "................."]
+        p.Art["F_WIDE"] = [".klttwettttwetkTk", ".kltteetttteetkTk", ".kltbtttttttbtkkk"]
+        p.Art["F_PANDA"] = [".klttwettttwetkTk", ".kltteetttteetkTk", ".kltbddttttddtkkk"]
+        p.Art["F_SLEEPY"] = [".kltttttttttttkTk", ".klttkkttttkktkTk", ".kltbtttttttbtkkk"]
+        p.Art["F_HAPPY"] = [".kltteetttteetkTk", ".kltettettettekTk", ".kltbtttttttbtkkk"]
+        p.Art["F_DIZZY"] = [".kltteetttttetkTk", ".kltttetttteetkTk", ".kltbtttttttbtkkk"]
+        p.Art["F_SQUISH"] = [".klttettttttetkTk", ".kltttettttettkTk", ".kltbtttttttbtkkk"]
+        p.Art["POT"] = ["..kkkk...", ".kkddkk..", "kggggggkk", "kgCCCCgk.k", "kgCCCCgk.k", "kgggggkk..", ".kkkkkk..."]
+        p.Art["CROISSANT"] = ["..kkkk..", ".kooOok.", "koOooOok", "kOooOooO", ".kkkkkk."]
+        p.FaceRow = 10
+    }
+    static func ArtOnigiri(_ p: Pal)
+    {
+        p.Col("G", 0x6AB04C, 0x4A8040)
+        p.Col("N", 0x45604F, 0x2E4036)
+        p.Col("O", 0x9A5420, 0x6E3C18)
+        p.Col("X", 0x8A3E26, 0x62301E)
+        p.Col("b", 0xF4A0A0, 0xB87A90)
+        p.Col("e", 0x2B2B33, 0x16161C)
+        p.Col("g", 0xE3DCC8, 0xB4B0C4)
+        p.Col("k", 0x2B2B33, 0x16161C)
+        p.Col("m", 0xC04050, 0x903040)
+        p.Col("n", 0x22302A, 0x141C18)
+        p.Col("o", 0xD88A3C, 0xA86A34)
+        p.Col("r", 0xFCF9F0, 0xD6D4E2)
+        p.Col("u", 0xE8607E, 0xB04A68)
+        p.Col("w", 0xFFFFFF, 0xECEAF6)
+        p.Col("x", 0xB85A3A, 0x8A4430)
+        p.Col("y", 0xFFD84A, 0xD8B040)
+        p.Art["HEAD"] = [".......kk.......", "......krrk......", ".....krrrrk.....", "....krrgrrrk....", "...krrrrrrrrk...", "...krrrrrrgrk...", "..krreerreerrk..", "..krreerreerrk..", ".krrbrrrrrrbrrk.", ".krrrrrmmrrrrrk."]
+        p.Art["HEAD_UP"] = [".......kk.......", "......krrk......", ".....krrrrk.....", ".kk.krrgrrrk.kk.", "krrkrrrrrrrrkrrk", ".kkkrrrrrrgrkkk.", "..krreerreerrk..", "..krreerreerrk..", ".krrbrrrrrrbrrk.", ".krrrrrmmrrrrrk."]
+        p.Art["BODY"] = ["krrrrrrrrrrrrrrk", "knnnnnnnnnnnnnnk", "knNnnnnnnnnnNnnk", ".kkkkkkkkkkkkkk."]
+        p.Art["BODY_BARE"] = ["krrrrrrrrrrrrrrk", "krrrrgrrrrrrrgrk", "krrgrrrrrgrrrrrk", ".kkkkkkkkkkkkkk."]
+        p.Art["BODY_HUG"] = ["kkkrrrrrrrrrrkkk", "krrkknnnnnnkkrrk", "knNnnnnnnnnnNnnk", ".kkkkkkkkkkkkkk."]
+        p.Art["LEGS_A"] = ["....kk....kk....", "....kk....kk...."]
+        p.Art["LEGS_B"] = ["...kk......kk...", "...kk......kk..."]
+        p.Art["LEGS_SIT"] = ["...kkk....kkk...", "................"]
+        p.Art["F_SLEEPY"] = ["..krrrrrrrrrrk..", "..krkkrrrrkkrk..", ".krrbrrrrrrbrrk.", ".krrrrrrrrrrrrk."]
+        p.Art["F_HAPPY"] = ["..krrerrrrerrk..", "..krerrrrrrerk..", ".krrbrrrrrrbrrk.", ".krrrrrmmrrrrrk."]
+        p.Art["F_DIZZY"] = ["..krekrrrekrrk..", "..krrerrrrerrk..", ".krrbrrrrrrbrrk.", ".krrrrrmmrrrrrk."]
+        p.Art["F_SQUISH"] = ["..krkkrrrrkkrk..", "..krrkrrrrkrrk..", ".krrbrrmmrrbrrk.", ".krrrrrmmrrrrrk."]
+        p.Art["F_CHEW"] = ["..krrewrrewrrk..", "..krreerreerrk..", ".krrbrrrrrrbrrk.", ".krrrrmmmmrrrrk."]
+        p.Art["PADDLE"] = [".kkk.", "k111k", "k111k", "k112k", ".k2k.", "..2..", "..2..", "..k.."]
+        p.Art["BENTO"] = [".kkkkkkkk.", "kxrrroOrxk", "kxrrroooxk", "kxGGyyrrxk", "kXXXXXXXXk", ".kkkkkkkk."]
+        p.Art["MINI_ONIGIRI"] = ["..k..", ".krk.", "krrrk", "knnnk", ".kkk."]
+        p.Art["NORI"] = ["kkkkkkkkkkkkkk", "knnnnnnnnnnnNk", "kkkkkkkkkkkkkk"]
+        p.FaceRow = 6
+    }
+    static func ArtSticky(_ p: Pal)
+    {
+        p.Col("C", 0x6E3E22, 0x4E2C18)
+        p.Col("L", 0xE8D890, 0xC4B680)
+        p.Col("b", 0x2A4FA8, 0x203E80)
+        p.Col("c", 0xA0623A, 0x7A4A2E)
+        p.Col("d", 0x3A3020, 0x221C10)
+        p.Col("g", 0xF2CC3A, 0xBCA040)
+        p.Col("k", 0x6A5418, 0x3A2E10)
+        p.Col("l", 0xFFF6C8, 0xE6DCB0)
+        p.Col("o", 0xE89A4A, 0xB87A3A)
+        p.Col("p", 0xFF9AA8, 0xC87A88)
+        p.Col("r", 0xFCF9F0, 0xD6D4E2)
+        p.Col("u", 0x3F6FD8, 0x3458A8)
+        p.Col("w", 0xFFFFFF, 0xE8E4F0)
+        p.Col("y", 0xFFE45C, 0xD8BC5A)
+        p.Art["HEAD"] = ["..............kk", "............kklk", "..kkkkkkkkkkllk.", "..kggggggggklk..", "..kyyyyyyyyykk..", "..kyyyyyyyyyyk..", "..kyydyyyydyyk..", "..kyydyyyydyyk..", "..kypyyyyyypyk..", "..kyyyyddyyyyk.."]
+        p.Art["HEAD_UP"] = ["..............kk", "............kklk", "..kkkkkkkkkkllk.", "..kggggggggklk..", "..kyyyyyyyyykk..", "kkkyyyyyyyyyykkk", "kykyydyyyydyykyk", ".kkyydyyyydyykk.", "..kypyyyyyypyk..", "..kyyyyddyyyyk.."]
+        p.Art["FLAP"] = ["................", "................", "..kkkkkkkkkkkk..", "..kggggggggggk..", "..kyyyyyyyyyyk.."]
+        p.Art["BODY"] = ["..kyyyyyyyyyyk..", ".kkyyyyyyyyyykk.", "..kyyyyyyyyyyk..", "..kkkkkkkkkkkk.."]
+        p.Art["BODY_HUG"] = ["..kyyyyyyyyyyk..", "kkkkyyyyyyyykkkk", "..kyyyyyyyyyyk..", "..kkkkkkkkkkkk.."]
+        p.Art["LEGS_A"] = ["....kk...kk.....", "....kk...kk....."]
+        p.Art["LEGS_B"] = ["...kk.....kk....", "...kk.....kk...."]
+        p.Art["LEGS_SIT"] = ["...kkk...kkk....", "................"]
+        p.Art["F_SLEEPY"] = ["..kyyyyyyyyyyk..", "..kyddyyyddyyk..", "..kypyyyyyypyk..", "..kyyyyddyyyyk.."]
+        p.Art["F_HAPPY"] = ["..kyydyyyydyyk..", "..kydydyydydyk..", "..kypyyyyyypyk..", "..kyyyddddyyyk.."]
+        p.Art["F_DIZZY"] = ["..kydydyydydyk..", "..kyydyyyydyyk..", "..kydydyydydyk..", "..kyyyyddyyyyk.."]
+        p.Art["F_SQUISH"] = ["..kyddyyyddyyk..", "..kyydyyyydyyk..", "..kypyyddyypyk..", "..kyyyyddyyyyk.."]
+        p.Art["F_PANIC"] = ["..kyydyyyydyyk..", "..kyydyyyydyyk..", "..kypyyddyypyk..", "..kyyyddddyyyk.."]
+        p.Art["MARKER"] = ["kuuuubk", "kwwwwbk", ".kkkkk."]
+        p.Art["MINI_NOTE"] = ["kkkkkkkkk", "kgggggggk", "kyppyppyk", "kpppppppk", "kpppppppk", "kyppppyyk", "kyyppyyyk", "kkkkkkkkk"]
+        p.Art["NOTE_BANG"] = ["kkkkkkkkk", "kgggggggk", "kyyyuyyyk", "kyyyuyyyk", "kyyyuyyyk", "kyyyyyyyk", "kyyyuyyyk", "kkkkkkkkk"]
+        p.Art["NOTE_HOME"] = ["kkkkkkkkk", "kgggggggk", "kyyyuyyyk", "kyyuyuyyk", "kyuyyyuyk", "kyuyuyuyk", "kyuuuuuyk", "kkkkkkkkk"]
+        p.Art["NOTE_ZZ"] = ["kkkkkkkkk", "kgggggggk", "kuuuuyyyk", "kyyuyyyyk", "kyuyyuuuk", "kuuuuyuyk", "kyyyyuuuk", "kkkkkkkkk"]
+        p.Art["NOTE_CHECK"] = ["kkkkkkkkk", "kgggggggk", "kyyyyyyuk", "kyyyyyuyk", "kuyyyuyyk", "kyuyuyyyk", "kyyuyyyyk", "kkkkkkkkk"]
+        p.Art["NOTE_DRINK"] = ["kkkkkkkkk", "kgggggggk", "kyuuuuuyk", "kyyyyyyyk", "kyuuuuyyk", "kyyyyyyyk", "kyuuuyyyk", "kkkkkkkkk"]
+        p.Art["RICEBOWL"] = ["..cCcC..", ".rcCcCr.", "kwwwwwwk", ".kwuuwk.", "..kkkk.."]
+        p.FaceRow = 6
+    }
+    // ==== 像素圖結束 ====
+}
+
+// ================= 一隻續命小隊 =================
+
+extension Pet {
+    var OGoing: Bool { return state == "orig" && oAct == "goto" }
+
+    func OrigDo(_ act: String, _ dur: Double) {
+        if state == "air" || state == "fling" || state == "drag" || state == "swim" { oPend = act; oPendDur = dur; return }
+        oAct = act; oT = 0; SetState("orig", dur)
+    }
+    func OPose(_ kind: String, _ dur: Double) { if !Grounded() && state != "air" { return }; oPose = kind; OrigDo("pose", dur) }
+    func OGoto(_ tx: Double, _ dur: Double) { oTx = tx; OrigDo("goto", dur) }
+    func OWire(_ sec: Double) { oWired = Math.Max(oWired, sec) }
+    func OLatte(_ sec: Double) { OPearlLatte = true; oLatteT = sec }
+    func ONote(_ sec: Double) { ONoteFace = true; oNoteT = sec }
+
+    // 畫面上的幾個點（串場丟東西用；螢幕座標）
+    func OStrawTip() -> PointF { return PointF(Cx + Double(dir) * 4.5 * Double(S), y - 4 * Double(S)) }
+    func OHandPoint() -> PointF { return PointF(Cx + Double(dir) * 6 * Double(S), y + Double((P.BodyTop + 1) * S)) }
+    func OFacePoint() -> PointF { return PointF(Cx - Double(dir) * 0.5 * Double(S), y + Double((P.BodyTop - 3) * S)) }
+    func OTopPoint() -> PointF { return PointF(Cx, y + Double((P.HeadTop + 1) * S)) }
+
+    // ---------- 連點三下 ----------
+    func OrigCombo() {
+        Say(L("tickle"), 1.8)
+        if !Grounded() || state == "dizzy" { return }
+        switch P.Id {
+        case "boba": OrigDo("shoot", 1.1)                                                                      // 噗噗噗：珍珠噴出來
+        case "coffee": OWire(3.5); Jump(0, -340 * k); Burst(6)                                                 // 嚇醒：跳起來、開始抖
+        case "onigiri": rolling = true; Jump(Double(dir) * R(120, 200) * k, -260 * k)                          // 笑到滾來滾去
+        default: OrigDo("write", 1.2); w.OrigNotes(self, 3)                                                    // 撒愛心便條
+        }
+    }
+
+    // ---------- 招牌動作 ----------
+    func OrigSignature() {
+        if !Grounded() { return }
+        switch P.Id {
+        case "boba": BobaVault()
+        case "coffee": OrigDo("pour", 2.6); Say(Pick(["續杯…拜託…", "（咖啡壺出現）續杯！", "開機需要咖啡因…"]), 1.6)
+        case "onigiri": OrigDo("surf", 3.4); Say(Pick(["海苔衝浪～咻！", "看我的海苔板！", "糰糰出發～"]), 1.6)
+        default: StickyFly()
+        }
+    }
+
+    // 半糖：把吸管拔下來當撐竿，跳上附近的視窗（沒有就跳高高）
+    func BobaVault() {
+        let o = PickPlatform(80 * k, 800 * k)
+        if let o = o { oFx1 = o[0]; oFy1 = o[1]; dir = o[0] > Cx ? 1 : -1 }
+        else { oFx1 = Double.nan }
+        OrigDo("vault", 0.5)
+        Say(Pick(["吸管撐竿跳！", "看我的～嘿！", "半糖起跳！"]), 1.4)
+    }
+
+    // 貼貼：飛到附近視窗的正面貼著（沒有視窗：直接貼在你的螢幕上）
+    func StickyFly() {
+        var tx = Double.nan, ty: Double = 0; var h: IntPtr = IntPtr.Zero
+        var bd = Double.greatestFiniteMagnitude
+        for wi in w.Cands.Values {
+            if Double(wi.R - wi.L) < 160 * k || Double(wi.B - wi.T) < 140 * k { continue }
+            let cx = Clamp(Cx, Double(wi.L + SW), Double(wi.R - SW)), cy = Double(wi.T) + Math.Min(110 * k, Double(wi.B - wi.T) * 0.3)
+            if !w.PointVisible(wi, cx, cy) || !w.PointVisible(wi, cx, cy + Double(SH) * 0.6) { continue }
+            let d = Math.Abs(cx - Cx) + Math.Abs(cy - y)
+            if d < bd && d < 1200 * k { bd = d; tx = cx; ty = cy; h = wi.H }
+        }
+        if tx.isNaN {
+            let wa = w.WA(Cx, y + Double(SH) / 2.0)
+            tx = Clamp(Cx + Double(dir) * R(40, 160) * k, Double(wa.Left + SW), Double(wa.Right - SW))
+            ty = Math.Max(Double(wa.Top + SH), y - R(170, 300) * k)
+        }
+        oFx0 = x; oFy0 = y; oFx1 = tx - Double(SW) / 2.0; oFy1 = ty - Double(SH) * 0.35
+        let ddx = oFx1 - oFx0, ddy = oFy1 - oFy0
+        let dist = Math.Sqrt(ddx * ddx + ddy * ddy)
+        oFlyDur = Clamp(dist / (300 * k), 0.8, 2.6)
+        oStuckH = h
+        supH = IntPtr.Zero
+        dir = oFx1 >= oFx0 ? 1 : -1
+        OrigDo("fly", 99)
+        Say(Pick(["貼過去囉～", "飄～貼！", "我去貼在那邊！"]), 1.4)
+    }
+
+    func OrigAct(_ a: String) -> Bool {
+        switch a {
+        case "shoot": if Grounded() && Is("boba") { OrigDo("shoot", 1.1); Say("噗噗噗！", 1.2) }; return true
+        case "yawn": if Grounded() && Is("coffee") { OrigDo("yawn", 1.8); Say("呼啊～～", 1.4) }; return true
+        case "tumble": if Grounded() { rolling = true; Jump(Double(dir) * 180 * k, -280 * k); Say("咕嚕咕嚕～", 1.2) }; return true
+        case "paddle": if Grounded() && Is("onigiri") { OrigDo("paddle", 0.9); Say("嘿！揮一揮！", 1.2) }; return true
+        case "write": if Grounded() && Is("sticky") { OrigDo("write", 1.6); Say("寫一張給你～", 1.4); w.OrigNoteToCursor(self, 1.2) }; return true
+        default: break
+        }
+        return false
+    }
+
+    // ---------- 自己閒晃時決定做什麼 ----------
+    func OrigDecide(_ r: Double, _ wa: Rectangle) {
+        if r < 0.16 { SetState("idle", R(1.5, 3.5)); return }
+        if r < 0.40 { dir = rnd.NextDouble() < 0.5 ? -1 : 1; SetState("walk", R(3, 6)); return }
+        if r < 0.48 { if !JumpToPlatform() { Hop() }; return }
+        if r < 0.54 { OrigSignature(); return }
+        if r < 0.62 {
+            switch P.Id {
+            case "boba": OPose("cheer", 1.8); Say(Pick(["Q 彈～Q 彈～", "珍珠在跳舞 ♪", "今天的甜度剛剛好～"]), 1.8)
+            case "coffee": if !Night && oWired <= 0 { OrigDo("yawn", 1.8); Say(Pick(["呼啊～～", "（打哈欠）好睏…", "……需要續杯"]), 1.6) } else { SetState("idle", 2); Say(L("talk"), 2.2) }
+            case "onigiri": OrigDo("paddle", 0.9); Say(Pick(["揮棒練習！嘿！", "飯匙素振り～", "嘿咻！"]), 1.2)
+            default: OrigDo("write", 1.6); Say(Pick(["（寫寫寫）記下來～", "今天的待辦…", "這個也要記！"]), 1.6)
+            }
+            return
+        }
+        if r < 0.67 { Hug(L("hugs"), 2.2); return }
+        if r < (Night ? 0.73 : 0.71) { Knock(L("knock"), "ambient"); return }
+        if r < 0.75 && lateCd <= 0 && LateLine() != nil { LateTick(); return }
+        if r < 0.78 && SeasonLine() != nil { Say(SeasonLine(), 3); SetState("idle", 3); return }
+        if r < 0.90 { SetState("idle", 2.5); Say(L("talk"), 2.4); return }
+        dir = -dir; SetState("walk", R(2, 5))
+    }
+
+    // 走到視窗邊：0 照預設跳、1 回頭、2 換狀態了
+    func OrigEdge(_ right: Bool) -> Int {
+        switch P.Id {
+        case "boba":
+            if rnd.NextDouble() < 0.4 { dir = -dir; return 1 }
+            x += Double(dir) * 4 * k; Jump(Double(dir) * 140 * k, -320 * k); Say(Pick(["嘿！", "跳～"]), 0.8)
+            return 2
+        case "coffee":
+            if rnd.NextDouble() < 0.75 { dir = -dir; if rnd.NextDouble() < 0.3 { Say("……不想跳", 1.2) }; return 1 }
+            x += Double(dir) * 4 * k; Jump(Double(dir) * 60 * k, -80 * k); Say("哎…（沒醒，踩空了）", 1.2)
+            return 2
+        case "onigiri":
+            if rnd.NextDouble() < 0.45 { dir = -dir; return 1 }
+            x += Double(dir) * 4 * k; rolling = true; Jump(Double(dir) * 160 * k, -160 * k); Say("咕嚕咕嚕～", 1.0)    // 三角飯糰滾下去
+            return 2
+        default:
+            if rnd.NextDouble() < 0.35 { dir = -dir; return 1 }
+            x += Double(dir) * 4 * k; Jump(Double(dir) * 120 * k, -220 * k); Say("飄～", 0.8)                       // 像紙一樣飄下去
+            return 2
+        }
+    }
+
+    func OrigLanded(_ wasRolling: Bool) -> Bool {
+        oGliding = false
+        if oPend != nil { let a = oPend!; oPend = nil; SetState("idle", 0.1); OrigDo(a, oPendDur); return true }
+        if oVaultT > 0 || (Is("boba") && oAct == "vaultair") {
+            oVaultT = 0; oAct = ""
+            OPose("cheer", 1.4); Say(Pick(["（落地）甜度剛好！", "十分！滿分！", "吸管插回去～"]), 1.6)
+            return true
+        }
+        if Is("onigiri") && wasRolling { SetState("dizzy", 0.8); Say(Pick(["滾太快了～", "咕嚕…頭暈", "嘿嘿，滾到了"]), 1.2); return true }
+        if Is("sticky") && lastLandVy < 320 * k && rnd.NextDouble() < 0.25 { SetState("idle", 1.2); Say("（輕輕飄下來）", 1.2); return true }
+        return false
+    }
+
+    func OrigLand(_ a: String) -> Bool {
+        switch a {
+        case "oyawn": OrigDo("yawn", 1.6); Say("呼啊～～", 1.2); return true
+        case "ocheer": OPose("cheer", 1.4); Say(Pick(["半糖出杯！", "Q 彈落地～"]), 1.4); return true
+        case "osniff": OPose("think", 1.4); Mark(2); return true
+        default: break
+        }
+        return false
+    }
+
+    // 從櫃子出來：每隻出場方式不一樣
+    func OrigExit() {
+        switch P.Id {
+        case "boba": if rnd.NextDouble() < 0.5 { afterLand = "ocheer" }
+        case "coffee": if !Night && rnd.NextDouble() < 0.6 { afterLand = "oyawn" }
+        case "onigiri": rolling = true                // 滾出來
+        default: break
+        }
+    }
+
+    func OrigNewWindow(_ win: WinInfo) {
+        let after = Is("boba") ? "ocheer" : (Is("coffee") ? "oyawn" : "osniff")
+        if Is("sticky") && rnd.NextDouble() < 0.5 { Say(L("newwin"), 1.5); StickyFly(); return }
+        if !GoToWindow(win, L("newwin"), after) { Say(L("newwin"), 1.5) }
+    }
+
+    // 錯誤變多：半糖擔心、醒醒瞬間清醒、糰糰抄起飯匙、貼貼慌張貼一張「！」
+    func OrigReact(_ why: String) {
+        switch P.Id {
+        case "boba": OPose("worry", 2.6); Mark(4)
+        case "coffee": OWire(4); OPose("wide", 2.4); Mark(1)
+        case "onigiri": OHold = "paddle"; OPose("ready", 2.6)
+        default: OPose("panic", 2.4); w.OrigNoteAbove(self, "NOTE_BANG")
+        }
+    }
+
+    // 慶祝（上版、做完）
+    func OrigCelebrate(_ line: String, _ lead: Bool) {
+        if lead { w.Fireworks(w.WA(Cx, y + Double(SH) / 2.0), 10, -1) }
+        if Grounded() { OPose("cheer", 3.2) }
+        Say(line, 4)
+        switch P.Id {
+        case "boba": w.OrigPearls(self, 6)
+        case "coffee": OWire(5); Mark(0); Mark(0); Burst(8)
+        case "onigiri": Burst(14); Jump(0, -300 * k)
+        default: w.OrigNotes(self, 4)
+        }
+    }
+
+    func OrigLine(_ kind: String) -> String {
+        switch kind {
+        case "goal": return Is("boba") ? "進杯！🏀 甜度剛好～" : (Is("coffee") ? "……進了？我醒了 🏀" : (Is("onigiri") ? "好球！🏀 飯糰入櫃！" : "貼上去了！🏀 貼貼～"))
+        case "cheer": return Is("boba") ? "好球～加珍珠！" : (Is("coffee") ? "……好球" : (Is("onigiri") ? "嘿嘿！好厲害！" : "記下來：好球 ✓"))
+        case "miss": return Is("boba") ? "差一點～再一杯！" : (Is("coffee") ? "……沒進。我還沒醒" : (Is("onigiri") ? "滾、滾過頭了！" : "飄走了～再一次！"))
+        default: break
+        }
+        return "！"
+    }
+
+    // ---------- 球 ----------
+    func OrigBall() {
+        switch P.Id {
+        case "boba": w.HoldBall(self); OrigDo("slurp", 0.9); Say(Pick(["吸～～", "好大的珍珠！吸～"]), 1.0)
+        case "coffee": w.HoldBall(self); OrigDo("dunk", 0.9); OWire(2.5); Say(Pick(["噗通！（掉進杯子裡）", "誰…丟的…（醒了）"]), 1.2)
+        case "onigiri":
+            OrigDo("paddle", 0.5)
+            w.By = y + 6 * Double(S); w.Bx = Cx + Double(dir) * 6 * Double(S)
+            do {
+                let c = Cursor.Position
+                w.Bvx = Clamp((Double(c.X) - w.Bx) * 1.2, -1000 * k, 1000 * k); w.Bvy = -R(560, 720) * k; w.CatchCd = 1.0; w.BallIdle = 0
+            }
+            Say(L("ball_catch"), 1.6)
+        default: w.HoldBall(self); OrigDo("stickball", 1.0); Say("黏住了！", 1.0)
+        }
+    }
+
+    func OReleaseBall(_ power: Double) {
+        if w.Holder !== self { return }
+        w.ReleaseBall(Cx + Double(dir) * 4 * Double(S), y + Double((P.BodyTop - 2) * S), 0, 0)
+        KickBallToCursor(power)
+    }
+
+    // ---------- 每一格 ----------
+    func OrigStep(_ dt: Double) -> Bool {
+        if oWired > 0 { oWired -= dt }
+        if oVaultT > 0 { oVaultT -= dt }
+        if oLatteT > 0 { oLatteT -= dt; if oLatteT <= 0 { OPearlLatte = false } }
+        if oNoteT > 0 { oNoteT -= dt; if oNoteT <= 0 { ONoteFace = false } }
+        // 貼貼：像紙一樣飄下來（左右晃、慢慢掉）
+        if Is("sticky") && state == "air" && !rolling {
+            if vy > 0 {
+                if !oGliding { oGliding = true; oGlideVx = vx }
+                oGlideVx *= Math.Pow(0.35, dt)
+                vy = Math.Min(vy, 210 * k)
+                vx = oGlideVx + Math.Sin(anim * 4.2) * 120 * k
+            }
+        }
+        else { oGliding = false }
+        // 醒醒續杯後：走路變很快、一直抖
+        if Is("coffee") && oWired > 0 && state == "walk" && !InScene {
+            if MoveOnGround(dt, 170 * k) { return true }
+            if rnd.NextDouble() < dt * 2 { Mark(0) }
+        }
+        if Is("coffee") && state == "walk" && oWired <= 0 && !Night && rnd.NextDouble() < dt * 0.08 && !InScene { OrigDo("yawn", 1.6); Say("呼啊～", 1.0); return true }
+        if state != "orig" { return false }
+        oT += dt
+        switch oAct {
+        case "goto":
+            if !oTx.isNaN && Math.Abs(oTx - Cx) > 3 {
+                dir = oTx > Cx ? 1 : -1
+                let step = Math.Min(Math.Abs(oTx - Cx), Math.Max(P.Speed, 70.0) * 1.6 * k * dt)
+                let nx = x + Double(dir) * step
+                if w.Inside(nx + Double(dir > 0 ? SW : 0), y + Double(SH) / 2.0) { x = nx }
+            }
+            else if t > 1 && InScene { t = Math.Min(t, 0.2) }
+            if t < 0 { SetState("idle", InScene ? 30 : 1) }
+            return true
+        case "vault":
+            if t < 0 {
+                if !oFx1.isNaN { BallisticTo(oFx1, oFy1) } else { Jump(Double(dir) * 90 * k, -760 * k) }
+                oAct = "vaultair"; oVaultT = 0.5; Burst(5)
+            }
+            return true
+        case "slurp":
+            if t < 0 { OReleaseBall(1.0); Say(Pick(["噗！還你～", "Q 彈回擊！"]), 1.4); SetState("idle", 1) }
+            return true
+        case "dunk":
+            if oT > 0.3 && oT - dt <= 0.3 { for _ in 0..<3 { Mark(4) } }
+            if t < 0 { OReleaseBall(0.9); Say(L("ball_catch"), 1.6); SetState("idle", 1) }
+            return true
+        case "stickball":
+            if t < 0 { OReleaseBall(1.0); Say(Pick(["撕下來～還你！", "啪！還你～"]), 1.4); SetState("idle", 1) }
+            return true
+        case "shoot":
+            for i in 0..<3 { let at = 0.15 + Double(i) * 0.3; if oT >= at && oT - dt < at { w.OrigPearlShot(self, i) } }
+            if t < 0 { SetState("idle", InScene ? 30 : 1) }
+            return true
+        case "pour":
+            if oT >= 1.6 && oT - dt < 1.6 { OWire(8); Burst(8); Say(Pick(["……！！醒了！！", "開機完成！衝！", "咖啡因注入！！"]), 1.6) }
+            if t < 0 { dir = rnd.NextDouble() < 0.5 ? -1 : 1; SetState("walk", 4.5) }
+            return true
+        case "yawn":
+            if oT > 0.4 && oT - dt <= 0.4 { Mark(3) }
+            if t < 0 { SetState("idle", InScene ? 30 : 1.2) }
+            return true
+        case "surf":
+            do {
+                let nx = x + Double(dir) * 240 * k * dt
+                let ok = supH != IntPtr.Zero ? (nx + Double(SW) / 2.0 >= Double(supL) && nx + Double(SW) / 2.0 <= Double(supR)) : w.Inside(nx + Double(dir > 0 ? SW : 0), y + Double(SH) / 2.0)
+                if ok { x = nx } else { dir = -dir }
+                if rnd.NextDouble() < dt * 8 { sparks.Add(Arr<Double>([Cx - Double(dir) * 6 * Double(S), y + Double(SH) - 2 * Double(S), -Double(dir) * R(40, 120) * k, -R(60, 160) * k, 0])) }
+                if t < 0 { SetState("idle", 1.4); Say(Pick(["（穿回海苔）不、不要看！", "好爽～海苔穿回去！", "嘿嘿，衝浪完畢"]), 1.6) }
+            }
+            return true
+        case "fly":
+            do {
+                let f = Math.Min(1.0, oT / oFlyDur), e = Ease(f)
+                x = oFx0 + (oFx1 - oFx0) * e + Math.Sin(oT * 6) * 6 * k * (1 - f)
+                y = oFy0 + (oFy1 - oFy0) * e - Math.Sin(Math.PI * f) * 50 * k
+                if f >= 1 {
+                    var r = W.RECT()
+                    if oStuckH != IntPtr.Zero && W.Rect(oStuckH, &r) { oStuckDx = CInt(Math.Round(x)) - r.L; oStuckDy = CInt(Math.Round(y)) - r.T }
+                    else { oStuckH = IntPtr.Zero }
+                    OrigDo("stick", R(6, 9)); Burst(4)
+                    Say(Pick(["貼好了！貼貼～", "黏住了！你看得到我嗎？", "（貼在這裡提醒你）📝"]), 2)
+                }
+            }
+            return true
+        case "stick":
+            do {
+                if oStuckH != IntPtr.Zero {
+                    var r = W.RECT()
+                    if !W.IsWindowVisible(oStuckH) || W.IsIconic(oStuckH) || !W.Rect(oStuckH, &r) { oStuckH = IntPtr.Zero; StickyPeel("哇！視窗不見了～"); return true }
+                    x = Double(r.L + oStuckDx); y = Double(r.T + oStuckDy)
+                }
+                if t < 0 { StickyPeel(Pick(["黏膠沒力了～飄～", "被冷氣吹下來了～", "（啪）掉下來囉～"])) }
+            }
+            return true
+        case "write":
+            if t < 0 { SetState("idle", InScene ? 30 : 1) }
+            return true
+        case "paddle":
+            if t < 0 { SetState("idle", InScene ? 30 : 1) }
+            return true
+        default:   // pose：站著擺姿勢
+            if oPose == "think" && rnd.NextDouble() < dt * 0.8 { Mark(2) }
+            if t < 0 { if oPose == "ready" { OHold = "" }; SetState("idle", InScene ? 30 : 1) }
+            return true
+        }
+    }
+
+    func StickyPeel(_ line: String) {
+        oStuckH = IntPtr.Zero
+        Jump(Double(dir) * 30 * k, -60 * k)
+        Say(line, 1.6)
+    }
+
+    func OrigBob() -> Double {
+        let moving = state == "walk" || state == "goto" || state == "seek" || state == "fetch" || (state == "orig" && (oAct == "goto" || oAct == "surf"))
+        if state == "dance" { return Math.Abs(Math.Sin(anim * 8)) * 6 * k }
+        if state == "orig" && oAct == "stick" { return Math.Sin(anim * 2.2) * 1.5 * k }                       // 貼著被冷氣吹得晃
+        switch P.Id {
+        case "boba": if moving { return Math.Abs(Math.Sin(anim * 9)) * 4 * k }                            // 蹦蹦跳（Q 彈）
+        case "coffee": if oWired > 0 && Grounded() { return (Math.Floor(anim * 24) % 2) * k }              // 咖啡因：一直抖
+        case "onigiri": if moving { return Math.Abs(Math.Sin(anim * 6)) * 2 * k }                        // 搖搖擺擺
+        default: if moving { return (Math.Floor(anim * 7) % 2) * k }
+        }
+        return 0
+    }
+
+    // ---------- 畫 ----------
+    func ORows(_ head: String, _ body: String, _ legs: String, _ face: String?) -> [String] {
+        var rows: [String] = A(P.Art.ContainsKey(head) ? head : "HEAD")
+        rows += A(P.Art.ContainsKey(body) ? body : "BODY")
+        rows += A(P.Art.ContainsKey(legs) ? legs : "LEGS_A")
+        if let face = face, P.Art.ContainsKey("F_" + face) {
+            let fr = A("F_" + face)
+            for i in 0..<fr.count {
+                let ri = P.FaceRow + i
+                let fi = Array(fr[i])
+                if ri >= rows.count || fi.count != rows[ri].count { continue }
+                var c = Array(rows[ri])
+                for j in 0..<c.count { if fi[j] != "." { c[j] = fi[j] } }   // 舉手的手留著
+                rows[ri] = String(c)
+            }
+        }
+        return rows
+    }
+
+    // 半糖的吸管拔下來當撐竿時：頭上沒有吸管
+    static func NoStraw(_ rows: [String]) -> [String] {
+        var o = rows
+        var i = 0
+        while i < 6 && i < o.count {
+            var c = Array(o[i])
+            for j in 0..<c.count { if c[j] == "s" || c[j] == "z" { c[j] = i < 4 ? "." : (i == 4 ? "k" : (j % 2 == 0 ? "F" : "f")) } }
+            o[i] = String(c)
+            i += 1
+        }
+        return o
+    }
+
+    func FrameOrig() -> Fr {
+        let act = state == "orig" ? oAct : ""
+        let pose = act == "pose" ? oPose : ""
+        let sleep = state == "sleep", hug = state == "hug"
+        let nightIdle = Night && state == "idle" && !InScene && !HoldingFood()
+        var moving = state == "walk" || state == "seek" || state == "fetch" || state == "hide" || state == "goto"
+        moving = moving || act == "goto"
+        var face: String? = nil
+        if sleep || pose == "doze" { face = "SLEEPY" }
+        else if hug || state == "dance" || pose == "cheer" || (state == "pose" && poseKind == "photo") || act == "stick" || act == "surf" { face = "HAPPY" }
+        else if state == "dizzy" { face = "DIZZY" }
+        else if state == "glass" { face = "SQUISH" }
+        else if act == "yawn" { face = "SLEEPY" }
+        switch P.Id {
+        case "boba":
+            if act == "shoot" || act == "slurp" || pose == "blow" { face = "BLOW" }
+            else if pose == "worry" { face = "WORRY" }
+            else if face == nil && nightIdle && (anim % 5) < 2 { face = "SLEEPY" }
+        case "coffee":
+            if face == "SLEEPY" && (act == "yawn" || sleep) { }
+            else if pose == "wide" || act == "dunk" || (act == "pour" && oT > 1.6) || oWired > 0 { face = face == "HAPPY" ? "HAPPY" : "WIDE" }
+            else if face == nil && Night && !sleep { face = "PANDA" }                 // 晚上：熬夜冠軍（黑眼圈）
+            if ONoteFace && !sleep { face = "SLEEPY" }
+        case "onigiri":
+            if pose == "eat" || (HoldingFood() && state == "idle") { face = Step2(3) ? "CHEW" : nil }
+            else if face == nil && nightIdle && (anim % 5) < 2.5 { face = "SLEEPY" }
+        default:
+            if pose == "panic" { face = "PANIC" }
+            else if face == nil && nightIdle && (anim % 5) < 2.5 { face = "SLEEPY" }
+        }
+        var armsUp = state == "air" || state == "fling" || state == "drag" || state == "kick" || state == "catch" || state == "glass"
+        armsUp = armsUp || (state == "wave" && Step2(4)) || (state == "dance" && Step2(4))
+        armsUp = armsUp || (state == "pose" && poseKind == "photo") || pose == "cheer" || pose == "panic" || pose == "wide"
+        armsUp = armsUp || act == "surf" || act == "vault" || act == "vaultair" || act == "fly" || act == "stick"
+        armsUp = armsUp || (act == "pour" && oT > 1.6) || act == "dunk" || act == "stickball" || (act == "paddle" && oT < 0.25) || pose == "ready"
+        if Is("sticky") && state == "air" { armsUp = true }
+        let head = armsUp ? "HEAD_UP" : "HEAD"
+        var body = hug ? "BODY_HUG" : (armsUp ? "BODY_UP" : "BODY")
+        if Is("onigiri") && act == "surf" { body = "BODY_BARE" }
+        let sit = sleep || (nightIdle && !Is("coffee")) || pose == "sit"
+        let rate: Double = Is("boba") ? 9 : (Is("coffee") ? (oWired > 0 ? 14 : 4) : 7)
+        let step = (moving && Step2(rate)) || (state == "dance" && Step2(4))
+        let legs = sit ? "LEGS_SIT" : (step ? "LEGS_B" : "LEGS_A")
+        // 半糖蹦跳時珍珠跟著彈
+        if Is("boba") && body == "BODY" && ((moving && Step2(9)) || (pose == "cheer" && Step2(5)) || state == "air") { body = "BODY_J" }
+        var rows = ORows(head, body, legs, face)
+        if Is("boba") && (act == "vault" || act == "vaultair" || oVaultT > 0) { rows = Pet.NoStraw(rows) }
+        // 醒醒的蒸氣飄來飄去；貼貼走路時角一翹一翹
+        if Is("coffee") && Step2(2.2) { let sb = A("STEAM_B"); for i in 0..<sb.count { rows[i] = sb[i] } }
+        if Is("coffee") && sleep { for i in 0..<4 { rows[i] = String(repeating: ".", count: rows[i].count) } }
+        if Is("sticky") && ((moving && Step2(7)) || (state == "air" && Step2(5))) { let fl = A("FLAP"); for i in 0..<fl.count { rows[i] = fl[i] } }
+        let f = F(rows)
+        if sit { f.AccDy = 0 }
+        if Is("onigiri") && act == "surf" { f.Top = -2 }
+        if rolling { f.Rot = CInt(Math.Floor(anim * 12)) % 4; f.Acc = false }
+        return f
+    }
+
+    static let O_POLE: [String] = ["....sz", "....sz", "...sz.", "...sz.", "..sz..", "..sz..", ".sz...", ".sz...", "sz....", "sz...."]
+    static let O_STREAM: [String] = ["c", "C", "c", "C", "c", "C"]
+    static let O_SPEED: [String] = ["vvv.", "....", ".vvv", "....", "vvv."]
+
+    func DrawOrigBehind(_ g: Graphics, _ f: Fr, _ bx: Int, _ by: Int, _ ps: Int, _ fx: Bool) {
+        let act = state == "orig" ? oAct : ""
+        if Is("onigiri") && act == "surf" { DrawAt(g, A("NORI"), -1, 14, bx, by, ps, fx, false, true) }   // 海苔衝浪板
+        if Is("boba") && act == "vault" { DrawAt(g, Pet.O_POLE, 10, 6, bx, by, ps, !fx, false, true) }         // 吸管撐在前面地上
+        if Is("boba") && oVaultT > 0.2 { DrawAt(g, ["sz", "sz", "sz", "sz", "sz", "sz"], 5, 14, bx, by, ps, fx, false, true) }
+        if Is("coffee") && oWired > 0 && (state == "walk" || state == "goto") && f.Rot == 0 {
+            DrawAt(g, Pet.O_SPEED, -4, 7, bx, by, ps, fx, false, false)                                      // 速度線（在背後）
+        }
+    }
+
+    func DrawOrigFront(_ g: Graphics, _ f: Fr, _ bx: Int, _ by: Int, _ ps: Int, _ fx: Bool) {
+        if f.Rot != 0 || f.Fy { return }
+        let act = state == "orig" ? oAct : ""
+        let dy = f.Top
+        switch P.Id {
+        case "boba":
+            do {
+                // 戴帽子時吸管要插在帽子上面
+                let hat = w.SeasonNow == "xmas" || Level() >= 3
+                if hat && f.Acc && act != "vault" && act != "vaultair" && oVaultT <= 0 {
+                    let h = A("HEAD")
+                    var st = [String](repeating: "", count: 5)
+                    for i in 0..<5 { var c = Array(h[i]); for j in 0..<c.count { if c[j] != "s" && c[j] != "z" { c[j] = "." } }; st[i] = String(c) }
+                    DrawAt(g, st, -(h[0].count - 12) / 2, -P.TopRows + dy, bx, by, ps, fx, false, false)
+                }
+                if act == "slurp" && w.Holder === self {
+                    let up = Clamp(oT / 0.6, 0, 1)
+                    DrawAt(g, TBALL, 8.5 - up * 1.5, Double(-P.TopRows - 1 + dy) - up * 3, bx, by, ps, fx, false, true)
+                }
+            }
+        case "coffee":
+            if act == "pour" {
+                // 咖啡壺從上面倒下來
+                let drop = Clamp(oT / 0.4, 0, 1)
+                let pot = A("POT")
+                DrawAt(g, pot, 5.0, -12 + drop * 2 + Double(dy), bx, by, ps, !fx, false, true)
+                if oT > 0.45 && oT < 1.7 { DrawAt(g, Pet.O_STREAM, 5, -6 + dy, bx, by, ps, fx, false, false) }
+            }
+            if act == "dunk" && w.Holder === self { DrawAt(g, TBALL, 3, -1 + dy, bx, by, ps, fx, false, true) }
+            if OPearlLatte { DrawAt(g, ["kv.", "kk."], 2, 2 + dy, bx, by, ps, fx, false, false); DrawAt(g, [".kv", ".kk"], 6, 2 + dy, bx, by, ps, fx, false, false) }
+            if ONoteFace { let st: Pal! = Pal.Get("sticky"); if st != nil { DrawPixPalAt(g, st, st.Art["NOTE_ZZ"], 1.5, Double(5 + dy), bx, by, ps, fx) } }
+        case "onigiri":
+            if act == "paddle" || OHold == "paddle" {
+                let pd = A("PADDLE")
+                if act == "paddle" && oT < 0.25 { DrawAt(g, pd, 12, 1 + dy, bx, by, ps, fx, false, true) }             // 舉起來
+                else if act == "paddle" { DrawAt(g, Pet.Rot90(pd, 1), 11, 8 + dy, bx, by, ps, fx, false, true) }    // 揮出去
+                else { DrawAt(g, pd, 12.5, 4 + dy, bx, by, ps, fx, false, true) }                                     // 拿著準備
+            }
+        default:
+            if act == "write" || (state == "orig" && oPose == "write") {
+                let wob = Math.Sin(oT * 18) * 0.6
+                DrawAt(g, A("MARKER"), 11 + wob, 9 + dy, bx, by, ps, fx, false, true)
+            }
+            if act == "stickball" && w.Holder === self { DrawAt(g, TBALL, 4, 6 + dy, bx, by, ps, fx, false, true) }
+            if act == "stick" || act == "fly" {
+                let tb = SolidBrush(Color.FromArgb(150, 240, 236, 220))       // 一小段透明膠帶
+                g.FillRectangle(tb, bx + 4 * ps, by + (P.HeadTop - 1 + dy) * ps, 5 * ps, 2 * ps)
+            }
+        }
+        if OHold == "mini" { let o: Pal! = Pal.Get("onigiri"); DrawPixPalAt(g, o, o.Art["MINI_ONIGIRI"], 10.5, Double(P.BodyTop - 1 + dy), bx, by, ps, fx) }
+    }
+
+    // 用別隻的調色盤畫一張小圖（12 格框座標，會跟著左右翻）
+    func DrawPixPalAt(_ g: Graphics, _ pal: Pal!, _ art: [String], _ col: Double, _ row: Double, _ bx0: Int, _ by0: Int, _ ps: Int, _ fx: Bool) {
+        if pal == nil { return }
+        let aw = art[0].count
+        let c = fx ? 12 - col - Double(aw) : col
+        DrawPixPal(g, pal, art, bx0 + CInt(Math.Round(c * Double(ps))), by0 + CInt(Math.Round(row * Double(ps))), ps, fx)
+    }
+
+    // ---------- 午餐：半糖雞排、醒醒可頌、糰糰雞腿便當、貼貼滷肉飯 ----------
+    func OrigLunchLine(_ phase: String) -> String {
+        switch P.Id {
+        case "boba":
+            if phase == "start" { return "午餐！雞排配珍奶，人生巔峰 🔔" }
+            if phase == "nap" { return "吃飽了…半糖瞇一下" }
+            if phase == "end" { return "回來工作囉～甜度補滿了！" }
+            return Pick(["雞排好香～要不要辣？", "咬一口雞排，吸一口珍珠～", "雞排配珍奶，熱量不算數"])
+        case "coffee":
+            if phase == "start" { return "午餐…可頌配咖啡（我自己）🔔" }
+            if phase == "nap" { return "吃飽…更想睡了…zZ" }
+            if phase == "end" { return "……下午了。需要續杯。" }
+            return Pick(["可頌屑屑掉進杯子裡了…", "（嚼）……還是想睡", "吃飽會想睡，這是定律"])
+        case "onigiri":
+            if phase == "start" { return "午餐時間！雞腿便當！🔔" }
+            if phase == "nap" { return "吃飽飽…糰糰睡午覺" }
+            if phase == "end" { return "吃飽了！下午繼續拚！" }
+            return Pick(["飯糰吃便當很奇怪嗎？嘿嘿", "雞腿好大！", "白飯配白飯，我可以"])
+        default:
+            if phase == "start" { return "提醒：午餐時間！滷肉飯 🔔" }
+            if phase == "nap" { return "吃飽了…貼貼睡一下" }
+            if phase == "end" { return "午休結束！下午的待辦寫好了" }
+            return Pick(["滷肉飯！記下來：好吃 ✓", "肥瘦剛好～", "加一顆滷蛋，記下來！"])
+        }
+    }
+
+    func DrawOrigLunch(_ g: Graphics, _ f: Fr, _ bx: Int, _ by: Int, _ ps: Int, _ fx: Bool, _ bite: Int) {
+        let dy = f.Top
+        switch P.Id {
+        case "boba": DrawAt(g, A("CHICKEN"), 11, P.BodyTop - 1 + bite + dy, bx, by, ps, fx, false, true)
+        case "coffee": DrawAt(g, A("CROISSANT"), -5, P.BodyTop + bite + dy, bx, by, ps, fx, false, true)
+        case "onigiri": DrawAt(g, A("BENTO"), 9.5, P.BodyTop + 1 + bite + dy, bx, by, ps, fx, false, true)
+        default: DrawAt(g, A("RICEBOWL"), 9.5, P.BodyTop + 1 + bite + dy, bx, by, ps, fx, false, true)
+        }
+    }
+
+    func OrigShelfRows() -> Int {
+        let hat = (w.SeasonNow == "xmas" || Level() >= 3) ? Math.Max(0, 4 - P.HatRow) : 0
+        return 16 + Math.Max(P.TopRows, hat) + 1
+    }
+
+    // ---------- 櫃子裡：半糖彈彈、醒醒打瞌睡（晚上反而醒著）、糰糰嚼嚼、貼貼角翹翹寫便條 ----------
+    func DrawOrigShelf(_ g: Graphics, _ fx: Int, _ bx: Int, _ by: Int, _ ps: Int, _ flip: Bool, _ tt: Double, _ blink: Bool, _ cell: Rectangle) {
+        var head = "HEAD", body = "BODY", legs = "LEGS_A"
+        var face: String? = nil
+        var hop = 0
+        var marker = false, zz = false
+        switch P.Id {
+        case "boba":
+            if Night { legs = "LEGS_SIT"; face = (tt % 6) < 4 ? "SLEEPY" : nil }
+            else if (tt % 4.5) < 0.6 { hop = -ps * ((tt % 4.5) < 0.3 ? 2 : 1); body = "BODY_J"; face = "HAPPY" }
+            else if blink { face = "SLEEPY" }
+        case "coffee":
+            if Night { face = "PANDA" }
+            else if (tt % 9) < 1.3 { face = "WIDE"; head = "HEAD_UP"; body = "BODY_UP" }   // 突然醒來
+            else { face = "SLEEPY"; zz = true }
+        case "onigiri":
+            if Night { legs = "LEGS_SIT"; face = (tt % 5) < 3.5 ? "SLEEPY" : nil }
+            else if (tt % 7) < 1.6 { face = Math.Floor(tt * 3) % 2 == 0 ? "CHEW" : nil }
+            else if (tt % 7) > 5.8 { head = "HEAD_UP"; face = "HAPPY" }                        // 伸懶腰
+            else if blink { face = "SLEEPY" }
+        default:
+            if Night { legs = "LEGS_SIT"; face = (tt % 6) < 4 ? "SLEEPY" : nil }
+            else if (tt % 8) < 2.2 { marker = true }
+            else if blink { face = "SLEEPY" }
+        }
+        var rows = ORows(head, body, legs, face)
+        if Is("coffee") && Math.Floor(tt * 1.6) % 2 == 1 { let sb = A("STEAM_B"); for i in 0..<sb.count { rows[i] = sb[i] } }
+        if Is("sticky") && !Night && (tt % 3.1) < 0.35 { let fl = A("FLAP"); for i in 0..<fl.count { rows[i] = fl[i] } }
+        DrawPix(g, rows, bx - (rows[0].count - 12) / 2 * ps, by + (16 - rows.count) * ps + hop, ps, flip, false, true)
+        DrawAccessories(g, bx, by + hop, ps, flip, 0, face == nil)
+        if marker { DrawAt(g, A("MARKER"), 11 + Math.Sin(tt * 16) * 0.5, 9, bx, by, ps, flip, false, true) }
+        if zz {
+            let zp = Math.Max(1, ps / 2)
+            let ph = (tt * 0.5) % 1
+            if ph < 0.85 { DrawPix(g, Pet.ZZ, bx + 12 * ps + CInt(ph * 4 * Double(ps)), by - CInt(ph * 6 * Double(ps)), zp, false, false, false) }
+        }
+        if w.Lunch {
+            switch P.Id {
+            case "boba": DrawAt(g, A("CHICKEN"), 10, P.BodyTop - 1, bx, by, ps, flip, false, true)
+            case "coffee": DrawAt(g, A("CROISSANT"), -4, P.BodyTop, bx, by, ps, flip, false, true)
+            case "onigiri": DrawAt(g, A("BENTO"), 8.5, P.BodyTop + 1, bx, by, ps, flip, false, true)
+            default: DrawAt(g, A("RICEBOWL"), 9, P.BodyTop + 1, bx, by, ps, flip, false, true)
+            }
+        }
+    }
+}
+
+// ================= 公仔櫃：方格紙背板（像筆記本）=================
+
+extension ShelfForm {
+    func DrawGridPaper(_ g: Graphics, _ inner: RectangleF, _ tall: Bool) {
+        let st = g.Save()
+        g.SetClip(inner)
+        let step = Math.Max(4.0, Double(U) * 2.6)
+        let gp = Pen(Night ? Color.FromArgb(26, 200, 210, 255) : Color.FromArgb(40, 80, 120, 170), 1.0)
+        var gx = inner.X + step * 0.5
+        while gx < inner.Right { g.DrawLine(gp, gx, inner.Y, gx, inner.Bottom); gx += step }
+        var gy = inner.Y + step * 0.5
+        while gy < inner.Bottom { g.DrawLine(gp, inner.X, gy, inner.Right, gy); gy += step }
+        if tall {
+            // 大格右上角釘一張小便利貼（畫一顆愛心）
+            let u = Math.Max(2, U * 3 / 4)
+            let du = Double(u)
+            let nx = inner.Right - 13 * du, ny = inner.Y + 4 * du
+            g.FillRectangle(SolidBrush(Color.FromArgb(50, 60, 40, 10)), nx + du, ny + du, 9 * du, 9 * du)
+            g.FillRectangle(SolidBrush(Night ? C(0xC8B05A) : C(0xFFE45C)), nx, ny, 9 * du, 9 * du)
+            g.FillRectangle(SolidBrush(Night ? C(0xAC9440) : C(0xF2CC3A)), nx, ny, 9 * du, 2 * du)
+            let heart: [String] = [".pp.pp.", "ppppppp", ".ppppp.", "..ppp..", "...p..."]
+            let hb = SolidBrush(Night ? C(0xC87A88) : C(0xFF8FA8))
+            for r in 0..<heart.count {
+                let row = Array(heart[r])
+                for c in 0..<row.count { if row[c] != "." { g.FillRectangle(hb, nx + Double(1 + c) * du, ny + Double(3 + r) * du, du, du) } }
+            }
+            g.FillEllipse(SolidBrush(Night ? C(0x9A3A3A) : C(0xE04848)), nx + 3.5 * du, ny - 0.8 * du, 2 * du, 2 * du)
+        }
+        g.Restore(st)
+    }
+}
+
+// ================= World：續命小隊的串場、點名、大合照、下班 =================
+
+extension World {
+    var OrigLineup: Bool { return lineup == Pal.Original }
+
+    // 沒指定哪一櫃時：照上次的；全新安裝（什麼都還沒存過）就是續命小隊。舊使用者完全不變。
+    // mac: World.init 在 super.init 之前就要用，所以是 static（只用到 static 的 ReadText／WriteText／FilePath）
+    static func StartLineup() -> String {
+        let saved = World.ReadText("lineup.txt")
+        if saved != "" { return saved }
+        let fm = FileManager.default
+        var fresh = !fm.fileExists(atPath: World.FilePath("out.txt")) && !fm.fileExists(atPath: World.FilePath("profile.txt")) && !fm.fileExists(atPath: World.FilePath("usage.txt"))
+        if fresh && !App.Isolated {
+            // mac: 舊版 Spidey（SpideyDesktop.swift）的資料在 ~/Library/Application Support/SpideyDesktop（bond.txt／pats.txt，見 Migrate）。
+            //      這個資料夾現在也是 VS Code 放程式和 socket 的地方，一定存在，所以看舊的資料檔在不在（Windows 是看資料夾在不在）。
+            let old = NSHomeDirectory() + "/Library/Application Support/SpideyDesktop"
+            if fm.fileExists(atPath: old + "/bond.txt") || fm.fileExists(atPath: old + "/pats.txt") { fresh = false }   // 從舊版 Spidey 小夥伴升級的：維持經典一櫃
+        }
+        if !fresh { return "" }
+        World.WriteText("lineup.txt", Pal.Original)   // 記下來：下次開機（沒帶參數）還是續命小隊
+        return Pal.Original
+    }
+
+    func OrigOrder(_ l: List<Pet>) -> List<Pet> {
+        let o = List<Pet>()
+        for id in Pal.OriginalIds { for p in l { if p.P.Id == id { o.Add(p) } } }
+        return o
+    }
+
+    func OPal(_ id: String) -> Pal! { return Pal.Get(id) }
+    func OArt(_ owner: String, _ name: String) -> [String]! { let p: Pal! = Pal.Get(owner); return p != nil && p.Art.ContainsKey(name) ? p.Art[name] : nil }
+
+    // ---------- 道具：珍珠、便條 ----------
+    func OrigPearlShot(_ b: Pet, _ i: Int) {
+        let a = b.OStrawTip()
+        let wa = WA(b.Cx, b.Foot - 4)
+        let tx = World.Mid(b.Cx + Double(b.dir) * Double(90 + i * 60) * k, Double(wa.Left + 10), Double(wa.Right - 10))
+        Toss(OArt("boba", "PEARL"), OPal("boba"), a, PointF(tx, b.Foot - 2 * Double(S)), 0.55 + Double(i) * 0.08, Double(70 + i * 20) * k, false, 0.8, nil)
+    }
+
+    func OrigPearls(_ b: Pet, _ n: Int) {
+        let a = b.OStrawTip()
+        let wa = WA(b.Cx, b.Foot - 4)
+        for i in Loop(0, n) {
+            let side: Double = i % 2 == 0 ? -1 : 1
+            let tx = World.Mid(b.Cx + side * (40 + rnd.NextDouble() * 160) * k, Double(wa.Left + 10), Double(wa.Right - 10))
+            Toss(OArt("boba", "PEARL"), OPal("boba"), a, PointF(tx, b.Foot - 2 * Double(S)), 0.6 + rnd.NextDouble() * 0.4, (120 + rnd.NextDouble() * 120) * k, false, 0.9, nil)
+        }
+    }
+
+    func OrigNotes(_ s: Pet, _ n: Int) {
+        let a = s.OHandPoint()
+        let wa = WA(s.Cx, s.Foot - 4)
+        let kinds: [String] = ["MINI_NOTE", "NOTE_CHECK", "MINI_NOTE", "NOTE_DRINK"]
+        for i in Loop(0, n) {
+            let side: Double = i % 2 == 0 ? -1 : 1
+            let tx = World.Mid(s.Cx + side * (50 + rnd.NextDouble() * 150) * k, Double(wa.Left + 10), Double(wa.Right - 10))
+            Toss(OArt("sticky", kinds[i % kinds.count]), OPal("sticky"), a, PointF(tx, s.Foot - 4 * Double(S)), 0.7 + rnd.NextDouble() * 0.4, (90 + rnd.NextDouble() * 90) * k, true, 1.2, nil)
+        }
+    }
+
+    func OrigNoteToCursor(_ s: Pet, _ delay: Double) {
+        let ss = s
+        Later(delay) { [self] in
+            if !ss.Out { return }
+            let c = Cursor.Position
+            let wa = WA(Double(c.X), Double(c.Y))
+            let to = PointF(World.Mid(Double(c.X) + 30 * k, Double(wa.Left + 20), Double(wa.Right - 20)), World.Mid(Double(c.Y) - 30 * k, Double(wa.Top + 20), Double(wa.Bottom - 20)))
+            Toss(OArt("sticky", rnd.NextDouble() < 0.5 ? "MINI_NOTE" : "NOTE_CHECK"), OPal("sticky"), ss.OHandPoint(), to, 0.8, 80 * k, false, 3.5, nil)
+            ss.Say(Pick2("貼給你！♥", "這張給你：今天也很棒 ✓"), 1.8)
+        }
+    }
+
+    func OrigNoteAbove(_ s: Pet, _ kind: String) {
+        let a = s.OHandPoint()
+        var b = s.OTopPoint()
+        b.Y -= 10 * Double(S)
+        Toss(OArt("sticky", kind), OPal("sticky"), a, b, 0.5, 30 * k, false, 2.0, nil)
+    }
+
+    // ---------- 選單 ----------
+    func OrigMenuItems(_ p: Pet) -> [[String]]? {
+        switch p.P.Id {
+        case "boba":
+            return [["抱抱 ♥", "hug"], ["打招呼", "hi"], ["敲敲螢幕", "knock"], ["吸管撐竿跳", "sig"],
+                    ["噗珍珠", "shoot"], ["跳到別的視窗上", "jump"], ["瞇一下", "sleep"], ["丟球給她 ⚾", "ball"]]
+        case "coffee":
+            return [["抱抱 ♥", "hug"], ["打招呼", "hi"], ["敲敲螢幕（呼～）", "knock"], ["續杯！", "sig"],
+                    ["打個哈欠", "yawn"], ["跳到別的視窗上", "jump"], ["補眠", "sleep"], ["丟球給他 ⚾", "ball"]]
+        case "onigiri":
+            return [["抱抱 ♥", "hug"], ["打招呼 吃飽沒？", "hi"], ["敲敲螢幕", "knock"], ["海苔衝浪", "sig"],
+                    ["滾一滾", "tumble"], ["飯匙揮一揮", "paddle"], ["睡覺", "sleep"], ["丟球給他 ⚾", "ball"]]
+        default:
+            return [["貼貼 ♥", "hug"], ["打招呼", "hi"], ["敲敲螢幕", "knock"], ["貼到視窗上", "sig"],
+                    ["寫一張便條給你", "write"], ["跳到別的視窗上", "jump"], ["睡覺", "sleep"], ["丟球給她 ⚾", "ball"]]
+        }
+    }
+
+    func AddOrigMenu(_ m: ContextMenuStrip) {
+        let grp = ToolStripMenuItem("續命小隊一起…")
+        let gs: [[String]] = [["揪團訂飲料 🥤", "order"], ["下午茶續命乾杯", "teatime"], ["大合照 📷", "photo"],
+                              ["點名", "rollcall"], ["下班說再見", "byebye"]]
+        for gi in gs { let key = gi[1]; grp.DropDownItems.Add(gi[0], nil, { [self] in OrigScene(key) }) }
+        m.Items.Add(grp)
+    }
+
+    // ---------- 每一格：午餐、下午三點 ----------
+    func OrigTick(_ dt: Double) {
+        if !OrigLineup { return }
+        if LunchState != oLunchSeen {
+            if LunchState == "eat" && oLunchSeen == "" && OutCount() >= 2 { Later(4) { [self] in if scene == nil && OrigLineup { OrigScene("lunch") } } }
+            oLunchSeen = LunchState
+        }
+        let n = DateTime.Now
+        let today = n.ToString("yyyy-MM-dd")
+        if n.Hour == 15 && n.Minute < 10 && !Night && oTeaDay != today && scene == nil && OutCount() >= 2 && Feat("scenes") && !focusOn && !quietOn {
+            oTeaDay = today
+            OrigScene("teatime")
+        }
+    }
+
+    // ---------- 串場：大家一起 ----------
+    func OrigGroup(_ n: Int) {
+        let r = rnd.NextDouble()
+        if r < 0.35 { OrigScene("order") } else if r < 0.6 { OrigScene("teatime") } else { OrigPhoto() }
+    }
+
+    func OrigScene(_ key: String) {
+        let outs = OrigOrder(OutPets())
+        if outs.Count < 2 && key != "rollcall" && key != "byebye" { AllOut(); Later(2.6) { [self] in if OrigLineup { OrigScene(key) } }; return }
+        switch key {
+        case "order": SceneOrder(outs)
+        case "teatime": SceneTeaTime(outs)
+        case "lunch": SceneOrigLunch(outs)
+        case "photo", "group": OrigPhoto()
+        case "rollcall":
+            let ids = List<String>()
+            for p in outs { ids.Add(p.P.Id) }
+            if ids.Count == 0 { ids.AddRange(Pal.OriginalIds) }
+            OrigRollCall(ids)
+        case "byebye": OrigNight(false)
+        default: break
+        }
+    }
+
+    // mac: C# 少一隻（Get 回 null）時在 Begin 丟例外被 Later 吞掉；這裡少一隻就不演（同 PikPairScene）
+    func OrigPairScene(_ key: String) {
+        func g(_ id: String) -> Pet? { return Get(id) }
+        switch key {
+        case "boba-coffee": if let a = g("boba"), let b = g("coffee") { SceneLatte(a, b) }
+        case "boba-onigiri": if let a = g("boba"), let b = g("onigiri") { SceneCombo(a, b) }
+        case "boba-sticky": if let a = g("boba"), let b = g("sticky") { SceneDrinkNote(a, b) }
+        case "coffee-onigiri": if let a = g("coffee"), let b = g("onigiri") { SceneBreakfast(a, b) }
+        case "coffee-sticky": if let a = g("coffee"), let b = g("sticky") { SceneDeadline(a, b) }
+        case "onigiri-sticky": if let a = g("onigiri"), let b = g("sticky") { SceneImLunch(a, b) }
+        default: break
+        }
+    }
+
+    // ---------- 半糖 × 醒醒：珍珠拿鐵 ----------
+    func SceneLatte(_ b: Pet, _ c: Pet) {
+        Begin(b, c)
+        At(0) { [self] in Face(b, c); b.ScenePose("idle", 30); c.OPose("doze", 30); c.Say("……zZ（站著睡著了）", 2); c.Mark(3) }
+        At(2.2) { b.Say("醒醒～醒醒！上班了啦！", 2) }
+        At(4.4) { c.Say("……再睡五分鐘", 1.8) }
+        At(6.4) { [self] in
+            b.FaceTo(c); b.OPose("blow", 1.4); b.Say("那…分你一顆珍珠！噗！", 1.8)
+            var to = c.OTopPoint(); to.Y -= 1 * Double(S)
+            Toss(OArt("boba", "PEARL"), OPal("boba"), b.OStrawTip(), to, 0.75, 90 * k, false, 0, { c.OLatte(70); c.OWire(6); c.OPose("wide", 30); c.Burst(6) })
+        }
+        At(8.6) { c.Say("！！……這是什麼？好好喝", 2.2) }
+        At(11.0) { b.OPose("cheer", 2); b.Say("珍珠拿鐵！我們合體了～", 2.2) }
+        At(13.4) { [self] in Face(b, c); b.ScenePose("hug", 2.4); c.ScenePose("hug", 2.4); c.Say("……醒了。謝謝。", 2.2) }
+        At(16) { }
+    }
+
+    // ---------- 半糖 × 糰糰：超商早餐組合價 ----------
+    func SceneCombo(_ b: Pet, _ o: Pet) {
+        Begin(b, o)
+        var tag: World.Prop? = nil
+        At(0) { [self] in Face(b, o); b.ScenePose("idle", 30); o.ScenePose("idle", 30); o.Say("半糖！我們一起站好～", 1.8) }
+        At(2.0) { o.WalkTo(b.Cx + Double(o.Cx < b.Cx ? -1 : 1) * Double(b.SW) * 1.35, 2) }
+        At(3.6) { [self] in
+            let mid = (b.Cx + o.Cx) / 2
+            b.dir = b.Cx < o.Cx ? -1 : 1; o.dir = o.Cx < b.Cx ? -1 : 1
+            b.OPose("cheer", 30); o.OPose("cheer", 30)
+            let low = Math.Max(b.Foot, o.Foot) - 4 * Double(S)   // 像貨架上的價格牌：貼在腳邊
+            tag = Toss(OArt("boba", "TAG"), OPal("boba"), PointF(mid, low - 200 * k), PointF(mid, low), 0.6, 0, false, 12, nil)
+            b.Say("超商早餐組合！", 1.8)
+        }
+        At(5.6) { o.Say("飯糰＋飲料，組合價 49 元！", 2.2) }
+        At(8.0) { b.Say("第二件六折喔～", 1.8) }
+        At(10.0) { o.OPose("think", 30); o.Say("……我們是在賣自己嗎？", 2.2); o.Mark(2) }
+        At(12.4) { [self] in RemoveProp(tag); Face(b, o); b.ScenePose("hug", 2.4); o.ScenePose("hug", 2.4); b.Say("嘿嘿～反正我們最搭！", 2.2) }
+        At(15) { }
+    }
+
+    // ---------- 半糖 × 貼貼：揪團訂飲料 ----------
+    func SceneDrinkNote(_ b: Pet, _ s: Pet) {
+        Begin(b, s)
+        var note: World.Prop? = nil
+        At(0) { [self] in Face(b, s); b.ScenePose("idle", 30); s.OPose("write", 30); s.Say("揪團訂飲料囉！📝", 1.8) }
+        At(2.0) { s.Say("半糖要喝什麼？", 1.6) }
+        At(3.8) { b.OPose("cheer", 1.4); b.Say("珍奶，半糖少冰！", 1.8) }
+        At(5.8) { s.Say("珍奶…半糖…少冰…（寫寫寫）", 2) }
+        At(7.8) { [self] in
+            var to = b.OFacePoint(); to.Y += 4 * Double(S)
+            note = Toss(OArt("sticky", "NOTE_DRINK"), OPal("sticky"), s.OHandPoint(), to, 0.6, 50 * k, false, 6, nil)
+            s.OPose("cheer", 1.2)
+        }
+        At(8.8) { b.ScenePose("idle", 30); b.Say("……等等，這不就是我嗎？", 2.2); b.Mark(2) }
+        At(11.2) { s.OPose("panic", 1.8); s.Say("啊！點到你了！", 1.8) }
+        At(13.2) { [self] in RemoveProp(note); b.OPose("cheer", 1.4); b.Say("沒關係～我最喜歡我自己了 ♥", 2.2) }
+        At(15.6) { [self] in Face(b, s); b.ScenePose("hug", 2.4); s.ScenePose("hug", 2.4); s.Say("貼貼～", 1.8) }
+        At(18.2) { }
+    }
+
+    // ---------- 醒醒 × 糰糰：早餐要吃 ----------
+    func SceneBreakfast(_ c: Pet, _ o: Pet) {
+        Begin(c, o)
+        At(0) { [self] in Face(c, o); c.OPose("doze", 30); o.ScenePose("idle", 30); o.Say("醒醒，早餐吃了沒？", 1.8) }
+        At(2.0) { c.Say("……我喝咖啡就好", 1.8) }
+        At(4.0) { o.OPose("cheer", 1.4); o.Say("不行！早餐要吃！", 1.8) }
+        At(5.8) { [self] in _ = Toss(OArt("onigiri", "MINI_ONIGIRI"), OPal("onigiri"), o.OHandPoint(), c.OHandPoint(), 0.7, 80 * k, true, 0, { c.OHold = "mini" }) }
+        At(6.8) { c.OPose("pose", 30); c.Say("（咬一口）……", 1.6) }
+        At(9.0) { c.OHold = ""; c.OWire(5); c.OPose("wide", 30); c.Burst(6); c.Say("……有飽足感。醒了。", 2.2) }
+        At(11.4) { o.Say("吃飽沒？", 1.4) }
+        At(12.6) { c.Say("吃飽了。", 1.4) }
+        At(14.0) { [self] in Face(c, o); c.ScenePose("hug", 2.4); o.ScenePose("hug", 2.4); o.Say("嘿嘿，早餐最重要！", 2) }
+        At(16.6) { }
+    }
+
+    // ---------- 醒醒 × 貼貼：死線前一晚 ----------
+    func SceneDeadline(_ c: Pet, _ s: Pet) {
+        Begin(c, s)
+        At(0) { [self] in Face(c, s); c.ScenePose("idle", 30); s.OPose("panic", 30); s.Say("報告明天要交！！還沒寫完！", 2.2); s.Mark(1) }
+        At(2.4) { c.OWire(10); c.OPose("wide", 30); c.Say("我陪你熬。（眼睛睜大）", 2.2) }
+        At(4.8) { s.OPose("cheer", 1.2); s.Say("真的嗎？那…一起寫！", 2) }
+        At(7.0) { s.OPose("write", 30); s.Say("（寫寫寫）", 1.4) }
+        At(7.8) { c.Say("寫一段，喝一口…", 1.8) }
+        At(10.0) { s.ScenePose("idle", 30); s.Say("……等等。", 1.4); s.Mark(2) }
+        At(11.4) { [self] in
+            let to = c.OFacePoint()
+            Toss(OArt("sticky", "NOTE_ZZ"), OPal("sticky"), s.OHandPoint(), to, 0.6, 60 * k, false, 0, { c.ONote(14); c.OWire(0); c.OPose("doze", 30) })
+            s.Say("先睡覺！健康第一！", 2)
+        }
+        At(14.0) { c.Say("……zZ（被貼睡著了）", 2.2); c.Mark(3) }
+        At(16.4) { s.OPose("cheer", 1.4); s.Say("鬧鐘我幫你訂好了 📝", 2) }
+        At(18.6) { }
+    }
+
+    // ---------- 糰糰 × 貼貼：我就是午餐 ----------
+    func SceneImLunch(_ o: Pet, _ s: Pet) {
+        Begin(o, s)
+        var note: World.Prop? = nil
+        At(0) { [self] in Face(o, s); o.ScenePose("idle", 30); s.OPose("write", 1.6); s.Say("提醒！12 點要吃午餐！", 1.8) }
+        At(2.0) { [self] in
+            var to = o.OFacePoint(); to.Y += 3 * Double(S)
+            note = Toss(OArt("sticky", "NOTE_BANG"), OPal("sticky"), s.OHandPoint(), to, 0.6, 50 * k, false, 8, nil)
+        }
+        At(2.8) { o.OPose("cheer", 1.2); o.Say("好！吃什麼呢？", 1.6) }
+        At(4.6) { o.OPose("think", 30); o.Say("……等等，我就是午餐耶？", 2.2) }
+        At(7.0) { s.OPose("panic", 1.8); s.Say("啊！那、那你不能被吃！", 2) }
+        At(9.2) { [self] in RemoveProp(note); o.OPose("cheer", 1.4); o.Say("嘿嘿，我們一起去吃便當吧！", 2.2) }
+        At(11.6) { [self] in Face(o, s); o.ScenePose("hug", 2.4); s.ScenePose("hug", 2.4); s.Say("貼貼～", 1.6); o.Say("抱緊緊！", 1.6) }
+        At(14.2) { }
+    }
+
+    // ---------- 大家：揪團訂飲料 ----------
+    func SceneOrder(_ outs: List<Pet>) {
+        let s: Pet! = Get("sticky")
+        let boss: Pet = s != nil && outs.Contains(s) ? s! : outs[0]
+        Begin(outs.ToArray())
+        let lr = LineUp(outs, Lead(), 1.7)
+        let cx = (lr[0] + lr[1]) / 2
+        At(0) { boss.Say("揪團訂飲料囉！大家要喝什麼？📝", 2.2) }
+        At(4.4) { for p in outs { p.FaceTo(boss); p.ScenePose("idle", 30) }; boss.OPose("write", 30); boss.dir = boss.Cx < cx ? 1 : -1 }
+        var d = 5.0
+        for p in outs {
+            let pp = p
+            let line = pp.P.Id == "boba" ? "珍奶，半糖少冰！" : (pp.P.Id == "coffee" ? "冰美式。大杯。" : (pp.P.Id == "onigiri" ? "我要…可以吃的！" : "我要綠茶，無糖～（記下來）"))
+            At(d) { pp.OPose("cheer", 1.2); pp.Say(line, 1.9) }
+            d += 2.1
+        }
+        At(d + 0.3) { boss.ScenePose("idle", 30); boss.Say("好！我下單了～", 1.8) }
+        At(d + 3.0) { [self] in
+            let b: Pal! = OPal("boba")
+            for i in 0..<outs.Count {
+                let pp = outs[i]
+                Toss(b.Art["DRINK"], b, PointF(cx, lr[2] - 260 * k), pp.OHandPoint(), 0.8 + Double(i) * 0.15, 40 * k, false, 4.5, nil)
+            }
+            boss.Say("外送到了！🛵", 1.8)
+        }
+        At(d + 4.8) { for p in outs { p.OPose("cheer", 2.2); p.Mark(0) }; outs[0].Say("續命成功！乾杯～", 2.2) }
+        At(d + 7.6) { }
+    }
+
+    // ---------- 大家：下午三點，下午茶續命乾杯 ----------
+    func SceneTeaTime(_ outs: List<Pet>) {
+        let b: Pet! = Get("boba")
+        let lead: Pet = b != nil && outs.Contains(b) ? b! : outs[0]
+        Begin(outs.ToArray())
+        LineUp(outs, Lead(), 1.6)
+        At(0) { lead.Say("三點了！下午茶續命時間～🥤", 2.2) }
+        At(4.4) { for p in outs { p.FaceTo(lead); p.ScenePose("idle", 30) } }
+        var d = 4.8
+        for p in outs {
+            let pp = p
+            let line = pp.P.Id == "boba" ? "甜度補滿！" : (pp.P.Id == "coffee" ? "咖啡因補滿。" : (pp.P.Id == "onigiri" ? "肚子補滿！" : "水分補滿！記下來 ✓"))
+            At(d) { pp.OPose("cheer", 1.4); pp.Say(line, 1.6); if pp.P.Id == "coffee" { pp.OWire(6) } }
+            d += 1.7
+        }
+        At(d + 0.4) { for p in outs { p.OPose("cheer", 2.4); p.AddHeart(); p.Burst(5) }; lead.Say("續命！乾杯～！", 2.2) }
+        At(d + 3.2) { for p in outs { p.ScenePose("wave", 1.6) } }
+        At(d + 5.0) { }
+    }
+
+    // ---------- 大家：午餐一起吃（各拿各的） ----------
+    func SceneOrigLunch(_ outs: List<Pet>) {
+        Begin(outs.ToArray())
+        LineUp(outs, Lead(), 1.8)
+        At(0) { outs[0].Say("午餐時間！大家一起吃～🔔", 2) }
+        var d = 4.6
+        for p in outs {
+            let pp = p
+            let line = pp.P.Id == "boba" ? "雞排配珍奶，人生巔峰！" : (pp.P.Id == "coffee" ? "我吃可頌…配咖啡（我自己）" : (pp.P.Id == "onigiri" ? "雞腿便當！…飯糰吃便當很奇怪嗎？" : "滷肉飯！記下來：好吃 ✓"))
+            At(d) { pp.ScenePose("idle", 30); pp.Say(line, 2.3) }
+            d += 2.5
+        }
+        At(d + 0.4) { for p in outs { p.ScenePose("wave", 1.6) }; outs[outs.Count - 1].Say("開動！", 1.6) }
+        At(d + 2.4) { }
+    }
+
+    // ---------- 大合照 ----------
+    func OrigPhoto() {
+        let outs = OrigOrder(OutPets())
+        if outs.Count < 2 { AllOut(); Later(2.5) { [self] in if OrigLineup { OrigPhoto() } }; return }
+        let l: Pet = Lead()
+        Begin(outs.ToArray())
+        let lr = LineUp(outs, l, 1.75)
+        let left = lr[0], right = lr[1], foot = lr[2]
+        At(0) { l.Say("續命小隊，來拍照～排好排好！", 2) }
+        At(5.2) {
+            for p in outs {
+                p.dir = p.Cx < (left + right) / 2 ? 1 : -1
+                if p.P.Id == "coffee" { p.OWire(4); p.OPose("wide", 30) } else { p.OPose("cheer", 30) }
+            }
+            l.Say("笑一個～ 3、2、1！", 1.6)
+        }
+        At(6.6) { [self] in
+            Flash(Rectangle.FromLTRB(CInt(left - 120 * k), CInt(foot - 220 * k), CInt(right + 120 * k), CInt(foot + 20 * k)))
+            let s: Pet! = Get("sticky")
+            if s != nil && outs.Contains(s) { OrigNoteAbove(s, "MINI_NOTE") }
+        }
+        var d = 7.4
+        for p in outs {
+            let pp = p
+            let line = pp.P.Id == "boba" ? "甜度滿分！🥤" : (pp.P.Id == "coffee" ? "……我有睜眼嗎？" : (pp.P.Id == "onigiri" ? "糰糰有拍到嗎？" : "記下來：今日合照 ✓"))
+            At(d) { pp.Say(line, 1.15) }
+            d += 1.2
+        }
+        At(d + 0.4) { }
+    }
+
+    // ---------- 早上點名：一隻一隻出來 ----------
+    func OrigRollCall(_ ids: List<String>) {
+        let order = List<Pet>()
+        for id in Pal.OriginalIds { if ids.Contains(id) && Get(id) != nil { order.Add(Get(id)) } }
+        var d = 0.4
+        for p in order {
+            let pp = p
+            let line = pp.P.Id == "boba" ? "半糖！🥤" : (pp.P.Id == "coffee" ? "醒醒…（還沒醒）☕" : (pp.P.Id == "onigiri" ? "糰糰！吃飽沒？🍙" : "貼貼！待辦寫好了！📝"))
+            Later(d) { [self] in if !pp.Out { BringOut(pp, false) } }
+            Later(d + 1.0) { pp.Say(line, 1.8) }
+            d += 1.6
+        }
+        Later(d + 1.0) { [self] in
+            for p in order { if p.Out && p.Grounded() { p.ScenePose("wave", 1.8) } }
+            if order.Count > 0 { Lead().Say("續命小隊，報到！", 2.6) }
+        }
+    }
+
+    // ---------- 下班：貼貼貼一張「回家」，大家一個一個回櫃子（醒醒最後才睡）----------
+    func OrigNight(_ nag: Bool) {
+        let outs = OrigOrder(OutPets())
+        if outs.Count == 0 { Lead().Say("續命小隊…下班囉～", 2.4); return }
+        outs.Sort { a, b in let ka = a.P.Id == "coffee" ? 1 : 0, kb = b.P.Id == "coffee" ? 1 : 0; return ka < kb ? -1 : (ka == kb ? 0 : 1) }
+        Begin(outs.ToArray())
+        for p in outs { if p.Grounded() { p.ScenePose("idle", 60) } }
+        var d = 0.2
+        if nag { for p in outs { let pp = p; At(d) { pp.Say(pp.L("nag"), 2.6) }; d += 2.8 } }
+        let s: Pet! = Get("sticky")
+        if s != nil && outs.Contains(s) {
+            At(d) { s.OPose("write", 1.4); s.Say("寫好了：下班！🏠", 1.8) }
+            At(d + 1.2) { [self] in OrigNoteAbove(s, "NOTE_HOME") }
+            d += 2.6
+        }
+        for p in outs {
+            let pp = p
+            let line = pp.P.Id == "boba" ? "打烊囉～明天再揪！" : (pp.P.Id == "onigiri" ? "回家吃飯囉～晚安！" : (pp.P.Id == "sticky" ? "明天的待辦，我都記好了！" : (Night ? "你們先睡…我也…zZ" : "……終於可以睡了")))
+            At(d) { pp.ScenePose("wave", 2); pp.Say(line, 2.2) }
+            At(d + 1.6) { pp.InScene = false; if pp.Out { pp.StowToShelf(false) } }
+            d += 2.6
+        }
+        At(d + 0.6) { let last = outs[outs.Count - 1]; last.Say("續命小隊，下班！明天見～", 2.6) }
+        At(d + 3.4) { }
+    }
+
+    // ---------- 通知的開場白、搶票 ----------
+    static func OrigFlavor(_ id: String, _ kind: String) -> String? {
+        if id != "boba" && id != "coffee" && id != "onigiri" && id != "sticky" { return nil }
+        let keys: [String] = ["ci-run", "ci-ok", "ci-fail", "cmd-ok", "cmd-fail", "meeting", "meeting-now", "jira", "worklog",
+                              "remind", "pc-cpu", "pc-ram", "pc-disk", "net-down", "net-up", "vpn", "download"]
+        let i = keys.IndexOf(kind)
+        if i < 0 { return nil }
+        let bo: [String] = ["CI 出杯中～", "CI 過了！加珍珠！", "嗚…CI 灑出來了：", "跑完了～甜：", "咦？沒成功：", "等等要開會喔：", "開會了！快去～", "有新的 Jira 喔：", "今天的日誌好了～",
+                            "⏰ 半糖提醒你：", "電腦好燙，要加冰了：", "記憶體快滿杯了：", "硬碟快滿杯了：", "網路斷了…外送叫不到了！", "網路回來了！甜～", "連不到公司網路（VPN 斷了？）", "下載好了～"]
+        let co: [String] = ["CI 開跑了…我也要開機了：", "CI 過了。乾杯 ☕", "CI 倒了。……我醒了：", "跑完了：", "失敗了。先續杯再看：", "等等開會…我會撐住：", "開會了。醒醒：", "新的 Jira：", "日誌好了，可以睡了：",
+                            "⏰ 醒醒提醒你（我醒著）：", "電腦比我還燙：", "記憶體快滿了：", "硬碟快滿了：", "網路斷了…正好補眠", "網路回來了。", "連不到公司網路（VPN 斷了？）", "下載好了："]
+        let on: [String] = ["CI 出發！吃飽了嗎：", "CI 過了！加一顆滷蛋！", "CI 摔倒了！糰糰來扶：", "跑完了！嘿嘿：", "失敗了…吃飽再試：", "等等要開會，先吃點東西：", "開會了！快去：", "有新的 Jira：", "今天的日誌好了，吃飯吧：",
+                            "⏰ 糰糰提醒你：", "電腦好燙，像剛出爐：", "記憶體快滿了，跟便當一樣：", "硬碟快塞爆了：", "網路斷了！嗚…", "網路回來了！嘿嘿", "連不到公司網路（VPN 斷了？）", "下載好了！"]
+        let st: [String] = ["記下來：CI 開跑：", "CI 過了！打勾 ✓", "CI 掛了！記下來：", "跑完了 ✓：", "失敗了！記下來：", "提醒：等等要開會：", "開會了！快去！📝", "新的 Jira，記下來：", "日誌好了 ✓：",
+                            "⏰ 提醒你：", "電腦好燙！記下來：", "記憶體快滿了：", "硬碟快滿了：", "網路斷了！記下來…", "網路回來了！✓", "連不到公司網路（VPN 斷了？）", "下載好了 ✓："]
+        switch id { case "boba": return bo[i]; case "coffee": return co[i]; case "onigiri": return on[i]; default: break }
+        return st[i]
+    }
+
+    static func OrigTicket(_ id: String, _ stage: Int, _ n: String, _ h: String) -> String? {
+        if id != "boba" && id != "coffee" && id != "onigiri" && id != "sticky" { return nil }
+        let bo: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款喔～", "🎫 " + n + " 再 30 分鐘！半糖陪你等", "🎫 " + n + " 剩 10 分鐘！好緊張～", "🎫 準備！深呼吸～", "🎫 開搶！！衝呀～"]
+        let co: [String] = ["🎫 " + n + " 還有 " + h + "開賣。先登入、綁好付款", "🎫 " + n + " 30 分鐘後開賣…我醒著", "🎫 " + n + " 剩 10 分鐘！咖啡因全開", "🎫 準備。手指放好。", "🎫 開搶！！醒了醒了！"]
+        let on: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款！", "🎫 " + n + " 再 30 分鐘！先吃飽", "🎫 " + n + " 剩 10 分鐘！糰糰陪你", "🎫 準備！嘿咻！", "🎫 開搶！！衝衝衝！"]
+        let st: [String] = ["🎫 提醒：" + n + " 還有 " + h + "開賣！先登入、綁好付款", "🎫 提醒：" + n + " 再 30 分鐘！", "🎫 提醒：" + n + " 剩 10 分鐘！", "🎫 準備！我幫你倒數！", "🎫 開搶！！快快快！"]
+        switch id { case "boba": return bo[stage]; case "coffee": return co[stage]; case "onigiri": return on[stage]; default: break }
+        return st[stage]
+    }
+}
+
+// ===== 52_study.swift =====
+// 52_study.swift — port of extension/desktop/DeskPals.Study.cs
+// Desk Pals：讀書小幫手（學校行事曆的上課提醒和作業死線、搶課提醒、考試倒數、熬夜提醒、讀書統計）。
+// 不分學生／上班族：每個功能有資料才會動（沒填學校行事曆就沒有上課／作業提醒；沒加考試就沒有倒數）。
+// 桌面版自己就能用（不用 VS Code）：自己抓 ICS、自己解析、自己提醒；設定在公仔小屋的「讀書小幫手設定…」。
+// 有 VS Code 的話，VS Code 設定（deskPals.schoolIcsUrl…）會從 pipe 推過來，以 VS Code 的為準（設定視窗顯示「由 VS Code 管理」）。
+//
+// 掛在核心的地方（都只有一兩行）：TickInner → StudyTick()、OnMsg 的 default → StudyMsg()、
+//   AddHelpers → AddStudyMenus()／ExamNear()、StartFocus／StopFocus → ExamNear()、Priority → StudyPriority()、
+//   Flavor → StudyFlavor()、OnNotify／Deliver → MeetingLike()、NoticeClicked → StudyClicked()、
+//   DailyWrap → WeekTomatoNote()／StudyWrapParts()、TicketLine → CourseLine()、DrawTicketBadge → BadgeIsCourse()／DrawCapIcon()、
+//   HouseMenu →「讀書小幫手設定…」、Snap → StudySnap()。搶課跟搶票共用 Ticket（Kind＝course）。
+//
+// pipe 指令：
+//   course <unixMs> <提前分鐘> <url|-> <課名…>      搶課提醒（跟 ticket 一樣，只是用字換成選課）
+//   exam <unixMs> <名稱…>、exam-del <id>               考試倒數
+//   study-vs <urls,remind,…|->                        VS Code 這次管哪幾項（只有使用者在 VS Code 設過的）
+//   study-set urls <網址…>｜remind <分>｜autoquiet 0/1｜late <HH:MM|off>｜nudge <HH:MM|off>｜workcal <網址|->
+//                                                     VS Code 推設定（推過的那一項就以 VS Code 為準）
+//   study-hello → study-state <json>；study-done <id>（這份作業交了）
+//   測試用（只在離屏模式）：study-ics <檔案> [當成哪個網址]｜study-ics clear、study-clock <yyyy-MM-ddTHH:mm|off>、
+//     study-idle <秒|-1>、study-dump、study-settings open|close|save|set <欄位> <值>
+// 送回 VS Code：study-state {"bar","school","d":[…],"e":[…]}（狀態列、「這週要交的」）、study-done <id>
+//
+// mac 差異（都標了 // mac:）：
+// - 時區：TimeZone(identifier:) 直接吃 IANA 名字；Outlook 匯出的 Windows 名字（"Taipei Standard Time"）用同一張對照表反查。
+// - 正規式：C# 用 RegexOptions.ECMAScript（\b、\w、\d、\s 只看 ASCII，跟 JS 一樣）；NSRegularExpression 是 Unicode 規則，
+//   所以這幾個寫成明確的 ASCII 字元類（中文字旁邊的 due 也算一個字）。
+// - 抓 ICS：HttpWebRequest → URLSession（背景執行緒、20 秒、最多 4 次轉址、最多 8 MB）。打開網址：NSWorkspace。
+import Foundation
+import AppKit
+import CryptoKit
+
+// ================= ICS（行事曆）：解析＋重複規則展開（跟 practical.js 的 parseIcs／occurrences 同一套規則）=================
+final class IcsTime { var Utc = 0; var Y = 0, M = 0, D = 0, H = 0, Mi = 0, S = 0; var Tz: String! = nil; var AllDay = false; init() {} }
+final class IcsEvent {
+    var Uid = "", Summary = "", Location = "", Description = "", Url = "", Conf = "", Status = "", RRule = "", Categories = ""
+    var Start: IcsTime! = nil, End: IcsTime! = nil, RecurrenceId: IcsTime! = nil
+    var Declined = false
+    let ExDates = List<Int>()
+    init() {}
+}
+final class IcsOcc { var Uid: String! = nil, Summary: String! = nil, Link: String! = nil; var Start = 0, End = 0; var Ev: IcsEvent! = nil, Parent: IcsEvent! = nil; init() {} }
+
+enum Ics {
+    static let Epoch = DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+    static func Ms(_ utc: DateTime) -> Int { return CInt((utc - Epoch).TotalMilliseconds) }
+
+    // 常見的 IANA 時區 → Windows 時區（.NET Framework 只認 Windows 的名字；Outlook 匯出的本來就是 Windows 名字）
+    // mac: 反過來用——Windows 名字 → IANA（TimeZone 只認 IANA）
+    static let IanaToWin: [(String, String)] = [
+        ("Asia/Taipei", "Taipei Standard Time"), ("Asia/Hong_Kong", "China Standard Time"), ("Asia/Shanghai", "China Standard Time"),
+        ("Asia/Macau", "China Standard Time"), ("Asia/Chongqing", "China Standard Time"), ("Asia/Tokyo", "Tokyo Standard Time"),
+        ("Asia/Seoul", "Korea Standard Time"), ("Asia/Singapore", "Singapore Standard Time"), ("Asia/Kuala_Lumpur", "Singapore Standard Time"),
+        ("Asia/Manila", "Singapore Standard Time"), ("Asia/Bangkok", "SE Asia Standard Time"), ("Asia/Ho_Chi_Minh", "SE Asia Standard Time"),
+        ("Asia/Jakarta", "SE Asia Standard Time"), ("Asia/Kolkata", "India Standard Time"), ("Asia/Dubai", "Arabian Standard Time"),
+        ("Australia/Sydney", "AUS Eastern Standard Time"), ("Australia/Melbourne", "AUS Eastern Standard Time"), ("Australia/Brisbane", "E. Australia Standard Time"),
+        ("Australia/Perth", "W. Australia Standard Time"), ("Pacific/Auckland", "New Zealand Standard Time"),
+        ("Europe/London", "GMT Standard Time"), ("Europe/Dublin", "GMT Standard Time"), ("Europe/Paris", "Romance Standard Time"),
+        ("Europe/Berlin", "W. Europe Standard Time"), ("Europe/Amsterdam", "W. Europe Standard Time"), ("Europe/Zurich", "W. Europe Standard Time"),
+        ("Europe/Rome", "W. Europe Standard Time"), ("Europe/Madrid", "Romance Standard Time"), ("Europe/Stockholm", "W. Europe Standard Time"),
+        ("America/New_York", "Eastern Standard Time"), ("America/Toronto", "Eastern Standard Time"), ("America/Chicago", "Central Standard Time"),
+        ("America/Denver", "Mountain Standard Time"), ("America/Phoenix", "US Mountain Standard Time"), ("America/Los_Angeles", "Pacific Standard Time"),
+        ("America/Vancouver", "Pacific Standard Time"), ("Pacific/Honolulu", "Hawaiian Standard Time") ]
+
+    // 某時區的牆上時間 → UTC 毫秒。fixedOff：檔案裡 VTIMEZONE 沒有夏令時間的固定時差（分鐘）
+    static func WallToUtc(_ y: Int, _ m: Int, _ d: Int, _ h: Int, _ mi: Int, _ s: Int, _ tz: String!, _ fixedOff: Dict<String, Int>!) -> Int {
+        // C#：new DateTime 不合法會丟例外 → 0
+        if y < 1 || y > 9999 || m < 1 || m > 12 || d < 1 || d > DateTime.DaysInMonth(y, m) || h < 0 || h > 23 || mi < 0 || mi > 59 || s < 0 || s > 59 { return 0 }
+        let wall = DateTime(y, m, d, h, mi, s, DateTimeKind.Unspecified)
+        if tz == nil { return Ms(DateTime.SpecifyKind(wall, DateTimeKind.Local).ToUniversalTime()) }
+        if tz == "UTC" || tz == "Etc/UTC" || tz == "GMT" || tz == "Z" { return Ms(DateTime.SpecifyKind(wall, DateTimeKind.Utc)) }
+        var off = 0
+        if fixedOff != nil && fixedOff.TryGetValue(tz, &off) { return Ms(DateTime.SpecifyKind(wall, DateTimeKind.Utc)) - off * 60000 }
+        let z = FindZone(tz)
+        if z != nil {
+            if let r = ConvertTimeToUtc(wall, z!) { return r }
+            if let r = ConvertTimeToUtc(wall.AddHours(1), z!) { return r }   // 夏令時間跳過的那一小時
+        }
+        return Ms(DateTime.SpecifyKind(wall, DateTimeKind.Local).ToUniversalTime())
+    }
+
+    // mac: TimeZoneInfo.ConvertTimeToUtc（跳過的那一小時＝nil，像 C# 丟 ArgumentException；重複的那一小時＝標準時間，跟 .NET 一樣）
+    static func ConvertTimeToUtc(_ wall: DateTime, _ z: TimeZone) -> Int? {
+        let w = Ms(DateTime.SpecifyKind(wall, DateTimeKind.Utc)) / 1000   // 牆上時間當成 UTC 的秒數
+        var offs: [Int] = []
+        for probe in [w - 86400, w, w + 86400] {
+            let o = z.secondsFromGMT(for: Date(timeIntervalSince1970: Double(probe)))
+            if !offs.contains(o) { offs.append(o) }
+        }
+        var hits: [Int] = []
+        for o in offs {
+            let t = w - o
+            if z.secondsFromGMT(for: Date(timeIntervalSince1970: Double(t))) == o && !hits.contains(t) { hits.append(t) }
+        }
+        if hits.isEmpty { return nil }
+        if hits.count > 1 { for t in hits { if !z.isDaylightSavingTime(for: Date(timeIntervalSince1970: Double(t))) { return t * 1000 } } }
+        return hits[0] * 1000
+    }
+
+    static let zoneCache = Dict<String, TimeZone?>()
+    static let zoneLock = NSObject()
+    static func FindZone(_ tz: String) -> TimeZone? {
+        return lock(zoneLock) { () -> TimeZone? in
+            if let hit = zoneCache.Get(tz) { return hit }
+            var id = tz.Trim("\"")
+            for (iana, win) in IanaToWin { if win == id { id = iana; break } }   // mac: Windows 名字 → IANA
+            let found = TimeZone(identifier: id)
+            zoneCache[tz] = found
+            return found
+        }
+    }
+
+    static let TimeRe = Regex(#"^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$"#)
+    static func ParseTime(_ v: String!, _ p: Dict<String, String>, _ fixedOff: Dict<String, Int>!) -> IcsTime! {
+        let m = TimeRe.Match((v ?? "").Trim())
+        if !m.Success { return nil }
+        let t = IcsTime()
+        t.Y = int.Parse(m.Groups[1].Value); t.M = int.Parse(m.Groups[2].Value); t.D = int.Parse(m.Groups[3].Value)
+        if m.Groups[4].Success { t.H = int.Parse(m.Groups[4].Value); t.Mi = int.Parse(m.Groups[5].Value); t.S = int.Parse(m.Groups[6].Value) }
+        var vt = ""
+        t.AllDay = !m.Groups[4].Success || (p.TryGetValue("VALUE", &vt) && vt == "DATE")
+        var tz = ""
+        t.Tz = m.Groups[7].Success ? "UTC" : (p.TryGetValue("TZID", &tz) ? tz : nil)
+        t.Utc = WallToUtc(t.Y, t.M, t.D, t.H, t.Mi, t.S, t.Tz, fixedOff)
+        return t
+    }
+
+    static func Unesc(_ s: String) -> String { return Regex.Replace(Regex.Replace(s, #"\\[nN]"#, "\n"), #"\\([,;\\])"#, "$1") }
+
+    // owner：行事曆擁有者（Google 私密網址裡就有信箱）——他按了「不參加」的不提醒
+    static func Parse(_ text: String, _ owner0: String!, _ calName: inout String) -> List<IcsEvent> {
+        calName = ""
+        let owner = (owner0 ?? "").ToLowerInvariant()
+        let lines = text.Replace("\r\n ", "").Replace("\r\n\t", "").Replace("\n ", "").Replace("\n\t", "").Split("\n")
+        let events = List<IcsEvent>()
+        let fixedOff = Dict<String, Int>()
+        // 先看 VTIMEZONE：只有 STANDARD、沒有 DAYLIGHT 的時區（例如 Asia/Taipei）＝固定時差
+        var tzid: String! = nil; var stdOff = 0; var hasStd = false, hasDst = false, inStd = false
+        for raw in lines {
+            let line = raw.TrimEnd("\r")
+            if line == "BEGIN:VTIMEZONE" { tzid = nil; hasStd = false; hasDst = false; continue }
+            if line == "END:VTIMEZONE" { if tzid != nil && hasStd && !hasDst { fixedOff[tzid] = stdOff }; tzid = nil; continue }
+            if line == "BEGIN:STANDARD" { inStd = true; hasStd = true; continue }
+            if line == "END:STANDARD" { inStd = false; continue }
+            if line == "BEGIN:DAYLIGHT" { hasDst = true; continue }
+            if line.StartsWith("TZID:") && tzid == nil { tzid = line.Substring(5).Trim() }
+            if inStd && line.StartsWith("TZOFFSETTO:") {
+                let o = Regex.Match(line.Substring(11).Trim(), #"^([+-])(\d{2})(\d{2})"#)
+                if o.Success { stdOff = (o.Groups[1].Value == "-" ? -1 : 1) * (int.Parse(o.Groups[2].Value) * 60 + int.Parse(o.Groups[3].Value)) }
+            }
+            if line.StartsWith("X-WR-CALNAME:") { calName = Unesc(line.Substring(13)).Trim() }
+        }
+        var cur: IcsEvent! = nil
+        for raw in lines {
+            let line = raw.TrimEnd("\r")
+            if line == "BEGIN:VEVENT" { cur = IcsEvent(); continue }
+            if line == "END:VEVENT" { if cur != nil { events.Add(cur) }; cur = nil; continue }
+            if cur == nil { continue }
+            let i = line.IndexOf(":")
+            if i < 0 { continue }
+            let left = line.Substring(0, i), value = line.Substring(i + 1)
+            let parts = left.Split(";")
+            let p = Dict<String, String>()
+            var k = 1
+            while k < parts.count { let j = parts[k].IndexOf("="); if j > 0 { p[parts[k].Substring(0, j).ToUpperInvariant()] = parts[k].Substring(j + 1).Trim("\"") }; k += 1 }
+            switch parts[0].ToUpperInvariant() {
+            case "UID": cur.Uid = value
+            case "SUMMARY": cur.Summary = Unesc(value)
+            case "LOCATION": cur.Location = Unesc(value)
+            case "DESCRIPTION": cur.Description = Unesc(value)
+            case "URL": cur.Url = value.Trim()
+            case "CATEGORIES": cur.Categories = Unesc(value)
+            case "X-GOOGLE-CONFERENCE": cur.Conf = value.Trim()
+            case "STATUS": cur.Status = value.Trim().ToUpperInvariant()
+            case "RRULE": cur.RRule = value.Trim()
+            case "DTSTART": cur.Start = ParseTime(value, p, fixedOff)
+            case "DTEND": cur.End = ParseTime(value, p, fixedOff)
+            case "RECURRENCE-ID": cur.RecurrenceId = ParseTime(value, p, fixedOff)
+            case "ATTENDEE":
+                var ps = ""
+                if owner != "" && value.ToLowerInvariant() == "mailto:" + owner && p.TryGetValue("PARTSTAT", &ps) && ps.ToUpperInvariant() == "DECLINED" { cur.Declined = true }
+            case "EXDATE": for v in value.Split(",") { let t = ParseTime(v, p, fixedOff); if t != nil { cur.ExDates.Add(t!.Utc) } }
+            default: break
+            }
+        }
+        return events
+    }
+
+    static let DAYS: [String] = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]
+
+    // 單次、DAILY／WEEKLY／MONTHLY（BYDAY、BYMONTHDAY）／YEARLY、INTERVAL、COUNT、UNTIL、EXDATE、單次改期（RECURRENCE-ID）、取消；全天的不展開
+    static func Occurrences(_ events: List<IcsEvent>, _ from: Int, _ to: Int) -> List<IcsOcc> {
+        let outl = List<IcsOcc>()
+        let overrides = Dict<String, IcsEvent>()
+        for e in events { if e.RecurrenceId != nil && e.Uid != "" { overrides[e.Uid + "@" + String(e.RecurrenceId.Utc)] = e } }
+        for e in events {
+            if e.Start == nil || e.Start.AllDay || e.RecurrenceId != nil { continue }
+            if e.RRule == "" { Push(outl, e, e.Start.Utc, nil, from, to); continue }
+            let r = Dict<String, String>()
+            for kv in e.RRule.Split(";") { let j = kv.IndexOf("="); if j > 0 { r[kv.Substring(0, j).ToUpperInvariant()] = kv.Substring(j + 1) } }
+            let freq = Get(r, "FREQ")
+            let interval = Math.Max(1, ToInt(Get(r, "INTERVAL"), 1))
+            let count = Get(r, "COUNT") != "" ? ToInt(Get(r, "COUNT"), int.MaxValue) : int.MaxValue
+            var until = long.MaxValue
+            if Get(r, "UNTIL") != "" { let u = ParseTime(Get(r, "UNTIL"), Dict<String, String>(), nil); if u != nil { until = u!.Utc } }
+            let byday: [String]? = Get(r, "BYDAY") != "" ? Get(r, "BYDAY").Split(",") : nil
+            var bymd: List<Int>? = nil
+            if Get(r, "BYMONTHDAY") != "" { bymd = List<Int>(); for x in Get(r, "BYMONTHDAY").Split(",") { bymd!.Add(ToInt(x, 0)) } }
+            let day0 = DateTime(e.Start.Y, e.Start.M, e.Start.D)
+            let endDay = Epoch.AddMilliseconds(to).Date.AddDays(2)
+            let mon0 = day0.AddDays(-((day0.DayOfWeek.rawValue + 6) % 7))   // 起始那週的週一
+            var n = 0
+            var tNext = day0
+            while tNext <= endDay && n < count {
+                let t = tNext
+                tNext = tNext.AddDays(1)
+                let wd = t.DayOfWeek.rawValue
+                var ok = false
+                if freq == "DAILY" { ok = CInt(Math.Round((t - day0).TotalDays)) % interval == 0 && (byday == nil || HasDay(byday!, wd)) }
+                else if freq == "WEEKLY" {
+                    let weeks = CInt(Math.Floor((t - mon0).TotalDays / 7))
+                    ok = weeks % interval == 0 && (byday != nil ? HasDay(byday!, wd) : wd == day0.DayOfWeek.rawValue)
+                }
+                else if freq == "MONTHLY" {
+                    let months = (t.Year - e.Start.Y) * 12 + (t.Month - e.Start.M)
+                    if months % interval == 0 {
+                        if byday != nil {
+                            for b in byday! {
+                                let mm = Regex.Match(b.Trim(), #"^([+-]?\d+)?(\w\w)$"#)
+                                if !mm.Success || mm.Groups[2].Value != DAYS[wd] { continue }
+                                if !mm.Groups[1].Success { ok = true; break }
+                                let nth = int.Parse(mm.Groups[1].Value)
+                                if nth > 0 && (t.Day + 6) / 7 == nth { ok = true; break }
+                                let dim = DateTime.DaysInMonth(t.Year, t.Month)
+                                if nth < 0 && (dim - t.Day + 7) / 7 == -nth { ok = true; break }
+                            }
+                        }
+                        else { ok = bymd != nil ? bymd!.Contains(t.Day) : t.Day == e.Start.D }
+                    }
+                }
+                else if freq == "YEARLY" { ok = (t.Year - e.Start.Y) % interval == 0 && t.Month == e.Start.M && t.Day == e.Start.D }
+                if !ok { continue }
+                var startUtc = WallToUtc(t.Year, t.Month, t.Day, e.Start.H, e.Start.Mi, e.Start.S, e.Start.Tz, nil)
+                if e.Start.Tz != nil && e.Start.Tz != "UTC" { startUtc = e.Start.Utc + (startUtc - WallToUtc(e.Start.Y, e.Start.M, e.Start.D, e.Start.H, e.Start.Mi, e.Start.S, e.Start.Tz, nil)) }   // 用同一套時區換算，固定時差的 VTIMEZONE 也對
+                if startUtc > until { break }
+                n += 1
+                if e.ExDates.Contains(startUtc) { continue }
+                var ov: IcsEvent? = nil
+                if overrides.TryGetValue(e.Uid + "@" + String(startUtc), &ov) { if ov!.Start != nil { Push(outl, ov!, ov!.Start.Utc, e, from, to) }; continue }
+                Push(outl, e, startUtc, nil, from, to)
+            }
+        }
+        outl.Sort { (a: IcsOcc, b: IcsOcc) -> Int in a.Start.CompareTo(b.Start) }
+        return outl
+    }
+
+    static func Get(_ r: Dict<String, String>, _ k: String) -> String { var v = ""; return r.TryGetValue(k, &v) ? v : "" }
+    static func ToInt(_ s: String, _ d: Int) -> Int { var v = 0; return int.TryParse(s, &v) ? v : d }
+    static func HasDay(_ byday: [String], _ wd: Int) -> Bool { for b in byday { let x = b.Trim(); if x.Length >= 2 && x.Substring(x.Length - 2) == DAYS[wd] { return true } }; return false }
+
+    static func Push(_ outl: List<IcsOcc>, _ e: IcsEvent, _ startUtc: Int, _ parent: IcsEvent!, _ from: Int, _ to: Int) {
+        if e.Status == "CANCELLED" || e.Declined { return }
+        if startUtc < from || startUtc > to { return }
+        let src: IcsEvent! = e.End != nil && e.Start != nil ? e : (parent != nil && parent.End != nil && parent.Start != nil ? parent : nil)
+        let len = src != nil ? Math.Max(5 * 60000, src.End.Utc - src.Start.Utc) : 30 * 60000
+        let o = IcsOcc()
+        o.Uid = e.Uid != "" ? e.Uid : e.Summary; o.Start = startUtc; o.End = startUtc + len
+        o.Summary = e.Summary != "" ? e.Summary : (parent != nil && parent.Summary != "" ? parent.Summary : "（沒有標題）")
+        o.Link = MeetLink(e); if o.Link == "" && parent != nil { o.Link = MeetLink(parent) }
+        o.Ev = e; o.Parent = parent
+        outl.Add(o)
+    }
+
+    static let MeetRe = Regex(#"https://(?:meet\.google\.com|[\w.-]*zoom\.us|teams\.microsoft\.com|teams\.live\.com)/[^\s"<>)]+"#, RegexOptions.IgnoreCase)
+    static func MeetLink(_ e: IcsEvent) -> String {
+        if e.Conf.StartsWith("https://") { return e.Conf }
+        let m = MeetRe.Match(e.Location + " " + e.Description + " " + e.Url)
+        if m.Success { return m.Value }
+        return e.Url.StartsWith("https://") ? e.Url : ""
+    }
+}
+
+// ================= 學校行事曆：分類（上課／考試／行程／作業死線）=================
+// 各家 ICS 的實際長相（規則照這個寫；test/fixtures 有範例，test/desktop-study.js 驗）：
+//   Canvas（含 NTU COOL）：/feeds/calendars/user_….ics；作業 UID＝event-assignment-<id>（討論區分段＝event-sub-assignment-），
+//     SUMMARY＝「標題 [課程代碼]」，DTSTART＝DTEND＝截止時間（UTC）；23:59 截止的作業是全天事件（只有 DTSTART;VALUE=DATE）；
+//     URL＝…/calendar?include_contexts=course_<課>&…#assignment_<id>。行事曆活動 UID＝event-calendar-event-<id>。
+//   Moodle：/calendar/export_execute.php?…；UID＝<id>@<主機>，SUMMARY＝「<名稱> is due」「… closes」「… opens」（介面語言），
+//     截止類 DTSTART＝DTEND（UTC），CATEGORIES＝課程簡稱，沒有 URL。
+//   Google Classroom：每個課程一個 Google 日曆（ID 含 classroom…@group.calendar.google.com），裡面只有作業截止：
+//     沒設時間＝全天事件（當天 23:59 截止），有時間＝在截止時間的事件；說明裡有 classroom.google.com 的作業連結。
+final class SchoolFeed { var Url: String! = nil, Kind: String! = nil, Name: String! = nil, Base: String! = nil, Owner: String! = nil; var Events: List<IcsEvent>! = nil; init() {} }
+final class SchoolTimed { var Id: String! = nil, Kind: String! = nil, Summary: String! = nil, Location: String! = nil, Link: String! = nil; var Start = 0, End = 0; init() {} }
+final class SchoolDue { var Id: String! = nil, Title: String! = nil, Course: String! = nil, Url: String! = nil; var Due = 0; init() {} }
+final class SchoolExam { var Id: String! = nil, Name: String! = nil; var At = 0; init() {} }
+final class SchoolScan { let Timed = List<SchoolTimed>(); let Dues = List<SchoolDue>(); let Exams = List<SchoolExam>(); init() {} }
+final class SchoolPlanItem { var At = 0; var Kind: String! = nil, Url: String! = nil, Text: String! = nil, Key: String! = nil; var QuietMin = 0; init() {} }
+
+enum School {
+    // ECMAScript：\b、\w 只看英數字（中文字旁邊的 due 也算一個字），跟 JS 一樣
+    // mac: NSRegularExpression 沒有 ECMAScript 模式 → \b、\d、\s、\w 寫成 ASCII 的字元類（RegexOptions.ECMAScript 照留著，shim 不理它）
+    static let O: RegexOptions = [RegexOptions.IgnoreCase, RegexOptions.ECMAScript]
+    static let B = "(?<![A-Za-z0-9_])", E = "(?![A-Za-z0-9_])", Dg = "[0-9]", Sp = #"[ \t\n\x0B\f\r]"#
+    static let DueWord = Regex("作業|功課|截止|到期|繳交|交件|提交|期限|deadline|" + B + "due" + E + "|assignment|homework|" + B + "hw" + Sp + "*" + Dg + "|submission|" + B + "closes?" + E, O)
+    static let DueHard = Regex("截止|到期|繳交|交件|deadline|" + B + "due" + E + "|" + B + "closes?" + E, O)   // 有長度的單次行程也算死線（例如自己排的「報告繳交截止」）
+    static let Opens = Regex(B + "opens?" + E + "|開放作答|開始作答|開放繳交|開始繳交|開放提交", O)  // Moodle「… opens」：開始，不是截止
+    static let ExamWord = Regex("期中考|期末考|小考|考試|段考|會考|測驗|" + B + "exams?" + E + "|midterm|final exam|" + B + "quiz" + E, O)
+    static let ClassWord = Regex("上課|課程|講堂|教室|實驗|演習|助教課|" + B + "lecture" + E + "|" + B + "lab" + E + "|" + B + "tutorial" + E + "|" + B + "seminar" + E + "|" + B + "class" + E + "|" + B + "section" + E + "|[館樓院]" + Sp + "*" + Dg + Dg, O)   // 課號（MATH4006）不算：Canvas 每個活動都帶課號
+    static let AssignLink = Regex("/courses/" + Dg + "+/assignments/" + Dg + "+|#assignment_" + Dg + "+|classroom\\.google\\.com/(?:u/" + Dg + "+/)?c/[^ \\t\\n\\x0B\\f\\r/]+/(?:a|sa|mc)/|/mod/(?:assign|quiz|workshop)/view\\.php", O)
+
+    static func KindOf(_ url: String!, _ text: String) -> String {
+        var u = url ?? ""
+        u = Uri.UnescapeDataString(u)
+        if Regex.IsMatch(u, "/feeds/calendars/", O) || Regex.IsMatch(text, "^UID:event-(?:sub-)?assignment-|^UID:event-calendar-event-", RegexOptions.Multiline) { return "canvas" }
+        if Regex.IsMatch(u, #"/calendar/export_execute\.php"#, O) || Regex.IsMatch(text, "^PRODID:.*moodle", [RegexOptions.Multiline, RegexOptions.IgnoreCase]) { return "moodle" }
+        if Regex.IsMatch(u, #"classroom[^/@]*@group\.calendar\.google\.com"#, O) || Regex.IsMatch(text, "^X-WR-CALNAME:.*classroom", [RegexOptions.Multiline, RegexOptions.IgnoreCase]) { return "classroom" }
+        return "generic"
+    }
+
+    static func Feed(_ url: String!, _ text: String) -> SchoolFeed {
+        let f = SchoolFeed()
+        f.Url = url ?? ""; f.Kind = KindOf(url, text)
+        let b = Regex.Match(f.Url, #"^(https://.+?)/calendar/export_execute\.php"#, RegexOptions.IgnoreCase)
+        f.Base = b.Success ? b.Groups[1].Value : ""
+        let ow = Regex.Match(f.Url, "/ical/([^/]+)/")
+        f.Owner = ow.Success ? Uri.UnescapeDataString(ow.Groups[1].Value) : ""
+        var name = ""
+        f.Events = Ics.Parse(text, f.Owner, &name)
+        f.Name = name
+        return f
+    }
+
+    // assignment｜exam｜class｜event｜skip
+    static func Classify(_ e: IcsEvent, _ feed: SchoolFeed, _ parent: IcsEvent!) -> String {
+        if e.Start == nil || e.Status == "CANCELLED" { return "skip" }
+        let sum: String = e.Summary != "" ? e.Summary : (parent != nil ? parent.Summary : "")
+        let allDay = e.Start.AllDay
+        let zero = !allDay && (e.End == nil || e.End.Utc - e.Start.Utc <= 60000)   // Canvas／Moodle 的截止＝開始和結束同一刻
+        let recurring = e.RRule != "" || e.RecurrenceId != nil || (parent != nil && parent.RRule != "")
+        let linky = e.Url + " " + e.Description + " " + e.Location
+        if feed.Kind == "canvas" && Regex.IsMatch(e.Uid, "^event-(?:sub-)?assignment-", O) { return "assignment" }
+        if feed.Kind == "classroom" { return Opens.IsMatch(sum) ? "skip" : "assignment" }   // Classroom 課程日曆只放作業截止
+        if Opens.IsMatch(sum) && (zero || allDay) { return "skip" }
+        if AssignLink.IsMatch(e.Url) || ((zero || allDay) && AssignLink.IsMatch(linky)) { return "assignment" }
+        if (zero || allDay) && DueWord.IsMatch(sum) { return "assignment" }
+        if !allDay && !recurring && DueHard.IsMatch(sum) && !ExamWord.IsMatch(sum) { return "assignment" }
+        if !allDay && ExamWord.IsMatch(sum) { return "exam" }
+        if zero && (feed.Kind == "moodle" || DueWord.IsMatch(e.Description)) { return "assignment" }
+        if allDay { return "skip" }          // 放假、校慶這類全天事件不提醒
+        if recurring || ClassWord.IsMatch((sum + " " + e.Location).Replace("助教室", "")) { return "class" }
+        return "event"
+    }
+
+    static func Clean(_ s: String!) -> String { return Regex.Replace(s ?? "", #"[\r\n]+"#, " ").Trim() }
+
+    static func Title(_ e: IcsEvent, _ feed: SchoolFeed, _ title: inout String, _ course: inout String) {
+        title = Clean(e.Summary); course = ""
+        if title == "" { title = "（沒有標題）" }
+        if feed.Kind == "canvas" {
+            let m = Regex.Match(title, #"^(.*\S)\s*\[([^\]]+)\]$"#)
+            if m.Success { title = m.Groups[1].Value; course = m.Groups[2].Value }
+        }
+        if feed.Kind == "moodle" {
+            let t = Regex.Replace(Regex.Replace(title, #"\s+(?:is due to be graded|is due|closes|due)$"#, "", RegexOptions.IgnoreCase), #"\s*(?:截止|到期)$"#, "")
+            if t != "" { title = t }
+            course = Clean(e.Categories)
+        }
+        if feed.Kind == "classroom" { course = feed.Name }
+    }
+
+    static func FirstHttps(_ text: String, _ httpToo: Bool) -> String {
+        let m = Regex.Match(text, httpToo ? #"https?://[^\s"<>)\\]+"# : #"https://[^\s"<>)\\]+"#, RegexOptions.IgnoreCase)
+        return m.Success ? m.Value : ""
+    }
+
+    static func AssignUrl(_ e: IcsEvent, _ feed: SchoolFeed, _ due: Int) -> String {
+        let u = Regex.IsMatch(e.Url, "^https?://", RegexOptions.IgnoreCase) ? e.Url.Trim() : ""
+        if feed.Kind == "canvas" && u != "" {
+            // 行事曆頁 → 直接到作業頁
+            let ctx = Regex.Match(u, #"include_contexts=course_(\d+)"#), a = Regex.Match(u, #"#assignment_(\d+)"#)
+            var uri: Uri? = nil
+            if ctx.Success && a.Success && Uri.TryCreate(u, UriKind.Absolute, &uri) { return uri!.Scheme + "://" + uri!.Authority + "/courses/" + ctx.Groups[1].Value + "/assignments/" + a.Groups[1].Value }
+            return u
+        }
+        let text = e.Description + " " + e.Location + " " + e.Url
+        let cr = Regex.Match(text, #"https://classroom\.google\.com/[^\s"<>)\\]+"#, RegexOptions.IgnoreCase)
+        if cr.Success { return cr.Value }
+        if u != "" { return u }
+        if feed.Kind == "moodle" && feed.Base != "" { return feed.Base + "/calendar/view.php?view=day&time=" + String(due / 1000) }
+        if feed.Kind == "classroom" { return "https://classroom.google.com/" }
+        return FirstHttps(text, false)
+    }
+
+    static func EventLink(_ e: IcsEvent, _ parent: IcsEvent!) -> String {
+        var m = Ics.MeetLink(e)
+        if m == "" && parent != nil { m = Ics.MeetLink(parent) }
+        if m != "" { return m }
+        return FirstHttps(e.Url + " " + e.Location + " " + e.Description, true)
+    }
+
+    static func SafeId(_ s: String!) -> String { return Regex.Replace(s ?? "", #"\s+"#, "_") }
+    // Canvas 的活動標題後面帶「 [課程代碼]」：講出來改成「（課程代碼）」
+    static func Nice(_ s0: String!, _ feed: SchoolFeed) -> String { let s = Clean(s0); return feed.Kind == "canvas" ? Regex.Replace(s, #"\s*\[([^\]]+)\]$"#, "（$1）") : s }
+
+    // 接下來 26 小時的課／考試／行程、14 天內的作業死線、120 天內的考試
+    static func Scan(_ feeds: List<SchoolFeed>, _ now: Int) -> SchoolScan {
+        let dueTo = now + 14 * 86400000, examTo = now + 120 * 86400000, timedTo = now + 26 * 3600000
+        let r = SchoolScan()
+        let seen = HashSet<String>()
+        for feed in feeds {
+            // 全天的作業（Canvas 23:59 截止、Classroom 沒設時間）：當天 23:59 截止
+            for e in feed.Events! {
+                if e.Start == nil || !e.Start.AllDay || e.RRule != "" || e.RecurrenceId != nil || e.Declined { continue }
+                if Classify(e, feed, nil) != "assignment" { continue }
+                AddDue(r, seen, e, feed, Ics.WallToUtc(e.Start.Y, e.Start.M, e.Start.D, 23, 59, 0, nil, nil), now, dueTo)
+            }
+            for o in Ics.Occurrences(feed.Events, now - 5 * 60000, examTo) {
+                let kind = Classify(o.Ev, feed, o.Parent)
+                if kind == "assignment" { AddDue(r, seen, o.Ev, feed, o.Start, now, dueTo) }
+                if kind == "exam" && o.Start > now { let x = SchoolExam(); x.Id = SafeId(o.Uid + "@" + String(o.Start)); x.At = o.Start; x.Name = Nice(o.Summary, feed); r.Exams.Add(x) }
+                if (kind == "class" || kind == "exam" || kind == "event") && o.Start <= timedTo {
+                    let loc = Clean(o.Ev.Location != "" ? o.Ev.Location : (o.Parent != nil ? o.Parent.Location : ""))
+                    let t = SchoolTimed()
+                    t.Id = SafeId(o.Uid + "@" + String(o.Start)); t.Kind = kind; t.Start = o.Start; t.End = o.End; t.Summary = Nice(o.Summary, feed)
+                    t.Location = Regex.IsMatch(loc, "^https?:", RegexOptions.IgnoreCase) ? "" : loc; t.Link = EventLink(o.Ev, o.Parent)
+                    r.Timed.Add(t)
+                }
+            }
+        }
+        r.Dues.Sort { (a: SchoolDue, b: SchoolDue) -> Int in a.Due.CompareTo(b.Due) }
+        r.Exams.Sort { (a: SchoolExam, b: SchoolExam) -> Int in a.At.CompareTo(b.At) }
+        return r
+    }
+
+    static func AddDue(_ r: SchoolScan, _ seen: HashSet<String>, _ e: IcsEvent, _ feed: SchoolFeed, _ due: Int, _ now: Int, _ dueTo: Int) {
+        if due <= now || due > dueTo { return }
+        var title = "", course = ""
+        Title(e, feed, &title, &course)
+        if !seen.Add(title + "|" + String(due)) { return }   // 同一份作業出現在兩個行事曆
+        let d = SchoolDue()
+        d.Id = SafeId((e.Uid != "" ? e.Uid : title) + "@" + String(due)); d.Due = due; d.Title = title; d.Course = course; d.Url = AssignUrl(e, feed, due)
+        r.Dues.Add(d)
+    }
+
+    // 上課／考試／行程的提醒：課前 N 分鐘＋開始時；上課、考試自動安靜（最多 4 小時）；同一時間的合成一則（考試優先）
+    static func Plan(_ timed: List<SchoolTimed>, _ now: Int, _ before: Int, _ autoQuiet: Bool) -> List<SchoolPlanItem> {
+        let groups = Dict<Int, List<SchoolTimed>>()
+        let order = List<Int>()
+        for t in timed {
+            var g: List<SchoolTimed>? = nil
+            if !groups.TryGetValue(t.Start, &g) { g = List<SchoolTimed>(); groups[t.Start] = g!; order.Add(t.Start) }
+            g!.Add(t)
+        }
+        let plan = List<SchoolPlanItem>()
+        for start in order {
+            let g: List<SchoolTimed> = groups[start]
+            var kind = "event", link = "", loc = "", key = ""
+            var end = start
+            var names: [String] = []
+            for t in g {
+                if Rank(t.Kind) > Rank(kind) { kind = t.Kind }
+                if link == "" { link = t.Link }
+                if loc == "" { loc = t.Location }
+                end = Math.Max(end, t.End)
+                names.append(t.Summary)
+                key += (key == "" ? "" : "+") + t.Id
+            }
+            let more: String = names.count > 2 ? " 等 " + String(names.count) + " 個" : ""
+            let name: String = names.count > 1 ? names[0] + "、" + names[1] + more : names[0]
+            let hhmm = DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddMilliseconds(start).ToLocalTime().ToString("HH:mm")
+            let locS: String = loc.Length > 16 ? loc.Substring(0, 16) + "…" : loc
+            let where_: String = loc != "" ? "・" + locS : ""
+            let bs = String(before)
+            let head: String = hhmm + " " + name + where_ + "（" + bs + " 分鐘後）"
+            let pre: String = kind == "exam" ? head + "，文具帶好，加油！" : head   // class／event 一樣
+            let openS: String = link != "" ? "（點我打開）" : ""
+            let go: String = kind == "exam" ? name + "，加油！🍀" : name + openS
+            let kPre = kind == "class" ? "class" : (kind == "exam" ? "exam-soon" : "event")
+            let kNow = kind == "class" ? "class-now" : (kind == "exam" ? "exam-now" : "event-now")
+            let at1 = start - before * 60000
+            if at1 > now { plan.Add(Item(at1, kPre, link, pre, 0, key + "@" + String(start) + "-pre")) }
+            if start > now {
+                let q = autoQuiet && kind != "event" ? CInt(Math.Min(240.0, Math.Round(Double(end - start) / 60000.0))) : 0
+                plan.Add(Item(start, kNow, link, go, Math.Max(0, q), key + "@" + String(start) + "-now"))
+            }
+        }
+        plan.Sort { (a: SchoolPlanItem, b: SchoolPlanItem) -> Int in a.At.CompareTo(b.At) }
+        return plan
+    }
+    static func Rank(_ k: String) -> Int { return k == "exam" ? 3 : (k == "class" ? 2 : 1) }
+    static func Item(_ at: Int, _ kind: String, _ url: String, _ text: String, _ q: Int, _ key: String) -> SchoolPlanItem {
+        let p = SchoolPlanItem(); p.At = at; p.Kind = kind; p.Url = url; p.Text = text; p.QuietMin = q; p.Key = key
+        return p
+    }
+}
+
+
+extension World {
+    func SNow() -> DateTime { return DateTime.Now + studyShift }
+    func SNowMs() -> Int { return World.UnixMs(SNow()) }
+    func StudyIdle() -> Double { return studyIdleFake >= 0 ? studyIdleFake : Double(W.IdleSeconds()) }
+
+    final class Exam { var At = 0; var Name: String! = nil, Id: String! = nil, Src: String! = nil; var LastDaily = ""; var DayBefore = false, Morning = false; init() {} }
+    final class Deadline { var Id: String! = nil, Title: String! = nil, Course: String! = nil, Url: String! = nil; var Due = 0; var Stage = 0; init() {} }
+    static let DueStages: [Int] = [3 * 24 * 60, 24 * 60, 180, 60]   // 截止前 3 天、1 天、3 小時、1 小時
+
+    // ================= 存檔 =================
+    func LoadStudy() {
+        studyLoaded = true
+        exams.Clear(); deadlines.Clear(); studyDone.Clear()
+        for line in World.ReadText("exams.txt").Split("\n") {
+            let a = line.TrimEnd("\r").Split("\t")
+            var at = 0
+            if a.count < 6 || !long.TryParse(a[0], &at) { continue }
+            let e = Exam(); e.At = at; e.Src = a[1]; e.LastDaily = a[2]
+            e.DayBefore = a[3].Length > 0 && a[3][0] == "1"; e.Morning = a[3].Length > 1 && a[3][1] == "1"
+            e.Id = a[4]; e.Name = a[5]
+            exams.Add(e)
+        }
+        for line in World.ReadText("deadlines.txt").Split("\n") {
+            let a = line.TrimEnd("\r").Split("\t")
+            var due = 0, stage = 0
+            if a.count < 6 || !long.TryParse(a[0], &due) || !int.TryParse(a[1], &stage) { continue }
+            let d = Deadline(); d.Due = due; d.Stage = stage; d.Id = a[2]; d.Url = a[3] == "-" ? nil : a[3]; d.Course = a[4] == "-" ? "" : a[4]; d.Title = a[5]
+            deadlines.Add(d)
+        }
+        for line in World.ReadText("study-done.txt").Split("\n") { if line.Trim() != "" { studyDone.Add(line.Trim()) } }
+        LoadStudyConfig()
+        haveSchool = schoolUrls.Count > 0
+        let lk = World.ReadText("late.txt").Split("\t")
+        if lk.count == 3 { lateKey = lk[0]; _ = int.TryParse(lk[1], &lateLevel); lateAsleep = lk[2] == "1" }
+    }
+
+    func LoadStudyConfig() {
+        lock(schoolUrls) {
+            schoolUrls.Clear(); vsKeys.Clear()
+            for line in World.ReadText("study-config.txt").Split("\n") {
+                let l = line.Trim()
+                let i = l.IndexOf("=")
+                if i <= 0 { continue }
+                let k = l.Substring(0, i), v = l.Substring(i + 1).Trim()
+                switch k {
+                case "url": let u = World.NormUrl(v); if u != nil && !schoolUrls.Contains(u!) { schoolUrls.Add(u!) }
+                case "remind": var n = 0; if int.TryParse(v, &n) && n > 0 { classRemind = Math.Min(120, n) }
+                case "autoquiet": classAutoQuiet = v != "0"
+                case "late": let m = World.ParseHm(v); if m >= 0 { lateStartMin = m }
+                case "lateon": lateOn = v != "0"
+                case "nudge": examNudgeMin = v == "off" ? -1 : (World.ParseHm(v) >= 0 ? World.ParseHm(v) : examNudgeMin)
+                case "workcal": workCal = v
+                case "vs": for x in v.Split(",") { if x.Trim() != "" { vsKeys.Add(x.Trim()) } }
+                default: break
+                }
+            }
+        }
+    }
+
+    func SaveStudyConfig() {
+        let sb = StringBuilder()
+        lock(schoolUrls) { for u in schoolUrls { sb.Append("url=" + u + "\n") } }
+        sb.Append("remind=" + String(classRemind) + "\nautoquiet=" + (classAutoQuiet ? "1" : "0") + "\nlate=" + World.Hm(lateStartMin) + "\nlateon=" + (lateOn ? "1" : "0") + "\nnudge=" + World.Hm(examNudgeMin) + "\n")
+        if workCal != "" { sb.Append("workcal=" + workCal + "\n") }
+        if vsKeys.Count > 0 { sb.Append("vs=" + string.Join(",", vsKeys.ToArray()) + "\n") }
+        World.WriteText("study-config.txt", sb.ToString())
+    }
+
+    // https://…、webcal://…（當成 https）；其他不收
+    static func NormUrl(_ s0: String!) -> String! {
+        var s = (s0 ?? "").Trim()
+        if s.StartsWith("webcal://", StringComparison.OrdinalIgnoreCase) { s = "https://" + s.Substring(9) }
+        else if s.StartsWith("webcals://", StringComparison.OrdinalIgnoreCase) { s = "https://" + s.Substring(10) }
+        var u: Uri? = nil
+        if !s.StartsWith("https://", StringComparison.OrdinalIgnoreCase) || !Uri.TryCreate(s, UriKind.Absolute, &u) { return nil }
+        return s
+    }
+
+    func SaveExams() {
+        let sb = StringBuilder()
+        for e in exams {
+            let src: String = e.Src, id: String = e.Id, flags: String = (e.DayBefore ? "1" : "0") + (e.Morning ? "1" : "0")
+            var a: String = String(e.At) + "\t" + src
+            a += "\t" + e.LastDaily + "\t" + flags
+            a += "\t" + id + "\t" + World.OneLine(e.Name) + "\n"
+            sb.Append(a)
+        }
+        World.WriteText("exams.txt", sb.ToString())
+    }
+
+    func SaveDeadlines() {
+        let sb = StringBuilder()
+        for d in deadlines {
+            let id: String = d.Id, url: String = d.Url ?? "-", course: String = d.Course == "" ? "-" : World.OneLine(d.Course)
+            var a: String = String(d.Due) + "\t" + String(d.Stage)
+            a += "\t" + id + "\t" + url
+            a += "\t" + course + "\t" + World.OneLine(d.Title) + "\n"
+            sb.Append(a)
+        }
+        World.WriteText("deadlines.txt", sb.ToString())
+    }
+
+    func SaveLate() { World.WriteText("late.txt", lateKey + "\t" + String(lateLevel) + "\t" + (lateAsleep ? "1" : "0")) }
+
+    static func OneLine(_ s: String!) -> String { return (s ?? "").Replace("\t", " ").Replace("\r", " ").Replace("\n", " ").Trim() }
+
+    // "01:00" → 60；"off"、空白、看不懂 → -1
+    static func ParseHm(_ s: String!) -> Int {
+        let a = (s ?? "").Trim().Replace("：", ":").Split(":")
+        var h = 0, m = 0
+        if a.count == 2 && int.TryParse(a[0], &h) && int.TryParse(a[1], &m) && h >= 0 && h < 24 && m >= 0 && m < 60 { return h * 60 + m }
+        return -1
+    }
+    static func Hm(_ min: Int) -> String { return min < 0 ? "off" : (min / 60).ToString("00") + ":" + (min % 60).ToString("00") }
+
+    // ================= pipe =================
+    static func NthSpace(_ t: String, _ n: Int) -> Int { var i = -1; var k = 0; while k < n { i = t.IndexOf(" ", i + 1); if i < 0 { return -1 }; k += 1 }; return i }
+
+    func StudyMsg(_ c: Client, _ p: [String], _ line: String) {
+        if !studyLoaded { LoadStudy() }
+        let t = line.Trim()
+        switch p[0] {
+        case "course":
+            if p.count >= 5 {
+                var ms = 0, lead = 0; let i4 = World.NthSpace(t, 4)
+                if long.TryParse(p[1], &ms) && int.TryParse(p[2], &lead) { AddTicket(ms, lead, p[3], i4 > 0 ? t.Substring(i4 + 1) : "", "course") }
+            }
+        case "exam":
+            if p.count >= 3 {
+                var ms = 0; let i2 = World.NthSpace(t, 2)
+                if long.TryParse(p[1], &ms) { AddExam(ms, i2 > 0 ? t.Substring(i2 + 1).Trim() : "", "me", nil, true) }
+            }
+        case "exam-del": if p.count >= 2 { DelExam(p[1]) }
+        case "study-set": if p.count >= 2 { StudySet(p) }
+        case "study-vs":   // VS Code 這次管哪幾項（其他的交還給桌面版的設定視窗）
+            vsKeys.Clear()
+            if p.count >= 2 { for k in p[1].Split(",") { if k != "-" && k.Trim() != "" { vsKeys.Add(k.Trim()) } } }
+            StudySaved()
+        case "study-hello": World.Send(c, StateLine())
+        case "study-done": if p.count >= 2 { MarkDone(p[1], false); PushState() }
+        // ---- 測試用（只在離屏模式）----
+        case "study-ics":
+            if !App.Offscreen { break }
+            if p.count >= 2 && p[1] == "clear" { testFeeds.Clear(); haveSchool = schoolUrls.Count > 0 }
+            else if p.count >= 2 {
+                do { testFeeds.Add(KeyValuePair<String, String>(p.count >= 3 ? p[2] : p[1], try File.ReadAllText(p[1], Encoding.UTF8))) }
+                catch { App.Log("study-ics: " + error.localizedDescription) }
+            }
+            RescanNow()
+        case "study-clock":
+            var want = DateTime.MinValue
+            if p.count >= 2 && DateTime.TryParse(p[1], &want) { studyShift = want - DateTime.Now } else { studyShift = TimeSpan.Zero }
+            studyNext = 0
+            if testFeeds.Count > 0 { RescanNow() }
+        case "study-idle": var s: Double = 0; studyIdleFake = p.count >= 2 && double.TryParse(p[1], &s) ? s : -1
+        case "study-dump": World.Send(c, StudyDump())
+        case "study-settings":
+            if p.count < 2 { break }
+            if p[1] == "open" { ShowStudySettings() }
+            else if studyForm != nil && !studyForm.IsDisposed {
+                if p[1] == "close" { studyForm.Close() }
+                else if p[1] == "save" { studyForm.Save() }
+                else if p[1] == "set" && p.count >= 4 { studyForm.TestSet(p[2], t.Substring(World.NthSpace(t, 3) + 1)) }
+            }
+        default: break
+        }
+    }
+
+    // VS Code 推設定：推過的那一項就記成「由 VS Code 管理」
+    func StudySet(_ p: [String]) {
+        let k = p[1]
+        switch k {
+        case "urls":
+            lock(schoolUrls) {
+                schoolUrls.Clear()
+                var i = 2
+                while i < p.count { let u = World.NormUrl(p[i]); if u != nil && !schoolUrls.Contains(u!) { schoolUrls.Add(u!) }; i += 1 }
+            }
+            haveSchool = schoolUrls.Count > 0 || testFeeds.Count > 0
+            fetchNow = true
+        case "remind": var n = 0; if p.count >= 3 && int.TryParse(p[2], &n) && n > 0 { classRemind = Math.Min(120, n) }; replan = true
+        case "autoquiet": classAutoQuiet = p.count < 3 || p[2] != "0"; replan = true
+        case "late": let m = p.count >= 3 ? World.ParseHm(p[2]) : -1; lateOn = m >= 0; if m >= 0 { lateStartMin = m }
+        case "nudge": examNudgeMin = p.count >= 3 ? World.ParseHm(p[2]) : -1
+        case "workcal": workCal = p.count >= 3 && p[2] != "-" ? (World.NormUrl(p[2]) ?? "") : ""; fetchNow = true; StudySaved(); return
+        default: return
+        }
+        vsKeys.Add(k)
+        StudySaved()
+    }
+    func StudySaved() { SaveStudyConfig(); if studyForm != nil && !studyForm.IsDisposed { studyForm.Reload() } }
+
+    func StudyDump() -> String {
+        let sb = StringBuilder()
+        let nowS: String = SNow().ToString("yyyy-MM-ddTHH:mm"), lateS: String = lateOn ? World.Hm(lateStartMin) : "off"
+        var head: String = "study now=" + nowS + " school=" + (haveSchool ? "1" : "0")
+        head += " urls=" + String(schoolUrls.Count) + " remind=" + String(classRemind)
+        head += " autoquiet=" + (classAutoQuiet ? "1" : "0") + " late=" + lateS
+        head += " nudge=" + World.Hm(examNudgeMin) + " lateKey=" + lateKey
+        head += " lateLevel=" + String(lateLevel) + " asleep=" + (lateAsleep ? "1" : "0")
+        let vsS: String = string.Join(",", vsKeys.ToArray())
+        head += " quiet=" + String(quietOn ? QuietLeft() : 0) + " vs=" + vsS + "\n"
+        sb.Append(head)
+        for e in exams {
+            let src: String = e.Src, name: String = e.Name, at: String = World.FromUnixMs(e.At).ToString("yyyy-MM-ddTHH:mm")
+            var l: String = "exam " + src + " " + at
+            l += " daily=" + e.LastDaily + " before=" + (e.DayBefore ? "1" : "0")
+            l += " morning=" + (e.Morning ? "1" : "0") + " " + name + "\n"
+            sb.Append(l)
+        }
+        for d in deadlines {
+            let title: String = d.Title, course: String = d.Course, url: String = d.Url ?? "-", due: String = World.FromUnixMs(d.Due).ToString("yyyy-MM-ddTHH:mm")
+            var l: String = "deadline " + due + " stage=" + String(d.Stage)
+            l += " " + title + (course != "" ? " [" + course + "]" : "")
+            l += " " + url + "\n"
+            sb.Append(l)
+        }
+        for it in plan {
+            let kind: String = it.Kind, text: String = it.Text, at: String = World.FromUnixMs(it.At).ToString("yyyy-MM-ddTHH:mm")
+            var l: String = "plan " + at + " " + kind + " q=" + String(it.QuietMin)
+            l += (planFired.Contains(it.Key) ? " fired" : "") + " " + text + "\n"
+            sb.Append(l)
+        }
+        for tk in tickets {
+            let kind: String = tk.Kind, name: String = tk.Name, at: String = World.FromUnixMs(tk.At).ToString("yyyy-MM-ddTHH:mm")
+            var l: String = "ticket " + kind + " " + at
+            l += " stage=" + String(tk.Stage) + " " + name + "\n"
+            sb.Append(l)
+        }
+        sb.Append("bar " + BarText() + "\n")
+        sb.Append("end\n")
+        return sb.ToString()
+    }
+
+    // ================= 給 VS Code 的狀態（狀態列、「這週要交的」）=================
+    func StateLine() -> String {
+        let now = SNowMs()
+        var d: [Any] = [], e: [Any] = []
+        for x in deadlines {
+            if x.Due <= now || x.Due - now > 7 * 86400000 { continue }
+            let o = Dict<String, Any>()
+            o["id"] = x.Id as Any; o["due"] = x.Due; o["title"] = x.Title as Any; o["course"] = x.Course as Any; o["url"] = x.Url ?? ""
+            d.append(o)
+        }
+        for x in exams {
+            let o = Dict<String, Any>()
+            o["id"] = x.Id as Any; o["at"] = x.At; o["name"] = x.Name as Any
+            e.append(o)
+        }
+        let s = Dict<String, Any>()
+        s["bar"] = BarText(); s["school"] = haveSchool ? 1 : 0; s["d"] = d; s["e"] = e
+        return "study-state " + JavaScriptSerializer().Serialize(s) + "\n"
+    }
+    func PushState() {
+        let s = StateLine()
+        if s == lastState { return }
+        lastState = s
+        lock(clients) { for c in clients { World.Send(c, s) } }
+    }
+
+    // 狀態列：24 小時內的作業、7 天內的考試，挑最近的一個（沒有就空白）
+    func BarText() -> String {
+        let now = SNowMs(); var best = long.MaxValue
+        var text = ""
+        for x in deadlines {
+            if x.Due > now && x.Due - now <= 24 * 3600000 && x.Due < best { best = x.Due; let sh: String = World.Short(x.Title, 8); text = "📝 " + sh + " " + World.LeftText(x.Due - now) }
+        }
+        for x in exams {
+            if x.At > now && x.At - now <= 7 * 86400000 && x.At < best {
+                best = x.At
+                let days = (World.FromUnixMs(x.At).Date - SNow().Date).Days
+                let sh: String = World.Short(x.Name, 8), dd: String = days <= 0 ? "今天" : (days == 1 ? "明天" : String(days) + " 天")
+                text = "📚 " + sh + " " + dd
+            }
+        }
+        return text
+    }
+    static func LeftText(_ ms: Int) -> String {
+        if ms < 3600000 { return "剩 " + String(Math.Max(1, CInt(Math.Ceiling(Double(ms) / 60000.0)))) + " 分" }
+        if ms < 48 * 3600000 { return "剩 " + String(ms / 3600000) + " 小時" }
+        return "剩 " + String(ms / 86400000) + " 天"
+    }
+
+    // ================= 抓學校行事曆（背景執行緒；連不上就用上次存的）=================
+    func StartSchoolFetch() {
+        fetchStarted = true
+        let th = Thread { self.SchoolFetchLoop() }; th.IsBackground = true; th.Start()
+    }
+
+    func SchoolFetchLoop() {
+        var nextFetch = DateTime.MinValue, nextScan = DateTime.MinValue
+        let texts = Dict<String, String>()
+        Thread.Sleep(3000)
+        while !closing {
+            do {
+                let urls: List<String> = lock(schoolUrls) { List<String>(schoolUrls) }
+                let skip = workCal
+                urls.RemoveAll { (u: String) -> Bool in u == skip }   // 跟 VS Code 開會提醒同一份：不要提醒兩次
+                let doFetch = fetchNow || DateTime.Now >= nextFetch
+                if urls.Count > 0 && !App.Offscreen && doFetch {
+                    fetchNow = false
+                    nextFetch = DateTime.Now.AddMinutes(10)
+                    var ok = 0
+                    var err = ""
+                    for u in urls {
+                        var text: String! = World.Fetch(u, &err)
+                        if text != nil { ok += 1; World.WriteText(World.CacheName(u), text) }
+                        else { text = World.ReadText(World.CacheName(u)) }
+                        if !string.IsNullOrEmpty(text) { texts[u] = text }
+                    }
+                    let errS: String = err != "" ? "（" + err + "）" : ""
+                    let st: String = DateTime.Now.ToString("HH:mm") + " 更新：" + String(ok) + "/" + String(urls.Count) + " 個行事曆" + errS
+                    schoolStatus = st
+                    nextScan = DateTime.MinValue
+                }
+                else if doFetch { fetchNow = false; nextFetch = DateTime.Now.AddMinutes(10) }
+                if DateTime.Now >= nextScan || replan {
+                    nextScan = DateTime.Now.AddMinutes(2)
+                    let feeds = List<KeyValuePair<String, String>>()
+                    for u in urls { var tx = ""; if texts.TryGetValue(u, &tx) { feeds.Add(KeyValuePair<String, String>(u, tx)) } }
+                    let none = urls.Count == 0
+                    if feeds.Count > 0 || none {
+                        let r = ScanFeeds(feeds)
+                        Post { if self.testFeeds.Count == 0 { self.ApplyScan(r, none) } }
+                    }
+                }
+            }
+            Thread.Sleep(1000)
+        }
+    }
+
+    static func CacheName(_ url: String) -> String {
+        let h = Array(Insecure.MD5.hash(data: Data(url.utf8)))   // mac: System.Security.Cryptography.MD5 → CryptoKit
+        let sb = StringBuilder("school-")
+        for i in 0..<6 { sb.Append(String(format: "%02x", h[i])) }
+        sb.Append(".ics")
+        return sb.ToString()
+    }
+
+    // mac: HttpWebRequest → URLSession（背景執行緒上用 semaphore 等；最多 4 次轉址、讀到 8 MB 就停）
+    final class StudyFetchTask: NSObject, URLSessionDataDelegate {
+        var data = Data()
+        var status = 0
+        var failed: Error? = nil
+        var capped = false
+        var redirects = 0
+        let done = DispatchSemaphore(value: 0)
+        func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+            status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            completionHandler(.allow)
+        }
+        func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive d: Data) {
+            data.append(d)
+            if data.count > 8000000 { capped = true; dataTask.cancel() }   // 最多 8 MB
+        }
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+            redirects += 1
+            completionHandler(redirects > 4 ? nil : request)
+        }
+        func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+            if !capped { failed = error }
+            done.signal()
+        }
+    }
+
+    static func Fetch(_ url: String, _ err: inout String) -> String! {
+        guard let u = URL(string: url) else { err = "讀取失敗"; App.Log("school ics: bad url"); return nil }
+        var req = URLRequest(url: u, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+        req.setValue("DeskPals", forHTTPHeaderField: "User-Agent")
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.timeoutIntervalForRequest = 20; cfg.timeoutIntervalForResource = 120
+        let ft = StudyFetchTask()
+        let session = URLSession(configuration: cfg, delegate: ft, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        session.dataTask(with: req).resume()
+        if ft.done.wait(timeout: .now() + 125) == .timedOut { session.invalidateAndCancel(); err = "連不上"; App.Log("school ics " + err + ": timeout"); return nil }
+        if let e = ft.failed { err = "連不上"; App.Log("school ics " + err + ": " + e.localizedDescription); return nil }
+        if ft.status >= 300 { err = "HTTP " + String(ft.status); App.Log("school ics " + err); return nil }
+        var s = String(decoding: ft.data, as: UTF8.self)
+        if s.hasPrefix("\u{FEFF}") { s.removeFirst() }   // StreamReader 會吃掉 BOM
+        if !s.Contains("BEGIN:VCALENDAR") { err = "有一個網址不是行事曆"; return nil }
+        return s
+    }
+
+    func ScanFeeds(_ feeds: List<KeyValuePair<String, String>>) -> SchoolScan {
+        let fs = List<SchoolFeed>()
+        for f in feeds { fs.Add(School.Feed(f.Key, f.Value)) }
+        return School.Scan(fs, SNowMs())
+    }
+
+    // 測試：馬上用 testFeeds 掃一次（UI 執行緒）
+    func RescanNow() {
+        haveSchool = schoolUrls.Count > 0 || testFeeds.Count > 0
+        if testFeeds.Count == 0 { return }
+        ApplyScan(ScanFeeds(testFeeds), false)
+    }
+
+    // 掃完：作業死線、行事曆上的考試換成這次的（提醒到哪一段、交了的照舊）；上課提醒重排
+    func ApplyScan(_ r: SchoolScan, _ none: Bool) {
+        if !studyLoaded { LoadStudy() }
+        lastScan = r
+        haveSchool = !none || testFeeds.Count > 0
+        let now = SNowMs()
+        let old = Dict<String, Deadline>()
+        for d in deadlines { old[d.Id] = d }
+        deadlines.Clear()
+        for x in r.Dues {
+            if studyDone.Contains(x.Id) { continue }
+            let d = Deadline()
+            d.Id = x.Id; d.Due = x.Due; d.Title = x.Title; d.Course = x.Course; d.Url = World.SafeUrl(x.Url)
+            if d.Url != nil && !d.Url.StartsWith("http") { d.Url = nil }
+            var was: Deadline? = nil
+            d.Stage = old.TryGetValue(d.Id, &was) && was!.Due == d.Due ? was!.Stage : World.FirstStage(d.Due, now)
+            deadlines.Add(d)
+        }
+        let oldEx = Dict<String, Exam>()
+        for e in exams { if e.Src == "ics" { oldEx[e.Id] = e } }
+        exams.RemoveAll { (e: Exam) -> Bool in e.Src == "ics" }
+        for x in r.Exams {
+            if x.At <= now || studyDone.Contains(x.Id) { continue }
+            var was: Exam? = nil
+            if oldEx.TryGetValue(x.Id, &was) && was!.At == x.At { was!.Name = x.Name; exams.Add(was!) }
+            else { AddExam(x.At, x.Name, "ics", x.Id, false) }
+        }
+        SortExams()
+        SaveDeadlines(); SaveExams()
+        replan = false
+        plan = School.Plan(r.Timed, now - 3 * 60000, classRemind, classAutoQuiet)   // 剛到的那幾則也留著（重掃剛好卡在提醒那一刻不會漏；planFired 擋重複）
+        PushState()
+        if studyForm != nil && !studyForm.IsDisposed { studyForm.Invalidate() }
+    }
+
+    // 第一次看到：已經過了的階段不補，但 24 小時內的話，最近那段馬上講一次
+    static func FirstStage(_ due: Int, _ now: Int) -> Int {
+        let left = Double(due - now) / 60000.0
+        var passed = 0
+        for s in 0..<DueStages.count { if left <= Double(DueStages[s]) { passed = s + 1 } }
+        if passed > 0 && left <= 24 * 60 && left > 0 { passed -= 1 }
+        return passed
+    }
+
+    func MarkDone(_ id: String, _ tell: Bool) {
+        if !studyLoaded { LoadStudy() }
+        studyDone.Add(id)
+        var keep = List<String>(studyDone.ToArray())
+        if keep.Count > 500 { keep = keep.GetRange(keep.Count - 500, 500) }
+        World.WriteText("study-done.txt", string.Join("\n", keep.ToArray()))
+        deadlines.RemoveAll { (d: Deadline) -> Bool in d.Id == id }
+        SaveDeadlines()
+        if tell { let s = "study-done " + id + "\n"; lock(clients) { for c in clients { World.Send(c, s) } }; PushState() }
+    }
+
+    // ================= 每一輪 =================
+    func StudyBusy() -> Bool { return quietOn || focusOn || sharing || fsNow || Hidden }
+
+    func StudyTick() {
+        if !studyLoaded { LoadStudy() }
+        if Now < studyNext { return }
+        studyNext = Now + 2
+        if !fetchStarted { StartSchoolFetch() }
+        PlanTick(); DeadlineTick(); ExamTick(); LateTick(); PushState()
+    }
+
+    // ================= 上課／考試／行程提醒（跟開會一樣：課前 N 分鐘、開始時；上課、考試中自動安靜）=================
+    func PlanTick() {
+        if plan.Count == 0 { return }
+        let now = SNowMs()
+        for it in plan {
+            if it.At > now || planFired.Contains(it.Key) { continue }
+            planFired.Add(it.Key)
+            if now - it.At > (it.Kind.EndsWith("-now") ? 5 : 3) * 60000 { continue }   // 電腦睡著錯過太久的就不補
+            App.Log("school " + it.Kind + ": " + it.Text)
+            if it.Kind == "class-now" { Count("classes") }
+            OnNotify(it.Kind, it.Url != "" ? it.Url : "-", it.Text)
+            let q = it.QuietMin
+            if q > 0 { Later(10) { self.StartQuiet(q) } }   // 等「上課了」那則講完再安靜（不然馬上被「我安靜待著」蓋掉）
+        }
+        if planFired.Count > 400 { planFired.Clear() }
+    }
+
+    // ================= 作業死線（3 天、1 天、3 小時、1 小時）=================
+    func DeadlineTick() {
+        if deadlines.Count == 0 { return }
+        let now = SNowMs()
+        let fire = List<Deadline>()
+        var top = -1
+        var changed = false
+        var i = deadlines.Count - 1
+        while i >= 0 {
+            let d: Deadline = deadlines[i]
+            i -= 1
+            let left = Double(d.Due - now) / 60000.0
+            if left < -60 { deadlines.RemoveAt(i + 1); changed = true; continue }
+            var f = -1
+            var s = d.Stage
+            while s < World.DueStages.count { if left <= Double(World.DueStages[s]) { f = s }; s += 1 }
+            if f < 0 { continue }
+            d.Stage = f + 1; changed = true
+            if left <= 0 { continue }     // 已經截止了：不再叫
+            fire.Add(d); top = Math.Max(top, f)
+        }
+        if changed { SaveDeadlines() }
+        if fire.Count == 0 { return }
+        fire.Sort { (a: Deadline, b: Deadline) -> Int in a.Due.CompareTo(b.Due) }
+        var text: String
+        if fire.Count == 1 { text = DeadlineText(fire[0], top, now) }
+        else {
+            var parts: [String] = []
+            var j = 0
+            while j < fire.Count && j < 3 { let sh: String = World.Short(fire[j].Title, 14), wn: String = DueWhen(fire[j].Due); parts.append("「" + sh + "」" + wn); j += 1 }
+            let joined: String = string.Join("、", parts)
+            text = "有 " + String(fire.Count) + " 份作業快截止了：" + joined + (fire.Count > 3 ? "…" : "")
+        }
+        let ids = List<String>()
+        for d in fire { ids.Add(d.Id) }
+        deadlineNotes[text] = ids
+        App.Log("deadline stage " + String(top) + ": " + text)
+        OnNotify(top >= 3 ? "deadline-hot" : "deadline", fire[0].Url ?? "-", text)
+    }
+
+    // C#：s[n-1] 是高代理字（emoji 的前半）就少切一個，不要把 emoji 切成兩半
+    static func Short(_ s0: String!, _ n0: Int) -> String {
+        let s: String = s0 ?? ""
+        var n = n0
+        if s.Length <= n { return s }
+        let u = Array(s.utf16)
+        if n >= 1 && UTF16.isLeadSurrogate(u[n - 1]) { n -= 1 }   // mac: char.IsHighSurrogate(s[n - 1])，直接看 UTF-16
+        return s.Substring(0, n) + "…"
+    }
+    static let WeekDays: [String] = ["日", "一", "二", "三", "四", "五", "六"]
+
+    // 今天 23:59／明天 23:59／11/20（五）23:59
+    func DueWhen(_ due: Int) -> String {
+        let d = World.FromUnixMs(due), n = SNow()
+        let days = (d.Date - n.Date).Days
+        let hm = d.ToString("HH:mm")
+        if days == 0 { return (d.Hour < 6 ? "今天凌晨 " : "今天 ") + hm }
+        if days == 1 { return (d.Hour < 6 ? "明天凌晨 " : "明天 ") + hm }
+        return d.ToString("M/d") + "（" + World.WeekDays[d.DayOfWeek.rawValue] + "）" + hm
+    }
+
+    func DeadlineText(_ d: Deadline, _ stage: Int, _ now: Int) -> String {
+        let title: String = d.Title, course: String = d.Course
+        let cpart: String = course != "" ? "（" + World.Short(course, 12) + "）" : ""
+        let name: String = "「" + title + "」" + cpart
+        let left = Double(d.Due - now) / 60000.0
+        let days = (World.FromUnixMs(d.Due).Date - SNow().Date).Days
+        let when: String = DueWhen(d.Due), hm: String = World.FromUnixMs(d.Due).ToString("HH:mm")
+        switch stage {
+        case 0: return name + " " + when + " 截止，還有 " + String(Math.Max(1, days)) + " 天"
+        case 1: return name + " " + when + " 截止！別忘了 📝"
+        case 2:
+            let hrs: String = String(Math.Max(1, CInt(Math.Ceiling(left / 60))))
+            return name + " 再 " + hrs + " 小時就截止了（" + hm + "）"
+        default:
+            let mins: String = left < 55 ? " 剩 " + String(Math.Max(1, CInt(Math.Ceiling(left)))) + " 分鐘！" : " 剩不到 1 小時！"
+            return name + mins + hm + " 截止，趕快交 📝"
+        }
+    }
+
+    // 點了作業通知：打開作業頁／交了／等等再說
+    func StudyClicked(_ p: Pet, _ n: Notice) -> Bool {
+        if n.Kind != "deadline" && n.Kind != "deadline-hot" { return false }
+        var ids: List<String>? = nil
+        deadlineNotes.TryGetValue(n.Text ?? "", &ids)
+        if App.Offscreen { p.Say("好～", 1.2); App.Log("deadline clicked (offscreen): " + (n.Text ?? "")); return true }
+        let m = ContextMenuStrip()
+        let url: String! = n.Url
+        if url != nil { m.Items.Add("打開作業頁", nil) { self.OpenStudyUrl(p, url) } }
+        if ids != nil && ids!.Count > 0 {
+            let l: List<String> = ids!
+            m.Items.Add(l.Count > 1 ? "都交了 ✓（不再提醒）" : "交了 ✓（不再提醒）", nil) { for id in l { self.MarkDone(id, true) }; p.Say("好棒！交了就輕鬆了 🎉", 2.2) }
+        }
+        m.Items.Add("等等再說", nil) { p.Say("好，時間快到會再叫你", 1.6) }
+        ShowMenu(m, "作業", false)
+        return true
+    }
+
+    func OpenStudyUrl(_ p: Pet, _ url: String) {
+        if App.Offscreen { App.Log("open (offscreen, skipped): " + url); return }
+        if World.OpenUrl(url) { p.Say("好～幫你打開了 👍", 1.4) }   // mac: Process.Start → NSWorkspace.open
+        else { App.Log("open url: failed " + url); p.Say("打不開耶…", 1.4) }
+    }
+
+    // ================= 考試倒數 =================
+    func SortExams() { exams.Sort { (a: Exam, b: Exam) -> Int in a.At.CompareTo(b.At) } }
+
+    func AddExam(_ at: Int, _ name: String!, _ src: String, _ id: String!, _ say: Bool) {
+        if !studyLoaded { LoadStudy() }
+        let e = Exam()
+        e.At = at; e.Name = string.IsNullOrEmpty(name) ? "考試" : World.OneLine(name); e.Src = src; e.Id = id ?? ("me-" + String(at))
+        let n = SNow(), ed = World.FromUnixMs(at)
+        // 加的時候已經過了今天倒數的時間：今天不再補講（剛剛才講過記住了）
+        if examNudgeMin >= 0 && n.Hour * 60 + n.Minute >= examNudgeMin { e.LastDaily = n.ToString("yyyyMMdd") }
+        let eid: String = e.Id
+        exams.RemoveAll { (x: Exam) -> Bool in x.Id == eid }
+        exams.Add(e)
+        SortExams(); SaveExams()
+        if !say { return }
+        PushState()
+        let days = (ed.Date - n.Date).Days
+        let left = days <= 0 ? "就是今天" : (days == 1 ? "就是明天" : "還有 " + String(days) + " 天")
+        let tail: String = examNudgeMin >= 0 && days >= 2 ? "。每天 " + World.Hm(examNudgeMin) + " 幫你倒數" : ""
+        let ename: String = e.Name, when: String = ed.ToString("M/d HH:mm")
+        let msg: String = "📚 記住了：" + ename + "，" + when + "，" + left + tail
+        Lead().Say(msg, 3.2)
+    }
+
+    func DelExam(_ id: String) {
+        let e0 = exams.Find { (x: Exam) -> Bool in x.Id == id }
+        if e0 == nil { return }
+        let e: Exam = e0!
+        exams.Remove(e)
+        if e.Src == "ics" { MarkDone(id, false) }   // 行事曆上的：下次同步也別再加回來
+        SaveExams(); PushState()
+        Lead().Say("取消考試倒數：" + e.Name, 1.8)
+    }
+
+    // 7 天內有考試：專注改叫「讀書 25 分鐘 📚」
+    func ExamNear() -> Bool {
+        if !studyLoaded { LoadStudy() }
+        let now = SNowMs()
+        for e in exams { if e.At > now && e.At - now <= 7 * 24 * 3600000 { return true } }
+        return false
+    }
+
+    // 早上那一則：07:30（考試比 08:30 早就提前到考前一小時）
+    static func MorningAt(_ exam: DateTime) -> DateTime {
+        let m = exam.Date.AddHours(7.5)
+        return exam.AddHours(-1) < m ? exam.AddHours(-1) : m
+    }
+
+    func ExamTick() {
+        if exams.Count == 0 { return }
+        let n = SNow()
+        let now = World.UnixMs(n)
+        let changed = exams.RemoveAll { (x: Exam) -> Bool in now > x.At + 3 * 3600000 } > 0   // 考完 3 小時就收掉
+        if changed { SaveExams() }
+        if StudyBusy() || StudyIdle() > 120 { return }          // 安靜、專注、分享螢幕、你不在：等一下再講（當天都還會補）
+        let today = n.ToString("yyyyMMdd")
+        let nowMin = n.Hour * 60 + n.Minute
+        var morning: Exam! = nil, before: Exam! = nil
+        let daily = List<Exam>()
+        for e in exams {
+            let ed = World.FromUnixMs(e.At)
+            let days = (ed.Date - n.Date).Days
+            if days == 0 && !e.Morning && now < e.At && n >= World.MorningAt(ed) { if morning == nil { morning = e } }
+            else if days == 1 && !e.DayBefore && examNudgeMin >= 0 && nowMin >= examNudgeMin { if before == nil { before = e } }
+            else if days >= 2 && days <= 14 && e.LastDaily != today && examNudgeMin >= 0 && nowMin >= examNudgeMin { daily.Add(e) }
+        }
+        let l: Pet = Lead()
+        if morning != nil {
+            morning.Morning = true; morning.LastDaily = today; SaveExams()
+            let pre: String = World.ExamPrefix(l.P.Id), hm: String = World.FromUnixMs(morning.At).ToString("HH:mm"), mname: String = morning.Name
+            let t: String = pre + "今天 " + hm + "「" + mname + "」，加油！🍀 准考證、文具、學生證帶了嗎？"
+            App.Log("exam morning: " + morning.Name)
+            l.Notify(t, nil, 1, false, false)
+            for o in OutPets() { if o !== l { o.React() } }
+            return
+        }
+        if before == nil && daily.Count == 0 { return }
+        var parts: [String] = []
+        for e in daily { e.LastDaily = today; let en: String = e.Name, dd: String = String((World.FromUnixMs(e.At).Date - n.Date).Days); parts.append("離「" + en + "」還有 " + dd + " 天") }
+        let joined: String = string.Join("、", parts)
+        var text: String = parts.count > 0 ? joined + " 📚 " + World.ExamTail(l.P.Id) : ""
+        if before != nil {
+            // 明天就考：這則優先，其他的倒數接在後面一起講
+            before.DayBefore = true; before.LastDaily = today
+            let pre: String = World.ExamPrefix(l.P.Id), hm: String = World.FromUnixMs(before.At).ToString("HH:mm"), bname: String = before.Name
+            let rest: String = parts.count > 0 ? "（" + joined + "）" : ""
+            text = pre + "明天 " + hm + " 就是「" + bname + "」了！重點再看一次，今晚早點睡 💤" + rest
+        }
+        SaveExams()
+        App.Log("exam nudge: " + text)
+        StudyNudge(l, text)
+    }
+
+    // 倒數提醒：點泡泡就開始讀書（番茄鐘）
+    func StudyNudge(_ l: Pet, _ text: String) {
+        let nt = Notice(); nt.Kind = "exam"; nt.Text = ""; nt.Pri = 1; nt.NextRound = true; nt.By = l; nt.Expire = Now + 120
+        current = nt
+        l.SetClickableBubble(true)
+        l.Notify(text, "點我開始讀書 " + String(focusMin) + " 分鐘", 1, false, false)
+    }
+
+    static func ExamPrefix(_ id: String) -> String {
+        let cu = World.CuStudy(id, "x_exam_prefix", nil, nil, nil); if cu != nil { return cu! }   // 自己做的公仔（53_custom.swift）
+        switch id {
+        case "spidey": return "蜘蛛感應："
+        case "po", "tinky": return "Eh-oh! "
+        case "stitch": return "ih! "
+        case "hangyodon": return "英雄報告："
+        case "dipsy": return "嘿，"
+        case "laalaa": return "啦啦～"
+        default: break
+        }
+        return id.StartsWith("pk") ? "皮克敏報告：" : ""
+    }
+
+    static func ExamTail(_ id: String) -> String {
+        let cu = World.CuStudy(id, "x_exam_tail", nil, nil, nil); if cu != nil { return cu! }
+        switch id {
+        case "po": return "小波陪你讀書！"
+        case "stitch": return "史迪仔幫你翻書！ih!"
+        case "hangyodon": return "讀書的你才是真正的英雄"
+        case "tinky": return "丁丁陪你讀～"
+        case "dipsy": return "讀一點，很酷。"
+        case "laalaa": return "邊讀邊唱～啦啦"
+        default: break
+        }
+        return id.StartsWith("pk") ? "皮克敏幫你搬課本！" : "今天讀一點？"
+    }
+
+    // ================= 熬夜提醒（預設 01:00 起；02:00、03:00 再講；06:00 結束；離開電腦 15 分鐘就當你睡了）=================
+    func LateTick() {
+        if !lateOn || lateStartMin < 0 { return }
+        let n = SNow()
+        let m = n.Hour * 60 + n.Minute
+        let sh = (m + 720) % 1440, st = (lateStartMin + 720) % 1440, end = (6 * 60 + 720) % 1440   // 以中午當一天的開始，跨半夜好算
+        if sh < st || sh >= end { return }
+        let key = n.AddHours(-12).ToString("yyyyMMdd")
+        if key != lateKey { lateKey = key; lateLevel = -1; lateAsleep = false; SaveLate() }
+        if lateAsleep { return }
+        let idle = StudyIdle()
+        if lateLevel >= 0 && idle >= 15 * 60 { lateAsleep = true; SaveLate(); App.Log("latenight: idle, stop for tonight"); return }
+        let want = Math.Min(2, (sh - st) / 60)
+        if want <= lateLevel || idle > 120 { return }          // 你不在電腦前：等你回來
+        if StudyBusy() { return }                              // 安靜、專注、分享螢幕：不吵
+        lateLevel = want; SaveLate()
+        let l: Pet = Lead()
+        let text = World.LateNightLine(l.P.Id, want, n.ToString("H:mm")) + LateExtra(n)
+        App.Log("latenight " + String(want) + ": " + text)
+        if want == 0 { l.WakeIfSleep(); l.Say(text, 8) }
+        else {
+            l.Notify(text, nil, 1, false, false)
+            if want == 2 { for o in OutPets() { if o !== l { o.React() } } }
+        }
+    }
+
+    // 還在趕作業／明天有考試：補一句
+    func LateExtra(_ n: DateTime) -> String {
+        let now = World.UnixMs(n)
+        for d in deadlines {
+            if d.Due > now && d.Due - now <= 8 * 3600000 { let sh: String = World.Short(d.Title, 12); return "（還在趕「" + sh + "」嗎？交完就去睡）" }
+        }
+        for e in exams {
+            if e.At > now && e.At - now <= 14 * 3600000 { let hm: String = World.FromUnixMs(e.At).ToString("H:mm"), sh: String = World.Short(e.Name, 12); return "（" + hm + " 還有「" + sh + "」，睡飽比熬夜有用）" }
+        }
+        return ""
+    }
+
+    static func LateNightLine(_ id: String, _ lv: Int, _ hm: String) -> String {
+        let cu = World.CuStudy(id, "x_late" + String(Math.Max(0, Math.Min(2, lv))), hm, nil, nil); if cu != nil { return cu! }
+        var a: [String]
+        switch id {
+        case "spidey": a = ["已經 " + hm + " 了…蜘蛛也要睡覺的，今天先到這裡？🌙", hm + " 了。熬夜的英雄明天會變殭屍，存檔去睡吧", hm + "！！蜘蛛感應：你真的該睡了 😴 剩下的明天再做"]
+        case "po": a = ["嗚…" + hm + " 了，小波好睏…你也去睡覺覺好不好 🌙", hm + " 了！太陽寶寶都睡好久了，關電腦吧～", hm + " 了…小波撐不住了，一起去睡嘛 😴"]
+        case "stitch": a = [hm + " 了…史迪仔想睡了，你也睡 🌙", hm + "！ih! 睡覺！明天再玩！", hm + "！！再不睡史迪仔要拔電源線了喔 😴"]
+        case "hangyodon": a = [hm + " 了…我在泡泡裡都快睡著了，你也早點休息 🌙", hm + " 了，英雄也要睡飽才能拯救世界", hm + " 了！真的該睡了…這不是冷笑話 😴"]
+        case "tinky": a = [hm + " 了…丁丁抱著袋袋想睡覺覺 🌙", hm + " 了！天線寶寶說：該睡覺囉～", hm + " 了…丁丁跌坐在枕頭上了，你也去睡 😴"]
+        case "dipsy": a = [hm + "。很晚了，帽子拉低，該睡了 🌙", hm + "。熬夜不酷，睡覺比較酷。", hm + "。真的，去睡。😴"]
+        case "laalaa": a = [hm + " 了…拉拉唱搖籃曲給你聽～啦…啦… 🌙", hm + " 了！球球都睡了，你也睡吧～", hm + " 了…啦…（打哈欠）一起去睡嘛 😴"]
+        default:
+            if id.StartsWith("pk") { a = [hm + " 了…皮克敏都回洋蔥睡了 🌙", hm + " 了，夜晚很危險，快回基地睡覺！", hm + " 了！！再不睡天就亮了 😴"] }
+            else { a = ["已經 " + hm + " 了，今天先到這裡好嗎？早點休息 🌙", hm + " 了，明天會很累喔，存檔去睡吧", hm + " 了！真的該睡了 😴"] }
+        }
+        return a[Math.Max(0, Math.Min(2, lv))]
+    }
+
+    // ================= 通知（Priority／Flavor／OnNotify／Deliver 會來問）=================
+    static func StudyPriority(_ kind: String) -> Int {
+        switch kind {
+        case "class", "class-now", "exam-soon", "exam-now", "deadline-hot": return 2
+        case "deadline", "event", "event-now": return 1
+        default: break
+        }
+        return -1
+    }
+
+    // 上課、考試、行程跟開會一樣：安靜時還是冒泡泡，敲玻璃走會議的冷卻
+    static func MeetingLike(_ kind: String) -> Bool { return kind.StartsWith("meeting") || kind.StartsWith("class") || kind.StartsWith("exam-") || kind.StartsWith("event") }
+
+    static func StudyFlavor(_ id: String, _ kind: String) -> String! {
+        let keys: [String] = ["class", "class-now", "exam-soon", "exam-now", "event", "event-now", "deadline", "deadline-hot"]
+        let i = keys.firstIndex(of: kind) ?? -1
+        if i < 0 { return nil }
+        var a: [String]
+        switch id {
+        case "po": a = ["🎒 小波提醒你上課：", "🎒 上課囉！Eh-oh!", "📚 要考試了，小波幫你加油：", "📚 考試！小波陪你：", "等一下有事喔：", "時間到囉：", "📝 小波提醒你寫作業：", "📝 嗚～快截止了："]
+        case "stitch": a = ["🎒 ih! 要上課：", "🎒 上課！快去！", "📚 要考試！ih-ih!", "📚 考試！史迪仔幫你集氣：", "等等有事！", "開始了！", "📝 ih! 作業：", "📝 ih-ih-ih! 快截止："]
+        case "hangyodon": a = ["🎒 英雄提醒：要上課了", "🎒 上課時間到了：", "📚 英雄報告：要考試了", "📚 考試開始，你就是英雄：", "等一下有行程喔：", "行程開始了：", "📝 英雄提醒你：", "📝 交給我這個英雄…快截止了："]
+        case "tinky": a = ["🎒 丁丁提醒你上課：", "🎒 上課囉！Eh-oh!", "📚 要考試了，丁丁幫你加油：", "📚 考試！丁丁陪你：", "等一下有事喔：", "時間到囉：", "📝 魔法袋裡有作業：", "📝 哎喲！快截止了："]
+        case "dipsy": a = ["🎒 要上課了：", "🎒 上課了，走吧：", "📚 要考試了，冷靜：", "📚 考試開始，酷：", "等等有事：", "開始了：", "📝 作業：", "📝 快截止了，帽子扶好："]
+        case "laalaa": a = ["🎒 拉拉提醒你上課：", "🎒 上課囉！啦～", "📚 要考試了，拉拉幫你加油：", "📚 考試！啦啦加油：", "等一下有事喔：", "時間到囉：", "📝 拉拉提醒你寫作業：", "📝 啦！快截止了："]
+        case "spidey": a = ["🎒 要上課囉：", "🎒 上課時間！", "📚 蜘蛛感應！要考試了：", "📚 考試開始！", "等一下有行程：", "行程開始了：", "📝 作業提醒：", "📝 蜘蛛感應！快截止了："]
+        default: a = ["🎒 要上課囉：", "🎒 上課時間！", "📚 要考試了：", "📚 考試開始！", "等一下有行程：", "行程開始了：", "📝 作業提醒：", "📝 快截止了："]
+        }
+        return a[i]
+    }
+
+    // ================= 搶課（Ticket 的 Kind＝course）=================
+    static func CourseLine(_ id: String, _ stage: Int, _ t: Ticket) -> String {
+        let cu = World.CuStudy(id, "x_course" + String(Math.Max(0, Math.Min(4, stage))), nil, t.Name, String(t.Lead / 60) + " 小時"); if cu != nil { return cu! }
+        let h = String(t.Lead / 60) + " 小時", n: String = t.Name
+        var a: [String]
+        switch id {
+        case "spidey": a = ["🎓 " + n + " 還有 " + h + "開放選課！先登入、志願序排好", "🎓 " + n + " 再 30 分鐘開放，選課頁先開好、課號抄好", "🎓 " + n + " 剩 10 分鐘！蜘蛛感應全開", "🎓 準備！手指放在加選按鈕上", "🎓 開放了！！快加選！Thwip!"]
+        case "po": a = ["🎓 " + n + " 還有 " + h + "開放選課！先登入、志願排好喔", "🎓 " + n + " 再 30 分鐘！課號先抄好，小波陪你等", "🎓 " + n + " 剩 10 分鐘！好緊張～", "🎓 準備！深呼吸～", "🎓 開放了！！衝衝衝！"]
+        case "stitch": a = ["🎓 " + n + " 還有 " + h + "開放選課！先登入！ih!", "🎓 " + n + " 30 分鐘！課號抄好，史迪仔幫你顧著", "🎓 " + n + " 10 分鐘！ih-ih-ih!", "🎓 準備！史迪仔也準備好了", "🎓 開放了！！衝啊！"]
+        case "hangyodon": a = ["🎓 " + n + " 還有 " + h + "開放選課！先登入、志願排好", "🎓 " + n + " 30 分鐘後開放，英雄陪你等", "🎓 " + n + " 剩 10 分鐘！英雄出動準備", "🎓 準備！這次一定選到！", "🎓 開放了！！祝你選到！"]
+        case "tinky": a = ["🎓 " + n + " 還有 " + h + "開放選課！先登入喔", "🎓 " + n + " 再 30 分鐘！丁丁陪你等", "🎓 " + n + " 剩 10 分鐘！魔法袋準備好了", "🎓 準備！深呼吸～", "🎓 開放了！！衝衝衝！"]
+        case "dipsy": a = ["🎓 " + n + " 還有 " + h + "開放選課，先登入", "🎓 " + n + " 30 分鐘後開放，課號抄好", "🎓 " + n + " 剩 10 分鐘，帽子戴好", "🎓 準備。冷靜，酷。", "🎓 開放了！！嘿！"]
+        case "laalaa": a = ["🎓 " + n + " 還有 " + h + "開放選課！先登入喔", "🎓 " + n + " 再 30 分鐘！拉拉唱歌陪你等", "🎓 " + n + " 剩 10 分鐘！好緊張～", "🎓 準備！啦…啦…", "🎓 開放了！！衝啊～啦！"]
+        default:
+            if id.StartsWith("pk") { a = ["🎓 " + n + " 還有 " + h + "開放選課！先登入、志願排好", "🎓 " + n + " 再 30 分鐘，皮克敏排好隊了", "🎓 " + n + " 剩 10 分鐘！全員集合！", "🎓 準備！吹哨子準備～", "🎓 開放了！！全員衝鋒！"] }
+            else { a = ["🎓 " + n + " 還有 " + h + "開放選課！先登入、志願序排好", "🎓 " + n + " 再 30 分鐘開放，選課頁先開好", "🎓 " + n + " 剩 10 分鐘！", "🎓 準備！手指放在加選按鈕上", "🎓 開放了！！快加選！"] }
+        }
+        return a[Math.Max(0, Math.Min(4, stage))]
+    }
+
+    // 倒數徽章上的是搶課就畫學士帽
+    func BadgeIsCourse() -> Bool {
+        let now = World.UnixMs(DateTime.Now)
+        for t in tickets {
+            let ms = t.At - now
+            if (ms > 0 && ms <= 10 * 60000) || (ms <= 0 && ms > -60000) { return t.Kind == "course" }
+        }
+        return false
+    }
+
+    // ================= 選單（小幫手）=================
+    func AddStudyMenus(_ items: ToolStripItemCollection) {
+        if !studyLoaded { LoadStudy() }
+        AddTicketMenus(items, "course")
+        items.Add("考試倒數…", nil) { self.ShowExamForm() }
+        let now = SNowMs()
+        if exams.Count > 0 {
+            let my = ToolStripMenuItem("我的考試（" + String(exams.Count) + "）")
+            for e in exams {
+                let ee = e
+                let days = (World.FromUnixMs(e.At).Date - SNow().Date).Days
+                let left = days <= 0 ? "今天" : (days == 1 ? "明天" : "還有 " + String(days) + " 天")
+                let at: String = World.FromUnixMs(e.At).ToString("MM/dd HH:mm"), sh: String = World.Short(e.Name, 16)
+                let label: String = at + "　" + sh + "　" + left + "（點一下取消）"
+                my.DropDownItems.Add(label, nil) { self.DelExam(ee.Id) }
+            }
+            items.Add(my)
+        }
+        if !haveSchool { items.Add("學校行事曆（上課、作業提醒）…", nil) { self.ShowStudySettings() }; return }
+        let week: List<Deadline> = deadlines.FindAll { (d: Deadline) -> Bool in d.Due > now && d.Due - now <= 7 * 24 * 3600000 }
+        let wk = ToolStripMenuItem("這週要交的（" + String(week.Count) + "）")
+        if week.Count == 0 { let none = ToolStripMenuItem("這週沒有要交的 🎉"); none.Enabled = false; wk.DropDownItems.Add(none) }
+        for d in week {
+            let dd = d
+            let course: String = d.Course, when: String = DueWhen(d.Due), sh: String = World.Short(d.Title, 16)
+            let cpart: String = course != "" ? "［" + World.Short(course, 10) + "］" : ""
+            let it = ToolStripMenuItem(when + "　" + sh + cpart)
+            if d.Url != nil { it.DropDownItems.Add("打開作業頁", nil) { self.OpenStudyUrl(self.Lead(), dd.Url) } }
+            it.DropDownItems.Add("交了 ✓（不再提醒）", nil) { self.MarkDone(dd.Id, true); let sh2: String = World.Short(dd.Title, 12); self.Lead().Say("好棒！「" + sh2 + "」交了 🎉", 2.2) }
+            wk.DropDownItems.Add(it)
+        }
+        items.Add(wk)
+    }
+
+    // ================= 今天的小結 =================
+    // 這週（週一起）的番茄數；跟今天一樣就不另外講
+    static func WeekTomatoNote(_ today: Int) -> String {
+        let d = DateTime.Now.Date
+        let back = (d.DayOfWeek.rawValue + 6) % 7
+        var week = 0
+        var i = 0
+        while i <= back {
+            var v = 0; _ = int.TryParse(World.ReadText("tomato-" + d.AddDays(-i).ToString("yyyyMMdd") + ".txt"), &v)
+            week += v
+            i += 1
+        }
+        return week > today ? "（這週 " + String(week) + " 顆）" : ""
+    }
+
+    func StudyWrapParts(_ parts: List<String>) {
+        if !studyLoaded { LoadStudy() }
+        if Day("classes") > 0 { parts.Add("上了 " + String(Day("classes")) + " 堂課") }
+        let now = SNowMs()
+        var n = 0
+        for d in deadlines { if d.Due > now && d.Due - now <= 7 * 24 * 3600000 { n += 1 } }
+        if n > 0 { parts.Add("這週還有 " + String(n) + " 份作業要交") }
+        for e in exams {
+            if e.At <= now { continue }
+            let days = (World.FromUnixMs(e.At).Date - SNow().Date).Days
+            if days >= 1 && days <= 14 { let sh: String = World.Short(e.Name, 10); parts.Add("離「" + sh + "」還有 " + String(days) + " 天") }
+            break
+        }
+    }
+
+    // ================= 小視窗：考試倒數、讀書小幫手設定 =================
+    func ShowExamForm() {
+        if App.Offscreen { return }
+        if examForm == nil || examForm.IsDisposed { examForm = ExamForm(self, Lead().P.Accent) }
+        let c: Point = Cursor.Position
+        let wa: Rectangle = WA(Double(c.X), Double(c.Y))
+        examForm.StartPosition = FormStartPosition.Manual
+        examForm.Location = Point(Math.Max(wa.Left, Math.Min(wa.Right - examForm.Width, c.X - examForm.Width / 2)), Math.Max(wa.Top, Math.Min(wa.Bottom - examForm.Height, c.Y - examForm.Height - 10)))
+        examForm.Show()
+        ActivateForm(examForm)
+        examForm.FocusFirst()
+        let ef: ExamForm = examForm
+        Later(0.2) { if ef.Visible { self.ActivateForm(ef); ef.FocusFirst() } }
+    }
+
+    func ShowStudySettings() {
+        if !studyLoaded { LoadStudy() }
+        if studyForm == nil || studyForm.IsDisposed { studyForm = StudySettingsForm(self) }
+        let wa: Rectangle = App.Offscreen ? screens[0].WorkingArea : Screen.FromPoint(Cursor.Position).WorkingArea
+        studyForm.Location = Point(wa.Left + (wa.Width - studyForm.Width) / 2, wa.Top + Math.Max(0, (wa.Height - studyForm.Height) / 2))
+        studyForm.Show()
+        if App.Offscreen { return }
+        ActivateForm(studyForm)
+        let sf: StudySettingsForm = studyForm
+        Later(0.2) { if !sf.IsDisposed && sf.Visible { self.ActivateForm(sf) } }
+    }
+
+    // 設定視窗讀寫用
+    func StudyUrls() -> [String] { return lock(schoolUrls) { schoolUrls.ToArray() } }
+    var ClassRemind: Int { return classRemind }
+    var ClassAutoQuiet: Bool { return classAutoQuiet }
+    var LateOn: Bool { return lateOn }
+    var LateStart: Int { return lateStartMin }
+    var ExamNudge: Int { return examNudgeMin }
+    func FromVsCode(_ key: String) -> Bool { return vsKeys.Contains(key) }
+    func SchoolStatus() -> String {
+        if !haveSchool { return "還沒有學校行事曆" }
+        var week = 0; let now = SNowMs()
+        for d in deadlines { if d.Due > now && d.Due - now <= 7 * 86400000 { week += 1 } }
+        let head: String = schoolStatus != "" ? schoolStatus + "；" : (lastScan == nil ? "更新中…；" : "")
+        return head + "這週 " + String(week) + " 份作業"
+    }
+    func ApplyStudySettings(_ urls: List<String>, _ remind: Int, _ autoQuiet: Bool, _ late: Bool, _ lateStart: Int, _ nudge: Int) {
+        if !vsKeys.Contains("urls") {
+            lock(schoolUrls) {
+                schoolUrls.Clear()
+                for u0 in urls { let u = World.NormUrl(u0); if u != nil && !schoolUrls.Contains(u!) { schoolUrls.Add(u!) } }
+            }
+        }
+        if !vsKeys.Contains("remind") && remind > 0 { classRemind = Math.Min(120, remind) }
+        if !vsKeys.Contains("autoquiet") { classAutoQuiet = autoQuiet }
+        if !vsKeys.Contains("late") { lateOn = late; if lateStart >= 0 { lateStartMin = lateStart } }
+        if !vsKeys.Contains("nudge") { examNudgeMin = nudge }
+        haveSchool = schoolUrls.Count > 0 || testFeeds.Count > 0
+        SaveStudyConfig()
+        fetchNow = true; replan = true
+        let lateS: String = lateOn ? World.Hm(lateStartMin) : "off"
+        App.Log("study settings: urls=" + String(schoolUrls.Count) + " remind=" + String(classRemind) + " late=" + lateS + " nudge=" + World.Hm(examNudgeMin))
+        Lead().Say(schoolUrls.Count > 0 ? "🎒 記住了！上課前、作業截止前都會叫你" : "好～設定存好了", 2.4)
+    }
+
+    func StudySnap(_ g: Graphics) { if studyForm != nil && !studyForm.IsDisposed && studyForm.VVisible { studyForm.PaintTo(g) } }
+}
+
+extension Pet {
+    // 搶課倒數徽章上的小學士帽（跟搶票的票券同一個位置、同樣大小）
+    static func DrawCapIcon(_ g: Graphics, _ x0: Double, _ y0: Double, _ w: Double, _ k: Double, _ hot: Bool) {
+        let was = g.SmoothingMode
+        g.SmoothingMode = SmoothingMode.AntiAlias
+        // 斜看的方帽：扁扁的菱形帽頂、底下一圈帽身、右邊垂一條流蘇
+        do {
+            let board = SolidBrush(Color.FromArgb(0xFF, 0xD8, 0x4A))
+            let cap = SolidBrush(Color.FromArgb(0xC8, 0x8A, 0x22))
+            g.FillPolygon(cap, [PointF(x0 + 2.0 * k, y0 + 3.0 * k), PointF(x0 + w - 2.0 * k, y0 + 3.0 * k), PointF(x0 + w - 2.4 * k, y0 + 6.0 * k), PointF(x0 + 2.4 * k, y0 + 6.0 * k)])
+            g.FillPolygon(board, [PointF(x0 - 0.6 * k, y0 + 2.4 * k), PointF(x0 + w / 2, y0 + 0.4 * k), PointF(x0 + w + 0.6 * k, y0 + 2.4 * k), PointF(x0 + w / 2, y0 + 4.2 * k)])
+        }
+        do {
+            let tassel = Pen(hot ? Color.White : Color.FromArgb(0xF0, 0x5A, 0x4A), Math.Max(1.2, 0.9 * k))
+            g.DrawLine(tassel, x0 + w / 2, y0 + 2.3 * k, x0 + w - 0.2 * k, y0 + 2.9 * k)
+            g.DrawLine(tassel, x0 + w - 0.2 * k, y0 + 2.9 * k, x0 + w - 0.2 * k, y0 + 6.4 * k)
+        }
+        g.SmoothingMode = was
+    }
+}
+
+// 「考試倒數…」的小視窗（跟「搶票提醒…」同一個樣子）
+class ExamForm: Form {
+    var w: World
+    let name = TextBox(), time = TextBox()
+    let date = DateTimePicker()
+    let hint = Label()
+    init(_ w: World, _ accent: Color) {
+        self.w = w
+        super.init()
+        Text = "📚 考試倒數"
+        FormBorderStyle = FormBorderStyle.FixedToolWindow
+        ShowInTaskbar = false; TopMost = true; MaximizeBox = false; MinimizeBox = false
+        BackColor = Color.FromArgb(0xFF, 0xFB, 0xF4)
+        Font = WorldC_Font("Microsoft JhengHei UI", 10)
+        AutoScaleMode = AutoScaleMode.Dpi
+        ClientSize = Size(360, 200)
+        let y0 = 12
+        AddLabel("什麼考試？（例如：微積分期末考）", y0); name.Location = Point(14, y0 + 22); name.Width = 332; Controls.Add(name)
+        AddLabel("考試日期與開始時間", y0 + 56)
+        date.Format = DateTimePickerFormat.Custom; date.CustomFormat = "yyyy-MM-dd"; date.Location = Point(14, y0 + 78); date.Width = 150; Controls.Add(date)
+        time.Location = Point(176, y0 + 78); time.Width = 80; time.Text = "09:00"; Controls.Add(time)
+        let tip = Label(); tip.Text = "考前兩週每天倒數、前一天晚上和當天早上提醒"; tip.Location = Point(14, y0 + 110); tip.AutoSize = true; tip.ForeColor = Color.FromArgb(0x80, 0x70, 0x60); Controls.Add(tip)
+        let ok = Button(); ok.Text = "好，幫我倒數"; ok.Location = Point(206, y0 + 138); ok.Size = Size(140, 34)
+        ok.FlatStyle = FlatStyle.Flat; ok.BackColor = accent; ok.ForeColor = Color.White; ok.FlatAppearance.BorderSize = 0
+        ok.Click = { [unowned self] in self.Submit() }
+        Controls.Add(ok)
+        hint.Location = Point(14, y0 + 146); hint.AutoSize = true; hint.ForeColor = Color.FromArgb(0xB0, 0x40, 0x40); Controls.Add(hint)
+        AcceptButton = ok
+        KeyPreview = true
+        KeyDown = { [unowned self] (e: KeyEventArgs) in if e.KeyCode == Keys.Escape { self.Hide() } }
+        FormClosing = { [unowned self] (e: FormClosingEventArgs) in if e.CloseReason == CloseReason.UserClosing { e.Cancel = true; self.Hide() } }
+    }
+
+    func FocusFirst() { NSApp.activate(ignoringOtherApps: true); name.Select(); name.Focus() }
+
+    func AddLabel(_ s: String, _ y: Int) { let l = Label(); l.Text = s; l.Location = Point(14, y); l.AutoSize = true; Controls.Add(l) }
+
+    func Submit() {
+        var t = DateTime.Now
+        let tm = time.Text.Trim().Replace("：", ":")
+        if name.Text.Trim() == "" { hint.Text = "什麼考試呢？"; name.Focus(); return }
+        if !DateTime.TryParse(date.Value.ToString("yyyy-MM-dd") + " " + tm, &t) { hint.Text = "時間看不懂，例如 09:00"; return }
+        if t < DateTime.Now { hint.Text = "這個時間已經過了喔"; return }
+        let ms = World.UnixMs(t)
+        w.AddExam(ms, name.Text.Trim(), "me", nil, true)
+        name.Text = ""; hint.Text = ""
+        Hide()
+    }
+}
+
+// mac: 多行的 NSTextField 按 Enter 換行（C# 的 AcceptsReturn）；打字照樣通知 TextBox
+final class StudyUrlsDelegate: NSObject, NSTextFieldDelegate {
+    weak var box: TextBox?
+    init(_ b: TextBox) { box = b }
+    func controlTextDidChange(_ obj: Notification) { box?._userEdited() }
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.insertNewline(_:)) { textView.insertNewlineIgnoringFieldEditor(nil); return true }
+        return false
+    }
+}
+
+// ================= 讀書小幫手設定（公仔小屋 →「讀書小幫手設定…」）：跟第一次設定同一套像素樣子 =================
+// 學校行事曆網址（一行一個）、上課前幾分鐘、上課中自動安靜、熬夜提醒（幾點開始）、考試倒數幾點講。
+// VS Code 推過來的那幾項會鎖住並寫「由 VS Code 設定」。
+class StudySettingsForm: Form {
+    let w: World
+    let d: Double
+    let U: Int
+    let urls = TextBox(), remind = TextBox(), lateAt = TextBox(), nudge = TextBox()
+    var autoQuiet = false, lateOn = false
+    var hoverId = "", err = ""
+    var titleF: FontT! = nil, labF: FontT! = nil, subF: FontT! = nil, btnF: FontT! = nil, boxF: FontT! = nil
+    var VVisible = false
+    let hits = Dict<String, Rectangle>()
+    static let Locked = Color.FromArgb(0xF1, 0xE8, 0xD8)   // 由 VS Code 管的欄位：灰一點、不能改
+    static let Open = Color.FromArgb(0xFF, 0xFD, 0xF7)
+    var urlsDelegate: StudyUrlsDelegate? = nil
+
+    init(_ w: World) {
+        self.w = w
+        d = Double(w.S) / 4.0
+        U = Math.Max(2, CInt(Math.Round(2 * d)))
+        super.init()
+        Text = "公仔櫃・讀書小幫手設定"
+        FormBorderStyle = FormBorderStyleT.FixedSingle
+        MaximizeBox = false; MinimizeBox = false
+        ShowInTaskbar = true; TopMost = true
+        StartPosition = FormStartPosition.Manual
+        BackColor = Pix.Cream
+        DoubleBuffered = true
+        titleF = FontT("Microsoft JhengHei UI", 12, FontStyle.Bold)
+        labF = FontT("Microsoft JhengHei UI", 10.5, FontStyle.Bold)
+        subF = FontT("Microsoft JhengHei UI", 8.5, FontStyle.Bold)
+        btnF = FontT("Microsoft JhengHei UI", 11, FontStyle.Bold)
+        boxF = FontT("Consolas", 9.5)
+        ClientSize = SizeT(Sc(600), Sc(600))
+        KeyPreview = true
+        KeyDown = { [unowned self] (e: KeyEventArgs) in if e.KeyCode == Keys.Escape { self.Close() } }
+        urls.Multiline = true   // mac: 要在 Controls.Add（建 NSTextField）之前設，才會是多行
+        for t in [urls, remind, lateAt, nudge] {
+            t.BackColor = StudySettingsForm.Open; t.ForeColor = Pix.TextC
+            t.Font = t === urls ? boxF! : FontT("Microsoft JhengHei UI", 10.5, FontStyle.Bold)
+            Controls.Add(t)
+            CuMaker.Borderless(t, StudySettingsForm.Open)   // mac: BorderStyle.None
+        }
+        // urls：ScrollBars.Vertical、WordWrap = false、AcceptsReturn = true
+        if let tf = urls.tf { tf.cell?.wraps = false; tf.cell?.isScrollable = true; let dg = StudyUrlsDelegate(urls); tf.delegate = dg; urlsDelegate = dg }
+        for t in [remind, lateAt, nudge] { t.tf?.alignment = .center }   // HorizontalAlignment.Center
+        let x = Sc(36)
+        urls.Bounds = Rectangle(x + U, Sc(118) + U, ClientSize.Width - 2 * x - 2 * U, Sc(96) - 2 * U)
+        remind.Bounds = Field(Sc(330), Sc(66))
+        lateAt.Bounds = Field(Sc(406), Sc(66))
+        nudge.Bounds = Field(Sc(468), Sc(66))
+        Reload()
+    }
+
+    func Sc(_ v: Int) -> Int { return CInt(Math.Round(Double(v) * d)) }
+    func Field(_ y: Int, _ wd: Int) -> Rectangle { let h = Sc(26); return Rectangle(ClientSize.Width - Sc(36) - wd + 2 * U, y + (h - Sc(18)) / 2, wd - 4 * U, Sc(18)) }
+
+    func Reload() {
+        urls.Text = string.Join("\r\n", w.StudyUrls())
+        remind.Text = String(w.ClassRemind)
+        autoQuiet = w.ClassAutoQuiet; lateOn = w.LateOn
+        lateAt.Text = (w.LateStart / 60).ToString("00") + ":" + (w.LateStart % 60).ToString("00")
+        nudge.Text = w.ExamNudge < 0 ? "" : (w.ExamNudge / 60).ToString("00") + ":" + (w.ExamNudge % 60).ToString("00")
+        urls.ReadOnly = w.FromVsCode("urls"); remind.ReadOnly = w.FromVsCode("remind")
+        lateAt.ReadOnly = w.FromVsCode("late"); nudge.ReadOnly = w.FromVsCode("nudge")
+        for t in [urls, remind, lateAt, nudge] {
+            t.BackColor = t.ReadOnly ? StudySettingsForm.Locked : StudySettingsForm.Open
+            t.tf?.backgroundColor = t.BackColor.ns   // mac: TextBox 的 BackColor 不會自己套到 NSTextField
+        }
+        err = ""
+        Invalidate()
+    }
+
+    // ---- 離屏測試模式：不真的顯示，snap 時畫到虛擬螢幕上（輸入框另外畫）----
+    override func SetVisibleCore(_ value: Bool) {
+        if App.Offscreen { VVisible = value; super.SetVisibleCore(false); return }
+        super.SetVisibleCore(value)
+    }
+    func PaintTo(_ g: Graphics) {
+        let cs = ClientSize
+        if cs.Width <= 0 || cs.Height <= 0 { return }
+        let b = Bitmap(cs.Width, cs.Height, PixelFormat.Format24bppRgb)
+        do {
+            let gg = Graphics.FromImage(b)
+            OnPaint(PaintEventArgs(gg, Rectangle(0, 0, cs.Width, cs.Height)))
+            for t in [urls, remind, lateAt, nudge] {
+                do { let bg = SolidBrush(t.BackColor); gg.FillRectangle(bg, t.Bounds) }
+                let s = t.Multiline ? t.Text : t.Text
+                let fl: TextFormatFlags = t.Multiline ? [TextFormatFlags.Left, TextFormatFlags.Top, TextFormatFlags.NoPrefix] : Pix.Mid
+                TextRenderer.DrawText(gg, s, t.Font, t.Bounds, t.ForeColor, fl)
+            }
+        }
+        g.DrawImageUnscaled(b, Left, Top)
+    }
+
+    func TestSet(_ field: String, _ value: String) {
+        if field == "urls" { urls.Text = value.Replace(" ", "\r\n") }
+        else if field == "remind" { remind.Text = value }
+        else if field == "late" { lateAt.Text = value }
+        else if field == "nudge" { nudge.Text = value }
+        else if field == "autoquiet" { autoQuiet = value == "1" }
+        else if field == "lateon" { lateOn = value == "1" }
+        Invalidate()
+    }
+
+    func Save() {
+        let list = List<String>()
+        let seps: [Character] = ["\r", "\n", " ", ","]
+        for line in urls.Text.Split(seps, StringSplitOptions.RemoveEmptyEntries) {
+            var s = line.Trim()
+            if s.StartsWith("webcal", StringComparison.OrdinalIgnoreCase) { s = "https" + s.Substring(s.IndexOf("://", StringComparison.Ordinal) < 0 ? 6 : s.IndexOf("://", StringComparison.Ordinal)) }
+            if !s.StartsWith("https://", StringComparison.OrdinalIgnoreCase) { err = "網址要 https:// 或 webcal:// 開頭：" + (s.Length > 30 ? s.Substring(0, 30) + "…" : s); Invalidate(); return }
+            list.Add(s)
+        }
+        var rm = 0
+        if !int.TryParse(remind.Text.Trim(), &rm) || rm < 1 || rm > 120 { err = "上課前幾分鐘：打 1～120"; Invalidate(); return }
+        let ls = StudySettingsForm.HmOf(lateAt.Text)
+        if lateOn && ls < 0 { err = "熬夜提醒的時間看不懂，例如 01:00"; Invalidate(); return }
+        let ng = nudge.Text.Trim() == "" ? -1 : StudySettingsForm.HmOf(nudge.Text)
+        if nudge.Text.Trim() != "" && ng < 0 { err = "考試倒數的時間看不懂，例如 20:00（空白＝不要每天倒數）"; Invalidate(); return }
+        w.ApplyStudySettings(list, rm, autoQuiet, lateOn, ls, ng)
+        Close()
+    }
+
+    static func HmOf(_ s: String!) -> Int {
+        let a = (s ?? "").Trim().Replace("：", ":").Split(":")
+        var h = 0, m = 0
+        if a.count == 2 && int.TryParse(a[0], &h) && int.TryParse(a[1], &m) && h >= 0 && h < 24 && m >= 0 && m < 60 { return h * 60 + m }
+        return -1
+    }
+
+    func HitAt(_ p: Point) -> String { for kv in hits { if kv.Value.Contains(p) { return kv.Key } }; return "" }
+    override func OnMouseMove(_ e: MouseEventArgs) {
+        super.OnMouseMove(e)
+        let h = HitAt(e.Location)
+        if h != hoverId { hoverId = h; Cursor = h != "" ? Cursors.Hand : Cursors.Default; Invalidate() }
+    }
+    override func OnMouseUp(_ e: MouseEventArgs) {
+        super.OnMouseUp(e)
+        if e.Button != MouseButtons.Left { return }
+        let h = HitAt(e.Location)
+        if h == "save" { Save() }
+        else if h == "cancel" { Close() }
+        else if h == "autoquiet" && !w.FromVsCode("autoquiet") { autoQuiet = !autoQuiet; Invalidate() }
+        else if h == "lateon" && !w.FromVsCode("late") { lateOn = !lateOn; Invalidate() }
+    }
+
+    override func OnPaint(_ e: PaintEventArgs) {
+        let g = e.Graphics
+        g.SmoothingMode = SmoothingMode.None
+        hits.Clear()
+        let W0 = ClientSize.Width, H0 = ClientSize.Height, F = 4 * U, crown = Sc(56), x = Sc(36)
+        Pix.Wood(g, 0, 0, W0, H0, U, false, 23)
+        Pix.Panel(g, F, crown, W0 - 2 * F, H0 - crown - F, U, false)
+        let t = "讀書小幫手設定"
+        let tw = Pix.TextW(t, titleF), plw = tw + 14 * U, plh = Sc(34)
+        let pr = Rectangle((W0 - plw) / 2, (crown - plh) / 2 + U / 2, plw, plh)
+        Pix.Plate(g, t, titleF, pr, U)
+        Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.X - 9 * U, pr.Y + plh / 2 - 2 * U, U)
+        Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.Right + 4 * U, pr.Y + plh / 2 - 2 * U, U)
+        let brown = Pix.C(0x9A6338)
+
+        // 學校行事曆
+        DrawLabel(g, "🎒 學校行事曆（ICS 網址，一行一個）", x, Sc(70), labF, Pix.TextC)
+        DrawLabel(g, w.FromVsCode("urls") ? "由 VS Code 設定（deskPals.schoolIcsUrl）" : "上課前提醒、上課中安靜；作業截止前 3 天、1 天、3 小時、1 小時提醒", x, Sc(94), subF, brown)
+        Frame(g, Rectangle(x, Sc(118), W0 - 2 * x, Sc(96)), urls.ReadOnly)
+        let how: [String] = [
+            "Canvas／NTU COOL：行事曆 → 右邊「行事曆摘要」(Calendar Feed)",
+            "Moodle：行事曆 → 匯入或匯出行事曆 → 匯出 → 取得行事曆網址",
+            "Google Classroom、Google 日曆：日曆設定 →「iCal 格式的私密網址」" ]
+        for i in 0..<how.count { DrawLabel(g, "・" + how[i], x, Sc(222) + i * Sc(18), subF, brown) }
+        DrawLabel(g, w.SchoolStatus(), x, Sc(282), subF, Pix.C(0x3F8A30))
+
+        Dots(g, x, Sc(312), W0 - 2 * x)
+        // 上課
+        DrawLabel(g, "上課、考試前幾分鐘提醒" + (remind.ReadOnly ? "（由 VS Code 設定）" : ""), x, Sc(330) + Sc(4), labF, remind.ReadOnly ? Pix.Dim : Pix.TextC)
+        Frame(g, Rectangle(W0 - x - Sc(66), Sc(330), Sc(66), Sc(26)), remind.ReadOnly)
+        Toggle(g, "autoquiet", "上課、考試時自動安靜到下課", autoQuiet, x, Sc(368), w.FromVsCode("autoquiet"))
+        // 熬夜
+        let lk = w.FromVsCode("late")
+        Toggle(g, "lateon", "熬夜提醒：過了這個時間還在用電腦，就催你去睡", lateOn, x, Sc(406), lk)
+        Frame(g, Rectangle(W0 - x - Sc(66), Sc(406), Sc(66), Sc(26)), lateAt.ReadOnly)
+        DrawLabel(g, lk ? "由 VS Code 設定（deskPals.lateNightStart）" : "之後每一小時再講一次（最多三次）；你離開電腦、安靜、專注時不吵", x + Sc(30), Sc(436), subF, brown)
+        // 考試
+        DrawLabel(g, "考試倒數每天幾點講（空白＝不要）" + (nudge.ReadOnly ? "（由 VS Code 設定）" : ""), x, Sc(468) + Sc(4), labF, nudge.ReadOnly ? Pix.Dim : Pix.TextC)
+        Frame(g, Rectangle(W0 - x - Sc(66), Sc(468), Sc(66), Sc(26)), nudge.ReadOnly)
+
+        if err != "" { DrawLabel(g, err, x, Sc(506), subF, Pix.C(0xB04040)) }
+        let by = H0 - Sc(64), bh = Sc(44)
+        DrawButton(g, "cancel", "取消", Rectangle(Sc(30), by, Sc(130), bh), false)
+        DrawButton(g, "save", "儲存", Rectangle(W0 - Sc(30) - Sc(160), by, Sc(160), bh), true)
+    }
+
+    func DrawLabel(_ g: Graphics, _ s: String, _ x: Int, _ y: Int, _ f: FontT, _ c: Color) { TextRenderer.DrawText(g, World.NoEmoji(s), f, PointT(x, y), c, [TextFormatFlags.NoPrefix, TextFormatFlags.NoPadding]) }
+
+    // 輸入框的像素框（深木色外框、上面一條陰影）
+    func Frame(_ g: Graphics, _ r: Rectangle, _ locked: Bool) {
+        Pix.Round(g, locked ? Pix.Dim : Pix.C(0x8A6A4A), r.X, r.Y, r.Width, r.Height, U)
+        Pix.Box(g, locked ? StudySettingsForm.Locked : Color.FromArgb(0xFF, 0xFD, 0xF7), r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U)
+        Pix.Box(g, Pix.C(0xEAD7B4), r.X + U, r.Y + U, r.Width - 2 * U, U)
+    }
+
+    func Dots(_ g: Graphics, _ x: Int, _ y: Int, _ wd: Int) { var sx = x; while sx + U <= x + wd { Pix.Box(g, Pix.C(0xD8BF94), sx, y, U, U); sx += 3 * U } }
+
+    // 像素勾勾開關（跟小屋選單的開關一樣：打勾＝開著）
+    func Toggle(_ g: Graphics, _ id: String, _ text: String, _ on: Bool, _ x: Int, _ y: Int, _ locked: Bool) {
+        let s = Sc(20)
+        let r = Rectangle(x, y + (Sc(26) - s) / 2, s, s)
+        Pix.Round(g, locked ? Pix.Dim : Pix.Ink, r.X, r.Y, s, s, U)
+        Pix.Box(g, on ? Pix.C(0x5FB04A) : Color.FromArgb(0xFF, 0xFD, 0xF7), r.X + U, r.Y + U, s - 2 * U, s - 2 * U)
+        if on { Pix.Mono(g, Pix.CHECK, Color.White, r.X + (s - 5 * U) / 2, r.Y + (s - 5 * U) / 2, U) }
+        let tc = locked ? Pix.Dim : (hoverId == id ? Pix.C(0x8A5A2A) : Pix.TextC)
+        DrawLabel(g, text + (locked && id != "lateon" ? "（由 VS Code 設定）" : ""), x + s + Sc(10), y + Sc(4), labF, tc)
+        hits[id] = Rectangle(x, y, s + Sc(10) + Pix.TextW(World.NoEmoji(text), labF), Sc(26))
+    }
+
+    func DrawButton(_ g: Graphics, _ id: String, _ text: String, _ r: Rectangle, _ main: Bool) {
+        let hot = hoverId == id
+        let face = main ? (hot ? Pix.C(0xFFD36A) : Pix.C(0xF6C453)) : (hot ? Pix.C(0xFFF3D6) : Pix.C(0xFFFBF0))
+        let shade = main ? Pix.C(0xC8902C) : Pix.C(0xDCC6A2)
+        Pix.Round(g, Pix.Ink, r.X, r.Y, r.Width, r.Height, U)
+        Pix.Box(g, face, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U)
+        Pix.Box(g, shade, r.X + U, r.Bottom - 3 * U, r.Width - 2 * U, 2 * U)
+        Pix.Box(g, Pix.Mix(face, Color.White, 0.6), r.X + 2 * U, r.Y + U, r.Width - 4 * U, U)
+        TextRenderer.DrawText(g, text, btnF, Rectangle(r.X, r.Y, r.Width, r.Height - 2 * U), Pix.TextC, Pix.Mid)
+        hits[id] = r
+    }
+}
+
+// ===== 53_custom.swift =====
+// 53_custom.swift — port of extension/desktop/DeskPals.Custom.cs
+// Desk Pals：自己做的公仔（上傳一張圖／動作表）。資料、處理好的圖、畫法、動作、我的櫃。
+// 圖片處理在 55_custom_image.swift、做公仔的視窗在 56_custom_make.swift、台詞在 54_custom_lines.swift、分享短片／匯出匯入在 57_share.swift。
+// mac: GDI+ 的 Matrix → CGAffineTransform（03_shim_custom_a.swift，同樣是 prepend）；ColorMatrix 在 ImageAttributes 裡逐像素套（01_drawing／03_shim_custom_a）；
+//      逐像素的白邊、晚上變暗是在 Bitmap 的裝置像素上做（Retina 的 cuOut 是 2 倍，白邊寬度跟著乘）。
+import Foundation
+import AppKit
+
+// ================= 一隻自己做的公仔的設定（custom/<id>/meta.json）=================
+final class CuMeta
+{
+    var Id = "", Name = "", Persona = "lively", Mode = "pixel", Created = ""
+    var Sub = 2                  // 像素風：1＝跟內建一樣大的像素、2＝細緻（像素小一半）
+    var Flip = false, Rig = false, Sheet = false, UseAlpha = true
+    var Neck: Double = -1, Hip: Double = -1   // 兩條線（0～1，處理後的圖從上往下）；-1＝自動猜
+    var Tol = 22                 // 去背強度 0～100
+    var Strokes = List<[Double]>()   // 筆刷：x, y, 半徑（0～1）, 1＝擦掉 0＝補回
+
+    var Pixel: Bool { return Mode != "smooth" }
+
+    init() {}
+
+    func Clone() -> CuMeta
+    {
+        // C# MemberwiseClone
+        let m = CuMeta()
+        m.Id = Id; m.Name = Name; m.Persona = Persona; m.Mode = Mode; m.Created = Created
+        m.Sub = Sub; m.Flip = Flip; m.Rig = Rig; m.Sheet = Sheet; m.UseAlpha = UseAlpha
+        m.Neck = Neck; m.Hip = Hip; m.Tol = Tol
+        m.Strokes = List<[Double]>()
+        for s in Strokes { m.Strokes.Add(s) }
+        return m
+    }
+
+    func ToJson() -> String
+    {
+        let d = Dict<String, Any>()
+        d["v"] = 1; d["id"] = Id; d["name"] = Name; d["persona"] = Persona; d["mode"] = Mode; d["sub"] = Sub
+        d["flip"] = Flip; d["rig"] = Rig; d["sheet"] = Sheet; d["useAlpha"] = UseAlpha
+        d["neck"] = Neck; d["hip"] = Hip; d["tol"] = Tol; d["created"] = Created
+        var st: [Any] = []
+        for s in Strokes { let row: [Any] = [Math.Round(s[0], 4), Math.Round(s[1], 4), Math.Round(s[2], 4), s[3] > 0.5 ? 1 : 0]; st.append(row) }
+        d["strokes"] = st
+        return JavaScriptSerializer().Serialize(d)
+    }
+
+    // mac: C# Convert.ToDouble(object)（數字、布林、字串）；轉不了＝nil（C# 會丟例外）
+    static func ToD(_ o: Any?) -> Double?
+    {
+        guard let o = o else { return nil }
+        if o is NSNull { return nil }
+        if let i = o as? Int { return Double(i) }
+        if let v = o as? Double { return v }
+        if let b = o as? Bool { return b ? 1 : 0 }
+        if let s = o as? String { var v: Double = 0; if double.TryParse(s, &v) { return v }; return nil }
+        return nil
+    }
+
+    static func S(_ d: Dict<String, Any>, _ k: String, _ def: String) -> String { if let s = d.Get(k) as? String { return s }; return def }
+    static func N(_ d: Dict<String, Any>, _ k: String, _ def: Double) -> Double
+    {
+        guard let v = ToD(d.Get(k)) else { return def }
+        return v.isNaN || v.isInfinite ? def : v
+    }
+    static func B(_ d: Dict<String, Any>, _ k: String, _ def: Bool) -> Bool { if let b = d.Get(k) as? Bool { return b }; return def }
+
+    // 讀 JSON（不認得的欄位不管；每個值都檢查過）
+    static func FromJson(_ json: String) -> CuMeta!
+    {
+        let js = JavaScriptSerializer()
+        js.MaxJsonLength = 1 << 20
+        guard let o = try? js.DeserializeObject(json), let d = o as? Dict<String, Any> else { return nil }
+        return FromDict(d)
+    }
+
+    static func FromDict(_ d: Dict<String, Any>) -> CuMeta
+    {
+        let m = CuMeta()
+        m.Id = S(d, "id", "")
+        m.Name = CleanName(S(d, "name", ""))
+        m.Persona = Pal.Personas.contains(S(d, "persona", "lively")) ? S(d, "persona", "lively") : "lively"
+        m.Mode = S(d, "mode", "pixel") == "smooth" ? "smooth" : "pixel"
+        m.Sub = N(d, "sub", 2) >= 1.5 ? 2 : 1
+        m.Flip = B(d, "flip", false); m.Rig = B(d, "rig", false); m.Sheet = B(d, "sheet", false); m.UseAlpha = B(d, "useAlpha", true)
+        m.Neck = N(d, "neck", -1); m.Hip = N(d, "hip", -1)
+        if m.Neck > 0.9 || m.Neck < 0.05 { m.Neck = -1 }
+        if m.Hip > 0.98 || m.Hip < 0.1 { m.Hip = -1 }
+        m.Tol = CInt(Math.Max(0.0, Math.Min(100.0, N(d, "tol", 22))))
+        m.Created = S(d, "created", "")
+        if m.Created.Length > 40 { m.Created = "" }
+        if let so = d.Get("strokes") as? [Any]
+        {
+            for o in so
+            {
+                guard let a = o as? [Any] else { continue }
+                if a.count < 4 || m.Strokes.Count >= 4000 { continue }
+                var s = [Double](repeating: 0, count: 4)
+                var bad = false
+                for i in 0..<4 { if let v = ToD(a[i]) { s[i] = v } else { bad = true } }
+                if bad { continue }
+                if s[0] < -0.2 || s[0] > 1.2 || s[1] < -0.2 || s[1] > 1.2 || s[2] <= 0 || s[2] > 0.5 { continue }
+                m.Strokes.Add(s)
+            }
+        }
+        return m
+    }
+
+    // 名字：去掉換行、控制字元、大括號（台詞代換用）、路徑字元；最多 10 個字
+    static func CleanName(_ s: String!) -> String
+    {
+        if s == nil { return "" }
+        var u: [UInt16] = []
+        for c in s.Trim().utf16
+        {
+            // char.IsControl：U+0000–001F、U+007F–009F
+            if c < 0x20 || (c >= 0x7F && c <= 0x9F) { continue }
+            switch c { case 0x7B, 0x7D, 0x5C, 0x2F, 0x3C, 0x3E, 0x7C, 0x22, 0x2A, 0x3F, 0x3A: continue; default: break }   // { } \ / < > | " * ? :
+            u.append(c)
+            if u.count >= 10 { break }
+        }
+        return String(decoding: u, as: UTF16.self).Trim()
+    }
+
+    static func ValidId(_ id: String!) -> Bool
+    {
+        if string.IsNullOrEmpty(id) || id.Length < 4 || id.Length > 14 || !id.StartsWith("cu") { return false }
+        for c in id.utf16 { if !((c >= 97 && c <= 122) || (c >= 48 && c <= 57)) { return false } }
+        return true
+    }
+}
+
+// ================= 處理好、可以畫的圖 =================
+final class CuSprite
+{
+    var Pixel = false
+    var R = 1                     // 一格幾個內部像素
+    var Stand: Bitmap! = nil      // 站好的樣子（已裁切）
+    var W = 0, H = 0
+    var Rig = false
+    var Neck = 0, Hip = 0, Split = 0      // 兩條線、兩隻腳的分界（內部像素）
+    var NeckF: Double = 0, HipF: Double = 0        // 0～1
+    var Head: Bitmap! = nil, Body: Bitmap! = nil, LegL: Bitmap! = nil, LegR: Bitmap! = nil
+    var BodyY0 = 0                // 身體那張從第幾列開始（往上多切一點，頭動的時候不會有縫）
+    var HeadTop = 0, HeadCx = 0, HeadW = 0, NeckCx = 0, NeckW = 0
+    var Main = Color.Gray, Outline = Color.FromArgb(0x2A, 0x2F, 0x45)
+    let Frames = Dict<String, Bitmap>()   // 動作表：stand walk1 walk2 jump sleep happy held sit
+    var Wc: Double { return Double(W) / Double(R) }
+    var Hc: Double { return Double(H) / Double(R) }
+    func HasFrame(_ k: String) -> Bool { return Frames.ContainsKey(k) }
+
+    init() {}
+
+    static let SheetKeys: [String] = ["stand", "walk1", "walk2", "jump", "sleep", "happy", "held", "sit"]
+    static let SheetLabels: [String] = ["站", "走 1", "走 2", "跳", "睡", "開心", "被抓", "坐"]
+
+    // 站姿圖準備好：量頭、脖子，切成頭／身體／兩隻腳
+    func SetStand(_ c: CuCut, _ rig: Bool, _ neck: Double, _ hip: Double)
+    {
+        Stand = CuImg.ToBitmap(c); W = c.W; H = c.H
+        var gn: Double = 0, gh: Double = 0; var conf = false
+        CuImg.GuessLines(c, &gn, &gh, &conf)
+        NeckF = neck > 0 ? neck : gn; HipF = hip > 0 ? hip : gh
+        if HipF < NeckF + 0.1 { HipF = Math.Min(0.95, NeckF + 0.25) }
+        Neck = Math.Max(1, Math.Min(H - 3, CInt(Math.Round(NeckF * Double(H)))))
+        Hip = Math.Max(Neck + 2, Math.Min(H - 1, CInt(Math.Round(HipF * Double(H)))))
+        Split = CuImg.LegSplit(c, Hip)
+        Rig = rig && H >= 6
+        let px: [Int] = c.Px
+        // 頭頂、頭的寬度（頭最上面三格的範圍）、脖子寬度
+        HeadTop = 0
+        var y = 0
+        while y < H
+        {
+            var any = false
+            var x = 0
+            while x < W { if ((px[y * W + x] >> 24) & 255) >= 110 { any = true; break }; x += 1 }
+            if any { HeadTop = y; break }
+            y += 1
+        }
+        var l = W, r = -1
+        let band = Math.Min(Neck, HeadTop + 3 * R)
+        y = HeadTop
+        while y < Math.Max(HeadTop + 1, band)
+        {
+            var x = 0
+            while x < W { if ((px[y * W + x] >> 24) & 255) >= 110 { if x < l { l = x }; if x > r { r = x } }; x += 1 }
+            y += 1
+        }
+        if r < 0 { l = 0; r = W - 1 }
+        HeadCx = (l + r + 1) / 2; HeadW = r - l + 1
+        l = W; r = -1
+        var x = 0
+        while x < W { if ((px[Math.Min(H - 1, Neck) * W + x] >> 24) & 255) >= 110 { if x < l { l = x }; if x > r { r = x } }; x += 1 }
+        if r < 0 { l = 0; r = W - 1 }
+        NeckCx = (l + r + 1) / 2; NeckW = r - l + 1
+        Main = CuImg.MainColor(c)
+        CutParts()
+    }
+
+    func CutParts()
+    {
+        DisposeParts()
+        let e = Math.Max(1, R / 2)
+        BodyY0 = Math.Max(0, Neck - e)
+        Head = Part(0, 0, W, Neck)
+        Body = Part(0, BodyY0, W, Math.Min(H, Hip + e) - BodyY0)
+        LegL = Part(0, Hip, Math.Max(1, Split), H - Hip)
+        LegR = Part(Split, Hip, Math.Max(1, W - Split), H - Hip)
+    }
+
+    func Part(_ x: Int, _ y: Int, _ w0: Int, _ h0: Int) -> Bitmap
+    {
+        let w = Math.Max(1, Math.Min(w0, W - x)), h = Math.Max(1, Math.Min(h0, H - y))
+        return Stand.Clone(Rectangle(x, y, w, h), PixelFormat.Format32bppArgb)
+    }
+
+    func DisposeParts() { for b in [Head, Body, LegL, LegR] { if b != nil { b!.Dispose() } } }
+
+    func Dispose()
+    {
+        DisposeParts()
+        for b in Frames.Values { if b !== Stand { b.Dispose() } }
+        if Stand != nil { Stand.Dispose() }
+    }
+
+    // ---------- 做出來：一張圖 ----------
+    static func Build(_ m: CuMeta, _ src: Bitmap!, _ err: inout String!) -> CuSprite!
+    {
+        err = nil
+        if src == nil { err = "沒有圖"; return nil }
+        if m.Sheet { return BuildSheet(m, src, &err) }
+        var hadAlpha = false
+        var cut: CuCut! = CuImg.Cutout(src, m.UseAlpha, m.Tol, m.Strokes, &hadAlpha)
+        if cut == nil { err = "去背之後什麼都不剩了，把去背強度調低一點"; return nil }
+        if m.Flip { cut = CuImg.Mirror(cut) }
+        let s = CuSprite()
+        s.Pixel = m.Pixel
+        var fin: CuCut! = nil
+        if s.Pixel { var ol = Color.Empty; fin = CuImg.ToPixel(cut, m.Sub, Double(CuImg.HCells), Double(CuImg.WCells), &ol); s.Outline = ol; s.R = m.Sub }
+        else { fin = CuImg.ToSmooth(cut, Double(CuImg.HCells), Double(CuImg.WCells)); s.R = CuImg.SmoothR; s.Outline = Darker(CuImg.MainColor(fin)) }
+        s.SetStand(fin, m.Rig, m.Neck, m.Hip)
+        return s
+    }
+
+    static func Darker(_ c: Color) -> Color { return Color.FromArgb(CInt(Double(c.R) * 0.25 + Double(0x2A) * 0.4), CInt(Double(c.G) * 0.25 + Double(0x2F) * 0.4), CInt(Double(c.B) * 0.25 + Double(0x45) * 0.45)) }
+
+    // ---------- 動作表範本：4×2 格，每格 128×128，上面有標籤 ----------
+    static let TCell = 128, TLab = 26, TGap = 16, THead = 64, TCols = 4, TRows = 2
+    static var TW: Int { return TGap + TCols * (TCell + TGap) }
+    static var TH: Int { return THead + TRows * (TLab + TCell + TGap) }
+    static func TCellRect(_ i: Int) -> Rectangle { let c = i % TCols, r = i / TCols; return Rectangle(TGap + c * (TCell + TGap), THead + r * (TLab + TCell + TGap) + TLab, TCell, TCell) }
+
+    static func Template() -> Bitmap
+    {
+        let b = Bitmap(TW, TH, PixelFormat.Format32bppArgb)
+        do {
+            let g = Graphics.FromImage(b)
+            let tf = Font("Microsoft JhengHei UI", 15, FontStyle.Bold, GraphicsUnit.Pixel)
+            let hf = Font("Microsoft JhengHei UI", 11, FontStyle.Bold, GraphicsUnit.Pixel)
+            let lf = Font("Microsoft JhengHei UI", 13, FontStyle.Bold, GraphicsUnit.Pixel)
+            let paper = SolidBrush(Color.FromArgb(0xFF, 0xF6, 0xE4))
+            let ink = SolidBrush(Color.FromArgb(0x4A, 0x30, 0x10))
+            let dim = SolidBrush(Color.FromArgb(0x9A, 0x63, 0x38))
+            let edge = Pen(Color.FromArgb(0xC9, 0xB0, 0x8A), 2)
+            let mark = SolidBrush(Color.FromArgb(0xE2, 0x7A, 0x5A))
+            g.Clear(Color.Transparent)
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit
+            // 格子外面是奶油色紙；格子裡面透明（畫圖軟體不支援透明的話，白底也可以，會自動去背）
+            g.FillRectangle(paper, 0, 0, TW, TH)
+            g.DrawString("Desk Pals 動作表範本", tf, ink, TGap, 10)
+            g.DrawString("每一格畫一個動作，腳踩在格子底部。空著的格子會自動補動畫（至少畫「站」）。", hf, dim, TGap, 36)
+            for i in 0..<SheetKeys.count
+            {
+                let r = TCellRect(i)
+                g.DrawString(SheetLabels[i] + (i == 0 ? "（必畫）" : ""), lf, ink, r.X, r.Y - TLab + 4)
+                g.CompositingMode = CompositingMode.SourceCopy
+                do { let clear = SolidBrush(Color.Transparent); g.FillRectangle(clear, r) }
+                g.CompositingMode = CompositingMode.SourceOver
+                g.DrawRectangle(edge, r.X - 2, r.Y - 2, r.Width + 3, r.Height + 3)
+                // 地面記號：格子左右兩邊外面的小三角形
+                g.FillPolygon(mark, [Point(r.X - 9, r.Bottom - 5), Point(r.X - 3, r.Bottom - 1), Point(r.X - 9, r.Bottom + 3)])
+                g.FillPolygon(mark, [Point(r.Right + 8, r.Bottom - 5), Point(r.Right + 2, r.Bottom - 1), Point(r.Right + 8, r.Bottom + 3)])
+            }
+        }
+        return b
+    }
+
+    // ---------- 做出來：動作表 ----------
+    static func BuildSheet(_ m: CuMeta, _ src: Bitmap, _ err: inout String!) -> CuSprite!
+    {
+        err = nil
+        let ar = Double(src.Width) / Double(src.Height), tar = Double(TW) / Double(TH)
+        if Math.Abs(ar - tar) > tar * 0.04 || src.Width < TW / 3 { err = "這張不是動作表範本（尺寸對不上）。先按「下載範本」，畫好再上傳"; return nil }
+        let sc = Double(src.Width) / Double(TW)
+        let px: [Int] = CuImg.Pixels(src)
+        var cells = [CuCut?](repeating: nil, count: SheetKeys.count)
+        for i in 0..<SheetKeys.count
+        {
+            let r = TCellRect(i)
+            let inset = CInt(Math.Ceiling(3 * sc))
+            var rr = Rectangle.FromLTRB(CInt(Double(r.X) * sc) + inset, CInt(Double(r.Y) * sc) + inset, CInt(Double(r.Right) * sc) - inset, CInt(Double(r.Bottom) * sc) - inset)
+            rr.Intersect(Rectangle(0, 0, src.Width, src.Height))
+            if rr.Width < 4 || rr.Height < 4 { continue }
+            let c: CuCut = CuImg.Crop(px, src.Width, src.Height, rr)
+            var cut: [Int]
+            if CuImg.HasAlpha(c.Px, c.W, c.H) && m.UseAlpha
+            {
+                cut = c.Px
+                for k in 0..<cut.count { if ((cut[k] >> 24) & 255) < 10 { cut[k] = 0 } }
+            }
+            else
+            {
+                var solid: [Int] = c.Px
+                for k in 0..<solid.count { if ((solid[k] >> 24) & 255) < 128 { solid[k] = CuSprite.ARGB_WHITE } else { solid[k] |= CuSprite.ARGB_OPAQUE } }
+                cut = CuImg.RemoveBg(solid, c.W, c.H, m.Tol)
+            }
+            let bb = CuImg.Bounds(cut, c.W, c.H, 40)
+            var area = 0; for v in cut { if ((v >> 24) & 255) >= 110 { area += 1 } }
+            if bb.Width < 2 || bb.Height < 2 || area < c.W * c.H / 200 { continue }   // 空格
+            var f: CuCut = CuImg.Crop(cut, c.W, c.H, bb)
+            if m.Flip { f = CuImg.Mirror(f) }
+            cells[i] = f
+        }
+        if cells[0] == nil { err = "動作表的「站」那格是空的（至少要畫「站」）"; return nil }
+        let s = CuSprite()
+        s.Pixel = m.Pixel
+        s.R = s.Pixel ? m.Sub : CuImg.SmoothR
+        // 同一個比例：「站」那格的高度＝16 格；別格也照這個比例（太大的再縮）
+        let unit: Double = s.Pixel ? Double(m.Sub) : Double(CuImg.SmoothR)
+        let c0: CuCut = cells[0]!
+        var k0 = Math.Min((Double(CuImg.HCells) * unit - (s.Pixel ? 2.0 : 0.0)) / Double(c0.H), (Double(CuImg.WCells) * unit - (s.Pixel ? 2.0 : 0.0)) / Double(c0.W))
+        for c in cells { if let c = c { k0 = Math.Min(k0, Math.Min(20 * unit / Double(c.H), 22 * unit / Double(c.W))) } }
+        var outs = [CuCut?](repeating: nil, count: cells.count)
+        var cw = 1, ch = 1
+        for i in 0..<cells.count
+        {
+            guard let ci = cells[i] else { continue }
+            let tw = Math.Max(1, CInt(Math.Round(Double(ci.W) * k0))), th = Math.Max(1, CInt(Math.Round(Double(ci.H) * k0)))
+            var oi: CuCut! = nil
+            if s.Pixel { var ol = Color.Empty; oi = CuImg.ToPixelSized(ci, tw, th, m.Sub >= 2 ? 18 : 12, false, &ol); if i == 0 { s.Outline = ol } }
+            else { oi = CuImg.ToSmoothSized(ci, tw, th) }
+            outs[i] = oi
+            cw = Math.Max(cw, oi.W); ch = Math.Max(ch, oi.H)
+        }
+        if !s.Pixel { s.Outline = Darker(CuImg.MainColor(outs[0]!)) }
+        // 全部放進同樣大小的框：底部置中（腳踩地）
+        for i in 0..<outs.count
+        {
+            guard let oi = outs[i] else { continue }
+            let o = CuCut(); o.W = cw; o.H = ch
+            var opx = [Int](repeating: 0, count: cw * ch)
+            let ox = (cw - oi.W) / 2, oy = ch - oi.H
+            let ipx: [Int] = oi.Px
+            for y in 0..<oi.H { for x in 0..<oi.W { opx[(oy + y) * cw + ox + x] = ipx[y * oi.W + x] } }
+            o.Px = opx
+            if i == 0 { s.SetStand(o, false, -1, -1) }
+            else { s.Frames[SheetKeys[i]] = CuImg.ToBitmap(o) }
+        }
+        s.Frames["stand"] = s.Stand
+        return s
+    }
+    // C# unchecked((int)0xFFFFFFFF)／unchecked((int)0xFF000000)（mac：像素一律存成不帶正負號的 0xAARRGGBB，跟 55_custom_image 一樣）
+    static let ARGB_WHITE = 0xFFFFFFFF
+    static let ARGB_OPAQUE = 0xFF000000
+
+    // ---------- 存／讀（處理好的圖存成 PNG，下次直接讀） ----------
+    func SaveTo(_ dir: String)
+    {
+        Stand.Save(Path.Combine(dir, "sprite.png"), ImageFormat.Png)
+        for kv in Frames { if kv.Key != "stand" { kv.Value.Save(Path.Combine(dir, "frame-" + kv.Key + ".png"), ImageFormat.Png) } }
+        let d = Dict<String, Any>()
+        d["pixel"] = Pixel; d["r"] = R; d["neck"] = NeckF; d["hip"] = HipF; d["rig"] = Rig; d["outline"] = Outline.ToArgb()
+        try? File.WriteAllText(Path.Combine(dir, "sprite.json"), JavaScriptSerializer().Serialize(d))
+    }
+
+    static func LoadFrom(_ dir: String, _ m: CuMeta) -> CuSprite!
+    {
+        let sj = Path.Combine(dir, "sprite.json"), sp = Path.Combine(dir, "sprite.png")
+        if !File.Exists(sj) || !File.Exists(sp) { return nil }
+        guard let txt = try? File.ReadAllText(sj), let o = try? JavaScriptSerializer().DeserializeObject(txt), let d = o as? Dict<String, Any> else { return nil }
+        let s = CuSprite()
+        s.Pixel = (d.Get("pixel") as? Bool) == true
+        if s.Pixel != m.Pixel { return nil }
+        // mac: C# 的 d["r"]（沒有那個 key 會丟例外 → catch → null）
+        guard let r = CuMeta.ToD(d.Get("r")), let ol = CuMeta.ToD(d.Get("outline")), let neck = CuMeta.ToD(d.Get("neck")), let hip = CuMeta.ToD(d.Get("hip")) else { App.Log("custom sprite load: " + "bad sprite.json"); return nil }
+        s.R = CInt(Math.Round(r))
+        if s.R < 1 || s.R > 8 { return nil }
+        s.Outline = Color.FromArgb(CInt(Math.Round(ol)))
+        let rig = (d.Get("rig") as? Bool) == true
+        var c: CuCut! = nil
+        do {
+            let b: Bitmap! = LoadPng(sp)
+            if b == nil || b.Width > 400 || b.Height > 400 { return nil }
+            c = CuImg.FromBitmap(b)
+        }
+        s.SetStand(c, rig, neck, hip)
+        if m.Sheet
+        {
+            s.Frames["stand"] = s.Stand
+            for i in 1..<SheetKeys.count
+            {
+                let fp = Path.Combine(dir, "frame-" + SheetKeys[i] + ".png")
+                if !File.Exists(fp) { continue }
+                let fb: Bitmap! = LoadPng(fp)
+                if fb != nil && fb.Width == s.W && fb.Height == s.H { s.Frames[SheetKeys[i]] = fb } else if fb != nil { fb.Dispose() }
+            }
+        }
+        return s
+    }
+
+    // mac: Image.FromStream → CGImageSource（Bitmap.FromFile），再複製成一張 32bppArgb
+    static func LoadPng(_ path: String) -> Bitmap!
+    {
+        guard let img = Bitmap.FromFile(path) else { return nil }
+        let b = Bitmap(img.Width, img.Height, PixelFormat.Format32bppArgb, img.Scale)
+        do { let g = Graphics.FromImage(b); g.CompositingMode = CompositingMode.SourceCopy; g.DrawImage(img, Rectangle(0, 0, img.Width, img.Height)) }
+        return b
+    }
+}
+
+// ================= 存放：資料夾 custom/<id>/（source.png 原圖、meta.json 設定、sprite.png 處理好的圖、icon.png 給 VS Code）=================
+enum CuStore
+{
+    static var Root: String { return Path.Combine(World.DataDir, "custom") }
+    static var metas: List<CuMeta>! = nil
+    static let sprites = Dict<String, CuSprite>()
+
+    static func All() -> List<CuMeta>
+    {
+        if metas != nil { return metas }
+        let ms = List<CuMeta>()
+        metas = ms
+        if Directory.Exists(Root)
+        {
+            for d in Directory.GetDirectories(Root)
+            {
+                let id = Path.GetFileName(d)
+                if !CuMeta.ValidId(id) { continue }
+                let mp = Path.Combine(d, "meta.json")
+                if !File.Exists(mp) || FileInfo(mp).Length > (1 << 20) { continue }
+                guard let txt = try? File.ReadAllText(mp, Encoding.UTF8) else { App.Log("custom list: " + "cannot read " + mp); continue }
+                let m: CuMeta! = CuMeta.FromJson(txt)
+                if m == nil { continue }
+                m.Id = id
+                if m.Name == "" { m.Name = "小公仔" }
+                ms.Add(m)
+            }
+        }
+        ms.Sort { (a: CuMeta, b: CuMeta) -> Int in let c = string.CompareOrdinal(a.Created, b.Created); return c != 0 ? c : string.CompareOrdinal(a.Id, b.Id) }
+        return ms
+    }
+
+    static func Get(_ id: String!) -> CuMeta! { for m in All() { if m.Id == id { return m } }; return nil }
+    static func Dir(_ id: String) -> String { return Path.Combine(Root, id) }
+
+    static func Sprite(_ m: CuMeta) -> CuSprite!
+    {
+        if let s0 = sprites.Get(m.Id) { return s0 }
+        let dir = Dir(m.Id)
+        var s: CuSprite! = CuSprite.LoadFrom(dir, m)
+        if s == nil
+        {
+            // 沒有處理好的圖（或版本不對）：從原圖重做一次
+            var err: String! = nil
+            let src: Bitmap! = CuImg.LoadFile(Path.Combine(dir, "source.png"), &err)
+            if src != nil
+            {
+                s = CuSprite.Build(m, src, &err)
+                src.Dispose()
+                if s != nil { s.SaveTo(dir) }
+            }
+            if s == nil { App.Log("custom sprite " + m.Id + ": " + (err ?? "")) }
+        }
+        if s != nil { sprites[m.Id] = s }
+        return s
+    }
+
+    static func NewId() -> String
+    {
+        let r = Random()
+        let cs = "abcdefghijkmnpqrstuvwxyz23456789"
+        for _ in 0..<100
+        {
+            let sb = StringBuilder("cu")
+            for _ in 0..<6 { sb.Append(cs[r.Next(cs.Length)]) }
+            let id = sb.ToString()
+            if !Directory.Exists(Dir(id)) && Pal.GetBuiltin(id) == nil { return id }
+        }
+        return "cu" + DateTime.Now.Ticks.ToString("x").Substring(0, 8)
+    }
+
+    // 存一隻（新的或改過的）：原圖、設定、處理好的圖、VS Code 用的小圖
+    static func Save(_ m: CuMeta, _ source: Bitmap!, _ s: CuSprite) throws
+    {
+        let dir = Dir(m.Id)
+        try Directory.CreateDirectory(dir)
+        if string.IsNullOrEmpty(m.Created) { m.Created = DateTime.Now.ToString("yyyy-MM-ddTHH:mm:ss") }
+        if source != nil { source.Save(Path.Combine(dir, "source.png"), ImageFormat.Png) }
+        try File.WriteAllText(Path.Combine(dir, "meta.json"), m.ToJson(), UTF8Encoding(false))
+        for f in Directory.GetFiles(dir, "frame-*.png") { try? File.Delete(f) }
+        s.SaveTo(dir)
+        do { let ic = Icon(m, s, 6); ic.Save(Path.Combine(dir, "icon.png"), ImageFormat.Png) }
+        if let old = sprites.Get(m.Id), old !== s { sprites.Remove(m.Id) }
+        sprites[m.Id] = s
+        Reset(false)
+    }
+
+    static func Delete(_ id: String)
+    {
+        if !CuMeta.ValidId(id) { return }
+        if sprites.Get(id) != nil { sprites.Remove(id) }
+        do { try Directory.Delete(Dir(id), true) } catch { App.Log("custom delete: " + error.localizedDescription) }
+        Reset(false)
+    }
+
+    // 清快取（全部重讀）；all＝連處理好的圖也重讀
+    static func Reset(_ all: Bool)
+    {
+        metas = nil
+        if all { sprites.Clear() }
+        Pal.CuReset()
+    }
+
+    // 站好的樣子（有白邊）畫成一張小圖：VS Code 側邊欄、設定視窗用
+    static func Icon(_ m: CuMeta, _ s: CuSprite, _ ps: Int) -> Bitmap
+    {
+        let pad = 2 * ps
+        let w = CInt(Math.Ceiling(s.Wc * Double(ps))) + 2 * pad, h = CInt(Math.Ceiling(s.Hc * Double(ps))) + 2 * pad
+        let b = Bitmap(w, h, PixelFormat.Format32bppArgb)
+        do {
+            let g = Graphics.FromImage(b)
+            g.Clear(Color.Transparent)
+            Pet.CuDrawStill(g, s, Double(w) / 2.0, Double(h - pad), ps, false, false, Color.White)
+        }
+        return b
+    }
+}
+
+// ================= Pal：自己做的公仔、我的櫃 =================
+
+extension Pal
+{
+    static let Mine = "mine"
+    static let Guests: [String] = ["boba", "coffee", "onigiri", "sticky", "spidey", "po", "stitch", "hangyodon", "tinky", "dipsy", "laalaa"]   // 可以來我的櫃作客的內建公仔
+
+    static func CuReset() { all = nil }
+    static func GetBuiltin(_ id: String) -> Pal! { if all == nil { return nil }; for p in all! { if p.Id == id && !p.Cu { return p } }; return nil }
+    static func HasCustom() -> Bool { return CuStore.All().Count > 0 }
+
+    static func CuPals() -> List<Pal>
+    {
+        let l = List<Pal>()
+        for m in CuStore.All()
+        {
+            let s: CuSprite! = CuStore.Sprite(m)
+            if s != nil { l.Add(MakeCu(m, s)) }
+        }
+        return l
+    }
+
+    static func MakeCu(_ m: CuMeta, _ s: CuSprite) -> Pal
+    {
+        let p = Pal()
+        p.Cu = true; p.Meta = m; p.Spr = s
+        p.Id = m.Id; p.Name = m.Name == "" ? "小公仔" : m.Name
+        p.Move = "walk"; p.BallKind = "tennis"; p.NightStyle = "sleepy"; p.NightBubble = 3
+        let mc = s.Main
+        let lum = 0.299 * Double(mc.R) + 0.587 * Double(mc.G) + 0.114 * Double(mc.B)
+        let f = lum > 150 ? 0.5 : (lum > 90 ? 0.75 : 1.0)
+        p.Accent = Color.FromArgb(CInt(Double(mc.R) * f), CInt(Double(mc.G) * f), CInt(Double(mc.B) * f))
+        p.Panel = Color.FromArgb(CInt(Double(mc.R) * 0.22 + 255 * 0.78), CInt(Double(mc.G) * 0.22 + 255 * 0.78), CInt(Double(mc.B) * 0.22 + 255 * 0.78))
+        p.Halo = Color.White; p.HaloNight = C(0xC8C0EC)
+        p.Day["k"] = s.Outline; p.Night["k"] = Color.FromArgb(s.Outline.R / 2, s.Outline.G / 2, s.Outline.B / 2 + 10)
+        switch m.Persona { case "cool": p.Speed = 38; case "shy": p.Speed = 32; case "funny": p.Speed = 48; case "cat": p.Speed = 40; case "dog": p.Speed = 66; default: p.Speed = 55 }
+        p.TopRows = Math.Max(0, CInt(Math.Ceiling(s.Hc)) - 16)
+        p.EyeRow = -1
+        // 萬一有共用的程式碼要內建的像素零件：給空白的，不會壞
+        let blank: [String] = ["............"]
+        for k in ["HEAD", "BODY", "ARMS_UP", "ARMS_HUG", "LEGS_A", "LEGS_B", "LEGS_SIT", "SLEEPY", "HAPPY", "DIZZY"] { p.Art[k] = blank }
+        p.CuLines(m.Persona, p.Name)
+        p.CuStudyLines(m.Persona, p.Name)
+        p.Shared()
+        return p
+    }
+
+    // 我的櫃：自己做的（最多 4 隻）＋可以請內建公仔來作客；custom/mine.txt
+    static func MineIds() -> [String]
+    {
+        let ids = List<String>()
+        let cus = CuStore.All()
+        var saved = ""
+        do { let f = Path.Combine(CuStore.Root, "mine.txt"); if File.Exists(f) { saved = (try? File.ReadAllText(f)) ?? "" } }
+        let hasFile = saved.Trim() != ""
+        let seps: [Character] = [" ", ",", "\n", "\r"]
+        for t in saved.Split(seps, StringSplitOptions.RemoveEmptyEntries)
+        {
+            if ids.Count >= 4 || ids.Contains(t) { continue }
+            if CuStore.Get(t) != nil || Guests.contains(t) { ids.Add(t) }
+        }
+        var anyCu = false; for t in ids { if CuStore.Get(t) != nil { anyCu = true } }
+        if !hasFile || !anyCu
+        {
+            for m in cus { if ids.Count >= 4 { break }; if !ids.Contains(m.Id) { ids.Add(m.Id) } }
+        }
+        if ids.Count > 4 { ids.RemoveRange(4, ids.Count - 4) }
+        return ids.ToArray()
+    }
+
+    static func SaveMine(_ ids: List<String>)
+    {
+        _ = try? Directory.CreateDirectory(CuStore.Root)
+        try? File.WriteAllText(Path.Combine(CuStore.Root, "mine.txt"), string.Join(" ", ids.ToArray()))
+    }
+
+    // 換一櫃、設定視窗列出來的櫃子：有自己做的公仔才有「我的櫃」
+    static func LineupsNow() -> [String]
+    {
+        if !HasCustom() { return Lineups }
+        var l = Lineups; l.append(Mine)
+        return l
+    }
+}
+
+// ================= 一隻自己做的公仔：姿勢、畫法 =================
+
+extension Pet
+{
+    // 一格的姿勢（單位：格；+y 往下；角度：度）
+    final class CuPose
+    {
+        var X: Double = 0, Y: Double = 0, Rot: Double = 0, PivotY: Double = 0, Sx: Double = 1, Sy: Double = 1      // 整隻：位移、旋轉（繞腳／中心／頭頂）、縮放（繞腳）
+        var Rot90 = 0                                     // 像素風打滾：90° 一格一格轉
+        var UpY: Double = 0, BodyRot: Double = 0, BodySy: Double = 1               // 上半身（頭＋身體）上下、身體搖、身體伸縮（繞屁股）
+        var HeadX: Double = 0, HeadY: Double = 0, HeadRot: Double = 0                  // 頭
+        var LX: Double = 0, LY: Double = 0, LRot: Double = 0, RX: Double = 0, RY: Double = 0, RRot: Double = 0             // 兩隻腳
+        var NoLegs = false                                   // 窩著（貓貓窩）：腳收起來
+        var Frame: String? = nil                                  // 動作表的哪一格
+        init() {}
+        func Reset() { X = 0; Y = 0; Rot = 0; PivotY = 0; UpY = 0; BodyRot = 0; HeadX = 0; HeadY = 0; HeadRot = 0; LX = 0; LY = 0; LRot = 0; RX = 0; RY = 0; RRot = 0; Sx = 1; Sy = 1; BodySy = 1; Rot90 = 0; NoLegs = false; Frame = nil }
+    }
+    static let CU_BLANK: [String] = ["............"]
+    static let BENTO: [String] = [".kkkkkkkk.", "k22222222k", "k2WWW1YY2k", "k2WSW1PP2k", "k22222222k", ".kkkkkkkk."]
+    static let MUG: [String] = ["kkkk..", "kWWkkk", "kSWk.k", "kWWkkk", ".kk..."]
+    var Persona: String { return P.Meta == nil ? "lively" : P.Meta.Persona }
+
+    // ---------- Frame()：姿勢算好，Rows 是空白（DrawFigure 交給 DrawFigureCu） ----------
+    func FrameCu() -> Fr
+    {
+        CuPoseNow(cuPose)
+        let f = F(Pet.CU_BLANK)
+        f.Rot = cuPose.Rot90 != 0 || Math.Abs(cuPose.Rot) > 30 ? 1 : 0
+        f.Acc = Math.Abs(cuPose.Rot) < 10 && cuPose.Rot90 == 0 && state != "sleep" && state != "drag" && state != "dizzy"
+        return f
+    }
+
+    func DrawFigureCu(_ g: Graphics, _ f: Fr, _ sbx: Int, _ sby: Int, _ sps: Int, _ fx: Bool, _ extras: Bool)
+    {
+        CuDraw(g, cuPose, Double(sbx + 6 * sps), Double(sby + 16 * sps), sps, fx)
+        if f.Acc { CuAccessories(g, cuPose, sbx, sby, sps, fx, true) }
+        if extras
+        {
+            CuFront(g, sbx, sby, sps, fx)
+            DrawLunch(g, f, sbx, sby, sps, fx)
+        }
+    }
+
+    // 嘴裡叼著球（汪系撿球）
+    func CuFront(_ g: Graphics, _ sbx: Int, _ sby: Int, _ sps: Int, _ fx: Bool)
+    {
+        if w.Holder !== self { return }
+        let s: CuSprite = P.Spr
+        let top: Double = 16 - s.Hc + cuPose.Y + cuPose.UpY + cuPose.HeadY
+        let col: Double = 6 + (Double(s.HeadCx) + Double(s.HeadW) / 2.0 - Double(s.W) / 2.0) / Double(s.R) - 2 + cuPose.X + cuPose.HeadX
+        DrawAt(g, w.BallKind == "baseball" ? Pet.BALLART : Pet.TBALL, col, top + Double(s.Neck) / Double(s.R) - 3, sbx, sby, sps, fx, false, true)
+    }
+
+    // ---------- 依狀態算姿勢 ----------
+    func CuPoseNow(_ p: CuPose)
+    {
+        p.Reset()
+        let s: CuSprite = P.Spr
+        let ps = Persona
+        let a = anim
+        let sheet = s.Frames.Count > 0
+        let legH = Double(s.H - s.Hip) / Double(s.R)
+        let walking = state == "walk" || state == "goto" || state == "seek" || state == "fetch" || state == "hide"
+            || (state == "cu" && (cuAct == "pushwalk" || cuAct == "fetchback" || cuAct == "comeback" || cuAct == "zoom"))
+        if rolling || state == "fling"
+        {
+            if s.Pixel { p.Rot90 = CInt(Math.Floor(a * 14)) % 4 } else { p.Rot = (a * 760) % 360 }
+            p.PivotY = 0.5
+            if sheet && s.HasFrame("jump") { p.Frame = "jump" }
+        }
+        else if state == "drag"
+        {
+            // 被抓著：從頭頂晃、腳甩來甩去
+            p.PivotY = 1; p.Rot = Math.Sin(a * 5.2) * 11; p.Sy = 1.05; p.Sx = 0.97
+            p.LRot = Math.Sin(a * 5.2 + 0.9) * 16; p.RRot = Math.Sin(a * 5.2 + 1.6) * 16; p.LY = 0.3; p.RY = 0.3
+            if sheet { p.Frame = s.HasFrame("held") ? "held" : (s.HasFrame("jump") ? "jump" : nil) }
+        }
+        else if state == "air" || state == "stowfly"
+        {
+            let up = vy < 0
+            p.Sy = up ? 1.10 : 1.04; p.Sx = up ? 0.93 : 0.98
+            p.LRot = -12; p.RRot = 12; p.LY = -0.4; p.RY = -0.4
+            p.HeadY = up ? 0.3 : -0.3
+            if sheet && s.HasFrame("jump") { p.Frame = "jump" }
+        }
+        else if state == "sleep"
+        {
+            let br = Math.Sin(a * 1.6)
+            if ps == "cat"
+            {
+                // 貓貓窩：腳收起來、身體壓低、頭也低低的
+                p.NoLegs = true; p.UpY = legH * 0.92; p.BodySy = 0.94; p.Sx = 1.04 + br * 0.012; p.HeadY = 0.3; p.HeadRot = 4
+                if !s.Rig { p.Sy = 0.86 + br * 0.012; p.Sx = 1.08 }
+            }
+            else { p.Rot = 9; p.Sy = 0.97 + br * 0.015; p.HeadRot = 10; p.HeadY = 0.3 }
+            if sheet && s.HasFrame("sleep") { p.Frame = "sleep"; p.Rot = 0; p.Sy = 1 + br * 0.012 }
+        }
+        else if walking
+        {
+            let fast = state == "seek" || state == "fetch" || cuAct == "zoom" || cuAct == "fetchback"
+            let ph = a * (fast ? 2.6 : 1.8) * 2 * Math.PI, sn = Math.Sin(ph)
+            let lift = Math.Max(0.6, Math.Min(1.4, legH * 0.38))
+            p.LY = -Math.Max(0, sn) * lift; p.RY = -Math.Max(0, -sn) * lift
+            p.LX = Math.Cos(ph) * 0.45; p.RX = -Math.Cos(ph) * 0.45
+            p.UpY = -Math.Abs(sn) * 0.5; p.BodyRot = 3
+            p.HeadY = -Math.Abs(Math.Sin(ph - 0.7)) * 0.35 + Math.Abs(sn) * 0.5 - 0.1; p.HeadX = -0.2
+            if !s.Rig { p.Y = -Math.Abs(sn) * 0.7; p.Rot = sn * 5 }
+            if sheet
+            {
+                let st2 = Math.Floor(a * (fast ? 7 : 5)) % 2 == 1
+                if s.HasFrame("walk1") && s.HasFrame("walk2") { p.Frame = st2 ? "walk2" : "walk1"; p.Rot = 0; p.Y = -Math.Abs(sn) * 0.4 }
+                else if s.HasFrame("walk1") { p.Frame = st2 ? "walk1" : "stand"; p.Rot = 0 }
+            }
+        }
+        else if state == "hug"
+        {
+            // 開心：連跳兩下＋點頭
+            let c = a % 1.1
+            let hop = c < 0.5 ? Math.Abs(Math.Sin(c / 0.5 * Math.PI * 2)) : 0
+            p.Y = -hop * 1.3; p.HeadRot = Math.Sin(a * 7) * 6
+            if hop < 0.15 && c < 0.6 { p.Sy = 0.93; p.Sx = 1.05 }
+            if ps == "dog" { p.BodyRot = Math.Sin(a * 22) * 4 }
+            if sheet && s.HasFrame("happy") { p.Frame = "happy" }
+        }
+        else if state == "dance" || state == "elvis"
+        {
+            p.Rot = Math.Sin(a * 6) * 8; p.Y = -Math.Abs(Math.Sin(a * 6)) * 0.7
+            p.LY = -Math.Max(0, Math.Sin(a * 6)) * 0.7; p.RY = -Math.Max(0, -Math.Sin(a * 6)) * 0.7; p.HeadRot = -Math.Sin(a * 6) * 6
+            if sheet && s.HasFrame("happy") { p.Frame = "happy" }
+        }
+        else if state == "dizzy" { p.Rot = Math.Sin(a * 12) * 10; p.HeadRot = Math.Sin(a * 12 + 1) * 12 }
+        else if state == "cu" { CuActPose(p, a, legH) }
+        else if state == "plop" { p.UpY = legH * 0.7; p.LRot = 60; p.RRot = -60; p.Sx = 1.06; if sheet && s.HasFrame("sit") { p.Frame = "sit" } }
+        else if state == "kick" { p.RRot = -38; p.RX = 0.6; p.Rot = -4 }
+        else if state == "think" { p.HeadRot = 13; p.HeadY = 0.1 }
+        else if state == "wave" { p.BodyRot = Math.Sin(a * 9) * 6; p.HeadRot = 6 + Math.Sin(a * 9) * 3; p.Y = -Math.Abs(Math.Sin(a * 4.5)) * 0.4; if sheet && s.HasFrame("happy") { p.Frame = "happy" } }
+        else if state == "nudge" || state == "glass" { p.Rot = 6 + (knock > 0 ? 3 : 0); p.HeadX = 0.4 }
+        else if state == "spin" || state == "twirl" { p.Sx = Math.Cos(a * 12); if Math.Abs(p.Sx) < 0.15 { p.Sx = p.Sx < 0 ? -0.15 : 0.15 } }
+        else if state == "catch" || state == "throw" { p.Sy = 1.06; p.Rot = -5 }
+        else if state == "pose"
+        {
+            if poseKind == "tap" { p.Rot = 7; p.HeadX = 0.5 }
+            else { p.Rot = -5; p.Sy = 1.04; p.HeadRot = -6; if sheet && s.HasFrame("happy") { p.Frame = "happy" } }
+        }
+        else
+        {
+            // 發呆：呼吸、偶爾歪頭；晚上頭垂垂的
+            let br = Math.Sin(a * (Night ? 1.4 : 2.2))
+            p.BodySy = 1 + br * 0.03; p.UpY = 0
+            let tilt = (a % 7.3) < 1.3 ? Math.Sin((a % 7.3) / 1.3 * Math.PI) : 0
+            p.HeadRot = tilt * 9
+            if Night { p.HeadRot += 7; p.HeadY = 0.35 }
+            if ps == "dog" && (a % 5) < 1.2 { p.BodyRot = Math.Sin(a * 22) * 3 }
+            if !s.Rig { p.Sy = 1 + br * 0.022; p.Sx = 1 - br * 0.012; p.Rot = tilt * 3 + (Night ? 3 : 0) }
+        }
+        if cuLandT > 0 { let q = cuLandT / 0.2; p.Sy *= 1 - 0.13 * q; p.Sx *= 1 + 0.1 * q }
+        if !s.Rig && p.Frame == nil
+        {
+            // 沒有切線：整隻一起動（上半身的上下也算到整隻）
+            p.Y += p.UpY * 0.6; p.Rot += p.BodyRot * 0.6 + p.HeadRot * 0.35
+            if p.NoLegs { p.Y = 0 }
+        }
+    }
+
+    // 自己做的公仔專屬動作的姿勢（state == "cu"）
+    func CuActPose(_ p: CuPose, _ a: Double, _ legH: Double)
+    {
+        let s: CuSprite = P.Spr
+        switch cuAct
+        {
+        case "wag":
+            // 搖尾巴：屁股扭扭、頭跟著晃、小跳
+            p.BodyRot = Math.Sin(a * 24) * 6; p.HeadRot = Math.Sin(a * 12) * 5; p.Y = -Math.Abs(Math.Sin(a * 6)) * 0.4
+            if !s.Rig { p.Rot = Math.Sin(a * 24) * 5 }
+        case "ignore":
+            // 不理你：頭抬高、尾巴（身體）甩一下
+            p.HeadRot = -10; p.HeadY = -0.2; p.BodyRot = Math.Sin(a * 3) * 2
+        case "push":
+            // 伸手（前腳）推推
+            let k2 = Math.Sin(Math.Min(1, cuT / 0.5) * Math.PI)
+            p.Rot = 6 * k2; p.RRot = -42 * k2; p.RX = 0.8 * k2; p.RY = -0.8 * k2; p.HeadX = 0.4 * k2
+        case "shy":
+            // 害羞：頭低低、縮起來
+            p.HeadRot = 14; p.HeadY = 0.5; p.Sy = 0.95; p.Sx = 1.02; p.BodyRot = Math.Sin(a * 10) * 1.5
+        case "sit":
+            p.UpY = legH * 0.7; p.LRot = 60; p.RRot = -60; p.Sx = 1.05
+            if !s.Rig { p.Sy = 0.9 }
+            if s.HasFrame("sit") { p.Frame = "sit" }
+        case "cool":
+            p.Rot = -6; p.HeadRot = -8; p.Sy = 1.03
+        default: break
+        }
+    }
+
+    // ---------- 畫：先在小畫布上把頭／身體／腳組起來，再放大畫上去（加白邊、晚上變暗） ----------
+    // 每一格：直接組在「螢幕大小」的小圖上（像素風先在格子大小組好再放大），
+    // 再一次把白邊、晚上變暗、左右翻轉做完（逐像素），最後原尺寸貼上去——四隻一起跑也不會卡
+    func CuDraw(_ g: Graphics, _ p: CuPose, _ feetX: Double, _ feetY: Double, _ ps: Int, _ fx: Bool)
+    {
+        let s: CuSprite = P.Spr
+        var mb = 0, cw = 0, ch = 0
+        Pet.CuCanvasSize(s, &cw, &ch, &mb)
+        let sc = Double(ps) / Double(s.R)
+        let hw = Math.Max(1, ps / 3), pad = hw + 1
+        let tw = CInt(Math.Ceiling(Double(cw) * sc)) + 2 * pad, th = CInt(Math.Ceiling(Double(ch) * sc)) + 2 * pad
+        if cuOut == nil || cuOut.Width != tw || cuOut.Height != th
+        {
+            if cuOut != nil { cuOut.Dispose() }
+            cuOut = Bitmap(tw, th, PixelFormat.Format32bppPArgb, Pet.CuDevScale())   // mac: 裝置像素（Retina 2 倍），白邊在 CuHaloPass 跟著乘
+        }
+        do {
+            let og = Graphics.FromImage(cuOut)
+            og.Clear(Color.Transparent)
+            if s.Pixel
+            {
+                if cuCanvas == nil || cuCanvas.Width != cw || cuCanvas.Height != ch
+                {
+                    if cuCanvas != nil { cuCanvas.Dispose() }
+                    cuCanvas = Bitmap(cw, ch, PixelFormat.Format32bppArgb, 1)   // mac: 1 倍（CuThreshold 逐像素）
+                }
+                do { let cg = Graphics.FromImage(cuCanvas); cg.Clear(Color.Transparent); Pet.CuCompose(cg, s, p, cw / 2, ch - mb, nil) }
+                Pet.CuThreshold(cuCanvas)
+                og.InterpolationMode = InterpolationMode.NearestNeighbor
+                og.PixelOffsetMode = PixelOffsetMode.Half
+                og.DrawImage(cuCanvas, RectangleF(Double(pad), Double(pad), Double(cw) * sc, Double(ch) * sc), RectangleF(0, 0, Double(cw), Double(ch)), GraphicsUnit.Pixel)
+            }
+            else
+            {
+                let bm = Matrix(sc, 0, 0, sc, Double(pad), Double(pad))
+                Pet.CuCompose(og, s, p, cw / 2, ch - mb, bm)
+            }
+        }
+        CuHaloPass(cuOut, hw, Night ? P.HaloNight : P.Halo, Night, fx)
+        let dx = CInt(Math.Round(feetX - Double(pad) - Double(cw) / 2.0 * sc)), dy = CInt(Math.Round(feetY - Double(pad) - Double(ch - mb) * sc))
+        let im = g.InterpolationMode, pom = g.PixelOffsetMode
+        g.InterpolationMode = InterpolationMode.NearestNeighbor; g.PixelOffsetMode = PixelOffsetMode.Half
+        g.DrawImage(cuOut, Rectangle(dx, dy, tw, th), 0, 0, tw, th, GraphicsUnit.Pixel)
+        g.InterpolationMode = im; g.PixelOffsetMode = pom
+    }
+
+    // mac: cuOut 的裝置倍率（整數，Retina＝2）
+    static func CuDevScale() -> Double { return Double(Math.Max(1, CInt(Math.Round(Bitmap.DefaultScale)))) }
+
+    // 白邊（往外 hw 像素的實心框，跟內建公仔一樣）、晚上變暗、左右翻轉：一次掃完（預乘 alpha）
+    func CuHaloPass(_ b: Bitmap, _ hw0: Int, _ halo: Color, _ night: Bool, _ flip: Bool)
+    {
+        // mac: 在裝置像素上掃（C# 是邏輯像素）；白邊寬度乘上倍率，看起來一樣粗
+        let ds = Math.Max(1, CInt(Math.Round(b.Scale)))
+        let hw = hw0 * ds
+        let w = b.PixelWidth, h = b.PixelHeight, n = w * h
+        var buf: [Int] = b.CuReadP()
+        if cuMask == nil || cuMask.count != n { cuBuf = nil; cuMask = [UInt8](repeating: 0, count: n); cuTmp = [UInt8](repeating: 0, count: n) }
+        var mask: [UInt8] = cuMask, tmp: [UInt8] = cuTmp
+        cuMask = nil; cuTmp = nil   // 借出來用（避免逐格複製）
+        // 剪影往外長 hw（先橫再直）
+        for y in 0..<h
+        {
+            let row = y * w
+            var run = -100000
+            for x in 0..<w { if ((buf[row + x] >> 24) & 255) >= 60 { run = x }; tmp[row + x] = x - run <= hw ? 1 : 0 }
+            run = 100000
+            var x = w - 1
+            while x >= 0 { if ((buf[row + x] >> 24) & 255) >= 60 { run = x }; if run - x <= hw { tmp[row + x] = 1 }; x -= 1 }
+        }
+        for x in 0..<w
+        {
+            var run = -100000
+            for y in 0..<h { if tmp[y * w + x] != 0 { run = y }; mask[y * w + x] = y - run <= hw ? 1 : 0 }
+            run = 100000
+            var y = h - 1
+            while y >= 0 { if tmp[y * w + x] != 0 { run = y }; if run - y <= hw { mask[y * w + x] = 1 }; y -= 1 }
+        }
+        let hr = halo.R, hg = halo.G, hb = halo.B
+        for i in 0..<n
+        {
+            let v = buf[i]
+            var a = (v >> 24) & 255, r = (v >> 16) & 255, gg = (v >> 8) & 255, bb = v & 255
+            if night && a > 0 { r = r * 58 / 100 + a * 5 / 255; gg = gg * 60 / 100 + a * 5 / 255; bb = bb * 78 / 100 + a * 18 / 255 }
+            if mask[i] != 0 && a < 255 { let inv = 255 - a; r += hr * inv / 255; gg += hg * inv / 255; bb += hb * inv / 255; a = 255 }
+            buf[i] = (a << 24) | (Math.Min(255, r) << 16) | (Math.Min(255, gg) << 8) | Math.Min(255, bb)
+        }
+        if flip
+        {
+            for y in 0..<h
+            {
+                let row = y * w
+                var x = 0
+                while x < w / 2 { let t = buf[row + x]; buf[row + x] = buf[row + w - 1 - x]; buf[row + w - 1 - x] = t; x += 1 }
+            }
+        }
+        b.CuWriteP(buf)
+        cuMask = mask; cuTmp = tmp
+    }
+
+    static func CuCanvasSize(_ s: CuSprite, _ cw: inout Int, _ ch: inout Int, _ mb: inout Int)
+    {
+        let R = s.R, m = Math.Max(s.W, s.H)
+        cw = m + 6 * R + 2
+        let mt = Math.Max(3 * R + s.H / 6, (s.W - s.H) / 2 + 3 * R)
+        mb = Math.Max(2 * R, (s.W - s.H) / 2 + 2 * R)
+        ch = s.H + mt + mb
+        if cw % 2 == 1 { cw += 1 }
+    }
+
+    // 小畫布 → 螢幕：白邊（往八個方向各畫一次的剪影）＋本體；像素風用最近點放大
+    static let haloIa = Dict<Int, ImageAttributes>()
+    static var nightIa: ImageAttributes! = nil
+    static func CuBlit(_ g: Graphics, _ canvas: Bitmap, _ s: CuSprite, _ feetX: Double, _ feetY: Double, _ cw: Int, _ ch: Int, _ mb: Int, _ ps: Int, _ fx: Bool, _ halo: Color, _ night: Bool, _ alpha: Double)
+    {
+        let sc = Double(ps) / Double(s.R)
+        var dx = feetX - Double(cw) / 2.0 * sc, dy = feetY - Double(ch - mb) * sc
+        if s.Pixel { dx = Math.Round(dx); dy = Math.Round(dy) }
+        let dw = Double(cw) * sc, dh = Double(ch) * sc
+        let pts: [PointF] = fx ? [PointF(dx + dw, dy), PointF(dx, dy), PointF(dx + dw, dy + dh)]
+                               : [PointF(dx, dy), PointF(dx + dw, dy), PointF(dx, dy + dh)]
+        let im = g.InterpolationMode, pom = g.PixelOffsetMode
+        g.InterpolationMode = s.Pixel ? InterpolationMode.NearestNeighbor : InterpolationMode.HighQualityBicubic
+        g.PixelOffsetMode = s.Pixel ? PixelOffsetMode.Half : PixelOffsetMode.HighQuality
+        let src = RectangleF(0, 0, Double(cw), Double(ch))
+        if halo.A > 0
+        {
+            let key = halo.ToArgb()
+            var hia: ImageAttributes! = haloIa.Get(key)
+            if hia == nil
+            {
+                let cm = ColorMatrix([
+                    [0, 0, 0, 0, 0], [0, 0, 0, 0, 0], [0, 0, 0, 0, 0],
+                    [0, 0, 0, 1, 0], [Double(halo.R) / 255.0, Double(halo.G) / 255.0, Double(halo.B) / 255.0, 0, 1]])
+                hia = ImageAttributes(); hia.SetColorMatrix(cm)
+                if haloIa.Count > 16 { haloIa.Clear() }
+                haloIa[key] = hia
+            }
+            let hw = Double(Math.Max(1, ps / 3))
+            for oy in -1...1
+            {
+                for ox in -1...1
+                {
+                    if ox == 0 && oy == 0 { continue }
+                    let q: [PointF] = [PointF(pts[0].X + Double(ox) * hw, pts[0].Y + Double(oy) * hw), PointF(pts[1].X + Double(ox) * hw, pts[1].Y + Double(oy) * hw), PointF(pts[2].X + Double(ox) * hw, pts[2].Y + Double(oy) * hw)]
+                    g.DrawImage(canvas, q, src, GraphicsUnit.Pixel, hia)
+                }
+            }
+        }
+        var ia: ImageAttributes! = nil
+        if night
+        {
+            if nightIa == nil
+            {
+                let nm = ColorMatrix([
+                    [0.58, 0, 0, 0, 0], [0, 0.6, 0, 0, 0], [0, 0, 0.78, 0, 0],
+                    [0, 0, 0, 1, 0], [0.02, 0.02, 0.07, 0, 1]])
+                nightIa = ImageAttributes(); nightIa.SetColorMatrix(nm)
+            }
+            ia = nightIa
+        }
+        if alpha < 0.999
+        {
+            let am = ColorMatrix(); am.Matrix33 = alpha
+            if night { am.Matrix00 = 0.58; am.Matrix11 = 0.6; am.Matrix22 = 0.78 }
+            let aia = ImageAttributes(); aia.SetColorMatrix(am)
+            g.DrawImage(canvas, pts, src, GraphicsUnit.Pixel, aia)
+            aia.Dispose()
+        }
+        else if ia != nil { g.DrawImage(canvas, pts, src, GraphicsUnit.Pixel, ia) }
+        else { g.DrawImage(canvas, pts, src, GraphicsUnit.Pixel) }
+        g.InterpolationMode = im; g.PixelOffsetMode = pom
+    }
+
+    // 組裝：整隻的位移／旋轉／縮放 → 腳 → 身體 → 頭
+    static func CuCompose(_ cg: Graphics, _ s: CuSprite, _ p: CuPose, _ ox: Int, _ oy: Int, _ baseM: Matrix!)
+    {
+        cg.InterpolationMode = s.Pixel ? InterpolationMode.NearestNeighbor : InterpolationMode.HighQualityBicubic
+        cg.PixelOffsetMode = s.Pixel ? PixelOffsetMode.Half : PixelOffsetMode.HighQuality
+        cg.CompositingQuality = CompositingQuality.HighQuality
+        let R = Double(s.R)
+        let q: (Double) -> Double = { v in s.Pixel ? Math.Round(v * R) : v * R }
+        if s.Pixel
+        {
+            // 像素風：小角度的轉動會讓格子歪掉（看起來不像內建公仔），改成一格一格的位移
+            if Math.Abs(p.HeadRot) < 8 { p.HeadY -= Math.Abs(p.HeadRot) / 8 * 0.6; p.HeadX += p.HeadRot / 8 * 0.5; p.HeadRot = 0 }
+            if Math.Abs(p.BodyRot) < 8 { p.UpY -= Math.Abs(p.BodyRot) / 8 * 0.4; p.BodyRot = 0 }
+            if Math.Abs(p.Rot) < 4 && p.Rot90 == 0 { p.X += p.Rot / 4 * 0.5; p.Rot = 0 }
+        }
+        let m: Matrix = baseM == nil ? Matrix() : baseM.Clone()
+        m.Translate(Double(ox) + q(p.X), Double(oy) + q(p.Y))
+        if p.Rot90 != 0 { m.Translate(0, -Double(s.H) / 2); m.Rotate(Double(90 * p.Rot90)); m.Translate(0, Double(s.H) / 2) }
+        if Math.Abs(p.Rot) > 0.01 { let pv = -Double(s.H) * p.PivotY; m.Translate(0, pv); m.Rotate(p.Rot); m.Translate(0, -pv) }
+        if Math.Abs(p.Sx - 1) > 0.001 || Math.Abs(p.Sy - 1) > 0.001 { m.Scale(p.Sx, p.Sy) }
+        let L = Double(-(s.W / 2)), T = Double(-s.H)
+        if p.Frame != nil, let fr = s.Frames.Get(p.Frame!) { CuPut(cg, m, fr, L, T, 0, 0, 0, 0, 0); return }
+        if !s.Rig { CuPut(cg, m, s.Stand, L, T, 0, 0, 0, 0, 0); return }
+        // 腳（踩在地上；抬腳往上、轉繞腳的最上面）
+        if !p.NoLegs
+        {
+            let lcx = L + Double(s.Split) / 2, rcx = L + Double(s.Split) + Double(s.W - s.Split) / 2, top = T + Double(s.Hip)
+            CuPut(cg, m, s.LegL, L, top, q(p.LX), q(p.LY), p.LRot, lcx, top)
+            CuPut(cg, m, s.LegR, L + Double(s.Split), top, q(p.RX), q(p.RY), p.RRot, rcx, top)
+        }
+        // 身體：繞屁股那條線伸縮、搖
+        let hipY = T + Double(s.Hip), up = q(p.UpY)
+        let mb = m.Clone()
+        mb.Translate(0, up)
+        mb.Translate(L + Double(s.NeckCx), hipY)
+        if Math.Abs(p.BodyRot) > 0.01 { mb.Rotate(p.BodyRot) }
+        if Math.Abs(p.BodySy - 1) > 0.001 { mb.Scale(1, p.BodySy) }
+        mb.Translate(-(L + Double(s.NeckCx)), -hipY)
+        CuPut(cg, mb, s.Body, L, T + Double(s.BodyY0), 0, 0, 0, 0, 0)
+        // 頭：跟著身體頂端；繞脖子轉
+        let neckY = T + Double(s.Neck)
+        CuPut(cg, mb, s.Head, L, T, q(p.HeadX), q(p.HeadY), p.HeadRot, L + Double(s.HeadCx), neckY)
+    }
+
+    // 放一張零件：先位移 (dx,dy)，再繞 (px,py) 轉 rot 度
+    static func CuPut(_ cg: Graphics, _ baseM: Matrix, _ img: Bitmap!, _ x: Double, _ y: Double, _ dx: Double, _ dy: Double, _ rot: Double, _ px: Double, _ py: Double)
+    {
+        if img == nil { return }
+        let m = baseM.Clone()
+        m.Translate(dx, dy)
+        if Math.Abs(rot) > 0.01 { m.Translate(px, py); m.Rotate(rot); m.Translate(-px, -py) }
+        cg.Transform = m
+        cg.DrawImage(img, RectangleF(x, y, Double(img.Width), Double(img.Height)), RectangleF(0, 0, Double(img.Width), Double(img.Height)), GraphicsUnit.Pixel)
+        cg.ResetTransform()
+    }
+
+    // 像素風：組完之後半透明的一律變成全有或全無（才會一格一格）
+    // mac: 畫布是 1 倍的 Bitmap，直接讀寫預乘的像素（C# 用不預乘的 32bppArgb：結果一樣）
+    static func CuThreshold(_ b: Bitmap)
+    {
+        var px: [Int] = b.CuReadP()
+        var ch = false
+        for i in 0..<px.count
+        {
+            let v = px[i]
+            let a = (v >> 24) & 255
+            if a == 0 || a == 255 { continue }
+            if a < 128 { px[i] = 0 }
+            else
+            {
+                let r = Math.Min(255, ((v >> 16) & 255) * 255 / a), g = Math.Min(255, ((v >> 8) & 255) * 255 / a), bb = Math.Min(255, (v & 255) * 255 / a)
+                px[i] = (255 << 24) | (r << 16) | (g << 8) | bb
+            }
+            ch = true
+        }
+        if !ch { return }
+        b.CuWriteP(px)
+    }
+
+    // 不用 Pet 的地方（設定視窗、VS Code 小圖、分享短片的預覽）：站好的樣子
+    static func CuDrawStill(_ g: Graphics, _ s: CuSprite, _ feetX: Double, _ feetY: Double, _ ps: Int, _ fx: Bool, _ night: Bool, _ halo: Color)
+    {
+        var mb = 0, cw = 0, ch = 0
+        CuCanvasSize(s, &cw, &ch, &mb)
+        let c = Bitmap(cw, ch, s.Pixel ? PixelFormat.Format32bppArgb : PixelFormat.Format32bppPArgb)
+        do { let cg = Graphics.FromImage(c); cg.Clear(Color.Transparent); let p = CuPose(); CuCompose(cg, s, p, cw / 2, ch - mb, nil) }
+        CuBlit(g, c, s, feetX, feetY, cw, ch, mb, ps, fx, halo, night, 1)
+    }
+
+    // ---------- 配件：帽子戴在頭頂（頭太小／太歪就不戴）、圍巾圍在脖子那條線、節日的紅包蛋糕放旁邊 ----------
+    func CuAccessories(_ g: Graphics, _ p: CuPose, _ sbx: Int, _ sby: Int, _ ps: Int, _ fx: Bool, _ sides: Bool)
+    {
+        let s: CuSprite = P.Spr
+        let lv = Level()
+        let hc = s.Hc
+        let sy = p.Sy
+        let top: Double = 16 - hc * sy + p.Y + (s.Rig ? p.UpY + p.HeadY : 0)
+        let headTop: Double = top + Double(s.HeadTop) / Double(s.R) * sy
+        let headCol: Double = 6 + (Double(s.HeadCx) - Double(s.W) / 2.0) / Double(s.R) + p.X + (s.Rig ? p.HeadX : 0)
+        let headW = Double(s.HeadW) / Double(s.R)
+        if lv >= 2 && s.Rig && p.Frame == nil
+        {
+            let nw = Double(s.NeckW) / Double(s.R)
+            if nw >= 4 && nw <= 12
+            {
+                let neckRow: Double = top + Double(s.Neck) / Double(s.R) * sy - (s.Rig ? p.HeadY : 0) - 0.5
+                DrawAt(g, Pet.SCARF, 6 + (Double(s.NeckCx) - Double(s.W) / 2.0) / Double(s.R) + p.X - 6, neckRow, sbx, sby, ps, fx, false, false)
+            }
+        }
+        let hat: [String]? = w.SeasonNow == "xmas" && w.Feat("season") ? Pet.SANTA : (lv >= 6 ? Pet.CROWN : (lv >= 3 ? Pet.BEANIE : nil))
+        if let hat = hat, headW >= 5 && headW <= 18 { DrawAt(g, hat, headCol - 6, headTop - Double(hat.count) + 1, sbx, sby, ps, fx, false, true) }
+        if !sides { return }
+        let side: Double = 6 + s.Wc / 2 + 0.2, mid: Double = 16 - hc * 0.5
+        if w.SeasonNow == "cny" { DrawAt(g, Pet.ENVELOPE, side, mid, sbx, sby, ps, fx, false, true) }
+        if w.SeasonNow == "birthday" { DrawAt(g, Pet.CAKE, side, mid - 1, sbx, sby, ps, fx, false, true) }
+    }
+
+    // ---------- 午餐：手上拿便當（睡午覺時擺旁邊的空盤子） ----------
+    func CuLunch(_ g: Graphics, _ f: Fr, _ bx: Int, _ by: Int, _ ps: Int, _ fx: Bool, _ bite: Int)
+    {
+        let s: CuSprite = P.Spr
+        let mid: Double = s.Rig ? Double(s.Neck + s.Hip) / 2.0 : Double(s.H) * 0.55
+        let row: Double = 16 - s.Hc + mid / Double(s.R) - 2 + cuPose.Y + cuPose.UpY
+        DrawAt(g, Pet.BENTO, 6 + s.Wc / 2 - 2.5 + cuPose.X, row + Double(bite), bx, by, ps, fx, false, true)
+    }
+
+    func CuLunchShelf(_ g: Graphics, _ bx: Int, _ by: Int, _ ps: Int, _ flip: Bool)
+    {
+        let s: CuSprite = P.Spr
+        let mid: Double = s.Rig ? Double(s.Neck + s.Hip) / 2.0 : Double(s.H) * 0.55
+        let row: Double = 16 - s.Hc + mid / Double(s.R) - 2
+        DrawAt(g, Pet.BENTO, 6 + s.Wc / 2 - 2.5, row, bx, by, ps, flip, false, true)
+    }
+
+    func CuLunchLine(_ phase: String) -> String
+    {
+        if phase == "start" { return L("x_lunch_start") }
+        if phase == "nap" { return L("x_lunch_nap") }
+        if phase == "end" { return L("x_lunch_end") }
+        return L("x_lunch_talk")
+    }
+
+    // ---------- 櫃子裡：輕輕呼吸、偶爾歪頭、換邊看；晚上睡（貓窩著） ----------
+    func DrawCuShelf(_ g: Graphics, _ fx: Int, _ fy: Int, _ ps: Int, _ cell: Rectangle, _ tt: Double)
+    {
+        let p = CuPose()
+        let s: CuSprite = P.Spr
+        let br = Math.Sin(tt * 1.9)
+        p.BodySy = 1 + br * 0.03
+        if !s.Rig { p.Sy = 1 + br * 0.02; p.Sx = 1 - br * 0.01 }
+        let tilt = (tt % 6.1) < 1.1 ? Math.Sin((tt % 6.1) / 1.1 * Math.PI) : 0
+        p.HeadRot = tilt * 8; if !s.Rig { p.Rot = tilt * 3 }
+        if Night
+        {
+            let legH = Double(s.H - s.Hip) / Double(s.R)
+            if Persona == "cat" && s.Rig { p.NoLegs = true; p.UpY = legH * 0.92; p.HeadY = 0.3; p.HeadRot = 4 }
+            else { p.HeadRot = 10; p.HeadY = 0.3; if !s.Rig { p.Rot = 5 } }
+            if s.HasFrame("sleep") { p.Frame = "sleep"; p.Rot = 0 }
+        }
+        let flip = (Math.Floor(tt / 9) % 2) == 1
+        CuDraw(g, p, Double(fx), Double(fy), ps, flip)
+        CuAccessories(g, p, fx - 6 * ps, fy - 16 * ps, ps, flip, false)
+        if w.Lunch { CuLunchShelf(g, fx - 6 * ps, fy - 16 * ps, ps, flip) }
+    }
+
+    // 外出中的格子：淡淡的剪影
+    func CuGhost(_ g: Graphics, _ fx: Int, _ fy: Int, _ ps: Int, _ night: Bool)
+    {
+        let s: CuSprite = P.Spr
+        var mb = 0, cw = 0, ch = 0
+        Pet.CuCanvasSize(s, &cw, &ch, &mb)
+        let c = Bitmap(cw, ch, PixelFormat.Format32bppArgb)
+        do { let cg = Graphics.FromImage(c); cg.Clear(Color.Transparent); Pet.CuCompose(cg, s, CuPose(), cw / 2, ch - mb, nil) }
+        let a = P.Accent
+        let cm = ColorMatrix([
+            [0, 0, 0, 0, 0], [0, 0, 0, 0, 0], [0, 0, 0, 0, 0],
+            [0, 0, 0, Double(night ? 34 : 42) / 255.0, 0], [Double(a.R) / 255.0, Double(a.G) / 255.0, Double(a.B) / 255.0, 0, 1]])
+        do {
+            let ia = ImageAttributes()
+            ia.SetColorMatrix(cm)
+            let sc = Double(ps) / Double(s.R)
+            let im = g.InterpolationMode
+            g.InterpolationMode = s.Pixel ? InterpolationMode.NearestNeighbor : InterpolationMode.HighQualityBilinear
+            g.DrawImage(c, Rectangle(CInt(Double(fx) - Double(cw) / 2.0 * sc), CInt(Double(fy) - Double(ch - mb) * sc), CInt(Double(cw) * sc), CInt(Double(ch) * sc)), 0, 0, cw, ch, GraphicsUnit.Pixel, ia)
+            g.InterpolationMode = im
+        }
+    }
+
+    func CuShelfRows() -> Int
+    {
+        let hat = (w.SeasonNow == "xmas" || Level() >= 3) && Double(P.Spr.HeadW) / Double(P.Spr.R) >= 5 ? 3 : 0
+        return CInt(Math.Ceiling(P.Spr.Hc * 1.04)) + hat + 1
+    }
+}
+
+// ================= 一隻自己做的公仔：個性和動作 =================
+extension Pet
+{
+    func CuDo(_ act: String, _ dur: Double) { cuAct = act; cuT = 0; SetState("cu", dur) }
+
+    // 每一格（StepSpecial 最前面）：落地壓扁、專屬動作
+    func CuStep(_ dt: Double) -> Bool
+    {
+        if cuLandT > 0 { cuLandT -= dt }
+        if cuIgnoreCd > 0 { cuIgnoreCd -= dt }
+        if cuPushCd > 0 { cuPushCd -= dt }
+        if cuPrev == "air" && state != "air" && state != "drag" { cuLandT = 0.2 }
+        cuPrev = state
+        if state != "cu" { return false }
+        cuT += dt
+        let cp = Cursor.Position
+        switch cuAct
+        {
+        case "pushwalk":
+            if Math.Abs(cuX - Cx) > 4
+            {
+                dir = cuX > Cx ? 1 : -1
+                if MoveOnGround(dt, P.Speed * k) { return true }
+                if (dir > 0 && Cx > cuX) || (dir < 0 && Cx < cuX) { x = cuX - Double(SW) / 2.0 }
+            }
+            else { dir = cuPushDir; CuDo("push", 1.5) }
+            if t < 0 { SetState("idle", 1) }
+            return true
+        case "push":
+            if cuT - dt < 0.55 && cuT >= 0.55 { CuPushItem() }
+            if t < 0 { SetState("idle", R(1.5, 3)) }
+            return true
+        case "ignore":
+            if t < 0 { CuDo("comeback", 4.5) }
+            return true
+        case "comeback":
+            do {
+                let dx = Double(cp.X) - Cx
+                if Math.Abs(dx) < 14 * k || t < 0 { dir = dx >= 0 ? 1 : -1; Hug(L("x_comeback"), 2.6); return true }
+                dir = dx > 0 ? 1 : -1
+                _ = MoveOnGround(dt, P.Speed * 1.3 * k)
+            }
+            return true
+        case "fetchback":
+            do {
+                let dx = Double(cp.X) - Cx
+                if w.Holder !== self { SetState("idle", 1); return true }
+                if Math.Abs(dx) < 16 * k || t < 0
+                {
+                    w.ReleaseBall(Cx + Double(dir) * 7 * k, y + Double(SH) - 8 * k, Double(dir) * 30 * k, -60 * k)
+                    Say(L("x_fetch_back"), 2.2); AddHeart()
+                    CuDo("wag", 1.8)
+                    return true
+                }
+                dir = dx > 0 ? 1 : -1
+                if MoveOnGround(dt, 150 * k) { return true }
+            }
+            return true
+        case "zoom":
+            if Math.Floor(cuT / 0.8) != Math.Floor((cuT - dt) / 0.8) { dir = -dir }
+            if MoveOnGround(dt, 210 * k) { return true }
+            if t < 0 { CuDo("wag", 1.4); Say(L("x_wag"), 1.6) }
+            return true
+        default:
+            if cuAct == "wag" && rnd.NextDouble() < dt * 2 { AddHeart() }
+            if t < 0 && !InScene { SetState("idle", R(1, 2)) }
+            return true
+        }
+    }
+
+    // 招牌動作（右鍵選單）
+    func CuSignature()
+    {
+        if !Grounded() && state != "cu" { return }
+        switch Persona
+        {
+        case "cool": CuDo("cool", 2.2); Say(L("x_sig"), 1.8)
+        case "shy":
+            do {
+                let o: Pet! = w.Nearest(self)
+                if o != nil && Math.Abs(o.Cx - Cx) < 500 * k && Math.Abs(o.Foot - Foot) < 3 { HideBehindPet(o) } else { CuDo("shy", 2.4) }
+                Say(L("x_sig"), 1.8); Mark(4)
+            }
+        case "funny": Say(L("x_sig"), 1.6); rolling = true; dizzyOnLand = true; Jump(Double(dir) * 60 * k, -400 * k)
+        case "cat": GoSleep(); t = R(8, 14); Say(L("x_loaf"), 1.8)
+        case "dog": CuDo("zoom", 2.6); Say(L("x_sig"), 1.4)
+        default:
+            Say(L("x_sig"), 1.4)
+            if !JumpToPlatform() { Jump(Double(dir) * 90 * k, -460 * k) }
+            afterLand = "cuhop"
+        }
+    }
+
+    func CuAct(_ a: String) -> Bool
+    {
+        switch a
+        {
+        case "sit": if Grounded() { CuDo("sit", R(3, 5)); Say(L("x_sit"), 1.6) }; return true
+        case "wag": if Grounded() { CuDo("wag", 2.2); Say(L("x_wag"), 1.6) }; return true
+        case "loaf": if Grounded() { GoSleep(); t = R(8, 14); Say(L("x_loaf"), 1.8) }; return true
+        case "push": if !CuPushStart() { Say(L("x_ignore"), 1.6) }; return true
+        case "ignore": if Grounded() { CuDo("ignore", 2.5); Say(L("x_ignore"), 1.8) }; return true
+        default: break
+        }
+        return false
+    }
+
+    // 連點三下
+    func CuCombo()
+    {
+        Say(L("tickle"), 1.8)
+        if !Grounded() || state == "dizzy" { return }
+        switch Persona
+        {
+        case "cool": CuDo("cool", 1.6)
+        case "shy": CuDo("shy", 2); Mark(4)
+        case "funny": SetState("spin", 0.9); Jump(0, -320 * k); rolling = true
+        case "cat": CuDo("ignore", 2)
+        case "dog": CuDo("wag", 2)
+        default: Jump(Double(dir) * 40 * k, -360 * k); afterLand = "cuhop"
+        }
+    }
+
+    // 摸一下：喵系偶爾不理你（過一下又自己跑回來）
+    func CuPat() -> Bool
+    {
+        if Persona != "cat" || Night || !Grounded() || state == "dizzy" || state == "sleep" || cuIgnoreCd > 0 || rnd.NextDouble() > 0.3 { return false }
+        cuIgnoreCd = 60
+        dir = Double(Cursor.Position.X) > Cx ? -1 : 1
+        CuDo("ignore", R(2.2, 3.4))
+        Say(L("x_ignore"), 2.0)
+        return true
+    }
+
+    // 從閒置回來：汪系開心地跳兩下
+    func CuWelcome() -> Bool
+    {
+        if Persona != "dog" || !Grounded() { return false }
+        Jump(0, -380 * k); afterLand = "cuhop"
+        Say(L("x_return"), 3); AddHeart(); AddHeart()
+        return true
+    }
+
+    func CuLand(_ a: String) -> Bool
+    {
+        if a == "cuhop" { Jump(Double(dir) * 20 * k, -260 * k); AddHeart(); return true }
+        if a == "cufetch" { if w.Holder === self { CuDo("fetchback", 5) } else { SetState("idle", 1) }; return true }
+        return false
+    }
+
+    // 球碰到他：汪系叼回來給你；喵系撥一下；其他人踢回去
+    func CuBall()
+    {
+        if Persona == "dog"
+        {
+            // 叼住；在空中接到的話落地再叼回來
+            w.HoldBall(self)
+            if Grounded() { CuDo("fetchback", 5) } else { afterLand = "cufetch" }
+            Say(L("ball_catch"), 1.6)
+            return
+        }
+        Say(L("ball_catch"), 1.8)
+        KickBallToCursor(Persona == "cat" ? 0.6 : 1.0)
+        if Grounded() { SetState("kick", 0.5) }
+    }
+
+    // 出錯了：害羞的躲起來、喵系不理、汪系跳起來、搞笑的轉暈
+    func CuReact(_ why: String)
+    {
+        if why != "errors" { return }
+        switch Persona
+        {
+        case "shy": do { let o: Pet! = w.Nearest(self); if o != nil { HideBehindPet(o) } else { CuDo("shy", 2.6) }; Mark(4) }
+        case "cat": CuDo("ignore", 2.4)
+        case "funny": SetState("dizzy", 1.6)
+        case "cool": CuDo("cool", 2)
+        default: Jump(0, -340 * k); Mark(1)
+        }
+    }
+
+    // 走到視窗邊：喵系常常坐在邊邊，偶爾把東西推下去
+    func CuEdge(_ right: Bool) -> Int
+    {
+        switch Persona
+        {
+        case "cat":
+            if rnd.NextDouble() < 0.25 && cuPushCd <= 0 { cuPushDir = right ? 1 : -1; dir = cuPushDir; CuDo("push", 1.5); return 2 }
+            if rnd.NextDouble() < 0.7 { dir = -dir; SetState("idle", R(2, 5)); return 2 }
+            return 0
+        case "shy": if rnd.NextDouble() < 0.75 { dir = -dir; return 1 }; return 0
+        case "cool": if rnd.NextDouble() < 0.5 { dir = -dir; return 1 }; return 0
+        case "dog": if rnd.NextDouble() < 0.3 { dir = -dir; return 1 }; return 0
+        default: break
+        }
+        if rnd.NextDouble() < 0.4 { dir = -dir; return 1 }
+        return 0
+    }
+
+    // 喵系：走到視窗邊，把一個小杯子推下去
+    func CuPushStart() -> Bool
+    {
+        if supH == IntPtr.Zero || !Grounded() { return false }
+        let right = (Double(supR) - Cx) < (Cx - Double(supL)) ? true : (rnd.NextDouble() < 0.5)
+        cuPushDir = right ? 1 : -1
+        cuX = right ? Double(supR) - Double(SW) * 0.15 : Double(supL) + Double(SW) * 0.15
+        if cuX < Double(supL) + Double(SW) * 0.3 && cuX > Double(supR) - Double(SW) * 0.3 { return false }
+        CuDo("pushwalk", 8)
+        return true
+    }
+
+    func CuPushItem()
+    {
+        cuPushCd = 90
+        let ex = cuPushDir > 0 ? Math.Max(Cx + Double(SW) * 0.4, Double(supR) + 6 * k) : Math.Min(Cx - Double(SW) * 0.4, Double(supL) - 6 * k)
+        let wa = w.WA(ex, y + Double(SH))
+        let from = PointF(Cx + Double(cuPushDir) * Double(SW) * 0.45, Foot - 3 * Double(S))
+        let to = PointF(ex + Double(cuPushDir) * 30 * k, Double(wa.Bottom) - 3 * Double(S))
+        w.CuToss(Pet.MUG, P, from, to)
+        Say(L("x_push"), 2.4)
+    }
+
+    func CuDecide(_ r: Double, _ wa: Rectangle)
+    {
+        let ps = Persona
+        if ps == "cat"
+        {
+            if supH != IntPtr.Zero
+            {
+                // 在視窗上：坐著看風景、窩著睡、偶爾推東西
+                if r < 0.32 { SetState("idle", R(4, 9)); return }
+                if r < 0.46 { GoSleep(); t = R(10, 20); if rnd.NextDouble() < 0.4 { Say(L("x_loaf"), 1.8) }; return }
+                if r < 0.56 && cuPushCd <= 0 && CuPushStart() { return }
+            }
+            else if r < 0.28 && JumpToPlatform() { return }
+        }
+        if ps == "dog" && r < 0.12 { CuDo("wag", R(1.4, 2.4)); if rnd.NextDouble() < 0.4 { Say(L("x_wag"), 1.4) }; return }
+        if ps == "dog" && r < 0.17 { CuDo("zoom", R(1.8, 3)); return }
+        if ps == "shy" && r < 0.10 { CuDo("shy", R(2, 3.5)); return }
+        let r2 = rnd.NextDouble()
+        let idle = ps == "cool" || ps == "shy" || ps == "cat" ? 0.30 : (ps == "dog" ? 0.10 : 0.15)
+        let hop = ps == "lively" ? 0.24 : (ps == "funny" ? 0.16 : (ps == "cool" || ps == "shy" ? 0.08 : 0.14))
+        let sig = ps == "funny" || ps == "lively" ? 0.08 : 0.05
+        var c = idle
+        if r2 < c { SetState("idle", R(1.5, 4.5)); return }
+        c += hop
+        if r2 < c { if !JumpToPlatform() { Hop() }; return }
+        c += sig
+        if r2 < c { CuSignature(); return }
+        c += 0.05
+        if r2 < c { Hug(L("hugs"), 2.2); return }
+        c += Night ? 0.05 : 0.03
+        if r2 < c { Knock(L("knock"), "ambient"); return }
+        c += 0.04
+        if r2 < c && lateCd <= 0 && LateLine() != nil { LateTick(); return }
+        c += 0.03
+        if r2 < c && SeasonLine() != nil { Say(SeasonLine(), 3); SetState("idle", 3); return }
+        c += 0.08
+        if r2 < c { SetState("idle", 2.5); Say(L("talk"), 2.4); return }
+        dir = rnd.NextDouble() < 0.5 ? -1 : 1; SetState("walk", R(3, 6))
+    }
+
+    // 測試用：直接叫某個專屬動作
+    func CuTest(_ a: String)
+    {
+        switch a
+        {
+        case "jumpwin": _ = JumpToPlatform()
+        case "push": if !CuPushStart() { Say("（不在視窗上）", 1) }
+        case "ignore": CuDo("ignore", 2.5); Say(L("x_ignore"), 2)
+        case "return": _ = CuWelcome()
+        case "loaf": GoSleep(); t = 12
+        default: _ = CuAct(a)
+        }
+    }
+
+    // 右鍵選單「一起玩」
+    func CuMenuItems() -> [[String]]
+    {
+        var sig: String
+        switch Persona
+        {
+        case "cool": sig = "耍帥一下"
+        case "shy": sig = "躲起來偷看"
+        case "funny": sig = "表演翻跟斗"
+        case "cat": sig = "窩成貓貓窩"
+        case "dog": sig = "暴衝跑一圈"
+        default: sig = "蹦蹦跳"
+        }
+        var l: [[String]] = []
+        l.append(["抱抱 ♥", "hug"]); l.append(["打招呼", "hi"]); l.append(["敲敲螢幕", "knock"])
+        l.append([sig, "sig"])
+        if Persona == "dog" { l.append(["搖尾巴", "wag"]) }
+        if Persona == "cat" { l.append(["把東西推下去", "push"]) }
+        l.append(["跳到別的視窗上", "jump"]); l.append(["坐下", "sit"]); l.append(["睡覺", "sleep"])
+        l.append([Persona == "dog" ? "丟球給他（會撿回來）" : "丟球給他", "ball"])
+        return l
+    }
+}
+
+// ================= World：我的櫃、選單、pipe 指令、重新載入 =================
+
+extension World
+{
+    var CuLineup: Bool { return lineup == Pal.Mine }
+
+    // 小道具（喵系推下去的杯子）
+    func CuToss(_ art: [String], _ owner: Pal, _ a: PointF, _ b: PointF) { Toss(art, owner, a, b, 0.75, 14 * k, true, 1.6, nil) }
+
+    // 串場：自己做的公仔 × 任何一隻（打招呼抱抱、聊天、傳球）
+    func CuPairScene(_ key: String, _ a0: Pet!, _ b0: Pet!)
+    {
+        if a0 == nil || b0 == nil { return }
+        var a: Pet = a0, b: Pet = b0
+        if !a.P.Cu && b.P.Cu { let t = a; a = b; b = t }
+        if !a.P.Cu { return }
+        let A: Pet = a, B: Pet = b
+        let pick = rnd.Next(3)
+        Begin(A, B)
+        let on: String = B.P.Name
+        if pick == 0
+        {
+            At(0) { [self] in Face(A, B); A.ScenePose("idle", 8); B.ScenePose("idle", 8); A.Say(A.L("x_pair_hi", "o", on), 2.2) }
+            At(2.3) { B.ScenePose("wave", 1.4); B.Say(B.P.Cu ? B.L("x_pair_hi", "o", A.P.Name) : B.L("hi"), 2.2) }
+            At(4.8) { [self] in Face(A, B); A.ScenePose("hug", 2.4); B.ScenePose("hug", 2.4); A.Say(A.L("hugs"), 2.2) }
+            At(7.6) { }
+        }
+        else if pick == 1
+        {
+            At(0) { [self] in Face(A, B); A.ScenePose("idle", 10); B.ScenePose("idle", 10); A.Say(A.L("x_pair_ask", "o", on), 2.4) }
+            At(2.6) { B.ScenePose("hop", 0); B.Say(B.L("talk"), 2.4) }
+            At(5.2) { A.ScenePose("dance", 1.6); A.Say(A.L("x_pair_react", "o", on), 2.2) }
+            At(7.6) { A.Say(A.L("x_pair_bye", "o", on), 1.8) }
+            At(9.6) { }
+        }
+        else
+        {
+            let ball: [String] = [".yy.", "yyyy", "yyyy", ".yy."]
+            At(0) { [self] in Face(A, B); A.ScenePose("idle", 12); B.ScenePose("idle", 12); A.Say(A.L("x_pair_ball", "o", on), 2) }
+            var tt = 1.6
+            for i in 0..<4
+            {
+                let from: Pet = i % 2 == 0 ? A : B, to: Pet = i % 2 == 0 ? B : A
+                At(tt) { [self] in from.ScenePose("kick", 0.4); Toss(ball, A.P, from.HandPoint(), to.HandPoint(), 0.7, 40 * k, true, 0, { to.ScenePose("hop", 0) }) }
+                tt += 1.1
+            }
+            At(tt + 0.4) { [self] in Face(A, B); B.Say(B.P.Cu ? B.L("x_pair_ball_end", "o", A.P.Name) : B.L("ball_catch"), 2); A.ScenePose("hug", 2); A.Say(A.L("x_pair_ball_end", "o", on), 2) }
+            At(tt + 3) { }
+        }
+    }
+
+    // 通知、提醒、搶票：自己做的公仔用自己個性的開場白
+    static func CuFlavor(_ id: String, _ kind: String, _ night: Bool) -> String?
+    {
+        let p: Pal! = Pal.Get(id)
+        if p == nil || !p.Cu { return nil }
+        var a: [String] = []
+        if night && p.Lines.TryGetValue("x_" + kind + "_d", &a) && a.count > 0 { return a[Random().Next(a.count)] }
+        if p.Lines.TryGetValue("x_" + kind, &a) && a.count > 0 { return a[Random().Next(a.count)] }
+        return nil
+    }
+
+    // 讀書小幫手：自己做的公仔用自己個性的句子（52_study.swift 的 ExamPrefix／ExamTail／LateNightLine／CourseLine 會先問這裡）
+    static func CuStudy(_ id: String, _ key: String, _ hm: String?, _ t: String?, _ h: String?) -> String?
+    {
+        let p: Pal! = Pal.Get(id)
+        var a: [String] = []
+        if p == nil || !p.Cu || !p.Lines.TryGetValue(key, &a) || a.count == 0 { return nil }
+        return a[Random().Next(a.count)].Replace("{hm}", hm ?? "").Replace("{t}", t ?? "").Replace("{h}", h ?? "")
+    }
+
+    static func CuTicket(_ id: String, _ stage: Int, _ n: String, _ h: String) -> String?
+    {
+        let p: Pal! = Pal.Get(id)
+        var a: [String] = []
+        if p == nil || !p.Cu || !p.Lines.TryGetValue("x_ticket" + String(stage), &a) || a.count == 0 { return nil }
+        return a[Random().Next(a.count)].Replace("{t}", n).Replace("{h}", h)
+    }
+
+    // ---------- 重新載入（新做／改過／刪掉一隻之後） ----------
+    func CuReload(_ pet: String)
+    {
+        CuStore.Reset(false)
+        if lineup == Pal.Mine && !Pal.HasCustom() { SwitchLineup(Pal.Classic, ""); return }
+        if lineup != Pal.Mine { return }
+        // 跟 SwitchLineup 一樣，只是同一櫃也要重建（公仔的資料換了）
+        AbortScene()
+        ClearProps()
+        if BallOn { BallOn = false; Holder = nil; if ballF != nil { ballF.Hide() } }
+        SaveUsage(); SaveOut()
+        let outIds = List<String>()
+        for p in outOrder { if p.Out { outIds.Add(p.P.Id) } }
+        current = nil
+        for p in Pets { p.Out = false; p.CloseForms() }
+        Pets.Clear(); outOrder.Clear(); active = nil; lastBroadcast = ""
+        defaultPet = DefaultPetFor(pet)
+        var seed = Environment.TickCount
+        for p in Pal.Lineup(lineup) { Pets.Add(Pet(self, p, S, seed)); seed += 1 }
+        RenderShelf()
+        if Get(pet) != nil && !outIds.Contains(pet) { outIds.Add(pet) }
+        if Single { let sp = SinglePet(); outIds.RemoveAll { (x: String) -> Bool in x != sp } }
+        var delay = 0.3
+        for oid in outIds
+        {
+            let pp: Pet! = Get(oid)
+            if pp == nil { continue }
+            let p2: Pet = pp
+            Later(delay) { [self] in BringOut(p2, oid == pet) }
+            delay += 0.45
+        }
+        active = Get(pet) ?? Get(defaultPet)
+        Broadcast()
+        CuBroadcast()
+    }
+
+    // 新做好一隻（或改好）：住進我的櫃、叫他出來
+    func CuCreated(_ id: String, _ first: Bool, _ edit: Bool)
+    {
+        CuStore.Reset(false)
+        let mine = List<String>(Pal.MineIds())
+        if !mine.Contains(id)
+        {
+            if mine.Count >= 4
+            {
+                // 滿了：換掉一隻作客的（沒有就換掉最後一隻）
+                var gi = -1
+                var i = mine.Count - 1
+                while i >= 0 { if CuStore.Get(mine[i]) == nil { gi = i; break }; i -= 1 }
+                mine.RemoveAt(gi >= 0 ? gi : mine.Count - 1)
+            }
+            mine.Insert(0, id)
+            Pal.SaveMine(mine)
+        }
+        CuBroadcast()   // 先讓 VS Code 知道有「我的櫃」，等一下換櫃的通知它才認得
+        if first || Single
+        {
+            ApplySetup(Pal.Mine, true, id, first)
+            if lineup == Pal.Mine { CuReload(id) }
+        }
+        else if lineup != Pal.Mine { SwitchLineup(Pal.Mine, id) }
+        else { CuReload(id) }
+        let p: Pet! = Get(id)
+        if p != nil && !edit { let pp: Pet = p; Later(1.4) { if pp.Out { pp.Say(pp.L("hi"), 3) } } }
+        CuBroadcast()
+    }
+
+    func CuDeleted(_ id: String)
+    {
+        if Single && singleId == id { singleId = ""; World.WriteText("mode.txt", "single ") }
+        let mine = List<String>(Pal.MineIds()); mine.Remove(id); Pal.SaveMine(mine)
+        if lineup == Pal.Mine { let l: Pet! = Lead(); CuReload(l != nil && l.P.Id != id ? l.P.Id : "") }
+        else { CuStore.Reset(false) }
+        CuBroadcast()
+    }
+
+    // ---------- 小屋選單：做一隻自己的公仔、我的公仔（編輯／匯出／刪除）、我的櫃放誰、分享短片 ----------
+    func CuHouseMenu(_ m: ContextMenuStrip)
+    {
+        m.Items.Add(ToolStripSeparator())
+        m.Items.Add(ToolStripLabel("自己做的公仔"))
+        m.Items.Add("做一隻自己的公仔（貓狗照片也可以）…", nil, { [self] in CuOpenMaker(nil, false) })
+        let cus = CuStore.All()
+        if cus.Count > 0
+        {
+            let my = ToolStripMenuItem("我的公仔")
+            for cm in cus
+            {
+                let mm: CuMeta = cm
+                let it = ToolStripMenuItem(mm.Name)
+                it.DropDownItems.Add("叫他出來", nil, { [self] in CuCallOut(mm.Id) })
+                it.DropDownItems.Add("修改（去背、動作、個性）…", nil, { [self] in CuOpenMaker(mm.Id, false) })
+                it.DropDownItems.Add("匯出成檔案（傳給朋友）…", nil, { [self] in CuExportDialog(mm.Id) })
+                let del = ToolStripMenuItem("刪除…")
+                del.DropDownItems.Add("確定刪除「" + mm.Name + "」（不能復原）", nil, { [self] in CuDelete(mm.Id) })
+                it.DropDownItems.Add(del)
+                my.DropDownItems.Add(it)
+            }
+            m.Items.Add(my)
+            let room = ToolStripMenuItem("我的櫃要放誰（最多 4 隻）")
+            let mine = List<String>(Pal.MineIds())
+            for cm in cus { CuMineItem(room, cm.Id, cm.Name, mine) }
+            let guests = ToolStripMenuItem("請內建公仔來作客")
+            for gid in Pal.Guests { let gp: Pal! = Pal.Get(gid); if gp != nil { CuMineItem(guests, gid, gp.Name, mine) } }
+            room.DropDownItems.Add(guests)
+            m.Items.Add(room)
+        }
+        m.Items.Add("匯入朋友的公仔（.deskpal）…", nil, { [self] in CuImportDialog(false) })
+        m.Items.Add("做分享短片（GIF）…", nil, { [self] in ShareClip(nil) })
+    }
+
+    func CuMineItem(_ parent: ToolStripMenuItem, _ id: String, _ name: String, _ mine: List<String>)
+    {
+        let it = ToolStripMenuItem(name)
+        it.CheckOnClick = true
+        it.Checked = mine.Contains(id)
+        it.Click = { [self] in CuToggleMine(id); it.Checked = List<String>(Pal.MineIds()).Contains(id) }
+        parent.DropDownItems.Add(it)
+    }
+
+    func CuToggleMine(_ id: String)
+    {
+        let mine = List<String>(Pal.MineIds())
+        let l: Pet! = Lead()
+        if mine.Contains(id)
+        {
+            var cus = 0; for x in mine { if CuStore.Get(x) != nil { cus += 1 } }
+            if cus <= 1 && CuStore.Get(id) != nil { l.Say("我的櫃至少要有一隻自己做的公仔喔", 2.4); return }
+            mine.Remove(id)
+        }
+        else
+        {
+            if mine.Count >= 4 { l.Say("我的櫃只有 4 格，先拿掉一隻再放", 2.4); return }
+            mine.Add(id)
+        }
+        Pal.SaveMine(mine)
+        if lineup == Pal.Mine { CuReload(l != nil && mine.Contains(l.P.Id) ? l.P.Id : "") }
+    }
+
+    func CuCallOut(_ id: String)
+    {
+        let mine = List<String>(Pal.MineIds())
+        if !mine.Contains(id) { if mine.Count >= 4 { mine.RemoveAt(mine.Count - 1) }; mine.Insert(0, id); Pal.SaveMine(mine) }
+        if Single { singleId = id; World.WriteText("mode.txt", "single " + id) }
+        if lineup != Pal.Mine { SwitchLineup(Pal.Mine, id) }
+        else { CuReload(id) }
+    }
+
+    func CuDelete(_ id: String)
+    {
+        let m: CuMeta! = CuStore.Get(id)
+        if m == nil { return }
+        CuStore.Delete(id)
+        CuDeleted(id)
+        Lead().Say("「" + m.Name + "」刪掉了。想他的話可以再做一隻 🧸", 2.8)
+    }
+
+    // 右鍵選單：分享短片；自己做的公仔可以直接修改
+    func CuPetMenu(_ p: Pet, _ m: ContextMenuStrip)
+    {
+        m.Items.Add("做分享短片（GIF）…", nil, { [self] in ShareClip(p) })
+        if p.P.Cu { m.Items.Add("修改 " + p.P.Name + "（去背、動作、個性）…", nil, { [self] in CuOpenMaker(p.P.Id, false) }) }
+    }
+
+    // ---------- 跟 VS Code 說：自己做的公仔有誰（名字、狀態列圖示、側邊欄小圖） ----------
+    func CuPalsJson() -> String
+    {
+        var l: [Any] = []
+        for m in CuStore.All()
+        {
+            let d = Dict<String, Any>()
+            d["id"] = m.Id; d["name"] = m.Name; d["emoji"] = Pal.PersonaEmoji(m.Persona)
+            let ic = Path.Combine(CuStore.Dir(m.Id), "icon.png")
+            d["img"] = File.Exists(ic) ? ic : ""
+            // 側邊欄的小公仔要講的話（跟桌面上同一套個性）
+            let p: Pal! = Pal.Get(m.Id)
+            if p != nil
+            {
+                let lines = Dict<String, Any>()
+                for k in ["hi", "hi_d", "save", "save_d", "pats", "pats_d", "tickle", "errors", "errors_d", "errors_ok", "errors_ok_d", "rest", "rest_d", "wake", "wake_d", "sleep", "night_on", "night_off", "x_sig"]
+                { var a: [String] = []; if p.Lines.TryGetValue(k, &a) { lines[k] = a.map { $0 as Any } } }
+                d["lines"] = lines
+            }
+            l.append(d)
+        }
+        let o = Dict<String, Any>()
+        o["pals"] = l; o["mine"] = Pal.MineIds().map { $0 as Any }
+        return JavaScriptSerializer().Serialize(o)
+    }
+    // ---------- 測試用：離屏隔離模式下放一個假視窗（喵系坐視窗、推東西要用） ----------
+    func CuFake(_ h: IntPtr) -> Bool { return App.Isolated && h == cuFakeH }
+    func CuFakeWins(_ nw: List<WinInfo>, _ nc: Dict<IntPtr, WinInfo>, _ np: List<Plat>)
+    {
+        if !App.Isolated || cuFakeR.IsEmpty { return }
+        let wi = WinInfo(); wi.H = cuFakeH; wi.L = cuFakeR.Left; wi.T = cuFakeR.Top; wi.R = cuFakeR.Right; wi.B = cuFakeR.Bottom; wi.Z = nw.Count
+        nw.Add(wi); nc[cuFakeH] = wi
+        let p = Plat(); p.H = cuFakeH; p.Top = wi.T; p.Left = wi.L + 4; p.Right = wi.R - 4; p.WinLeft = wi.L; np.Add(p)
+    }
+    func CuSetFakeWin(_ r: Rectangle) { cuFakeR = App.Isolated ? r : Rectangle.Empty }
+
+    func CuHello(_ c: Client) { World.Send(c, "pals " + CuPalsJson() + "\n") }
+    func CuBroadcast() { let s = "pals " + CuPalsJson() + "\n"; lock(clients) { for c in clients { World.Send(c, s) } } }
+}
+
+// ===== 54_custom_lines.swift =====
+// 54_custom_lines.swift — port of extension/desktop/DeskPals.CustomLines.cs（generated by a script from the C#; strings are byte-identical）
+// Desk Pals：自己做的公仔（上傳圖片）的六種個性台詞：活潑、酷酷、害羞、搞笑、喵系、汪系。
+import Foundation
+
+extension Pal {
+    static let Personas: [String] = ["lively", "cool", "shy", "funny", "cat", "dog"]
+
+    static func PersonaName(_ id: String) -> String
+    {
+        switch id
+        {
+            case "cool": return "酷酷"
+            case "shy": return "害羞"
+            case "funny": return "搞笑"
+            case "cat": return "喵系"
+            case "dog": return "汪系"
+            default: break
+        }
+        return "活潑"
+    }
+
+    static func PersonaDesc(_ id: String) -> String
+    {
+        switch id
+        {
+            case "cool": return "話很少，但很可靠"
+            case "shy": return "小小聲，默默陪你"
+            case "funny": return "冷笑話停不下來"
+            case "cat": return "高冷，但會偷偷黏你"
+            case "dog": return "超黏人，看到你就搖尾巴"
+            default: break
+        }
+        return "精神超好、愛撒嬌"
+    }
+
+    static func PersonaEmoji(_ id: String) -> String
+    {
+        switch id
+        {
+            case "cool": return "😎"
+            case "shy": return "🙈"
+            case "funny": return "🤡"
+            case "cat": return "🐱"
+            case "dog": return "🐶"
+            default: break
+        }
+        return "🧸"
+    }
+
+    func CuLines(_ persona: String, _ me: String)
+    {
+        switch persona
+        {
+            case "cool": CuCool(me)
+            case "shy": CuShy(me)
+            case "funny": CuFunny(me)
+            case "cat": CuCat(me)
+            case "dog": CuDog(me)
+            default: CuLively(me)
+        }
+    }
+
+    // ---------------- 活潑：精神超好、愛撒嬌 ----------------
+    func CuLively(_ me: String)
+    {
+        Say("talk", "今天也要元氣滿滿！", "嘿嘿，我在這裡喔～", "要不要喝口可樂？🥤", "螢幕好大，可以跑好遠！", me + "陪你一起努力！", "你剛剛是不是在偷笑？", "伸個懶腰～嗯～！");
+        Say("talk_d", "下班時間到啦！快收工～", "還在忙？明天的你會接手的！", "我電量剩一格了…你也是吧？", "關機關機～回家吃好料！", "今天辛苦了，剩下的明天再說！");
+        Say("save", "存好了！讚啦 👍", "存檔成功～安心！", "收好收好！", "叮！存起來了");
+        Say("save_d", "存好了！那就可以下班啦", "存檔完成～快關機！", "存好了，走走走回家！");
+        Say("pats", "嘿嘿，好舒服～", "再摸一下嘛！", "你今天超棒的！", "被摸摸就充飽電了！", "我最喜歡你的手了 ♥", "慢慢來，我陪你", "你辛苦了，換我摸摸你！", "嘻嘻，好癢又好開心");
+        Say("pats_d", "摸完就回家喔！", "我的電量分你，快下班！", "嘿嘿…明天再繼續摸", "今天好累吧？回家休息～");
+        Say("pats_hi", "能遇到你真的好幸運！", "我們是最強搭檔！", "最最最喜歡你了 ♥", "每天都要這樣陪著你！");
+        Say("hugs", "抱抱！充電中～", "大大的抱抱！♥", "(つ´ω`)つ 抱緊緊", "抱一下，煩惱飛走！");
+        Say("hugs_d", "晚安抱抱！然後回家", "抱完就要下班喔！", "抱抱～路上小心 ♥");
+        Say("knock", "叩叩！看我看我！👀", "嗨～螢幕外面的你！", "我可以出去玩嗎？", "你在發呆嗎？叩叩！");
+        Say("knock_d", "叩叩！下班時間到了啦！", "我看到你還在加班喔…", "叩叩叩！快回家！");
+        Say("newwin", "新視窗！我去看看！", "哇，這是什麼？", "衝啊～去探險！");
+        Say("newwin_d", "又開新的？明天再看啦", "不准再開了，下班！");
+        Say("hi", "嗨！我是" + me + "！👋"); Say("hi_d", "嗨～下班了嗎？");
+        Say("wake", "嗯…是你！我醒了！"); Say("wake_d", "嗯…我在充電…你也去睡嘛");
+        Say("dizzy", "轉圈圈～頭好暈 @@"); Say("dizzy_d", "暈暈的…該睡了…");
+        Say("dizzy_ok", "好了！我又活過來了！"); Say("dizzy_ok_d", "好了…那我們下班吧");
+        Say("tickle", "哈哈哈好癢！", "不要啦～哈哈哈！", "再一次！不對，不要了！哈哈"); Say("tickle_d", "哈…好啦最後一次喔");
+        Say("pat10", "今天第 {n} 次摸摸了！好開心 ♥"); Say("pat10_d", "第 {n} 次了～摸完就回家喔");
+        Say("levelup", me + "好感度 Lv{n}！拿到「{u}」了 ♥"); Say("levelup_d", "Lv{n}！「{u}」明天戴給你看！");
+        Say("missed", "你好幾天沒摸我了…🥺"); Say("missed_d", "好久沒摸了…明天要記得喔");
+        Say("hover", "你在摸我嗎？嘿嘿～");
+        Say("seek", "咦？那是什麼！"); Say("seek_lost", "啊，跑掉了…"); Say("seek_got", "抓到滑鼠了！耶！");
+        Say("drag", "哇～飛起來了！"); Say("throw", "咻～～～！");
+        Say("shelf_in", "我回家囉，掰掰 👋"); Say("shelf_in_d", "我先回家充電，你也是喔");
+        Say("shelf_out", "出來玩囉！耶～"); Say("shelf_out_d", "咦？天黑了你怎麼還在？");
+        Say("ball_go", "球！我來了！", "等我等我～", "這球我接定了！"); Say("ball_go_d", "最後一球喔！");
+        Say("ball_catch", "接到了！傳回去～", "好球！再來！", "我是不是很厲害？"); Say("ball_catch_d", "接到了，然後下班！");
+        Say("ball_end", "不玩了嗎？下次再玩！⚾"); Say("ball_end_d", "不玩了～那就回家吧");
+        Say("ball_far", "球跑好遠喔～");
+        Say("back", "我回來啦！"); Say("back_d", "回來了…該下班囉");
+        Say("share_end", "分享結束～我回來了！");
+        Say("welcome", "你回來了！我等你好久！"); Say("welcome_d", "回來了？是要來關機的吧！");
+        Say("rest", "已經 {n} 分鐘了！起來喝口可樂、伸展一下！🥤"); Say("rest_d", "{n} 分鐘了…喝完可樂就下班吧 🥤");
+        Say("night_on", "下班時間到了！"); Say("night_off", "早安！元氣補滿了 ☀");
+        Say("sleep", "晚安～zZ"); Say("sleep_d", "晚安…你也快去睡");
+        Say("jump", "跳～！"); Say("nojump", "附近沒有可以跳的地方耶");
+        Say("errors", "哇！有 {n} 個錯誤！一起修！"); Say("errors_d", "{n} 個錯誤…明天再修啦");
+        Say("errors_ok", "錯誤清光光！抱一個！"); Say("errors_ok_d", "修好了！可以下班啦！");
+        Say("typing", "打字好快！加油加油！", "手指在飛耶！🔥", "衝衝衝！我幫你打氣！"); Say("typing_d", "打這麼快，是想快點下班吧？");
+        Say("done", "{who} 做完了！快來看 👀"); Say("done_d", "{who} 做完了～你也該收工啦");
+        Say("wait", "{who} 在等你回答喔～👋"); Say("wait_d", "{who} 在等你，回完就下班！");
+        Say("ask", "{who} 有問題要問你！🙋"); Say("ask_d", "{who} 在問你問題，回完就回家");
+        Say("stuck_tool", "{who} 停在「{tool}」{n} 分鐘了，要你按允許嗎？"); Say("stuck_tool_d", "{who} 停了 {n} 分鐘，去按一下就下班");
+        Say("stuck", "{who} 好像卡住了…{n} 分鐘沒動，去看看？"); Say("stuck_d", "{who} 卡住 {n} 分鐘了，看完就回家");
+        Say("unstuck", "{who} 又動起來了！👍"); Say("unstuck_d", "{who} 動了！");
+        Say("tag", "上版成功！🎆"); Say("tag_dev", "測試機上好了！🎆"); Say("tag_prod", "上正式機了！辛苦了 🎉"); Say("tag_d", "上版成功！那現在可以下班了吧？");
+        Say("late23", "好晚了耶，早點休息好不好 🌙"); Say("late12", "午餐吃了沒？"); Say("late15", "下午茶時間～來罐可樂吧 🥤");
+        Say("late_d", "下班時間早就過了喔！"); Say("late_dd", "這麼晚了，關機睡覺！");
+        Say("g_late", "這麼晚還在忙？我陪你 🌙"); Say("g_morning", "早安！今天也元氣滿滿 ☀"); Say("g_noon", "午安～吃飯了沒？");
+        Say("g_evening", "晚上了，辛苦啦～"); Say("g_day", me + "出來玩囉！"); Say("g_d", "下班時間了！你怎麼還開著電腦？");
+        Say("app_browser", "在逛什麼？我也要看！"); Say("app_code", "寫 code 時間！加油！"); Say("app_excel", "好多數字喔，加油！");
+        Say("app_ppt", "做簡報？我幫你盯著！"); Say("app_word", "寫文件～慢慢來"); Say("app_chat", "有人找你嗎？"); Say("app_files", "在找檔案？我幫你找！");
+        Say("app_other", "這是什麼？我也來看看！");
+        Say("app_code_d", "還在寫？下班啦！"); Say("app_chat_d", "下班了，訊息明天再回！"); Say("app_office_d", "這份明天做也來得及！"); Say("app_other_d", "你在忙什麼？該下班了吧！");
+        Say("s_birthday", "生日快樂！🎂 今天你最大！", "祝你生日快樂～許個願吧！", "今天什麼都不准煩惱 ♥");
+        Say("s_cny", "新年快樂！恭喜發財 🧧", "紅包拿來～騙你的啦！");
+        Say("s_xmas", "聖誕快樂！🎄", "我想要的禮物是你準時下班！");
+        Say("s_newyear", "新年快樂！今年也請多指教 ✨");
+        Say("s_halloween", "不給糖就搗蛋！🎃", "我今天扮成…一隻超可愛的公仔！");
+        Say("s_friday", "星期五了！撐住！", "小週末～今天準時下班好不好？");
+        Say("morning", "早安！" + me + "報到 ☀", "早安～今天也一起加油！");
+        Say("goodnight", "晚安～我先回家了 👋", "今天辛苦了，晚安！");
+        Say("nag", "下班時間到啦！", "快回家吃飯！", "電腦也要休息啦～");
+        Say("react", "！", "怎麼了怎麼了？", "咦？");
+        // ---- 串場、午餐、小幫手 ----
+        Say("x_goal", "進球！🏀 我超準的！"); Say("x_goal_d", "進球！🏀 好，回家！");
+        Say("x_cheer", "好球！", "耶～進了！"); Say("x_miss", "差一點點！再一次！");
+        Say("x_photo", "耶～比個 YA！", "笑～咪咪～");
+        Say("x_pair_hi", "{o}！一起玩嘛！"); Say("x_pair_ask", "{o}，你今天開心嗎？"); Say("x_pair_react", "嘿嘿，那就好！");
+        Say("x_pair_ball", "接球～{o}！"); Say("x_pair_ball_end", "好好玩！再來一次！"); Say("x_pair_bye", "掰掰～等等見！");
+        Say("x_lunch_start", "午餐時間！打開便當囉 🔔"); Say("x_lunch_nap", "吃飽飽…睡一下下"); Say("x_lunch_end", "回來工作囉！元氣滿滿！");
+        Say("x_lunch_talk", "便當好香！", "這塊排骨分你一半！", "吃飽才有力氣！");
+        Say("x_quiet_on", "噓～我安靜陪你 🤫"); Say("x_quiet_off", "安靜時間結束～可以講話了嗎？");
+        Say("x_focus_end", "專注結束！休息 5 分鐘 ☕ 你超厲害！"); Say("x_wrap", "今天的我們超棒：");
+        // ---- 通知開場白 ----
+        Say("x_ci-run", "CI 出發囉："); Say("x_ci-ok", "CI 過了！耶！"); Say("x_ci-fail", "啊！CI 失敗了："); Say("x_cmd-ok", "指令跑完了："); Say("x_cmd-fail", "咦？指令失敗了：");
+        Say("x_meeting", "等一下要開會喔："); Say("x_meeting-now", "會議開始了！快去："); Say("x_jira", "有新的 Jira！"); Say("x_worklog", "今天的工作日誌好了："); Say("x_worklog_d", "日誌好了！然後下班：");
+        Say("x_remind", "⏰ 提醒你："); Say("x_pc-cpu", "電腦好燙喔："); Say("x_pc-ram", "記憶體快滿了："); Say("x_pc-disk", "硬碟快滿了：");
+        Say("x_net-down", "網路斷了！"); Say("x_net-up", "網路回來了！👍"); Say("x_vpn", "連不到公司網路（VPN 斷了？）"); Say("x_download", "下載好了！");
+        Say("x_ticket0", "🎫 {t} 還有 {h}開賣！先登入、綁好付款"); Say("x_ticket1", "🎫 {t} 再 30 分鐘開賣，網頁先開好！"); Say("x_ticket2", "🎫 {t} 剩 10 分鐘！好緊張～");
+        Say("x_ticket3", "🎫 準備！手指放在按鈕上！"); Say("x_ticket4", "🎫 開搶！！衝衝衝！");
+        Say("x_share", "我家的" + me + "住進我電腦了 ✨ #我的桌面公仔 #DeskPals", me + "每天在我桌面上跑來跑去 ✨ #我的桌面公仔 #DeskPals");
+        Say("x_sig", "看我的招牌跳跳！"); Say("x_sit", "坐一下下～");
+        // ---- 小動作 ----
+        Say("x_push", "（推推）啊，掉下去了！"); Say("x_ignore", "哼，我在忙！（其實沒有）"); Say("x_comeback", "好啦好啦，我回來陪你了！");
+        Say("x_loaf", "縮成一團…好舒服"); Say("x_wag", "開心到停不下來！"); Say("x_fetch_back", "撿回來了！再丟一次！"); Say("x_return", "你回來了！耶耶耶！");
+    }
+
+    // ---------------- 酷酷：話很少，但很可靠 ----------------
+    func CuCool(_ me: String)
+    {
+        Say("talk", "嗯。", "我在。", "可樂？🥤", "這畫面，還行。", "別急，穩著來。", me + "，待命中。", "今天沒什麼難得倒你。");
+        Say("talk_d", "下班了。", "收工。", "明天再說。", "該走了。", "工作不會跑，你該走了。");
+        Say("save", "存了。", "穩。👍", "存檔，完成。", "嗯，收好了。");
+        Say("save_d", "存了。走吧。", "存好了。關機。");
+        Say("pats", "……還行。", "嗯，不錯。", "別一直摸。…再一下。", "你今天表現不差。", "我在，放心。", "辛苦了。", "（點頭）");
+        Say("pats_d", "摸完就下班。", "不是捨不得你，是你該走了。", "嗯。明天再來。");
+        Say("pats_hi", "你是我認可的人。", "跟你一組，不錯。", "……我挺喜歡你的。");
+        Say("hugs", "……就一下。", "抱。", "(　´_ゝ`)つ 嗯。");
+        Say("hugs_d", "抱完回家。", "一下下就好。走吧。");
+        Say("knock", "叩。你在看我？", "嗯，看到你了。", "出去走走。可以吧？");
+        Say("knock_d", "叩叩。下班了沒？", "還在加班？不酷。");
+        Say("newwin", "新的。我看看。", "嗯？", "有東西，去看。");
+        Say("newwin_d", "別開了。", "明天再看。");
+        Say("hi", me + "。嗨。"); Say("hi_d", "嗯。下班了沒？");
+        Say("wake", "……醒了。"); Say("wake_d", "我在休息。你也是。");
+        Say("dizzy", "停。頭暈。@@"); Say("dizzy_d", "……暈。睡了。");
+        Say("dizzy_ok", "沒事。"); Say("dizzy_ok_d", "沒事。走吧。");
+        Say("tickle", "……不准笑。", "別鬧。", "哼。…好吧，有點癢。"); Say("tickle_d", "夠了。下班。");
+        Say("pat10", "今天第 {n} 次。…還不錯。"); Say("pat10_d", "第 {n} 次了。回家。");
+        Say("levelup", "好感度 Lv{n}。「{u}」，收下了。"); Say("levelup_d", "Lv{n}。「{u}」。明天戴。");
+        Say("missed", "幾天沒摸了。我沒在等。…真的。"); Say("missed_d", "好幾天了。哼。");
+        Say("hover", "嗯？");
+        Say("seek", "那是什麼。"); Say("seek_lost", "跑了。"); Say("seek_got", "抓到。");
+        Say("drag", "放我下來。"); Say("throw", "……咻。");
+        Say("shelf_in", "回去待著。"); Say("shelf_in_d", "我回去了。你也是。");
+        Say("shelf_out", "出來透透氣。"); Say("shelf_out_d", "天黑了，你還在？");
+        Say("ball_go", "球。", "我來。", "接得到。"); Say("ball_go_d", "最後一球。");
+        Say("ball_catch", "接住。還你。", "好球。", "簡單。"); Say("ball_catch_d", "接到了。收工。");
+        Say("ball_end", "不玩了？行。⚾"); Say("ball_end_d", "不玩了。下班。");
+        Say("ball_far", "太遠了。");
+        Say("back", "回來了。"); Say("back_d", "回來了。該走了。");
+        Say("share_end", "分享完了。我回來了。");
+        Say("welcome", "回來了。…歡迎。"); Say("welcome_d", "回來關機的吧。");
+        Say("rest", "{n} 分鐘了。起來，喝口可樂，伸展一下。🥤"); Say("rest_d", "{n} 分鐘了。喝完可樂就下班。🥤");
+        Say("night_on", "下班時間。"); Say("night_off", "早。☀");
+        Say("sleep", "睡了。"); Say("sleep_d", "你也睡。");
+        Say("jump", "跳。"); Say("nojump", "沒地方跳。");
+        Say("errors", "{n} 個錯誤。冷靜。"); Say("errors_d", "{n} 個錯誤。明天修。");
+        Say("errors_ok", "清空了。漂亮。"); Say("errors_ok_d", "清完了。下班。");
+        Say("typing", "速度不錯。", "手感來了。", "穩，繼續。"); Say("typing_d", "打這麼快，想下班？");
+        Say("done", "{who} 做完了。去看。"); Say("done_d", "{who} 做完了。你也收工。");
+        Say("wait", "{who} 在等你。"); Say("wait_d", "{who} 在等你。回完就走。");
+        Say("ask", "{who} 有問題問你。"); Say("ask_d", "{who} 在問。回完下班。");
+        Say("stuck_tool", "{who} 停在「{tool}」{n} 分鐘了。要你按允許？"); Say("stuck_tool_d", "{who} 停 {n} 分鐘了。按完就走。");
+        Say("stuck", "{who} 卡住 {n} 分鐘了。去看。"); Say("stuck_d", "{who} 卡 {n} 分鐘。看完下班。");
+        Say("unstuck", "{who} 動了。"); Say("unstuck_d", "{who} 動了。");
+        Say("tag", "上版成功。🎆"); Say("tag_dev", "測試機，過。🎆"); Say("tag_prod", "正式機，上了。幹得好。🎉"); Say("tag_d", "上完了。下班。");
+        Say("late23", "很晚了。睡。🌙"); Say("late12", "吃飯。"); Say("late15", "可樂時間。🥤");
+        Say("late_d", "下班時間過了。"); Say("late_dd", "太晚了。關機。");
+        Say("g_late", "這時間還在？我陪你。🌙"); Say("g_morning", "早。☀"); Say("g_noon", "午安。吃了沒。");
+        Say("g_evening", "晚上了。辛苦。"); Say("g_day", me + "，上線。"); Say("g_d", "下班了。電腦還開著？");
+        Say("app_browser", "在看什麼。"); Say("app_code", "寫 code。很好。"); Say("app_excel", "數字。加油。");
+        Say("app_ppt", "簡報。排版我盯著。"); Say("app_word", "寫文件。慢慢來。"); Say("app_chat", "有人找你。"); Say("app_files", "找檔案？");
+        Say("app_other", "這是什麼。");
+        Say("app_code_d", "還寫？下班。"); Say("app_chat_d", "明天再回。"); Say("app_office_d", "明天做。"); Say("app_other_d", "該走了。");
+        Say("s_birthday", "生日快樂。🎂 今天你最大。", "生日快樂。…蛋糕，我準備了。");
+        Say("s_cny", "新年快樂。🧧", "紅包？我不缺。…你給的話我收。");
+        Say("s_xmas", "聖誕快樂。🎄", "禮物？你準時下班就好。");
+        Say("s_newyear", "新年快樂。今年也一起。✨");
+        Say("s_halloween", "不給糖就搗蛋。🎃", "我不扮裝。…好啦，戴個面具。");
+        Say("s_friday", "星期五。撐住。", "週末快到了。準時走。");
+        Say("morning", "早。" + me + "報到。", "早。今天也穩穩的。");
+        Say("goodnight", "晚安。我先回去了。", "今天辛苦了。晚安。");
+        Say("nag", "下班。", "走了。", "關機。");
+        Say("react", "！", "怎麼了。", "嗯？");
+        // ---- 串場、午餐、小幫手 ----
+        Say("x_goal", "進球。🏀 沒懸念。"); Say("x_goal_d", "進球。🏀 下班。");
+        Say("x_cheer", "不錯。", "嗯，漂亮。"); Say("x_miss", "偏了。再來。");
+        Say("x_photo", "（帥氣站好）", "……拍吧。");
+        Say("x_pair_hi", "{o}。"); Say("x_pair_ask", "{o}，最近還好？"); Say("x_pair_react", "嗯。那就好。");
+        Say("x_pair_ball", "{o}，接著。"); Say("x_pair_ball_end", "還行。下次再來。"); Say("x_pair_bye", "走了。");
+        Say("x_lunch_start", "午餐。便當，開動。🔔"); Say("x_lunch_nap", "吃飽了。閉眼一下。"); Say("x_lunch_end", "回來工作。");
+        Say("x_lunch_talk", "便當，不錯。", "滷蛋留到最後。", "安靜吃飯。");
+        Say("x_quiet_on", "安靜。我懂。🤫"); Say("x_quiet_off", "安靜結束。");
+        Say("x_focus_end", "專注結束！休息 5 分鐘 ☕ 幹得好。"); Say("x_wrap", "今天的紀錄：");
+        // ---- 通知開場白 ----
+        Say("x_ci-run", "CI 跑了："); Say("x_ci-ok", "CI 過了。"); Say("x_ci-fail", "CI 掛了。冷靜："); Say("x_cmd-ok", "指令跑完："); Say("x_cmd-fail", "指令失敗：");
+        Say("x_meeting", "等等開會："); Say("x_meeting-now", "開會了。去："); Say("x_jira", "新的 Jira："); Say("x_worklog", "日誌好了："); Say("x_worklog_d", "日誌好了。下班：");
+        Say("x_remind", "⏰ 提醒："); Say("x_pc-cpu", "電腦很燙："); Say("x_pc-ram", "記憶體快滿："); Say("x_pc-disk", "硬碟快滿：");
+        Say("x_net-down", "網路斷了。"); Say("x_net-up", "網路回來了。👍"); Say("x_vpn", "連不到公司網路（VPN 斷了？）"); Say("x_download", "下載好了：");
+        Say("x_ticket0", "🎫 {t} 還有 {h}開賣。先登入、綁好付款"); Say("x_ticket1", "🎫 {t} 30 分鐘後開賣。網頁先開"); Say("x_ticket2", "🎫 {t} 剩 10 分鐘。專心");
+        Say("x_ticket3", "🎫 準備。手指就位"); Say("x_ticket4", "🎫 開搶。上！");
+        Say("x_share", me + "住進我的桌面了。很酷。😎 #我的桌面公仔 #DeskPals", "我的桌面多了一位" + me + "。 #我的桌面公仔 #DeskPals");
+        Say("x_sig", "看好了。"); Say("x_sit", "坐一下。");
+        // ---- 小動作 ----
+        Say("x_push", "（推）……掉了。"); Say("x_ignore", "（轉頭）現在不想理人。"); Say("x_comeback", "……好吧，陪你。");
+        Say("x_loaf", "休息。別吵。"); Say("x_wag", "……我才沒有很開心。"); Say("x_fetch_back", "球。還你。"); Say("x_return", "回來了。…等你很久。");
+    }
+
+    // ---------------- 害羞：小小聲，默默陪你 ----------------
+    func CuShy(_ me: String)
+    {
+        Say("talk", "那個…今天也加油喔", "（小聲）我在這裡…", "要、要喝口可樂嗎？🥤", "被你看到了…", me + "會…安靜陪你", "那個…你辛苦了", "（偷看你一眼）");
+        Say("talk_d", "那個…該下班了吧？", "（小聲）天黑了喔…", "你…要不要回家休息？", "明、明天再做也可以的…", "我會等你明天回來…");
+        Say("save", "存、存好了…👍", "（小聲）存檔成功", "收好了喔…", "那個…存起來了");
+        Say("save_d", "存好了…那、回家吧？", "存好了…可以下班了…");
+        Say("pats", "欸…（臉紅）", "那、那個…好舒服", "被摸了…嘿嘿", "（小聲）可以再一下嗎…", "你…今天很努力喔", "我會一直在的…", "謝、謝謝你…");
+        Say("pats_d", "那個…摸完要回家喔", "（小聲）你要早點休息…", "嘿嘿…明天見…");
+        Say("pats_hi", "能遇到你…真好", "（小聲）最喜歡你了…♥", "我…會一直陪你");
+        Say("hugs", "抱、抱抱…（臉紅）", "（小小聲）抱一下…", "(⁄ ⁄•⁄ω⁄•⁄ ⁄)つ ♥");
+        Say("hugs_d", "抱完…就回家喔", "晚安抱抱…（小聲）");
+        Say("knock", "叩、叩…你在嗎？", "那個…可以看我一下嗎…", "（輕輕敲）我想出去…");
+        Say("knock_d", "叩…那個…下班了喔", "你…還在加班嗎…");
+        Say("newwin", "新、新視窗…", "那個…我去看一下", "（探頭）");
+        Say("newwin_d", "又開新的…明天再看好不好", "那個…別再開了…");
+        Say("hi", "那個…我是" + me + "…👋"); Say("hi_d", "嗨…（小聲）下班了嗎？");
+        Say("wake", "唔…是你…我醒了"); Say("wake_d", "唔…我在睡…你也去睡…");
+        Say("dizzy", "頭、頭好暈…@@"); Say("dizzy_d", "暈暈的…想睡了…");
+        Say("dizzy_ok", "好、好了…沒事"); Say("dizzy_ok_d", "沒事了…回家吧…");
+        Say("tickle", "不、不要啦…好癢…", "（縮成一團）嘻…", "會、會笑出來啦…"); Say("tickle_d", "最、最後一次喔…");
+        Say("pat10", "今天第 {n} 次了…（臉紅）"); Say("pat10_d", "第 {n} 次…那個…該回家了");
+        Say("levelup", "好感度 Lv{n}…拿到「{u}」了（小聲）"); Say("levelup_d", "Lv{n}…「{u}」…明天戴給你看…");
+        Say("missed", "那個…你好幾天沒摸我了…🥺"); Say("missed_d", "好久沒摸了…（小聲）");
+        Say("hover", "那、那個…你在摸我嗎…");
+        Say("seek", "那、那是什麼…"); Say("seek_lost", "不見了…"); Say("seek_got", "抓、抓到了…♥");
+        Say("drag", "哇、哇…放我下來…"); Say("throw", "呀啊～～");
+        Say("shelf_in", "我、我回去了…掰掰"); Say("shelf_in_d", "我先回去了…你也早點休息");
+        Say("shelf_out", "那個…我出來了…"); Say("shelf_out_d", "天、天黑了耶…你還在…");
+        Say("ball_go", "球、球…我去撿！", "等、等我一下…", "我、我試試看！"); Say("ball_go_d", "最後一球…好嗎？");
+        Say("ball_catch", "接、接到了！給你…", "（小聲）我接到了耶", "還你…"); Say("ball_catch_d", "接到了…那個…回家吧");
+        Say("ball_end", "不玩了嗎…下次再一起 ⚾"); Say("ball_end_d", "不玩了…那…下班吧");
+        Say("ball_far", "球、球跑好遠…");
+        Say("back", "我、我回來了…"); Say("back_d", "回來了…（小聲）");
+        Say("share_end", "分享結束了…我可以出來了嗎？");
+        Say("welcome", "你回來了…（小聲）我有在等"); Say("welcome_d", "你回來了…是要回家了嗎？");
+        Say("rest", "那個…已經 {n} 分鐘了，起來喝口可樂、伸展一下好嗎？🥤"); Say("rest_d", "{n} 分鐘了…喝完可樂…就下班吧？🥤");
+        Say("night_on", "那個…下班時間到了…"); Say("night_off", "早、早安…☀");
+        Say("sleep", "晚安…（小聲）"); Say("sleep_d", "晚安…你也要睡喔…");
+        Say("jump", "嘿、嘿咻…"); Say("nojump", "那個…附近沒地方跳…");
+        Say("errors", "那個…有 {n} 個錯誤…"); Say("errors_d", "{n} 個錯誤…明天再修好不好…");
+        Say("errors_ok", "錯誤都沒了…好厲害！"); Say("errors_ok_d", "修好了…那可以回家了…");
+        Say("typing", "打、打好快…", "（小聲）加油…", "好、好厲害…"); Say("typing_d", "打這麼快…是想早點下班嗎…");
+        Say("done", "那個…{who} 做完了…"); Say("done_d", "{who} 做完了…你也收工好嗎…");
+        Say("wait", "那個…{who} 在等你回答…"); Say("wait_d", "{who} 在等你…回完就回家…");
+        Say("ask", "{who} 好像有問題要問你…"); Say("ask_d", "{who} 在問你…回完就下班…");
+        Say("stuck_tool", "那個…{who} 停在「{tool}」{n} 分鐘了，是不是在等你按允許？"); Say("stuck_tool_d", "{who} 停了 {n} 分鐘…按一下就回家…");
+        Say("stuck", "{who} 好像卡住了…{n} 分鐘沒動…"); Say("stuck_d", "{who} 卡住 {n} 分鐘了…看完就下班…");
+        Say("unstuck", "{who} 動起來了…太好了"); Say("unstuck_d", "{who} 動了…");
+        Say("tag", "上、上版成功了！🎆"); Say("tag_dev", "測試機上好了…🎆"); Say("tag_prod", "上正式機了…辛苦了 🎉"); Say("tag_d", "上版成功了…那…下班吧？");
+        Say("late23", "那個…好晚了…早點睡好嗎 🌙"); Say("late12", "那個…吃午餐了嗎？"); Say("late15", "要、要不要來罐可樂？🥤");
+        Say("late_d", "下班時間…早就過了喔…"); Say("late_dd", "好晚了…關機睡覺吧…");
+        Say("g_late", "這麼晚…我陪你一下下 🌙"); Say("g_morning", "早、早安…☀"); Say("g_noon", "午安…吃飯了嗎？");
+        Say("g_evening", "晚上了…辛苦了"); Say("g_day", "那個…" + me + "出來了…"); Say("g_d", "那個…下班了…你怎麼還在？");
+        Say("app_browser", "在看什麼…（偷看）"); Say("app_code", "寫 code…我安靜陪你"); Say("app_excel", "好多格子…加油");
+        Say("app_ppt", "做簡報…好厲害"); Say("app_word", "寫文件…慢慢來"); Say("app_chat", "有、有人找你…"); Say("app_files", "在找東西嗎…");
+        Say("app_other", "那個…這是什麼？");
+        Say("app_code_d", "還在寫…該下班了…"); Say("app_chat_d", "訊息…明天再回好嗎"); Say("app_office_d", "這個…明天做也可以…"); Say("app_other_d", "那個…該回家了…");
+        Say("s_birthday", "生、生日快樂！🎂", "（小聲）我有準備蛋糕…生日快樂");
+        Say("s_cny", "新年快樂…恭喜發財 🧧", "紅、紅包…不用給我啦…");
+        Say("s_xmas", "聖誕快樂…🎄", "（小聲）想跟你一起過聖誕…");
+        Say("s_newyear", "新年快樂…今年也請多指教 ✨");
+        Say("s_halloween", "不、不給糖就…搗蛋…🎃", "我扮成…（躲到後面）");
+        Say("s_friday", "星期五了…再撐一下", "快週末了…今天早點下班好嗎");
+        Say("morning", "早、早安…" + me + "來了", "早安…今天也一起加油…");
+        Say("goodnight", "晚安…我先回去了", "今天辛苦了…晚安（小聲）");
+        Say("nag", "那個…下班了…", "（拉拉你）回家吧…", "該休息了喔…");
+        Say("react", "！", "怎、怎麼了？", "欸？");
+        // ---- 串場、午餐、小幫手 ----
+        Say("x_goal", "進、進球了！🏀"); Say("x_goal_d", "進球了…那、回家吧 🏀");
+        Say("x_cheer", "好、好厲害…", "（小聲）進了耶"); Say("x_miss", "差一點點…");
+        Say("x_photo", "（躲到後面一點）", "那、那個…要拍了嗎…");
+        Say("x_pair_hi", "那個…{o}，你好…"); Say("x_pair_ask", "{o}…可以一起玩嗎？"); Say("x_pair_react", "（小聲）好開心…");
+        Say("x_pair_ball", "{o}…接、接球！"); Say("x_pair_ball_end", "好好玩…謝謝你"); Say("x_pair_bye", "那、那我先走了…");
+        Say("x_lunch_start", "那個…午餐時間，便當打開了 🔔"); Say("x_lunch_nap", "吃飽了…睡一下…"); Say("x_lunch_end", "回、回來工作了…");
+        Say("x_lunch_talk", "便當好好吃…", "（小口小口吃）", "這個…分你一口？");
+        Say("x_quiet_on", "我、我會很安靜的…🤫"); Say("x_quiet_off", "安靜時間結束了…（小聲）");
+        Say("x_focus_end", "專注結束！休息 5 分鐘 ☕ 你好厲害…"); Say("x_wrap", "那個…今天的我們：");
+        // ---- 通知開場白 ----
+        Say("x_ci-run", "CI…開始跑了："); Say("x_ci-ok", "CI 過了…太好了！"); Say("x_ci-fail", "那個…CI 失敗了："); Say("x_cmd-ok", "指令跑完了…："); Say("x_cmd-fail", "指令…失敗了：");
+        Say("x_meeting", "那個…等一下要開會："); Say("x_meeting-now", "會議開始了…快去："); Say("x_jira", "有新的 Jira…："); Say("x_worklog", "今天的日誌好了…："); Say("x_worklog_d", "日誌好了…然後回家吧：");
+        Say("x_remind", "⏰ 那個…提醒你："); Say("x_pc-cpu", "電腦好燙…："); Say("x_pc-ram", "記憶體快滿了…："); Say("x_pc-disk", "硬碟快滿了…：");
+        Say("x_net-down", "網、網路斷了！"); Say("x_net-up", "網路回來了…👍"); Say("x_vpn", "那個…連不到公司網路（VPN 斷了？）"); Say("x_download", "下載好了…：");
+        Say("x_ticket0", "🎫 {t} 還有 {h}開賣…先登入、綁好付款喔"); Say("x_ticket1", "🎫 {t} 再 30 分鐘…網頁先開好"); Say("x_ticket2", "🎫 {t} 剩 10 分鐘…好緊張…");
+        Say("x_ticket3", "🎫 準、準備…手指放好"); Say("x_ticket4", "🎫 開搶！衝、衝啊！");
+        Say("x_share", "我家的" + me + "害羞地住進我電腦了 🙈 #我的桌面公仔 #DeskPals", me + "每天偷偷在我桌面上陪我 ✨ #我的桌面公仔 #DeskPals");
+        Say("x_sig", "那、那我表演一下…"); Say("x_sit", "坐、坐一下…");
+        // ---- 小動作 ----
+        Say("x_push", "啊…（不小心推下去了）"); Say("x_ignore", "（害羞到轉過去）"); Say("x_comeback", "那個…我回來了…");
+        Say("x_loaf", "縮起來…比較安心…"); Say("x_wag", "（開心得扭來扭去）"); Say("x_fetch_back", "撿、撿回來了…給你"); Say("x_return", "你回來了！…（小聲）好想你");
+    }
+
+    // ---------------- 搞笑：冷笑話停不下來 ----------------
+    func CuFunny(_ me: String)
+    {
+        Say("talk", "我今天的 KPI：可愛。", "要喝口可樂嗎？氣泡跟我一樣多 🥤", "Bug 是 feature 的遠房親戚。", "我是公仔，不是工仔。", me + "：專業陪笑三十年", "螢幕為什麼這麼亮？因為有我。", "今日運勢：大吉，因為有我。");
+        Say("talk_d", "加班費我看不到，你也看不到。", "電腦都想睡了，你呢？", "下班不積極，思想有問題！", "明天的你會感謝今天早睡的你。", "再不走，我要開始講冷笑話了。");
+        Say("save", "存檔！比存錢簡單多了 👍", "存好了，存款就不一定了", "Ctrl+S，人生救命鍵", "存起來！記性比我好");
+        Say("save_d", "存好了，人也該存回家了", "存檔完畢，請攜帶隨身物品下班");
+        Say("pats", "摸頭會長高嗎？試試看", "再摸要收費囉（騙你的）", "這是今日份的摸摸 ♥", "你的手比暖暖包還暖", "被摸到要融化了～", "摸一下，bug 少一個", "我宣布你是今日最佳員工", "嘿嘿，我很好摸吧");
+        Say("pats_d", "摸完打卡下班！", "夜間摸摸加收服務費：早點睡", "摸摸 OK，加班 NO");
+        Say("pats_hi", "你是我的頭號粉絲！", "我們這組合，可以出道了", "我最喜歡你了，這句不搞笑 ♥");
+        Say("hugs", "抱抱！免費的喔", "人體暖暖包啟動！", "(つ´ω`)つ 抱一下不用錢");
+        Say("hugs_d", "晚安抱抱，抱完下班", "抱完這下，電腦關機");
+        Say("knock", "叩叩！外送到了…是我啦 👀", "哈囉～螢幕外的人類！", "叩叩！有人要聽笑話嗎？");
+        Say("knock_d", "叩叩！保全巡邏，請你下班", "叩叩！你的床打電話來找你");
+        Say("newwin", "新視窗！開箱囉！", "這是什麼？我要評分！", "又一個新世界！");
+        Say("newwin_d", "還開？你是視窗收藏家嗎？", "新視窗明天再開，比較新鮮");
+        Say("hi", "嗨！我是" + me + "，請多指教 👋"); Say("hi_d", "晚上好～下班沒？");
+        Say("wake", "我沒睡！我在…閉目養神"); Say("wake_d", "我在充電…你也去充一下");
+        Say("dizzy", "轉轉轉～世界在旋轉 @@"); Say("dizzy_d", "暈了…這就是加班的感覺嗎");
+        Say("dizzy_ok", "復活！我是不死身！"); Say("dizzy_ok_d", "好了…那我們一起下班吧");
+        Say("tickle", "哈哈哈住手！我要報警了！", "癢死了！你犯規！", "哈哈哈…我投降！"); Say("tickle_d", "哈…夜間禁止搔癢！");
+        Say("pat10", "今天第 {n} 次摸摸！破紀錄了嗎？"); Say("pat10_d", "第 {n} 次了，摸摸額度用完，回家吧");
+        Say("levelup", "叮咚！好感度 Lv{n}！獲得「{u}」！"); Say("levelup_d", "Lv{n}！「{u}」明天再秀給你看");
+        Say("missed", "幾天沒摸我了？我要寫信給客服 🥺"); Say("missed_d", "好幾天沒摸…我都快生灰塵了");
+        Say("hover", "滑鼠停我身上？要收停車費喔");
+        Say("seek", "那是什麼？能吃嗎？"); Say("seek_lost", "可惡，被它跑了"); Say("seek_got", "抓到滑鼠！今晚加菜！");
+        Say("drag", "綁架啊——！"); Say("throw", "我會飛——！");
+        Say("shelf_in", "下班打卡，回櫃子囉 👋"); Say("shelf_in_d", "我先下班了，你呢？");
+        Say("shelf_out", "我出來了！掌聲在哪？"); Say("shelf_out_d", "天黑了還叫我出來？加班費咧？");
+        Say("ball_go", "球！看我的魔術接球！", "我是球王！", "讓開讓開！"); Say("ball_go_d", "最後一球，打完收工！");
+        Say("ball_catch", "接到！觀眾請鼓掌！", "好球！我可以去打職棒了", "還你～下一球加點難度"); Say("ball_catch_d", "接到了，然後下班！");
+        Say("ball_end", "不玩了？我還沒表演完耶 ⚾"); Say("ball_end_d", "比賽結束，大家回家！");
+        Say("ball_far", "球跑去度假了…");
+        Say("back", "我回來了！想我嗎？"); Say("back_d", "回來了…順便提醒你該下班了");
+        Say("share_end", "分享完了？輪到我上場了吧！");
+        Say("welcome", "你回來了！我數羊數到第 999 隻了"); Say("welcome_d", "回來了？是回來關機的吧");
+        Say("rest", "已經 {n} 分鐘了！起來喝口可樂、伸展一下，屁股會謝謝你 🥤"); Say("rest_d", "{n} 分鐘了！喝完可樂就下班吧 🥤");
+        Say("night_on", "下班鈴響了！叮叮叮！"); Say("night_off", "早安！今天的我也很好笑 ☀");
+        Say("sleep", "晚安，zZ…（假裝打呼）"); Say("sleep_d", "晚安，你也去睡，不准偷滑手機");
+        Say("jump", "跳！"); Say("nojump", "附近沒地方跳，我又不會飛");
+        Say("errors", "{n} 個錯誤！bug 在開派對嗎"); Say("errors_d", "{n} 個錯誤…讓它們熬夜，你回家");
+        Say("errors_ok", "錯誤歸零！你是除蟲大師！"); Say("errors_ok_d", "全修好了！下班理由 +1");
+        Say("typing", "鍵盤要冒煙了！🔥", "打字速度：光速！", "手指在跳街舞耶！"); Say("typing_d", "打這麼快，是急著下班吧？");
+        Say("done", "{who} 做完了！快來驗收 👀"); Say("done_d", "{who} 做完了，換你下班了");
+        Say("wait", "{who} 在等你回話喔～👋"); Say("wait_d", "{who} 在等你，回完就打卡下班");
+        Say("ask", "{who} 有問題！快舉手回答 🙋"); Say("ask_d", "{who} 在問你，回完就跑");
+        Say("stuck_tool", "{who} 停在「{tool}」{n} 分鐘了，是在等你按允許嗎？"); Say("stuck_tool_d", "{who} 停了 {n} 分鐘，按完一起下班");
+        Say("stuck", "{who} {n} 分鐘沒動了，在冥想嗎？去看看"); Say("stuck_d", "{who} 卡 {n} 分鐘了，看完就回家");
+        Say("unstuck", "{who} 又動了！復活成功 👍"); Say("unstuck_d", "{who} 動了，你也動身回家吧");
+        Say("tag", "上版成功！放煙火 🎆"); Say("tag_dev", "測試機上好了！先放小煙火 🎆"); Say("tag_prod", "上正式機！今晚加雞腿 🎉"); Say("tag_d", "上版成功！那現在可以下班了吧？");
+        Say("late23", "這麼晚了，貓頭鷹都下班了 🌙"); Say("late12", "午餐吃什麼？我推薦…我不能吃"); Say("late15", "下午茶！可樂配洋芋片 🥤");
+        Say("late_d", "下班時間早就過啦！"); Say("late_dd", "現在是睡覺時間，不是工作時間");
+        Say("g_late", "夜貓子你好！我陪你 🌙"); Say("g_morning", "早安！今天的笑點已備妥 ☀"); Say("g_noon", "午安～吃飯皇帝大！");
+        Say("g_evening", "晚上好！辛苦啦～"); Say("g_day", me + "閃亮登場！"); Say("g_d", "下班了還開電腦？電腦也想放假");
+        Say("app_browser", "在逛什麼？購物車別太滿喔"); Say("app_code", "寫 code！bug 退散！"); Say("app_excel", "Excel！格子們排隊報數！");
+        Say("app_ppt", "做簡報？記得放我的照片"); Say("app_word", "寫文件～字數夠嗎？"); Say("app_chat", "有人找你聊天？八卦分我"); Say("app_files", "找檔案？它一定在最後一個資料夾");
+        Say("app_other", "這是什麼？看起來很厲害");
+        Say("app_code_d", "還寫 code？下班才是最好的 commit"); Say("app_chat_d", "下班了，已讀不回是你的權利"); Say("app_office_d", "這份明天做，今天的你已經很棒了"); Say("app_other_d", "不管這是什麼，都該下班了");
+        Say("s_birthday", "生日快樂！🎂 你又升級了！", "生日快樂，蛋糕我先試吃一口", "今天你是壽星，你最大！");
+        Say("s_cny", "新年快樂！紅包拿來 🧧", "恭喜發財，紅包…我收現金");
+        Say("s_xmas", "聖誕快樂！🎄", "聖誕老人說你今年很乖，可以準時下班");
+        Say("s_newyear", "新年快樂！新年新希望：少一點 bug ✨");
+        Say("s_halloween", "不給糖就搗蛋！🎃", "我扮成…一個正常人");
+        Say("s_friday", "星期五！快樂星期五！", "週五了，今天的 bug 下週再說");
+        Say("morning", "早安！" + me + "準時打卡 ☀", "早安～今天也請多指教！");
+        Say("goodnight", "晚安～我先下班囉 👋", "今天辛苦了，夢裡見！");
+        Say("nag", "下班！現在！立刻！", "你的床在哭了", "再不走我要唱歌了");
+        Say("react", "！", "怎麼了怎麼了？", "誰叫我？");
+        // ---- 串場、午餐、小幫手 ----
+        Say("x_goal", "進球！🏀 三分球！"); Say("x_goal_d", "進球！🏀 收工！");
+        Say("x_cheer", "好球！給你按讚", "神射手！"); Say("x_miss", "差一點！裁判，我要看重播！");
+        Say("x_photo", "（比 YA 加鬥雞眼）", "等等，我的瀏海！");
+        Say("x_pair_hi", "{o}！你今天也很好笑嗎？"); Say("x_pair_ask", "{o}，你知道 bug 最怕什麼嗎？"); Say("x_pair_react", "哈哈哈！你比我還好笑！");
+        Say("x_pair_ball", "{o}！魔球來了！"); Say("x_pair_ball_end", "精彩！下一場再戰！"); Say("x_pair_bye", "掰啦，記得想我！");
+        Say("x_lunch_start", "午餐時間！便當開箱 🔔"); Say("x_lunch_nap", "吃飽了…飯後想睡是人之常情"); Say("x_lunch_end", "回來工作！吃飽才有力氣抓 bug");
+        Say("x_lunch_talk", "這個便當我給五顆星", "排骨是我的，不准偷吃", "吃飯皇帝大，bug 等一下");
+        Say("x_quiet_on", "好，我把嘴巴拉上拉鍊 🤫"); Say("x_quiet_off", "安靜結束！我憋了好多笑話");
+        Say("x_focus_end", "專注結束！休息 5 分鐘 ☕ 你是專注之王！"); Say("x_wrap", "今日戰報：");
+        // ---- 通知開場白 ----
+        Say("x_ci-run", "CI 出發！祝它一路順風："); Say("x_ci-ok", "CI 過了！放鞭炮！"); Say("x_ci-fail", "CI 掛了，它需要一點愛："); Say("x_cmd-ok", "指令跑完了："); Say("x_cmd-fail", "指令失敗了，不哭不哭：");
+        Say("x_meeting", "等一下要開會，先去裝水："); Say("x_meeting-now", "會議開始了！快衝："); Say("x_jira", "新的 Jira 來敲門了："); Say("x_worklog", "今天的日誌好了："); Say("x_worklog_d", "日誌好了，然後打卡下班：");
+        Say("x_remind", "⏰ 叮咚！提醒你："); Say("x_pc-cpu", "電腦燙到可以煎蛋了："); Say("x_pc-ram", "記憶體快滿了："); Say("x_pc-disk", "硬碟快塞爆了：");
+        Say("x_net-down", "網路斷了！世界末日！"); Say("x_net-up", "網路回來了！人類得救了 👍"); Say("x_vpn", "連不到公司網路（VPN 斷了？）"); Say("x_download", "下載好了！");
+        Say("x_ticket0", "🎫 {t} 還有 {h}開賣！先登入、綁好付款"); Say("x_ticket1", "🎫 {t} 再 30 分鐘開賣，網頁先開好"); Say("x_ticket2", "🎫 {t} 剩 10 分鐘！手指熱身！");
+        Say("x_ticket3", "🎫 準備！深呼吸，不要手抖"); Say("x_ticket4", "🎫 開搶！！衝啊！");
+        Say("x_share", "我家" + me + "住進我電腦了，還會講冷笑話 ✨ #我的桌面公仔 #DeskPals", me + "在我桌面上班，薪水是摸摸 🤡 #我的桌面公仔 #DeskPals");
+        Say("x_sig", "看我的招牌絕技！"); Say("x_sit", "坐下，休息是為了走更長的路");
+        // ---- 小動作 ----
+        Say("x_push", "（推）喔不，地心引力贏了"); Say("x_ignore", "我在生氣（假的）"); Say("x_comeback", "好啦好啦，氣消了！");
+        Say("x_loaf", "變身：麻糬模式"); Say("x_wag", "開心到搖頭晃腦！"); Say("x_fetch_back", "球撿回來了！有小費嗎？"); Say("x_return", "你回來了！我數羊數到睡著了！");
+    }
+
+    // ---------------- 喵系：高冷，但會偷偷黏你 ----------------
+    func CuCat(_ me: String)
+    {
+        Say("talk", "……喵。", "這個位置是我的。", "罐罐呢？", "（舔爪子）", "你的鍵盤，好溫暖。", me + "在巡視領土。", "（盯著你）……沒事。", "可樂？我喝水就好。🥤");
+        Say("talk_d", "天黑了，該餵我然後去睡。", "下班。我說了算。", "……你還不睡？喵。", "我的晚餐時間到了，你的下班時間也是。", "（打哈欠）你也該休息了。");
+        Say("save", "存好了。喵。", "（踩一下 Ctrl+S）", "嗯，存了。👍", "勉強幫你看著。存好了。");
+        Say("save_d", "存了。快回家餵我。", "存好了。關燈，睡覺。");
+        Say("pats", "……還可以。", "（呼嚕呼嚕）", "下巴…對，就是那裡。", "我沒有很喜歡。…繼續。", "喵～（瞇眼）", "只准摸頭。", "（蹭你的手）");
+        Say("pats_d", "摸完就去睡。", "（呼嚕）…晚了，回家。", "嗯…明天再摸。");
+        Say("pats_hi", "（翻肚子）……只給你看。", "你是我的人類。", "（輕輕咬一下）這是喜歡的意思。");
+        Say("hugs", "……就一下下。喵。", "（勉強被抱）", "(=´ω`=) 抱吧。");
+        Say("hugs_d", "抱完回家。", "（呼嚕）晚安。");
+        Say("knock", "（拍螢幕）喂。", "喵！看這裡。", "（用爪子敲敲）放我出去。");
+        Say("knock_d", "（拍拍）下班了。", "喵…你還在？");
+        Say("newwin", "（耳朵豎起來）", "新的東西…我去聞聞。", "喵？");
+        Say("newwin_d", "不要再開了。", "明天再看。喵。");
+        Say("hi", "喵。我是" + me + "。"); Say("hi_d", "喵…下班了沒？");
+        Say("wake", "（伸懶腰）……幹嘛。"); Say("wake_d", "我在睡。你也是。");
+        Say("dizzy", "喵嗚…頭好暈 @@"); Say("dizzy_d", "暈…睡了…");
+        Say("dizzy_ok", "（甩甩頭）沒事。"); Say("dizzy_ok_d", "好了。回家。");
+        Say("tickle", "（咬你）", "喵！不准摸肚子！", "（踢踢）……再來我就咬了"); Say("tickle_d", "夠了。喵。");
+        Say("pat10", "今天第 {n} 次了。…准了。"); Say("pat10_d", "第 {n} 次。睡覺。");
+        Say("levelup", "好感度 Lv{n}。「{u}」…還算喜歡。"); Say("levelup_d", "Lv{n}。「{u}」。明天戴。");
+        Say("missed", "好幾天沒摸我。…我也沒在等。🥺"); Say("missed_d", "哼。好幾天了。");
+        Say("hover", "（尾巴勾住滑鼠）");
+        Say("seek", "（壓低身體）……獵物。"); Say("seek_lost", "跑了。我本來就不想抓。"); Say("seek_got", "（撲！）抓到了。");
+        Say("drag", "喵嗚——放開！"); Say("throw", "喵～～！（準備四腳著地）");
+        Say("shelf_in", "我回窩了。"); Say("shelf_in_d", "回窩睡覺。你也是。");
+        Say("shelf_out", "（伸懶腰）巡邏時間。"); Say("shelf_out_d", "夜貓出動。…你怎麼還在？");
+        Say("ball_go", "（盯）……喵！", "我要那顆。", "（屁股扭扭）撲！"); Say("ball_go_d", "最後一次。");
+        Say("ball_catch", "抓到了。…不還。…好啦還你。", "（用爪子撥回去）", "太簡單了。"); Say("ball_catch_d", "抓到了。睡覺。");
+        Say("ball_end", "不玩了？我本來就累了 ⚾"); Say("ball_end_d", "不玩了。回家。");
+        Say("ball_far", "太遠了。我不撿。");
+        Say("back", "我回來了。沒有想你。"); Say("back_d", "回來了。");
+        Say("share_end", "分享完了？這裡還是我的地盤。");
+        Say("welcome", "你回來了。…（蹭蹭）"); Say("welcome_d", "回來了。是要回家餵我吧？");
+        Say("rest", "已經 {n} 分鐘了。起來喝口可樂、伸個懶腰，像我這樣。🥤"); Say("rest_d", "{n} 分鐘了。喝完可樂就下班。🥤");
+        Say("night_on", "天黑了。夜貓時間，人類下班。"); Say("night_off", "早。（伸懶腰）☀");
+        Say("sleep", "（縮成一團）zZ"); Say("sleep_d", "睡了。你也睡。");
+        Say("jump", "（輕巧一跳）"); Say("nojump", "沒有高的地方。無聊。");
+        Say("errors", "{n} 個錯誤。（嫌棄）"); Say("errors_d", "{n} 個錯誤。明天再說。");
+        Say("errors_ok", "清乾淨了。…還不錯。"); Say("errors_ok_d", "修好了。下班。");
+        Say("typing", "（想踩你的鍵盤）", "打好快。我也想打。", "（盯著游標）"); Say("typing_d", "打完了就去睡。");
+        Say("done", "{who} 做完了。去看。"); Say("done_d", "{who} 做完了。你也收工。");
+        Say("wait", "{who} 在等你。喵。"); Say("wait_d", "{who} 在等你。回完就睡。");
+        Say("ask", "{who} 在問你。（尾巴甩甩）"); Say("ask_d", "{who} 在問。回完下班。");
+        Say("stuck_tool", "{who} 停在「{tool}」{n} 分鐘了，大概在等你按允許。"); Say("stuck_tool_d", "{who} 停 {n} 分鐘了。按完就回家。");
+        Say("stuck", "{who} {n} 分鐘沒動了。睡著了？去看看。"); Say("stuck_d", "{who} 卡 {n} 分鐘。看完下班。");
+        Say("unstuck", "{who} 動了。喵。"); Say("unstuck_d", "{who} 動了。");
+        Say("tag", "上版成功。賞你摸一下。🎆"); Say("tag_dev", "測試機，過了。🎆"); Say("tag_prod", "上正式機了。今晚開罐罐。🎉"); Say("tag_d", "上完了。下班。");
+        Say("late23", "人類該睡了。🌙"); Say("late12", "午餐。我的罐罐呢？"); Say("late15", "點心時間。可樂給你，肉泥給我 🥤");
+        Say("late_d", "下班時間過了。"); Say("late_dd", "太晚了。關機。睡覺。");
+        Say("g_late", "夜貓子。我陪你。🌙"); Say("g_morning", "早。…我的早餐呢？☀"); Say("g_noon", "午安。吃了沒。");
+        Say("g_evening", "晚上了。辛苦。"); Say("g_day", me + "出巡。"); Say("g_d", "下班了。為什麼還開著電腦？");
+        Say("app_browser", "在看什麼？有貓影片嗎？"); Say("app_code", "寫 code。我坐鍵盤旁邊。"); Say("app_excel", "好多格子。像我的窩。");
+        Say("app_ppt", "簡報？放我的照片。"); Say("app_word", "寫字。我想踩一下。"); Say("app_chat", "有人找你？…不准理別人。"); Say("app_files", "找東西？我幫你推下桌。");
+        Say("app_other", "這是什麼。我聞一下。");
+        Say("app_code_d", "還寫？去睡。"); Say("app_chat_d", "明天再回。現在陪我。"); Say("app_office_d", "明天做。"); Say("app_other_d", "下班。喵。");
+        Say("s_birthday", "生日快樂。🎂 蛋糕上的奶油給我。", "今天你最大。…只有今天。");
+        Say("s_cny", "新年快樂。🧧", "紅包？我要罐罐。");
+        Say("s_xmas", "聖誕快樂。🎄", "禮物拆完，箱子給我。");
+        Say("s_newyear", "新年快樂。今年也歸我管。✨");
+        Say("s_halloween", "不給肉泥就搗蛋。🎃", "我扮成…一隻貓。很像吧？");
+        Say("s_friday", "星期五。早點回來陪我。", "週末到了。你可以整天陪我睡。");
+        Say("morning", "早。" + me + "巡邏開始。", "（伸懶腰）早。今天也陪你。");
+        Say("goodnight", "晚安。我回窩了。", "（呼嚕）晚安。");
+        Say("nag", "下班。", "（躺在鍵盤上）不准再打了。", "回家。");
+        Say("react", "（耳朵一豎）", "喵？", "……嗯？");
+        // ---- 串場、午餐、小幫手 ----
+        Say("x_goal", "（優雅落地）進球。🏀"); Say("x_goal_d", "進球。回窩睡覺 🏀");
+        Say("x_cheer", "……還行。", "（尾巴甩一下）"); Say("x_miss", "偏了。我是故意的。");
+        Say("x_photo", "（看別的地方）", "……拍快點。");
+        Say("x_pair_hi", "{o}。（聞聞）"); Say("x_pair_ask", "{o}，你有罐罐嗎？"); Say("x_pair_react", "（尾巴翹高）…可以。");
+        Say("x_pair_ball", "（撥）{o}，給你。"); Say("x_pair_ball_end", "玩夠了。睡覺。"); Say("x_pair_bye", "（頭也不回地走掉）");
+        Say("x_lunch_start", "午餐。便當裡的魚歸我 🔔"); Say("x_lunch_nap", "吃飽了…（縮成麻糬）"); Say("x_lunch_end", "（伸懶腰）回來工作。");
+        Say("x_lunch_talk", "魚，好吃。", "（偷挖一口便當）", "這塊肉…我先檢查。");
+        Say("x_quiet_on", "安靜？我本來就很安靜。🤫"); Say("x_quiet_off", "安靜結束。可以餵我了。");
+        Say("x_focus_end", "專注結束！休息 5 分鐘 ☕ 來摸我。"); Say("x_wrap", "今天的巡邏報告：");
+        // ---- 通知開場白 ----
+        Say("x_ci-run", "CI 在跑。我盯著："); Say("x_ci-ok", "CI 過了。喵。"); Say("x_ci-fail", "CI 壞了。（嫌棄）："); Say("x_cmd-ok", "指令跑完了："); Say("x_cmd-fail", "指令失敗了。不是我推的：");
+        Say("x_meeting", "等等要開會："); Say("x_meeting-now", "開會了。去吧："); Say("x_jira", "新的 Jira："); Say("x_worklog", "日誌好了："); Say("x_worklog_d", "日誌好了。回家餵我：");
+        Say("x_remind", "⏰ 喵。提醒你："); Say("x_pc-cpu", "電腦好燙，好適合睡："); Say("x_pc-ram", "記憶體快滿了："); Say("x_pc-disk", "硬碟快滿了：");
+        Say("x_net-down", "網路斷了。不是我咬的！"); Say("x_net-up", "網路回來了。喵 👍"); Say("x_vpn", "連不到公司網路（VPN 斷了？）"); Say("x_download", "下載好了：");
+        Say("x_ticket0", "🎫 {t} 還有 {h}開賣。先登入、綁好付款"); Say("x_ticket1", "🎫 {t} 再 30 分鐘開賣。網頁先開好"); Say("x_ticket2", "🎫 {t} 剩 10 分鐘。（尾巴甩甩）");
+        Say("x_ticket3", "🎫 準備。像撲獵物那樣"); Say("x_ticket4", "🎫 開搶！撲！");
+        Say("x_share", "我家" + me + "住進我電腦了 🐾 #我的桌面公仔 #DeskPals", me + "現在連我的桌面都要佔領 🐾 #我的桌面公仔 #DeskPals", "上班有" + me + "盯著，不敢偷懶 🐱 #我的桌面公仔 #DeskPals");
+        Say("x_sig", "（伸懶腰，然後一躍）"); Say("x_sit", "（坐下，尾巴繞好）");
+        // ---- 貓的小動作：推東西、不理你又回來、縮成土司 ----
+        Say("x_push", "（推）……掉下去了。", "（盯著你，慢慢推）", "這個不需要。（推）"); Say("x_ignore", "（背對你）", "現在不想理你。"); Say("x_comeback", "（蹭蹭）……只是剛好路過。", "（跳回你旁邊）");
+        Say("x_loaf", "（縮成土司）", "（收起腳，變成麻糬）"); Say("x_wag", "（尾巴豎得直直的）"); Say("x_fetch_back", "（叼回來，放下，走掉）"); Say("x_return", "你回來了。（假裝沒在等）");
+    }
+
+    // ---------------- 汪系：超黏人，看到你就搖尾巴 ----------------
+    func CuDog(_ me: String)
+    {
+        Say("talk", "汪！今天也一起努力！", "要喝口可樂嗎？我幫你叼過來！🥤", "（搖尾巴）汪！", "你在做什麼？我也要！", me + "隨時待命！汪！", "好想出去散步喔～", "你是世界上最棒的人！");
+        Say("talk_d", "汪…下班時間到了！", "散步時間！我們回家吧！", "（咬住你的衣角）回家啦～", "你累了吧？回家休息！汪", "明天再一起努力！");
+        Say("save", "汪！存好了！👍", "存檔成功！（搖尾巴）", "我幫你守著！存好了！", "汪汪！收好了！");
+        Say("save_d", "存好了！回家散步！", "存好了！汪！下班下班！");
+        Say("pats", "汪～好舒服！", "（尾巴搖到停不下來）", "再摸！再摸！", "你是最棒的主人！", "（翻肚子）這邊也要！", "你辛苦了！舔舔你！", "汪！好開心！", "我會一直保護你！");
+        Say("pats_d", "摸完我們就回家！", "汪…你今天好累吧", "（趴下）明天再玩…");
+        Say("pats_hi", "你是我的全世界！", "汪！最最最喜歡你！", "一輩子跟著你！");
+        Say("hugs", "抱抱！汪！", "（撲上去）大抱抱！", "(U・ᴥ・U)つ ♥");
+        Say("hugs_d", "晚安抱抱！回家囉！", "抱完一起回家！");
+        Say("knock", "汪！看我看我！👀", "（鼻子貼玻璃）汪！", "可以出去玩嗎？汪汪！");
+        Say("knock_d", "汪…該回家了！", "（扒扒螢幕）下班下班！");
+        Say("newwin", "汪！新的！", "我去看看！（衝）", "（嗅嗅）這是什麼？");
+        Say("newwin_d", "汪…明天再看！", "不要再開了，回家！");
+        Say("hi", "汪！我是" + me + "！👋"); Say("hi_d", "汪～下班了嗎？");
+        Say("wake", "汪！你來了！我醒了！"); Say("wake_d", "（迷迷糊糊搖尾巴）你也去睡…");
+        Say("dizzy", "汪嗚…轉圈圈 @@"); Say("dizzy_d", "暈暈…想睡了…");
+        Say("dizzy_ok", "汪！我好了！再玩！"); Say("dizzy_ok_d", "好了！回家囉！");
+        Say("tickle", "汪哈哈！好癢！", "（打滾）汪汪汪！", "再來！再來！"); Say("tickle_d", "汪…最後一次！");
+        Say("pat10", "今天第 {n} 次摸摸！汪！好幸福！"); Say("pat10_d", "第 {n} 次了！摸完回家！");
+        Say("levelup", "汪！好感度 Lv{n}！拿到「{u}」了！"); Say("levelup_d", "Lv{n}！「{u}」明天戴給你看！汪");
+        Say("missed", "你好幾天沒摸我了…嗚嗚 🥺"); Say("missed_d", "好久沒摸了…我一直在等你");
+        Say("hover", "汪？你在摸我嗎？（搖尾巴）");
+        Say("seek", "汪！那是什麼！"); Say("seek_lost", "嗚…跑掉了"); Say("seek_got", "抓到了！汪汪！");
+        Say("drag", "汪嗚～要去哪裡？"); Say("throw", "汪～～～！");
+        Say("shelf_in", "我回狗窩囉！汪！"); Say("shelf_in_d", "我回去顧家，你也早點回來！");
+        Say("shelf_out", "汪！出來玩了！"); Say("shelf_out_d", "汪？天黑了，你怎麼還在？");
+        Say("ball_go", "球！球！球！", "汪！我去撿！", "（衝刺）等我！"); Say("ball_go_d", "最後一球！汪！");
+        Say("ball_catch", "接到了！再丟一次！", "汪！我很棒吧！", "（叼著球）還要還要！"); Say("ball_catch_d", "接到了！回家吧！");
+        Say("ball_end", "不玩了嗎…好吧，下次再玩！⚾"); Say("ball_end_d", "不玩了！那我們回家！");
+        Say("ball_far", "球好遠…我還是會去撿！");
+        Say("back", "汪！我回來了！"); Say("back_d", "回來了！該回家囉！");
+        Say("share_end", "分享完了？汪！我回來了！");
+        Say("welcome", "你回來了！！汪汪汪！"); Say("welcome_d", "你回來了！是要帶我回家嗎？");
+        Say("rest", "已經 {n} 分鐘了！起來喝口可樂、伸展一下，順便摸摸我！🥤"); Say("rest_d", "{n} 分鐘了！喝完可樂就回家散步吧 🥤");
+        Say("night_on", "汪…下班時間到了！"); Say("night_off", "早安！汪！今天也好開心 ☀");
+        Say("sleep", "（趴下）晚安…汪"); Say("sleep_d", "晚安！你也要睡喔！");
+        Say("jump", "汪！跳！"); Say("nojump", "這裡沒地方跳…汪");
+        Say("errors", "汪汪！有 {n} 個錯誤！我來顧！"); Say("errors_d", "{n} 個錯誤…明天再修，先回家！");
+        Say("errors_ok", "錯誤都沒了！汪！抱抱！"); Say("errors_ok_d", "修好了！回家囉！");
+        Say("typing", "打好快！汪汪加油！", "（跟著打字聲搖尾巴）", "你好厲害！汪！"); Say("typing_d", "打快一點，早點回家！");
+        Say("done", "汪！{who} 做完了！快來看 👀"); Say("done_d", "{who} 做完了！收工回家！");
+        Say("wait", "{who} 在等你回答喔！汪 👋"); Say("wait_d", "{who} 在等你，回完就回家！");
+        Say("ask", "{who} 有問題要問你！🙋"); Say("ask_d", "{who} 在問你，回完就下班！");
+        Say("stuck_tool", "{who} 停在「{tool}」{n} 分鐘了，是不是在等你按允許？汪！"); Say("stuck_tool_d", "{who} 停了 {n} 分鐘！按完回家！");
+        Say("stuck", "汪！{who} {n} 分鐘沒動了，去看看！"); Say("stuck_d", "{who} 卡住 {n} 分鐘，看完就回家！");
+        Say("unstuck", "{who} 又動了！汪！👍"); Say("unstuck_d", "{who} 動了！");
+        Say("tag", "上版成功！汪汪汪！🎆"); Say("tag_dev", "測試機成功！汪！🎆"); Say("tag_prod", "上正式機了！你最棒了！🎉"); Say("tag_d", "上版成功！現在可以回家了吧？汪");
+        Say("late23", "好晚了…汪，早點睡 🌙"); Say("late12", "午餐時間！我也餓了！"); Say("late15", "下午茶！可樂給你，骨頭給我 🥤");
+        Say("late_d", "下班時間過了！汪！"); Say("late_dd", "好晚了！關機睡覺！");
+        Say("g_late", "這麼晚了…我陪你！汪 🌙"); Say("g_morning", "早安！汪！看到你好開心 ☀"); Say("g_noon", "午安！吃飯了嗎？汪");
+        Say("g_evening", "晚上了！辛苦了！汪"); Say("g_day", me + "來了！汪汪！"); Say("g_d", "下班了！你怎麼還在？汪");
+        Say("app_browser", "在看什麼？有狗狗影片嗎？"); Say("app_code", "寫 code！我在旁邊守著！"); Say("app_excel", "好多格子！加油！汪");
+        Say("app_ppt", "做簡報？我幫你看！"); Say("app_word", "寫文件～加油！"); Say("app_chat", "有人找你！汪！"); Say("app_files", "找東西？我鼻子很靈！");
+        Say("app_other", "汪？這是什麼？");
+        Say("app_code_d", "還在寫…回家啦！汪"); Say("app_chat_d", "明天再回！陪我散步！"); Say("app_office_d", "明天做嘛～汪"); Say("app_other_d", "下班了！回家！");
+        Say("s_birthday", "生日快樂！汪汪汪！🎂", "今天你最大！我幫你吹蠟燭！");
+        Say("s_cny", "新年快樂！汪！🧧", "恭喜發財！今年也要一起散步！");
+        Say("s_xmas", "聖誕快樂！🎄", "我想要的禮物…是新的球！");
+        Say("s_newyear", "新年快樂！今年也要一起！✨");
+        Say("s_halloween", "不給零食就搗蛋！🎃", "我扮成…一隻狼！嗷嗚～");
+        Say("s_friday", "星期五！週末可以出去玩了嗎？", "快放假了！汪汪！");
+        Say("morning", "早安！" + me + "報到！汪！", "早安～今天也要一起努力！");
+        Say("goodnight", "晚安！我回狗窩囉！", "今天辛苦了！晚安，汪");
+        Say("nag", "汪！下班！", "（叼來你的包包）回家啦！", "散步時間到了！");
+        Say("react", "汪？", "汪！", "怎麼了怎麼了？");
+        // ---- 串場、午餐、小幫手 ----
+        Say("x_goal", "汪！進球！🏀"); Say("x_goal_d", "進球！回家囉！🏀");
+        Say("x_cheer", "汪汪！好厲害！", "（跳起來）汪！"); Say("x_miss", "差一點！再來再來！");
+        Say("x_photo", "（吐舌頭笑）汪！", "我要站中間！");
+        Say("x_pair_hi", "{o}！汪汪！（聞聞）"); Say("x_pair_ask", "{o}，要不要一起玩球？"); Say("x_pair_react", "汪！好耶！");
+        Say("x_pair_ball", "{o}，接球！汪！"); Say("x_pair_ball_end", "好好玩！再一次！"); Say("x_pair_bye", "掰掰！汪！");
+        Say("x_lunch_start", "午餐時間！汪！便當好香 🔔"); Say("x_lunch_nap", "吃飽了…（趴著睡）"); Say("x_lunch_end", "汪！回來工作囉！");
+        Say("x_lunch_talk", "便當好好吃！汪！", "這塊肉…可以給我嗎？", "（盯著你的便當流口水）");
+        Say("x_quiet_on", "汪…（小聲）我乖乖的 🤫"); Say("x_quiet_off", "安靜結束！汪汪！");
+        Say("x_focus_end", "專注結束！休息 5 分鐘 ☕ 來摸摸我！汪"); Say("x_wrap", "汪！今天的我們：");
+        // ---- 通知開場白 ----
+        Say("x_ci-run", "汪！CI 出發了："); Say("x_ci-ok", "CI 過了！汪汪！"); Say("x_ci-fail", "汪嗚…CI 失敗了："); Say("x_cmd-ok", "指令跑完了！"); Say("x_cmd-fail", "指令失敗了…汪嗚：");
+        Say("x_meeting", "等一下要開會喔！"); Say("x_meeting-now", "會議開始了！快去："); Say("x_jira", "汪！有新的 Jira："); Say("x_worklog", "今天的日誌好了："); Say("x_worklog_d", "日誌好了！回家吧：");
+        Say("x_remind", "⏰ 汪！提醒你："); Say("x_pc-cpu", "電腦好燙！汪："); Say("x_pc-ram", "記憶體快滿了："); Say("x_pc-disk", "硬碟快滿了：");
+        Say("x_net-down", "網路斷了！汪汪！"); Say("x_net-up", "網路回來了！汪 👍"); Say("x_vpn", "連不到公司網路（VPN 斷了？）"); Say("x_download", "下載好了！汪！");
+        Say("x_ticket0", "🎫 {t} 還有 {h}開賣！先登入、綁好付款"); Say("x_ticket1", "🎫 {t} 再 30 分鐘！我陪你等！"); Say("x_ticket2", "🎫 {t} 剩 10 分鐘！汪汪！");
+        Say("x_ticket3", "🎫 準備！手指放好！"); Say("x_ticket4", "🎫 開搶！！衝啊！汪！");
+        Say("x_share", "我家" + me + "住進我電腦了 🐾 #我的桌面公仔 #DeskPals", me + "每天在我桌面上搖尾巴 🐶 #我的桌面公仔 #DeskPals", "上班有" + me + "陪，心情好好 🐾 #我的桌面公仔 #DeskPals");
+        Say("x_sig", "汪！看我轉圈圈！"); Say("x_sit", "（乖乖坐好）汪！");
+        // ---- 狗的小動作：搖尾巴、撿球回來、你回來就跳 ----
+        Say("x_push", "汪？（不小心撞下去了）", "（咬咬…掉下去了）"); Say("x_ignore", "（假裝在聞地板）"); Say("x_comeback", "汪！我回來了！不生氣了！");
+        Say("x_loaf", "（趴下，下巴放地上）"); Say("x_wag", "（尾巴搖到屁股都在動）", "汪汪！好開心！"); Say("x_fetch_back", "汪！撿回來了！再丟一次！", "（叼著球跑回來）給你！"); Say("x_return", "你回來了！！汪汪汪！（跳跳跳）");
+    }
+}
+
+// 讀書小幫手（DeskPals.Study.cs）：上課／考試／行程／作業的開場白、考試的一句、熬夜提醒（{hm}＝幾點）、搶課倒數（{t} 課名、{h} 幾小時）
+extension Pal {
+    func CuStudyLines(_ persona: String, _ me: String)
+    {
+        switch persona
+        {
+            case "cool":
+                Say("x_class", "🎒 要上課了："); Say("x_class-now", "🎒 上課了，走。"); Say("x_exam-soon", "📚 要考試了，穩住："); Say("x_exam-now", "📚 考試開始。你可以："); Say("x_event", "等等有事："); Say("x_event-now", "開始了："); Say("x_deadline", "📝 作業："); Say("x_deadline-hot", "📝 快截止了，別拖："); Say("x_deadline-hot_d", "📝 快截止了…交完就睡："); Say("x_exam_prefix", "嗯，"); Say("x_exam_tail", "讀一點，就很酷。"); Say("x_late0", "{hm}。很晚了，該睡了 🌙"); Say("x_late1", "{hm}。熬夜不酷，睡覺才酷。"); Say("x_late2", "{hm}。去睡。真的。😴"); Say("x_course0", "🎓 {t} 還有 {h}開放選課，先登入、志願排好"); Say("x_course1", "🎓 {t} 再 30 分鐘，課號抄好"); Say("x_course2", "🎓 {t} 剩 10 分鐘，穩住"); Say("x_course3", "🎓 準備。手放加選鍵上。"); Say("x_course4", "🎓 開放了。加選！");
+            case "shy":
+                Say("x_class", "🎒 那個…要上課了："); Say("x_class-now", "🎒 （小聲）上課時間到了…"); Say("x_exam-soon", "📚 那個…快考試了："); Say("x_exam-now", "📚 考試開始了…加油："); Say("x_event", "那個…等一下有事："); Say("x_event-now", "（小聲）開始了："); Say("x_deadline", "📝 那個…作業："); Say("x_deadline-hot", "📝 快、快截止了："); Say("x_deadline-hot_d", "📝 快截止了…寫完就睡喔："); Say("x_exam_prefix", "那個…"); Say("x_exam_tail", "我（小聲）陪你讀…"); Say("x_late0", "那個…已經 {hm} 了…要不要去睡？🌙"); Say("x_late1", "（小聲）{hm} 了…明天會很累的…"); Say("x_late2", "{hm} 了！拜、拜託去睡…😴"); Say("x_course0", "🎓 那個…{t} 還有 {h}開放選課，先登入喔"); Say("x_course1", "🎓 {t} 再 30 分鐘…課號抄好了嗎？"); Say("x_course2", "🎓 {t} 剩 10 分鐘…好緊張"); Say("x_course3", "🎓 準、準備…"); Say("x_course4", "🎓 開放了！快加選！（小聲）");
+            case "funny":
+                Say("x_class", "🎒 上課時間（不是下課，很遺憾）："); Say("x_class-now", "🎒 上課了！睡覺請小聲："); Say("x_exam-soon", "📚 考試要來了，書在哪？"); Say("x_exam-now", "📚 考試開始！猜 C 不保證對："); Say("x_event", "等一下有事，不是我編的："); Say("x_event-now", "開演了："); Say("x_deadline", "📝 作業在敲門："); Say("x_deadline-hot", "📝 死線在跑百米："); Say("x_deadline-hot_d", "📝 死線熬夜中，你別陪它："); Say("x_exam_prefix", "冷知識："); Say("x_exam_tail", "讀一頁，等於少擔心一頁。"); Say("x_late0", "{hm} 了！現在睡還算早睡（騙你的）🌙"); Say("x_late1", "{hm} 了，你的黑眼圈要升級成熊貓了"); Say("x_late2", "{hm}！再不睡太陽要來跟你打招呼了 😴"); Say("x_course0", "🎓 {t} 還有 {h}開放選課！先登入，手指熱身"); Say("x_course1", "🎓 {t} 再 30 分鐘，課號背起來"); Say("x_course2", "🎓 {t} 剩 10 分鐘！手速決勝負"); Say("x_course3", "🎓 預備——別先按！"); Say("x_course4", "🎓 開放了！！手速全開！");
+            case "cat":
+                Say("x_class", "🎒 喵。要上課了："); Say("x_class-now", "🎒 上課了。我在這裡睡，你去："); Say("x_exam-soon", "📚 要考試了。本喵罩你："); Say("x_exam-now", "📚 考試開始。喵："); Say("x_event", "等一下有事。記一下："); Say("x_event-now", "開始了，喵："); Say("x_deadline", "📝 作業。別讓我提醒第二次："); Say("x_deadline-hot", "📝 快截止了。喵！"); Say("x_deadline-hot_d", "📝 快截止了…寫完陪我睡："); Say("x_exam_prefix", "喵，"); Say("x_exam_tail", "我趴在課本上陪你（不准移開我）。"); Say("x_late0", "{hm} 了。本喵都睡第三輪了 🌙"); Say("x_late1", "{hm}。被窩比螢幕暖，喵。"); Say("x_late2", "{hm}！我要坐在鍵盤上了 😴"); Say("x_course0", "🎓 {t} 還有 {h}開放選課。先登入，喵"); Say("x_course1", "🎓 {t} 再 30 分鐘。課號抄好"); Say("x_course2", "🎓 {t} 剩 10 分鐘。尾巴豎起來了"); Say("x_course3", "🎓 準備……（壓低身體）"); Say("x_course4", "🎓 開放了！撲！");
+            case "dog":
+                Say("x_class", "🎒 汪！要上課囉："); Say("x_class-now", "🎒 上課了！汪汪，快去："); Say("x_exam-soon", "📚 要考試了！我幫你加油汪："); Say("x_exam-now", "📚 考試開始！你最棒了汪："); Say("x_event", "汪！等一下有事："); Say("x_event-now", "開始了！汪："); Say("x_deadline", "📝 汪！作業："); Say("x_deadline-hot", "📝 汪汪！快截止了："); Say("x_deadline-hot_d", "📝 快截止了…寫完我們去睡汪："); Say("x_exam_prefix", "汪！"); Say("x_exam_tail", "我坐在旁邊陪你讀，乖乖的！"); Say("x_late0", "{hm} 了汪…我趴著等你去睡 🌙"); Say("x_late1", "{hm} 了！散步明天再說，先睡覺汪"); Say("x_late2", "{hm}！！汪汪汪！去睡覺！😴"); Say("x_course0", "🎓 {t} 還有 {h}開放選課！先登入汪"); Say("x_course1", "🎓 {t} 再 30 分鐘！課號叼好了嗎"); Say("x_course2", "🎓 {t} 剩 10 分鐘！尾巴搖好快"); Say("x_course3", "🎓 坐下…等…"); Say("x_course4", "🎓 開放了！衝啊汪！");
+            default:
+                Say("x_class", "🎒 要上課囉！" + me + "提醒你："); Say("x_class-now", "🎒 上課時間！衝！"); Say("x_exam-soon", "📚 要考試了，" + me + "幫你加油："); Say("x_exam-now", "📚 考試開始！你可以的："); Say("x_event", "等一下有事喔："); Say("x_event-now", "時間到囉："); Say("x_deadline", "📝 作業提醒："); Say("x_deadline-hot", "📝 快截止了！衝刺："); Say("x_deadline-hot_d", "📝 快截止了…寫完就睡喔："); Say("x_exam_prefix", "嘿！"); Say("x_exam_tail", "" + me + "陪你讀！"); Say("x_late0", "已經 {hm} 了！今天先到這裡好不好？🌙"); Say("x_late1", "{hm} 了，明天還要元氣滿滿，去睡吧"); Say("x_late2", "{hm}！真的該睡了 😴"); Say("x_course0", "🎓 {t} 還有 {h}開放選課！先登入、志願排好"); Say("x_course1", "🎓 {t} 再 30 分鐘！選課頁先開好"); Say("x_course2", "🎓 {t} 剩 10 分鐘！好緊張"); Say("x_course3", "🎓 準備！手指放好！"); Say("x_course4", "🎓 開放了！！快加選！");
+        }
+    }
+}
+
+
+// ===== 55_custom_image.swift =====
+// 55_custom_image.swift — port of extension/desktop/DeskPals.CustomImage.cs
+// Desk Pals：自己做公仔（上傳圖片）的影像處理——讀圖、去背、裁切、像素風／保留原圖、切頭身腳。
+// 全部在本機算，不連網、不用任何外部套件；只用 System.Drawing。
+// mac: C# 的 int ARGB（有號 32 位元）在這裡是 Int，存成 0…0xFFFFFFFF（不預乘）；只用 `>> 24 & 255`、`& 255`、`== 0` 這幾種運算，
+//      所以跟 C# 的有號值一樣。LockBits／Marshal.Copy → 直接讀寫 CGBitmapContext（BGRA 預乘，換算成不預乘）；
+//      Image.FromStream＋EXIF → CGImageSource（照 kCGImagePropertyOrientation 轉正）。
+import Foundation
+import AppKit
+import ImageIO
+
+// 去背、像素化的結果（內部像素：像素風一格＝Sub 個像素，保留原圖一格＝8 個像素）
+final class CuCut {
+    var W = 0, H = 0
+    var Px: [Int] = []            // ARGB（不預乘）
+    var A: [Int] { var a = [Int](repeating: 0, count: Px.count); for i in 0..<Px.count { a[i] = (Px[i] >> 24) & 255 }; return a }
+    init() {}
+}
+
+enum CuImg {
+    static let MaxSrc = 640              // 處理用的原圖最長邊（照片太大先縮）
+    static let MaxFileBytes = 40 << 20   // 40MB 以上的檔案不讀
+    static let HCells = 16, WCells = 22  // 公仔最高 16 格、最寬 22 格（跟內建的差不多大）
+    static let SmoothR = 8               // 保留原圖：一格 8 個像素
+
+    // ---------- 像素陣列 ----------
+    // mac: 處理用的 Bitmap 一律 1 倍（邏輯像素＝實際像素）；Retina 的 Bitmap 先縮回邏輯大小再讀
+    static func NewBmp(_ w: Int, _ h: Int) -> Bitmap { return Bitmap(Math.Max(1, w), Math.Max(1, h), PixelFormat.Format32bppArgb, 1) }
+
+    static func Pixels(_ b: Bitmap) -> [Int] {
+        let w = b.Width, h = b.Height
+        var a = [Int](repeating: 0, count: w * h)
+        var ctx: CGContext = b.ctx
+        if ctx.width != w || ctx.height != h {
+            guard let img = b.ctx.makeImage(),
+                  let c = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0, space: _gdiColorSpace,
+                                    bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue) else { return a }
+            c.interpolationQuality = .high
+            c.setBlendMode(.copy)
+            c.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+            ctx = c
+        }
+        guard let data = ctx.data else { return a }
+        let p = data.assumingMemoryBound(to: UInt8.self)
+        let bpr = ctx.bytesPerRow
+        for y in 0..<h {
+            var o = y * bpr   // CGBitmapContext 記憶體第 0 列＝最上面那列
+            for x in 0..<w {
+                let bb = Int(p[o]), gg = Int(p[o + 1]), rr = Int(p[o + 2]), aa = Int(p[o + 3])
+                if aa == 0 { a[y * w + x] = 0 }
+                else if aa == 255 { a[y * w + x] = (255 << 24) | (rr << 16) | (gg << 8) | bb }
+                else {
+                    let r2 = Swift.min(255, (rr * 255 + aa / 2) / aa), g2 = Swift.min(255, (gg * 255 + aa / 2) / aa), b2 = Swift.min(255, (bb * 255 + aa / 2) / aa)
+                    a[y * w + x] = (aa << 24) | (r2 << 16) | (g2 << 8) | b2
+                }
+                o += 4
+            }
+        }
+        return a
+    }
+
+    static func FromPixels(_ px: [Int], _ w: Int, _ h: Int) -> Bitmap {
+        let b = NewBmp(w, h)
+        if w <= 0 || h <= 0 { return b }
+        let ctx = b.ctx
+        guard let data = ctx.data, ctx.width == w, ctx.height == h else { return b }
+        let p = data.assumingMemoryBound(to: UInt8.self)
+        let bpr = ctx.bytesPerRow
+        for y in 0..<h {
+            var o = y * bpr
+            for x in 0..<w {
+                let v = px[y * w + x]
+                let aa = (v >> 24) & 255
+                if aa == 0 { p[o] = 0; p[o + 1] = 0; p[o + 2] = 0; p[o + 3] = 0 }
+                else {
+                    let rr = (v >> 16) & 255, gg = (v >> 8) & 255, bb = v & 255
+                    p[o] = UInt8((bb * aa + 127) / 255); p[o + 1] = UInt8((gg * aa + 127) / 255); p[o + 2] = UInt8((rr * aa + 127) / 255); p[o + 3] = UInt8(aa)
+                }
+                o += 4
+            }
+        }
+        return b
+    }
+
+    static func Argb(_ a: Int, _ r: Int, _ g: Int, _ b: Int) -> Int { return (Clamp255(a) << 24) | (Clamp255(r) << 16) | (Clamp255(g) << 8) | Clamp255(b) }
+    static func Clamp255(_ v: Int) -> Int { return v < 0 ? 0 : (v > 255 ? 255 : v) }
+    static func Clamp255(_ v: Double) -> Int { return v < 0 ? 0 : (v > 255 ? 255 : CInt(Math.Round(v))) }
+
+    // ---------- 讀圖：PNG／JPG／GIF（第一格）／BMP；照 EXIF 轉正；太大先縮 ----------
+    static func LoadFile(_ path: String, _ err: inout String!) -> Bitmap! {
+        err = nil
+        let fi = FileInfo(path)
+        if !fi.Exists { err = "找不到這個檔案"; return nil }
+        if fi.Length > MaxFileBytes { err = "這張圖太大了（超過 40MB），換一張小一點的"; return nil }
+        do { let bytes = try File.ReadAllBytes(path); return Decode(bytes, MaxSrc, &err) }
+        catch { err = "打不開這張圖（" + error.Message + "）"; return nil }
+    }
+
+    static func Decode(_ bytes: [UInt8], _ maxDim: Int, _ err: inout String!) -> Bitmap! {
+        err = nil
+        // mac: Image.FromStream → CGImageSource（GIF 取第一格）
+        guard let src = CGImageSourceCreateWithData(Data(bytes) as CFData, nil), CGImageSourceGetCount(src) > 0,
+              let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { err = "這個檔案不是看得懂的圖片（格式不支援）"; return nil }
+        let iw = img.width, ih = img.height
+        if iw * ih > 60000000 || iw < 1 || ih < 1 { err = "這張圖的尺寸太誇張了，換一張吧"; return nil }
+        let full = NewBmp(iw, ih)
+        do {
+            let c = full.ctx
+            c.saveGState()
+            c.setBlendMode(.copy)
+            c.interpolationQuality = .none
+            c.draw(img, in: CGRect(x: 0, y: 0, width: iw, height: ih))
+            c.restoreGState()
+        }
+        let fixed = ExifFix(full, ExifOrientation(src))
+        return Shrink(fixed, maxDim)
+    }
+
+    // 手機照片常常是「躺著存、EXIF 說要轉」
+    // mac: EXIF 0x0112 → kCGImagePropertyOrientation（同一個值）
+    static func ExifOrientation(_ src: CGImageSource) -> Int {
+        guard let props = CGImageSourceCopyPropertiesAtIndex(src, 0, nil) as? [CFString: Any] else { return 1 }
+        if let o = props[kCGImagePropertyOrientation] as? Int { return o }
+        if let n = props[kCGImagePropertyOrientation] as? NSNumber { return n.intValue }
+        return 1
+    }
+
+    // C# 的 RotateFlip（2 RotateNoneFlipX、3 Rotate180FlipNone、4 Rotate180FlipX、5 Rotate90FlipX、6 Rotate90FlipNone、7 Rotate270FlipX、8 Rotate270FlipNone）
+    // mac: 直接搬（預乘的）像素，不經過換算，跟 GDI+ 的 RotateFlip 一樣是無損的
+    static func ExifFix(_ b: Bitmap, _ o: Int) -> Bitmap {
+        if o < 2 || o > 8 { return b }
+        let w = b.Width, h = b.Height
+        let swap = o >= 5
+        let ow = swap ? h : w, oh = swap ? w : h
+        let r = NewBmp(ow, oh)
+        guard let sd = b.ctx.data, let dd = r.ctx.data, b.ctx.width == w, b.ctx.height == h, r.ctx.width == ow, r.ctx.height == oh else { return b }
+        let sp = sd.assumingMemoryBound(to: UInt32.self), dp = dd.assumingMemoryBound(to: UInt32.self)
+        let sbpr = b.ctx.bytesPerRow / 4, dbpr = r.ctx.bytesPerRow / 4
+        for y in 0..<oh {
+            for x in 0..<ow {
+                var ix = x, iy = y
+                switch o {
+                case 2: ix = w - 1 - x; iy = y
+                case 3: ix = w - 1 - x; iy = h - 1 - y
+                case 4: ix = x; iy = h - 1 - y
+                case 5: ix = y; iy = x
+                case 6: ix = y; iy = h - 1 - x
+                case 7: ix = w - 1 - y; iy = h - 1 - x
+                default: ix = w - 1 - y; iy = x   // 8
+                }
+                dp[y * dbpr + x] = sp[iy * sbpr + ix]
+            }
+        }
+        return r
+    }
+
+    static func Shrink(_ src: Bitmap, _ maxDim: Int) -> Bitmap {
+        let s = Math.Min(1.0, Double(maxDim) / Double(Math.Max(src.Width, src.Height)))
+        let nw = Math.Max(1, CInt(Math.Round(Double(src.Width) * s))), nh = Math.Max(1, CInt(Math.Round(Double(src.Height) * s)))
+        let b = NewBmp(nw, nh)
+        // mac: HighQualityBicubic → interpolationQuality .high；NearestNeighbor → .none；邊緣不會糊出一圈半透明（CG 取樣不出界）
+        guard let img = src.ctx.makeImage() else { return b }
+        let c = b.ctx
+        c.saveGState()
+        c.setBlendMode(.copy)
+        c.interpolationQuality = s < 1 ? .high : .none
+        c.draw(img, in: CGRect(x: 0, y: 0, width: nw, height: nh))
+        c.restoreGState()
+        return b
+    }
+
+    // 這張圖本來就有透明背景嗎？
+    static func HasAlpha(_ px: [Int], _ w: Int, _ h: Int) -> Bool {
+        var clear = 0, edgeClear = 0, edge = 0
+        for y in 0..<Math.Max(0, h) {
+            for x in 0..<Math.Max(0, w) {
+                let a = (px[y * w + x] >> 24) & 255
+                if a < 128 { clear += 1 }
+                if x == 0 || y == 0 || x == w - 1 || y == h - 1 { edge += 1; if a < 128 { edgeClear += 1 } }
+            }
+        }
+        return clear > px.count / 100 && edgeClear * 5 > edge
+    }
+
+    // ---------- 顏色距離（紅均值加權，接近人眼） ----------
+    @inline(__always) static func Dist(_ r1: Int, _ g1: Int, _ b1: Int, _ r2: Int, _ g2: Int, _ b2: Int) -> Double {
+        let rm = Double(r1 + r2) / 2.0, dr = Double(r1 - r2), dg = Double(g1 - g2), db = Double(b1 - b2)
+        let t1: Double = (2 + rm / 256) * dr * dr
+        let t2: Double = 4 * dg * dg
+        let t3: Double = (2 + (255 - rm) / 256) * db * db
+        return Math.Sqrt(t1 + t2 + t3) / 3.0
+    }
+    static func TolToT(_ tol: Int) -> Double { return 6 + Double(Math.Max(0, Math.Min(100, tol))) * 0.9 }   // 去背強度 0～100 → 顏色距離門檻
+
+    // ---------- 自動去背：從四邊取背景色（分群），從邊往內長；毛邊半透明、去掉背景色暈；只留最大的那塊 ----------
+    static func RemoveBg(_ px: [Int], _ w: Int, _ h: Int, _ tol: Int) -> [Int] {
+        let n = w * h
+        var R = [Int](repeating: 0, count: n), G = [Int](repeating: 0, count: n), B = [Int](repeating: 0, count: n)
+        for i in 0..<n { R[i] = (px[i] >> 16) & 255; G[i] = (px[i] >> 8) & 255; B[i] = px[i] & 255 }
+        let T = TolToT(tol)
+        // 1) 邊框兩圈像素分群（最多 5 群），太少的群丟掉
+        // 背景色只從上、左、右三邊取（寵物照常常被下緣切到，下緣多半是主角）；下緣只拿來當起點
+        var border: [Int] = [], side: [Int] = []
+        let bw = Math.Max(1, Math.Min(3, Math.Min(w, h) / 40 + 1))
+        for y in 0..<h {
+            for x in 0..<w {
+                if x < bw || y < bw || x >= w - bw || y >= h - bw {
+                    border.append(y * w + x)
+                    if y < h - bw { side.append(y * w + x) }
+                }
+            }
+        }
+        var cen: List<[Double]> = KMeans(side, R, G, B, 5)
+        // 主角也碰到邊的時候，那一群其實是主角：中間那塊很多這個顏色的群（除了最大的那群）不算背景
+        if cen.Count > 1 {
+            let cx0 = w * 35 / 100, cx1 = w * 65 / 100, cy0 = h * 35 / 100, cy1 = h * 65 / 100
+            var tot = 0
+            var hit = [Int](repeating: 0, count: cen.Count)
+            var y = cy0
+            while y < cy1 {
+                var x = cx0
+                while x < cx1 {
+                    let i = y * w + x; tot += 1
+                    for k in 0..<cen.Count { if Dist(R[i], G[i], B[i], CInt(cen[k][0]), CInt(cen[k][1]), CInt(cen[k][2])) < T { hit[k] += 1 } }
+                    x += 2
+                }
+                y += 2
+            }
+            let keep = List<[Double]>()
+            for k in 0..<cen.Count { if k == 0 || tot == 0 || hit[k] * 100 < tot * 10 { keep.Add(cen[k]) } }
+            cen = keep
+        }
+        // 2) 每個像素到最近背景色的距離
+        let cens: [[Int]] = cen.ToArray().map { [CInt($0[0]), CInt($0[1]), CInt($0[2])] }
+        var dmin = [Double](repeating: 0, count: n)
+        for i in 0..<n {
+            var best = 1e9
+            for c in cens { let d = Dist(R[i], G[i], B[i], c[0], c[1], c[2]); if d < best { best = d } }
+            dmin[i] = best
+        }
+        // 3) 從邊框往內長：像背景色的、或跟旁邊背景很接近（漸層、陰影）的都算背景
+        var bg = [Bool](repeating: false, count: n)
+        var q = [Int](repeating: 0, count: n); var qh = 0, qt = 0
+        for i in border { if dmin[i] < T && !bg[i] { bg[i] = true; q[qt] = i; qt += 1 } }
+        while qh < qt {
+            let p = q[qh]; qh += 1
+            let x = p % w, y = p / w
+            for k in 0..<4 {
+                let nx = x + (k == 0 ? 1 : (k == 1 ? -1 : 0)), ny = y + (k == 2 ? 1 : (k == 3 ? -1 : 0))
+                if nx < 0 || ny < 0 || nx >= w || ny >= h { continue }
+                let o = ny * w + nx
+                if bg[o] { continue }
+                let ok = dmin[o] < T || (dmin[o] < T * 1.6 && Dist(R[o], G[o], B[o], R[p], G[p], B[p]) < T * 0.22)
+                if ok { bg[o] = true; q[qt] = o; qt += 1 }
+            }
+        }
+        // 4) alpha：背景 0；靠近背景的那一圈照「跟旁邊背景色差多少」給半透明（毛邊），並把背景色暈掉
+        var outPx = [Int](repeating: 0, count: n)
+        for i in 0..<n { outPx[i] = bg[i] ? 0 : (px[i] | 0xFF000000) }
+        for y in 0..<h {
+            for x in 0..<w {
+                let i = y * w + x
+                if bg[i] { continue }
+                var sr = 0.0, sg = 0.0, sb = 0.0; var cnt = 0
+                for dy in -2...2 {
+                    for dx in -2...2 {
+                        let xx = x + dx, yy = y + dy
+                        if xx < 0 || yy < 0 || xx >= w || yy >= h { continue }
+                        let o = yy * w + xx
+                        if !bg[o] { continue }
+                        sr += Double(R[o]); sg += Double(G[o]); sb += Double(B[o]); cnt += 1
+                    }
+                }
+                if cnt == 0 { continue }
+                let br = sr / Double(cnt), bgc = sg / Double(cnt), bb = sb / Double(cnt)
+                let dl = Dist(R[i], G[i], B[i], CInt(br), CInt(bgc), CInt(bb))
+                let a = Math.Max(0.0, Math.Min(1.0, (dl - T * 0.45) / (T * 1.1)))
+                if a <= 0.02 { outPx[i] = 0; continue }
+                // 去掉背景色暈：c = (c - (1-a)·bg) / a
+                let cr = (Double(R[i]) - (1 - a) * br) / a, cg = (Double(G[i]) - (1 - a) * bgc) / a, cb = (Double(B[i]) - (1 - a) * bb) / a
+                outPx[i] = Argb(CInt(Math.Round(a * 255)), CInt(Math.Round(cr)), CInt(Math.Round(cg)), CInt(Math.Round(cb)))
+            }
+        }
+        KeepMain(&outPx, w, h)
+        return outPx
+    }
+
+    // 邊框色分群（最遠點初始化＋幾輪 k-means）
+    static func KMeans(_ idx: [Int], _ R: [Int], _ G: [Int], _ B: [Int], _ kmax: Int) -> List<[Double]> {
+        let c = List<[Double]>()
+        if idx.count == 0 { c.Add([255, 255, 255]); return c }
+        var mr = 0.0, mg = 0.0, mb = 0.0
+        for i in idx { mr += Double(R[i]); mg += Double(G[i]); mb += Double(B[i]) }
+        let nIdx = Double(idx.count)
+        c.Add([mr / nIdx, mg / nIdx, mb / nIdx])
+        let step = Math.Max(1, idx.count / 4000)
+        while c.Count < kmax {
+            var far = 0.0; var fi = -1
+            var s = 0
+            while s < idx.count {
+                let i = idx[s]; var best = 1e9
+                for cc in c { best = Math.Min(best, Dist(R[i], G[i], B[i], CInt(cc[0]), CInt(cc[1]), CInt(cc[2]))) }
+                if best > far { far = best; fi = i }
+                s += step
+            }
+            if fi < 0 || far < 14 { break }
+            c.Add([Double(R[fi]), Double(G[fi]), Double(B[fi])])
+        }
+        var cnt = [Int](repeating: 0, count: c.Count)
+        for _ in 0..<6 {
+            var sum = [[Double]](repeating: [0, 0, 0], count: c.Count)
+            cnt = [Int](repeating: 0, count: c.Count)
+            let ci: [[Int]] = c.ToArray().map { [CInt($0[0]), CInt($0[1]), CInt($0[2])] }
+            for i in idx {
+                var bk = 0; var best = 1e9
+                for k in 0..<ci.count { let d = Dist(R[i], G[i], B[i], ci[k][0], ci[k][1], ci[k][2]); if d < best { best = d; bk = k } }
+                sum[bk][0] += Double(R[i]); sum[bk][1] += Double(G[i]); sum[bk][2] += Double(B[i]); cnt[bk] += 1
+            }
+            for k in 0..<c.Count { if cnt[k] > 0 { c[k] = [sum[k][0] / Double(cnt[k]), sum[k][1] / Double(cnt[k]), sum[k][2] / Double(cnt[k])] } }
+        }
+        // 太少的群是剛好碰到邊的主角，不算背景
+        // 由多到少排好（第一群＝最大的背景色）
+        let order = List<Int>()
+        for k in 0..<c.Count { if cnt[k] * 100 >= idx.count * 4 { order.Add(k) } }
+        let cntF = cnt
+        order.Sort { (a: Int, b: Int) -> Int in cntF[b].CompareTo(cntF[a]) }
+        let keep = List<[Double]>()
+        for k in order { keep.Add(c[k]) }
+        if keep.Count == 0 { keep.Add(c[0]) }
+        return keep
+    }
+
+    // 只留最大的那塊（和夠大的旁支，例如分開的耳朵、尾巴）
+    static func KeepMain(_ px: inout [Int], _ w: Int, _ h: Int) {
+        let n = w * h
+        var lab = [Int](repeating: 0, count: n)
+        var sizes: [Int] = [0]
+        var q = [Int](repeating: 0, count: n)
+        for s in 0..<n {
+            if lab[s] != 0 || ((px[s] >> 24) & 255) < 96 { continue }
+            let id = sizes.count
+            var qh = 0, qt = 0, size = 0
+            lab[s] = id; q[qt] = s; qt += 1
+            while qh < qt {
+                let p = q[qh]; qh += 1
+                let x = p % w, y = p / w; size += 1
+                for dy in -1...1 {
+                    for dx in -1...1 {
+                        let xx = x + dx, yy = y + dy
+                        if xx < 0 || yy < 0 || xx >= w || yy >= h { continue }
+                        let o = yy * w + xx
+                        if lab[o] != 0 || ((px[o] >> 24) & 255) < 96 { continue }
+                        lab[o] = id; q[qt] = o; qt += 1
+                    }
+                }
+            }
+            sizes.append(size)
+        }
+        var big = 0
+        for i in 1..<sizes.count { big = Math.Max(big, sizes[i]) }
+        if big == 0 { return }
+        for i in 0..<n {
+            let a = (px[i] >> 24) & 255
+            if a == 0 { continue }
+            let l = lab[i]
+            if l == 0 {
+                // 半透明的毛邊：旁邊有留下來的才留
+                var near = false
+                let x = i % w, y = i / w
+                var dy = -1
+                while dy <= 1 && !near {
+                    var dx = -1
+                    while dx <= 1 && !near {
+                        let xx = x + dx, yy = y + dy
+                        if !(xx < 0 || yy < 0 || xx >= w || yy >= h) {
+                            let ll = lab[yy * w + xx]
+                            if ll != 0 && sizes[ll] * 8 >= big { near = true }
+                        }
+                        dx += 1
+                    }
+                    dy += 1
+                }
+                if !near { px[i] = 0 }
+            }
+            else if sizes[l] * 8 < big { px[i] = 0 }
+        }
+    }
+
+    // 筆刷：擦掉／補回（座標都是 0～1；補回＝原圖的顏色）
+    static func ApplyStrokes(_ px: inout [Int], _ orig: [Int], _ w: Int, _ h: Int, _ strokes: List<[Double]>!) {
+        if strokes == nil { return }
+        let m = Double(Math.Max(w, h))
+        for s in strokes! {
+            if s.count < 4 { continue }
+            let cx = s[0] * Double(w), cy = s[1] * Double(h), r = Math.Max(0.6, s[2] * m)
+            let erase = s[3] > 0.5
+            let x0 = Math.Max(0, CInt(cx - r - 1)), x1 = Math.Min(w - 1, CInt(cx + r + 1)), y0 = Math.Max(0, CInt(cy - r - 1)), y1 = Math.Min(h - 1, CInt(cy + r + 1))
+            if y1 < y0 || x1 < x0 { continue }
+            for y in y0...y1 {
+                for x in x0...x1 {
+                    let ddx = Double(x) + 0.5 - cx, ddy = Double(y) + 0.5 - cy
+                    let d = Math.Sqrt(ddx * ddx + ddy * ddy)
+                    if d > r { continue }
+                    let i = y * w + x
+                    if erase { px[i] = 0 }
+                    else { px[i] = orig[i] | 0xFF000000 }
+                }
+            }
+        }
+    }
+
+    // 透明的地方裁掉（四邊留 pad）
+    static func Bounds(_ px: [Int], _ w: Int, _ h: Int, _ thr: Int) -> Rectangle {
+        var l = w, t = h, r = -1, b = -1
+        for y in 0..<Math.Max(0, h) {
+            for x in 0..<Math.Max(0, w) {
+                if ((px[y * w + x] >> 24) & 255) >= thr { if x < l { l = x }; if x > r { r = x }; if y < t { t = y }; if y > b { b = y } }
+            }
+        }
+        if r < 0 { return Rectangle.Empty }
+        return Rectangle.FromLTRB(l, t, r + 1, b + 1)
+    }
+
+    static func Crop(_ px: [Int], _ w: Int, _ h: Int, _ r: Rectangle) -> CuCut {
+        let c = CuCut(); c.W = r.Width; c.H = r.Height; c.Px = [Int](repeating: 0, count: r.Width * r.Height)
+        for y in 0..<Math.Max(0, r.Height) {
+            let s0 = (r.Y + y) * w + r.X, d0 = y * r.Width
+            for x in 0..<r.Width { c.Px[d0 + x] = px[s0 + x] }
+        }
+        return c
+    }
+
+    // 去背＋筆刷＋裁切：從原圖做出「主角」
+    static func Cutout(_ src: Bitmap, _ useAlpha: Bool, _ tol: Int, _ strokes: List<[Double]>!, _ hadAlpha: inout Bool) -> CuCut! {
+        let w = src.Width, h = src.Height
+        let orig = Pixels(src)
+        hadAlpha = HasAlpha(orig, w, h)
+        var px: [Int]
+        if hadAlpha && useAlpha {
+            px = orig
+            for i in 0..<px.count { if ((px[i] >> 24) & 255) < 10 { px[i] = 0 } }
+        } else {
+            var solid = orig
+            for i in 0..<solid.count { if ((solid[i] >> 24) & 255) < 128 { solid[i] = 0xFFFFFFFF } else { solid[i] |= 0xFF000000 } }
+            px = RemoveBg(solid, w, h, tol)
+        }
+        ApplyStrokes(&px, orig, w, h, strokes)
+        let bb = Bounds(px, w, h, 40)
+        if bb.Width < 2 || bb.Height < 2 { return nil }
+        return Crop(px, w, h, bb)
+    }
+
+    // ---------- 大小：最高 16 格、最寬 20 格 ----------
+    static func Fit(_ w: Int, _ h: Int, _ maxW: Double, _ maxH: Double, _ cw: inout Int, _ ch: inout Int) {
+        let s = Math.Min(maxH / Double(h), maxW / Double(w))
+        cw = Math.Max(1, CInt(Math.Round(Double(w) * s))); ch = Math.Max(1, CInt(Math.Round(Double(h) * s)))
+    }
+
+    // ---------- 保留原圖：平滑縮放（一格 8 像素） ----------
+    static func ToSmooth(_ c: CuCut, _ hCells: Double, _ wCells: Double) -> CuCut {
+        var cw = 0, ch = 0
+        Fit(c.W, c.H, wCells * Double(SmoothR), hCells * Double(SmoothR), &cw, &ch)
+        return ToSmoothSized(c, cw, ch)
+    }
+    static func ToSmooth(_ c: CuCut, _ hCells: Int, _ wCells: Int) -> CuCut { return ToSmooth(c, Double(hCells), Double(wCells)) }
+
+    static func ToSmoothSized(_ c: CuCut, _ cw: Int, _ ch: Int) -> CuCut {
+        let o = CuCut(); o.W = cw; o.H = ch
+        o.Px = Resample(c, cw, ch)
+        for i in 0..<o.Px.count { if ((o.Px[i] >> 24) & 255) < 14 { o.Px[i] = 0 } }
+        return o
+    }
+
+    // 預乘平均的超取樣縮放（不會有黑邊）
+    static func Resample(_ c: CuCut, _ tw: Int, _ th: Int) -> [Int] {
+        var o = [Int](repeating: 0, count: Math.Max(0, tw * th))
+        let sx = Double(c.W) / Double(tw), sy = Double(c.H) / Double(th)
+        let nx = Math.Max(1, Math.Min(8, CInt(Math.Ceiling(sx * 2)))), ny = Math.Max(1, Math.Min(8, CInt(Math.Ceiling(sy * 2))))
+        for y in 0..<Math.Max(0, th) {
+            for x in 0..<Math.Max(0, tw) {
+                var a = 0.0, r = 0.0, g = 0.0, b = 0.0; var cnt = 0
+                for j in 0..<ny {
+                    for i in 0..<nx {
+                        let fx: Double = (Double(x) + (Double(i) + 0.5) / Double(nx)) * sx
+                        let fy: Double = (Double(y) + (Double(j) + 0.5) / Double(ny)) * sy
+                        let px = Math.Min(c.W - 1, CInt(fx)), py = Math.Min(c.H - 1, CInt(fy))
+                        let v = c.Px[py * c.W + px]
+                        let av = Double((v >> 24) & 255) / 255.0
+                        a += av; r += av * Double((v >> 16) & 255); g += av * Double((v >> 8) & 255); b += av * Double(v & 255); cnt += 1
+                    }
+                }
+                if a <= 0.0001 { o[y * tw + x] = 0; continue }
+                o[y * tw + x] = Argb(CInt(Math.Round(a / Double(cnt) * 255)), CInt(Math.Round(r / a)), CInt(Math.Round(g / a)), CInt(Math.Round(b / a)))
+            }
+        }
+        return o
+    }
+
+    // ---------- 像素風：縮到格子、減色、深色外框（跟內建公仔同一種畫法） ----------
+    static func ToPixel(_ c: CuCut, _ sub: Int, _ hCells: Double, _ wCells: Double, _ outline: inout Color) -> CuCut {
+        var cw = 0, ch = 0
+        let maxH = hCells * Double(sub) - 2, maxW = wCells * Double(sub) - 2
+        // 本來就很小的圖（多半是像素圖）：用整數倍放大，才不會一格大一格小
+        if Double(c.H) <= maxH && Double(c.W) <= maxW {
+            let k = Math.Max(1, CInt(Math.Floor(Math.Min(maxH / Double(c.H), maxW / Double(c.W)))))
+            cw = c.W * k; ch = c.H * k
+        }
+        else { Fit(c.W, c.H, maxW, maxH, &cw, &ch) }
+        return ToPixelSized(c, cw, ch, sub >= 2 ? 18 : 12, true, &outline)
+    }
+    static func ToPixel(_ c: CuCut, _ sub: Int, _ hCells: Int, _ wCells: Int, _ outline: inout Color) -> CuCut { return ToPixel(c, sub, Double(hCells), Double(wCells), &outline) }
+
+    // 縮到 cw×ch（外框另外加一圈）；quant＝要不要減色（動作表是使用者自己畫的，不減）
+    static func ToPixelSized(_ c: CuCut, _ cw: Int, _ ch: Int, _ K: Int, _ quant: Bool, _ outline: inout Color) -> CuCut {
+        let small = Resample(c, cw, ch)
+        let gw = cw + 2, gh = ch + 2
+        var g = [Int](repeating: 0, count: gw * gh)
+        let cols = List<Int>()
+        for y in 0..<ch {
+            for x in 0..<cw {
+                var v = small[y * cw + x]
+                if ((v >> 24) & 255) < 110 { continue }
+                if quant { v = Punch(v) } else { v |= 0xFF000000 }
+                g[(y + 1) * gw + x + 1] = v
+                cols.Add(v)
+            }
+        }
+        // 減色（中位切割）
+        let pal = MedianCut(cols, quant ? K : 64)
+        var use = [Int](repeating: 0, count: pal.Count)
+        for i in 0..<g.count {
+            if g[i] == 0 { continue }
+            let best = Nearest(pal, g[i])
+            if quant { g[i] = pal[best] | 0xFF000000 }
+            use[best] += 1
+        }
+        // 孤零零的一個像素拿掉（雜點）
+        var g2 = g
+        if gh > 2 && gw > 2 {
+            for y in 1..<(gh - 1) {
+                for x in 1..<(gw - 1) {
+                    let i = y * gw + x
+                    if g[i] == 0 { continue }
+                    let nb = (g[i - 1] != 0 ? 1 : 0) + (g[i + 1] != 0 ? 1 : 0) + (g[i - gw] != 0 ? 1 : 0) + (g[i + gw] != 0 ? 1 : 0)
+                    if nb == 0 { g2[i] = 0 }
+                }
+            }
+        }
+        g = g2
+        // 外框色：最多的那個顏色壓暗、帶一點藏青（內建公仔的 k 都是很深的有色黑）
+        var dom = 0; for i in Loop(1, use.count) { if use[i] > use[dom] { dom = i } }
+        let dc: Color = pal.Count > 0 ? Color.FromArgb(pal[dom]) : Color.Gray
+        outline = Color.FromArgb(255, Clamp255(Double(dc.R) * 0.22 + Double(0x2A) * 0.45), Clamp255(Double(dc.G) * 0.22 + Double(0x2F) * 0.45), Clamp255(Double(dc.B) * 0.22 + Double(0x45) * 0.5))
+        // 原圖邊緣本來就有深色外框（多半是像素圖、貼圖）：不要再多加一圈
+        var el = 0, en = 0
+        if gh > 2 && gw > 2 {
+            for y in 1..<(gh - 1) {
+                for x in 1..<(gw - 1) {
+                    let i = y * gw + x
+                    if g[i] == 0 || (g[i - 1] != 0 && g[i + 1] != 0 && g[i - gw] != 0 && g[i + gw] != 0) { continue }
+                    let v = g[i]; el += (((v >> 16) & 255) * 299 + ((v >> 8) & 255) * 587 + (v & 255) * 114) / 1000; en += 1
+                }
+            }
+        }
+        if en > 0 && el / en < 75 { let r0 = CuCut(); r0.W = gw; r0.H = gh; r0.Px = g; return r0 }
+        let ok = outline.ToArgb() & 0xFFFFFFFF
+        var o2 = g
+        for y in 0..<gh {
+            for x in 0..<gw {
+                let i = y * gw + x
+                if g[i] != 0 { continue }
+                let edge = (x > 0 && g[i - 1] != 0) || (x < gw - 1 && g[i + 1] != 0) || (y > 0 && g[i - gw] != 0) || (y < gh - 1 && g[i + gw] != 0)
+                if edge { o2[i] = ok }
+            }
+        }
+        let r = CuCut(); r.W = gw; r.H = gh; r.Px = o2
+        return r
+    }
+
+    // 像素風顏色稍微飽和一點（照片縮小後會灰灰的）
+    static func Punch(_ v: Int) -> Int {
+        let r = (v >> 16) & 255, g = (v >> 8) & 255, b = v & 255
+        let l = 0.299 * Double(r) + 0.587 * Double(g) + 0.114 * Double(b), s = 1.18
+        return Argb(255, CInt(l + (Double(r) - l) * s), CInt(l + (Double(g) - l) * s), CInt(l + (Double(b) - l) * s))
+    }
+
+    static func Nearest(_ pal: List<Int>, _ v: Int) -> Int {
+        let r = (v >> 16) & 255, g = (v >> 8) & 255, b = v & 255
+        var best = 0; var bd = 1e9
+        for i in 0..<pal.Count {
+            let p = pal[i]
+            let d = Dist(r, g, b, (p >> 16) & 255, (p >> 8) & 255, p & 255)
+            if d < bd { bd = d; best = i }
+        }
+        return best
+    }
+
+    // 中位切割減色（K 色）
+    static func MedianCut(_ cols: List<Int>, _ K: Int) -> List<Int> {
+        let pal = List<Int>()
+        if cols.Count == 0 { pal.Add(0xFF808080); return pal }
+        let boxes = List<List<Int>>()
+        boxes.Add(List<Int>(cols))
+        let wgt: [Double] = [1.0, 1.25, 0.9]
+        while boxes.Count < K {
+            var bi = -1, ch = 0; var bestScore = 0.0
+            for i in 0..<boxes.Count {
+                let bx = boxes[i]
+                if bx.Count < 2 { continue }
+                var mn = [255, 255, 255], mx = [0, 0, 0]
+                for v in bx.items {
+                    for c in 0..<3 { let cv = (v >> (16 - 8 * c)) & 255; if cv < mn[c] { mn[c] = cv }; if cv > mx[c] { mx[c] = cv } }
+                }
+                let sq = Math.Sqrt(Double(bx.Count))
+                for c in 0..<3 {
+                    let score = Double(mx[c] - mn[c]) * wgt[c] * sq
+                    if score > bestScore { bestScore = score; bi = i; ch = c }
+                }
+            }
+            if bi < 0 || bestScore < 1 { break }
+            let box = boxes[bi]
+            let sh = 16 - 8 * ch
+            box.Sort { (a: Int, b: Int) -> Int in ((a >> sh) & 255).CompareTo((b >> sh) & 255) }
+            let mid = box.Count / 2
+            boxes[bi] = box.GetRange(0, mid)
+            boxes.Add(box.GetRange(mid, box.Count - mid))
+        }
+        for bx in boxes {
+            if bx.Count == 0 { continue }
+            var r = 0, g = 0, b = 0
+            for v in bx.items { r += (v >> 16) & 255; g += (v >> 8) & 255; b += v & 255 }
+            pal.Add(Argb(255, r / bx.Count, g / bx.Count, b / bx.Count))
+        }
+        return pal
+    }
+
+    // ---------- 切頭身腳：猜兩條線的位置（0～1） ----------
+    // 頭／身體：中段最窄的那列（脖子）；身體／腳：從下面往上，中間開始有空隙（兩隻腳）的那列
+    static func GuessLines(_ c: CuCut, _ neck: inout Double, _ hip: inout Double, _ confident: inout Bool) {
+        let w = c.W, h = c.H
+        var width = [Int](repeating: 0, count: h), left = [Int](repeating: 0, count: h), right = [Int](repeating: 0, count: h)
+        for y in 0..<h {
+            var l = -1, r = -1
+            for x in 0..<w { if ((c.Px[y * w + x] >> 24) & 255) >= 110 { if l < 0 { l = x }; r = x } }
+            left[y] = l; right[y] = r; width[y] = l < 0 ? 0 : r - l + 1
+        }
+        // 脖子
+        neck = 0.42; var neckOk = false
+        let y0 = CInt(Double(h) * 0.22), y1 = CInt(Double(h) * 0.6)
+        var best = -1; var bv = 1e9
+        var y = y0
+        while y <= y1 && y < h {
+            var sm = 0.0; var cnt = 0
+            for d in -1...1 { if y + d >= 0 && y + d < h { sm += Double(width[y + d]); cnt += 1 } }
+            sm /= Double(cnt)
+            if sm < bv { bv = sm; best = y }
+            y += 1
+        }
+        if best > 0 {
+            var above = 0, below = 0
+            for y2 in 0..<best { above = Math.Max(above, width[y2]) }
+            for y2 in best..<h { below = Math.Max(below, width[y2]) }
+            if bv < Double(above) * 0.86 && bv < Double(below) * 0.9 { neck = Double(best) / Double(h); neckOk = true }
+        }
+        // 腳：中間有空隙
+        hip = 0.78; var hipOk = false
+        var run = 0
+        var yy = h - 1
+        let yStop = CInt(Double(h) * 0.55)
+        while yy >= yStop {
+            var gap = false
+            if width[yy] > 2 {
+                let l = left[yy], r = right[yy], m0 = l + (r - l) / 5, m1 = r - (r - l) / 5
+                var firstOn = -1
+                var seenGap = false
+                for x in l...r {
+                    let on = ((c.Px[yy * w + x] >> 24) & 255) >= 110
+                    if on && firstOn < 0 { firstOn = x }
+                    if !on && firstOn >= 0 && x >= m0 && x <= m1 { seenGap = true }
+                    if on && seenGap { gap = true; break }
+                }
+            }
+            if gap { run += 1 }
+            else if run > 0 { break }
+            yy -= 1
+        }
+        if Double(run) >= Math.Max(2.0, Double(h) * 0.07) {
+            let hp = 1 - (Double(run) + 0.5) / Double(h)
+            if hp > neck + 0.12 && hp < 0.95 { hip = hp; hipOk = true }
+        }
+        if hip < neck + 0.15 { hip = Math.Min(0.92, neck + 0.3) }
+        confident = hipOk && neckOk || (hipOk && Double(run) >= Double(h) * 0.12)
+    }
+
+    // 兩隻腳的分界（腳那一段最空的那一欄）
+    static func LegSplit(_ c: CuCut, _ hipRow: Int) -> Int {
+        let w = c.W, h = c.H
+        var l = w, r = -1
+        for y in Loop(Math.Max(0, hipRow), h) { for x in 0..<w { if ((c.Px[y * w + x] >> 24) & 255) >= 110 { if x < l { l = x }; if x > r { r = x } } } }
+        if r < 0 { return w / 2 }
+        let m0 = l + (r - l) / 4, m1 = r - (r - l) / 4
+        var best = (l + r + 1) / 2, bv = int.MaxValue
+        var x = m0
+        while x <= m1 {
+            var cnt = 0
+            for y in Loop(Math.Max(0, hipRow), h) { if ((c.Px[y * w + x] >> 24) & 255) >= 110 { cnt += 1 } }
+            let score = cnt * 4 + Math.Abs(x - (l + r) / 2)
+            if score < bv { bv = score; best = x }
+            x += 1
+        }
+        return best
+    }
+
+    static func ToBitmap(_ c: CuCut) -> Bitmap { return FromPixels(c.Px, c.W, c.H) }
+    static func FromBitmap(_ b: Bitmap) -> CuCut { let c = CuCut(); c.W = b.Width; c.H = b.Height; c.Px = Pixels(b); return c }
+    static func Mirror(_ c: CuCut) -> CuCut {
+        let o = CuCut(); o.W = c.W; o.H = c.H; o.Px = [Int](repeating: 0, count: c.Px.count)
+        for y in 0..<c.H { for x in 0..<c.W { o.Px[y * c.W + x] = c.Px[y * c.W + c.W - 1 - x] } }
+        return o
+    }
+    // 主要顏色（不透明像素的平均，忽略外框）
+    static func MainColor(_ c: CuCut) -> Color {
+        var r = 0, g = 0, b = 0, n = 0
+        for v in c.Px {
+            if ((v >> 24) & 255) < 200 { continue }
+            let rr = (v >> 16) & 255, gg = (v >> 8) & 255, bb = v & 255
+            if rr + gg + bb < 120 { continue }
+            r += rr; g += gg; b += bb; n += 1
+        }
+        if n == 0 { return Color.FromArgb(0x8A, 0x9A, 0xB8) }
+        return Color.FromArgb(r / n, g / n, b / n)
+    }
+}
+
+// ===== 56_custom_make.swift =====
+// 56_custom_make.swift — port of extension/desktop/DeskPals.CustomMake.cs
+// Desk Pals：「做一隻自己的公仔」視窗。四步：選照片 → 去背 → 動起來 → 取名字。
+// 全部自己畫（跟設定視窗同一套木框＋奶油色），名字用真的 TextBox（才打得了中文）。離屏測試時不顯示，用 pipe 的 custom 指令操作。
+// mac: 拖檔案進來 → Form.AllowDrop／DragEnter／DragDrop（04_shim_custom_b.swift）；OpenFileDialog／SaveFileDialog → NSOpenPanel／NSSavePanel（CuDialogs）。
+import Foundation
+import AppKit
+
+class CuMaker: Form {
+    final class Btn { var Id = "", Text = ""; var R = Rectangle(0, 0, 0, 0); var Kind = 0; var On = false, Enabled = true }   // Kind：0 卡片 2 按鈕 3 主要按鈕 4 小按鈕
+    let w: World
+    let first: Bool
+    let editId: String!
+    let d: Double
+    let U: Int
+    var step = 0
+    var VVisible = false
+    let btns = List<Btn>()
+    var hoverId = ""
+    var err: String! = ""
+    var titleF: FontT! = nil, qF: FontT! = nil, bigF: FontT! = nil, subF: FontT! = nil, btnF: FontT! = nil, smallF: FontT! = nil
+    let nameBox: TextBox
+    let timer = Timer()
+    var animT = 0.0
+    var anim = "walk"
+    var Capture = false   // mac: 拖曳時 AppKit 本來就會一直把滑鼠事件給這個視窗；這裡只記 C# 的 Capture 狀態
+
+    // 草稿
+    var meta = CuMeta()
+    var src: Bitmap! = nil               // 原圖（最長邊 640）
+    var srcAlpha = false
+    var srcPx: [Int] = [], autoPx: [Int] = [], viewPx: [Int] = []     // 原圖、自動去背的結果（快取）、加上筆刷的結果
+    var autoKey = -999
+    var viewBmp: Bitmap! = nil, srcDim: Bitmap! = nil
+    var spr: CuSprite! = nil
+    var draft: Pal! = nil
+    var pv: Pet! = nil
+    var pvw: World! = nil
+    var brushOn = false; var brushErase = true; var brushSize = 1
+    var painting = false, dragLine = false; var dragWhich = 0
+    var lastPaint = PointT(0, 0)
+
+    init(_ w: World, _ first: Bool, _ editId: String!) {
+        self.w = w; self.first = first; self.editId = editId
+        d = Double(w.S) / 4.0
+        U = Math.Max(2, CInt(Math.Round(2 * d)))
+        nameBox = TextBox()
+        super.init()
+        Text = editId != nil ? "修改我的公仔" : "做一隻自己的公仔"
+        FormBorderStyle = FormBorderStyleT.FixedSingle
+        MaximizeBox = false; MinimizeBox = false
+        ShowInTaskbar = true; TopMost = true
+        StartPosition = FormStartPosition.Manual
+        BackColor = Pix.Cream
+        DoubleBuffered = true
+        AllowDrop = true
+        titleF = FontT("Microsoft JhengHei UI", 12, FontStyle.Bold)
+        qF = FontT("Microsoft JhengHei UI", 15, FontStyle.Bold)
+        bigF = FontT("Microsoft JhengHei UI", 12, FontStyle.Bold)
+        subF = FontT("Microsoft JhengHei UI", 9, FontStyle.Bold)
+        btnF = FontT("Microsoft JhengHei UI", 11, FontStyle.Bold)
+        smallF = FontT("Microsoft JhengHei UI", 8.5, FontStyle.Regular)
+        ClientSize = SizeT(Sc(780), Sc(600))
+        KeyPreview = true
+        KeyDown = { [unowned self] (e: KeyEventArgs) in if e.KeyCode == Keys.Escape { self.Cancel() } }
+        nameBox.Font = FontT("Microsoft JhengHei UI", 15, FontStyle.Bold)
+        nameBox.BackColor = Color.FromArgb(0xFF, 0xFD, 0xF7)
+        nameBox.ForeColor = Pix.TextC
+        nameBox.MaxLength = 10
+        nameBox.Visible = false
+        nameBox.TextChanged = { [unowned self] in self.meta.Name = CuMeta.CleanName(self.nameBox.Text); self.RefreshDraftLines(); self.LayoutBtns(); self.Invalidate() }
+        Controls.Add(nameBox)
+        CuMaker.Borderless(nameBox, Color.FromArgb(0xFF, 0xFD, 0xF7))
+        DragEnter = { (e: DragEventArgs) in e.Effect = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None }
+        DragDrop = { [unowned self] (e: DragEventArgs) in
+            guard let files = e.Data.GetData(DataFormats.FileDrop) as? [String], files.count > 0 else { return }
+            if files[0].EndsWith(".deskpal", StringComparison.OrdinalIgnoreCase) { let f = self.first; let ww = self.w; self.Close(); ww.CuImportFile(files[0], f); return }
+            self.LoadImage(files[0], false)
+        }
+        timer.Interval = 40
+        timer.Tick = { [weak self] in
+            guard let s = self else { return }
+            s.animT += 0.04; if s.step >= 2 { s.Invalidate(s.PreviewRect()) }
+        }
+        FormClosed = { [weak self] in self?.timer.Stop(); self?.timer.Dispose() }
+        if editId != nil { LoadExisting(editId) }
+        LayoutBtns()
+    }
+
+    // mac: TextBox.BorderStyle = BorderStyle.None（NSTextField 拿掉外框、背景照 BackColor）
+    static func Borderless(_ t: TextBox, _ back: Color) {
+        guard let tf = t.tf else { return }
+        tf.isBezeled = false; tf.isBordered = false
+        tf.drawsBackground = true; tf.backgroundColor = back.ns
+        tf.focusRingType = .none
+    }
+
+    func Sc(_ v: Int) -> Int { return CInt(Math.Round(Double(v) * d)) }
+
+    override func SetVisibleCore(_ value: Bool) {
+        if App.Offscreen { VVisible = value; super.SetVisibleCore(false); if value { timer.Start() }; return }
+        super.SetVisibleCore(value)
+        if value { _applyAllowDrop(); timer.Start() }   // mac: 視窗這時才建好，登記可以放檔案
+    }
+    func PaintTo(_ g: Graphics) {
+        let cs = ClientSize
+        if cs.Width <= 0 || cs.Height <= 0 { return }
+        let b = Bitmap(cs.Width, cs.Height, PixelFormat.Format24bppRgb)
+        do { let gg = Graphics.FromImage(b); OnPaint(PaintEventArgs(gg, Rectangle(0, 0, cs.Width, cs.Height))); if step == 3 { DrawNameText(gg) } }
+        g.DrawImageUnscaled(b, Left, Top)
+    }
+
+    // ================= 草稿 =================
+    func LoadExisting(_ id: String) {
+        let m: CuMeta! = CuStore.Get(id)
+        if m == nil { return }
+        meta = m.Clone()
+        var e2: String! = nil
+        let b: Bitmap! = CuImg.LoadFile(Path.Combine(CuStore.Dir(id), "source.png"), &e2)
+        if b == nil { err = e2; return }
+        SetSource(b)
+        Rebuild(false)
+        nameBox.Text = meta.Name
+        step = 1
+    }
+
+    func LoadImage(_ path: String, _ sheet: Bool) {
+        var e2: String! = nil
+        let b: Bitmap! = CuImg.LoadFile(path, &e2)
+        if b == nil { err = e2; step = 0; LayoutBtns(); Invalidate(); return }
+        err = ""
+        let keepName: String = meta.Name, keepPersona: String = meta.Persona
+        meta = CuMeta()
+        meta.Name = keepName; meta.Persona = keepPersona
+        meta.Sheet = sheet
+        if !sheet && keepName == "" { let fn = CuMeta.CleanName(Path.GetFileNameWithoutExtension(path)); if fn.Length > 0 && fn.Length <= 6 && !fn.StartsWith("IMG") && !fn.StartsWith("DSC") { meta.Name = fn } }
+        SetSource(b)
+        // 小小的圖（多半本來就是像素圖）：像素風、跟內建一樣大的像素；照片：保留原圖（像素風可以自己切）
+        if b.Width <= 64 && b.Height <= 64 { meta.Mode = "pixel"; meta.Sub = 1 }
+        else if !sheet { meta.Mode = "smooth"; meta.Sub = 2 }
+        Rebuild(true)
+        if spr == nil { step = sheet ? 0 : 1 }
+        else { step = sheet ? 2 : 1 }
+        nameBox.Text = meta.Name
+        LayoutBtns(); Invalidate()
+    }
+
+    func SetSource(_ b: Bitmap) {
+        if src != nil { src.Dispose() }
+        src = b
+        srcPx = CuImg.Pixels(b)
+        srcAlpha = CuImg.HasAlpha(srcPx, b.Width, b.Height)
+        autoKey = -999
+        if srcDim != nil { srcDim.Dispose() }
+        srcDim = b.Clone()
+    }
+
+    // 去背（快取：強度沒變就不重算）→ 筆刷 → 裁切 → 像素風／原圖 → 切頭身腳
+    func Rebuild(_ guessRig: Bool) {
+        if src == nil { return }
+        if meta.Sheet {
+            var e2: String! = nil
+            spr = CuSprite.Build(meta, src, &e2)
+            err = spr == nil ? e2 : ""
+            MakeDraft()
+            return
+        }
+        let key = (srcAlpha && meta.UseAlpha) ? -1 : meta.Tol
+        if key != autoKey {
+            if key == -1 { autoPx = srcPx; for i in 0..<autoPx.count { if ((autoPx[i] >> 24) & 255) < 10 { autoPx[i] = 0 } } }
+            else {
+                var solid = srcPx
+                for i in 0..<solid.count { if ((solid[i] >> 24) & 255) < 128 { solid[i] = 0xFFFFFFFF } else { solid[i] |= 0xFF000000 } }
+                autoPx = CuImg.RemoveBg(solid, src.Width, src.Height, meta.Tol)
+            }
+            autoKey = key
+        }
+        viewPx = autoPx
+        CuImg.ApplyStrokes(&viewPx, srcPx, src.Width, src.Height, meta.Strokes)
+        RefreshView()
+        BuildSprite(guessRig)
+    }
+
+    func RefreshView() {
+        if viewBmp != nil { viewBmp.Dispose() }
+        viewBmp = CuImg.FromPixels(viewPx, src.Width, src.Height)
+    }
+
+    func BuildSprite(_ guessRig: Bool) {
+        let bb = CuImg.Bounds(viewPx, src.Width, src.Height, 40)
+        if bb.Width < 2 || bb.Height < 2 { spr = nil; err = "去背之後什麼都不剩了：把去背強度調低，或用「補回」筆刷"; MakeDraft(); return }
+        var cut = CuImg.Crop(viewPx, src.Width, src.Height, bb)
+        if meta.Flip { cut = CuImg.Mirror(cut) }
+        let s = CuSprite()
+        s.Pixel = meta.Pixel
+        var fin: CuCut
+        if s.Pixel { var ol = Color.Empty; fin = CuImg.ToPixel(cut, meta.Sub, CuImg.HCells, CuImg.WCells, &ol); s.Outline = ol; s.R = meta.Sub }
+        else { fin = CuImg.ToSmooth(cut, CuImg.HCells, CuImg.WCells); s.R = CuImg.SmoothR; let mc = CuImg.MainColor(fin); s.Outline = Color.FromArgb(CInt(Double(mc.R) * 0.25 + 17), CInt(Double(mc.G) * 0.25 + 19), CInt(Double(mc.B) * 0.25 + 31)) }
+        if guessRig {
+            var gn = 0.0, gh = 0.0; var conf = false
+            CuImg.GuessLines(fin, &gn, &gh, &conf)
+            meta.Rig = conf; meta.Neck = -1; meta.Hip = -1
+        }
+        s.SetStand(fin, meta.Rig, meta.Neck, meta.Hip)
+        spr = s
+        err = ""
+        MakeDraft()
+    }
+
+    func MakeDraft() {
+        if spr == nil { draft = nil; pv = nil; return }
+        let m: CuMeta = meta.Clone()
+        if m.Id == "" { m.Id = "cudraft" }
+        if m.Name == "" { m.Name = "小公仔" }
+        draft = Pal.MakeCu(m, spr)
+        if pvw == nil { pvw = World(w.S, Pal.Classic) }
+        pv = Pet(pvw, draft, w.S, 7)
+    }
+
+    func RefreshDraftLines() { if spr != nil { MakeDraft() } }
+
+    // ================= 按鈕 =================
+    @discardableResult func Add(_ id: String, _ text: String, _ r: Rectangle, _ kind: Int, _ on: Bool) -> Btn {
+        let b = Btn(); b.Id = id; b.Text = text; b.R = r; b.Kind = kind; b.On = on; btns.Add(b); return b
+    }
+    func Find(_ id: String) -> Btn! { for b in btns { if b.Id == id { return b } }; return nil }
+    func At(_ p: Point) -> Btn! { for b in btns { if b.R.Contains(p) && b.Enabled { return b } }; return nil }
+
+    func ContentRect() -> Rectangle { return Rectangle(Sc(30), Sc(150), ClientSize.Width - Sc(60), ClientSize.Height - Sc(150) - Sc(80)) }
+    func LeftRect() -> Rectangle { let c = ContentRect(); return Rectangle(c.X, c.Y, Sc(400), c.Height) }
+    func RightRect() -> Rectangle { let c = ContentRect(); let x = c.X + Sc(418); return Rectangle(x, c.Y, c.Right - x, c.Height) }
+    func PreviewRect() -> Rectangle { let r = RightRect(); return Rectangle(r.X, r.Y, r.Width, Sc(210)) }
+    func SliderRect() -> Rectangle { let r = RightRect(); return Rectangle(r.X + Sc(10), r.Y + Sc(50), r.Width - Sc(20), Sc(22)) }
+
+    func LayoutBtns() {
+        btns.Clear()
+        let W0 = ClientSize.Width, H0 = ClientSize.Height
+        let c = ContentRect()
+        nameBox.Visible = step == 3 && !App.Offscreen
+        if step == 0 {
+            Add("open", "", Rectangle(c.X, c.Y, c.Width, Sc(200)), 0, false)
+            let bw = (c.Width - 2 * Sc(12)) / 3, by = c.Bottom - Sc(40)
+            Add("template", "下載動作表範本", Rectangle(c.X, by, bw, Sc(36)), 4, false)
+            Add("sheet", "上傳畫好的動作表…", Rectangle(c.X + bw + Sc(12), by, bw, Sc(36)), 4, false)
+            Add("importpal", "匯入朋友的公仔…", Rectangle(c.X + 2 * (bw + Sc(12)), by, bw, Sc(36)), 4, false)
+        }
+        else if step == 1 {
+            let r = RightRect()
+            var y = r.Y
+            if meta.Sheet { }
+            else if srcAlpha { Add("usealpha", meta.UseAlpha ? "改用自動去背" : "用原本的透明背景", Rectangle(r.X + Sc(10), y + Sc(42), Sc(170), Sc(30)), 4, false) }
+            y += Sc(92)
+            let bw = Sc(78)
+            Add("erase", "擦掉", Rectangle(r.X + Sc(10), y + Sc(30), bw, Sc(32)), 4, brushOn && brushErase)
+            Add("restore", "補回", Rectangle(r.X + Sc(10) + bw + Sc(8), y + Sc(30), bw, Sc(32)), 4, brushOn && !brushErase)
+            Add("bsize", brushSize == 0 ? "筆刷：小" : (brushSize == 1 ? "筆刷：中" : "筆刷：大"), Rectangle(r.X + Sc(10) + 2 * (bw + Sc(8)), y + Sc(30), Sc(100), Sc(32)), 4, false)
+            Add("undo", "復原一筆", Rectangle(r.X + Sc(10), y + Sc(68), Sc(100), Sc(30)), 4, false).Enabled = meta.Strokes.Count > 0
+            Add("clearbrush", "筆刷全部重來", Rectangle(r.X + Sc(118), y + Sc(68), Sc(130), Sc(30)), 4, false).Enabled = meta.Strokes.Count > 0
+            if meta.Sheet { let b1: Btn = Find("erase"); b1.Enabled = false; Find("restore").Enabled = false; Find("bsize").Enabled = false }
+            y += Sc(112)
+            let cw = (r.Width - Sc(30)) / 2
+            Add("pixel", "像素風", Rectangle(r.X + Sc(10), y + Sc(28), cw, Sc(58)), 0, meta.Pixel)
+            Add("smooth", "保留原圖", Rectangle(r.X + Sc(20) + cw, y + Sc(28), cw, Sc(58)), 0, !meta.Pixel)
+            if meta.Pixel { Add("sub", meta.Sub >= 2 ? "細緻像素 ✓" : "細緻像素", Rectangle(r.X + Sc(10), y + Sc(94), Sc(130), Sc(30)), 4, meta.Sub >= 2) }
+            Add("flip", "左右翻轉", Rectangle(r.X + Sc(148), y + Sc(94), Sc(110), Sc(30)), 4, meta.Flip)
+        }
+        else if step == 2 {
+            let l = LeftRect(), pr = PreviewRect()
+            if !meta.Sheet { Add("rig", meta.Rig ? "✓ 用兩條線分出頭、身體、腳" : "用兩條線分出頭、身體、腳", Rectangle(l.X, l.Y, l.Width, Sc(32)), 4, meta.Rig) }
+            let an: [String] = ["walk", "jump", "sleep", "happy", "held"]
+            let at: [String] = ["走路", "跳", "睡覺", "開心", "被抓"]
+            let bw = (pr.Width - 4 * Sc(6)) / 5
+            for i in 0..<an.count { Add("anim:" + an[i], at[i], Rectangle(pr.X + i * (bw + Sc(6)), pr.Bottom + Sc(10), bw, Sc(32)), 4, anim == an[i]) }
+        }
+        else {
+            let r = ContentRect()
+            let nf = Rectangle(r.X + Sc(150), r.Y + Sc(6), Sc(260), Sc(40))
+            nameBox.Bounds = Rectangle(nf.X + Sc(12), nf.Y + (nf.Height - nameBox.PreferredHeight) / 2, nf.Width - Sc(24), nameBox.PreferredHeight)
+            let cw = (r.Width - 2 * Sc(12)) / 3, ch = Sc(82), y0 = r.Y + Sc(84)
+            for i in 0..<Pal.Personas.count {
+                let id = Pal.Personas[i]
+                Add("persona:" + id, Pal.PersonaName(id), Rectangle(r.X + (i % 3) * (cw + Sc(12)), y0 + (i / 3) * (ch + Sc(12)), cw, ch), 0, meta.Persona == id)
+            }
+        }
+        let bby = H0 - Sc(64), bh = Sc(44)
+        Add(step > 0 ? "back" : "cancel", step > 0 ? "上一步" : "取消", Rectangle(Sc(30), bby, Sc(130), bh), 2, false)
+        let nx = Add("next", step < 3 ? "下一步" : (editId != nil ? "存好了！" : "完成！"), Rectangle(W0 - Sc(30) - Sc(160), bby, Sc(160), bh), 3, false)
+        nx.Enabled = step == 0 ? spr != nil : (step == 3 ? spr != nil && meta.Name.Trim() != "" : spr != nil)
+    }
+
+    // 按按鈕（滑鼠、測試用的 custom 指令都走這裡）
+    func Press(_ id: String) {
+        let b: Btn! = Find(id)
+        if b != nil && !b.Enabled { return }
+        switch id {
+        case "open": PickImage(false); return
+        case "sheet": PickImage(true); return
+        case "template": w.CuSaveTemplateDialog(); return
+        case "importpal": let f = first; let ww = w; Close(); ww.CuImportDialog(f); return
+        case "usealpha": meta.UseAlpha = !meta.UseAlpha; Rebuild(false)
+        case "erase": brushOn = !(brushOn && brushErase); brushErase = true
+        case "restore": brushOn = !(brushOn && !brushErase); brushErase = false
+        case "bsize": brushSize = (brushSize + 1) % 3
+        case "undo":
+            if meta.Strokes.Count > 0 {
+                let n = meta.Strokes.Count
+                var keep = n - 1
+                while keep > 0 && meta.Strokes[keep - 1].count > 4 && meta.Strokes[keep - 1][4] == meta.Strokes[n - 1][4] { keep -= 1 }
+                meta.Strokes.RemoveRange(keep, n - keep)
+                Rebuild(false)
+            }
+        case "clearbrush": meta.Strokes.Clear(); Rebuild(false)
+        case "pixel": meta.Mode = "pixel"; BuildSprite(false)
+        case "smooth": meta.Mode = "smooth"; BuildSprite(false)
+        case "sub": meta.Sub = meta.Sub >= 2 ? 1 : 2; BuildSprite(false)
+        case "flip": meta.Flip = !meta.Flip; if meta.Sheet { Rebuild(false) } else { BuildSprite(false) }
+        case "rig": meta.Rig = !meta.Rig; BuildSprite(false)
+        case "back": if step > 0 { step -= 1 }; if step == 1 && meta.Sheet { step = 0 }
+        case "cancel": Cancel(); return
+        case "next":
+            if step < 3 { step += 1; if step == 1 && meta.Sheet { step = 2 } }
+            else { Finish(); return }
+        default:
+            if id.StartsWith("anim:") { anim = id.Substring(5); animT = 0 }
+            else if id.StartsWith("persona:") { meta.Persona = id.Substring(8); RefreshDraftLines() }
+            else { return }
+        }
+        LayoutBtns(); hoverId = ""; Invalidate()
+    }
+
+    func PickImage(_ sheet: Bool) {
+        if App.Offscreen { App.Log("custom: file dialog skipped (offscreen)"); return }
+        // mac: OpenFileDialog（圖片（PNG、JPG、GIF、BMP））→ NSOpenPanel
+        let file = CuDialogs.Open(sheet ? "選畫好的動作表" : "選一張照片或圖片", ["png", "jpg", "jpeg", "gif", "bmp"], Environment.GetFolderPath(Environment.SpecialFolder.MyPictures))
+        if file != nil { LoadImage(file!, sheet) }
+    }
+
+    // 外面（pipe 測試指令）設定
+    func SetTol(_ t: Int) { meta.Tol = Math.Max(0, Math.Min(100, t)); if srcAlpha { meta.UseAlpha = false }; Rebuild(false); LayoutBtns(); Invalidate() }
+    func SetLines(_ neck: Double, _ hip: Double) { meta.Neck = neck; meta.Hip = hip; meta.Rig = true; BuildSprite(false); LayoutBtns(); Invalidate() }
+    func SetName(_ s: String) { nameBox.Text = s; meta.Name = CuMeta.CleanName(s); RefreshDraftLines(); LayoutBtns(); Invalidate() }
+    func Brush(_ erase: Bool, _ x: Double, _ y: Double, _ r: Double) { if src == nil { return }; meta.Strokes.Add([x, y, r, erase ? 1 : 0, Double(meta.Strokes.Count)]); Rebuild(false); LayoutBtns(); Invalidate() }
+    func SetStep(_ s: Int) { step = Math.Max(0, Math.Min(3, s)); LayoutBtns(); Invalidate() }
+    func SetAnim(_ a: String, _ t: Double) { anim = a; animT = t; LayoutBtns(); Invalidate() }
+    var Step: Int { return step }
+
+    func Cancel() {
+        let f = first
+        let ww = w
+        Close()
+        if f { ww.ShowSetup(true) }   // 第一次設定時按取消：回到設定視窗
+    }
+
+    func Finish() {
+        if spr == nil || src == nil { return }
+        let m: CuMeta = meta.Clone()
+        if m.Name.Trim() == "" { return }
+        let edit = editId != nil
+        m.Id = edit ? editId : CuStore.NewId()
+        // 筆刷：只留 x y r 擦／補（第五個數字是哪一筆，存檔不用）
+        let st = List<[Double]>()
+        for s in m.Strokes { st.Add([s[0], s[1], s[2], s[3]]) }
+        m.Strokes = st
+        do {
+            try CuStore.Save(m, src, spr)
+            App.Log("custom saved " + m.Id + " name=" + m.Name + " persona=" + m.Persona + " mode=" + m.Mode + " rig=" + m.Rig.ToString() + " sheet=" + m.Sheet.ToString())
+        }
+        catch { err = "存不起來：" + error.Message; Invalidate(); return }
+        spr = nil   // 已經交給 CuStore 了
+        let f = first
+        let id: String = m.Id
+        let ww = w
+        Close()
+        ww.CuCreated(id, f, edit)
+    }
+
+    // ================= 滑鼠：按鈕、拖去背強度、筆刷、拖兩條線 =================
+    func ViewRect() -> Rectangle {
+        let l = LeftRect()
+        if src == nil { return l }
+        let s = Math.Min(Double(l.Width) / Double(src.Width), Double(l.Height) / Double(src.Height))
+        let vw = CInt(Double(src.Width) * s), vh = CInt(Double(src.Height) * s)
+        return Rectangle(l.X + (l.Width - vw) / 2, l.Y + (l.Height - vh) / 2, vw, vh)
+    }
+
+    func SpriteRect() -> Rectangle {
+        var l = LeftRect()
+        l = Rectangle(l.X, l.Y + Sc(42), l.Width, l.Height - Sc(42))
+        if spr == nil { return l }
+        var s = Math.Min(Double(l.Width - Sc(80)) / Double(spr.W), Double(l.Height - Sc(16)) / Double(spr.H))
+        if spr.Pixel { s = Math.Max(1.0, Math.Floor(s)) }
+        let vw = CInt(Double(spr.W) * s), vh = CInt(Double(spr.H) * s)
+        return Rectangle(l.X + (l.Width - vw) / 2, l.Y + (l.Height - vh) / 2, vw, vh)
+    }
+
+    override func OnMouseDown(_ e: MouseEventArgs) {
+        super.OnMouseDown(e)
+        if e.Button != MouseButtons.Left { return }
+        if step == 1 && !meta.Sheet && !(srcAlpha && meta.UseAlpha) && SliderRect().Contains(e.Location) { SliderAt(e.X, false); Capture = true; dragWhich = -1; return }
+        if step == 1 && brushOn && ViewRect().Contains(e.Location) { painting = true; lastPaint = e.Location; PaintAt(e.Location, true); return }
+        if step == 2 && meta.Rig && spr != nil {
+            let sr = SpriteRect()
+            let ny = sr.Y + CInt(spr.NeckF * Double(sr.Height)), hy = sr.Y + CInt(spr.HipF * Double(sr.Height))
+            if e.X > sr.X - Sc(60) && e.X < sr.Right + Sc(60) {
+                if Math.Abs(e.Y - ny) < Sc(10) { dragLine = true; dragWhich = 0; return }
+                if Math.Abs(e.Y - hy) < Sc(10) { dragLine = true; dragWhich = 1; return }
+            }
+        }
+    }
+
+    override func OnMouseMove(_ e: MouseEventArgs) {
+        super.OnMouseMove(e)
+        if Capture && dragWhich == -1 && step == 1 { SliderAt(e.X, false); return }
+        if painting { if Math.Abs(e.X - lastPaint.X) + Math.Abs(e.Y - lastPaint.Y) >= Sc(3) { lastPaint = e.Location; PaintAt(e.Location, false) }; return }
+        if dragLine && spr != nil {
+            let sr = SpriteRect()
+            let f = Math.Max(0.06, Math.Min(0.96, Double(e.Y - sr.Y) / Double(sr.Height)))
+            if dragWhich == 0 { meta.Neck = Math.Min(f, spr.HipF - 0.08) } else { meta.Hip = Math.Max(f, spr.NeckF + 0.08) }
+            if meta.Neck < 0 { meta.Neck = spr.NeckF }
+            if meta.Hip < 0 { meta.Hip = spr.HipF }
+            BuildSprite(false); Invalidate()
+            return
+        }
+        let b: Btn! = At(e.Location)
+        let h = b != nil ? b.Id : ""
+        if h != hoverId { hoverId = h; Invalidate() }
+        var lineHot = false
+        if step == 2 && meta.Rig && spr != nil {
+            let sr = SpriteRect()
+            let ny = sr.Y + CInt(spr.NeckF * Double(sr.Height)), hy = sr.Y + CInt(spr.HipF * Double(sr.Height))
+            lineHot = Math.Abs(e.Y - ny) < Sc(10) || Math.Abs(e.Y - hy) < Sc(10)
+        }
+        Cursor = h != "" ? Cursors.Hand : (lineHot ? Cursors.SizeNS : (step == 1 && brushOn && ViewRect().Contains(e.Location) ? Cursors.Cross : Cursors.Default))
+        if step == 1 && brushOn { Invalidate(LeftRect()) }
+    }
+
+    override func OnMouseUp(_ e: MouseEventArgs) {
+        super.OnMouseUp(e)
+        if e.Button != MouseButtons.Left { return }
+        if Capture && dragWhich == -1 && step == 1 { Capture = false; dragWhich = 0; SliderAt(e.X, true); return }
+        if painting { painting = false; BuildSprite(false); LayoutBtns(); Invalidate(); return }
+        if dragLine { dragLine = false; return }
+        let b: Btn! = At(e.Location)
+        if b != nil { Press(b.Id) }
+    }
+
+    func SliderAt(_ x: Int, _ commit: Bool) {
+        let s = SliderRect()
+        let t = CInt(Math.Round(Math.Max(0.0, Math.Min(1.0, Double(x - s.X) / Double(s.Width))) * 100))
+        meta.Tol = t
+        if commit { Rebuild(false); LayoutBtns() }
+        Invalidate()
+    }
+
+    func BrushR() -> Double { return brushSize == 0 ? 0.012 : (brushSize == 1 ? 0.028 : 0.06) }
+
+    func PaintAt(_ p: Point, _ newStroke: Bool) {
+        let v = ViewRect()
+        let x = Double(p.X - v.X) / Double(v.Width), y = Double(p.Y - v.Y) / Double(v.Height)
+        let n = meta.Strokes.Count
+        let group: Double = newStroke ? Double(n) : (n > 0 && meta.Strokes[n - 1].count > 4 ? meta.Strokes[n - 1][4] : Double(n))
+        let st: [Double] = [x, y, BrushR(), brushErase ? 1 : 0, group]
+        meta.Strokes.Add(st)
+        let one = List<[Double]>(); one.Add(st)
+        CuImg.ApplyStrokes(&viewPx, srcPx, src.Width, src.Height, one)
+        RefreshView()
+        Invalidate(LeftRect())
+    }
+
+    // ================= 畫 =================
+    override func OnPaint(_ e: PaintEventArgs) {
+        let g = e.Graphics
+        g.SmoothingMode = SmoothingMode.None
+        let W0 = ClientSize.Width, H0 = ClientSize.Height, F = 4 * U, crown = Sc(56)
+        Pix.Wood(g, 0, 0, W0, H0, U, false, 23)
+        Pix.Panel(g, F, crown, W0 - 2 * F, H0 - crown - F, U, false)
+        let t = editId != nil ? "修改我的公仔" : "做一隻自己的公仔"
+        let tw = Pix.TextW(t, titleF), plw = tw + 14 * U, plh = Sc(34)
+        let pr = Rectangle((W0 - plw) / 2, (crown - plh) / 2 + U / 2, plw, plh)
+        Pix.Plate(g, t, titleF, pr, U)
+        Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.X - 9 * U, pr.Y + plh / 2 - 2 * U, U)
+        Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.Right + 4 * U, pr.Y + plh / 2 - 2 * U, U)
+        Steps(g, W0, Sc(68))
+        var q: String, hint: String
+        switch step {
+        case 0: q = "選一張照片"; hint = "你家的貓、狗、娃娃、自己畫的角色都可以"
+        case 1: q = "去背"; hint = srcAlpha && meta.UseAlpha ? "這張本來就是透明背景，直接用 ✓（有沒去乾淨的，用筆刷修）" : "灰格子＝透明。沒去乾淨就把強度調高、或用筆刷擦掉；主角被吃掉就調低、或用「補回」"
+        case 2: q = "動起來"; hint = meta.Sheet ? "動作表的每一格會直接拿來用；空格會自動補動畫" : "兩條線把圖切成頭、身體、腳：走路會擺腳、點頭（拖線調位置）"
+        default: q = "取名字、選個性"; hint = "個性會決定他講什麼話、怎麼動"
+        }
+        TextRenderer.DrawText(g, q, qF, Rectangle(0, Sc(98), W0, Sc(28)), Pix.TextC, Pix.Mid)
+        TextRenderer.DrawText(g, hint, subF, Rectangle(Sc(20), Sc(126), W0 - Sc(40), Sc(18)), Pix.C(0x9A6338), [Pix.Mid, TextFormatFlags.EndEllipsis])
+        if step == 0 { PaintPick(g) }
+        else if step == 1 { PaintBg(g) }
+        else if step == 2 { PaintRig(g) }
+        else { PaintName(g) }
+        for b in btns { DrawBtn(g, b) }
+        if err != nil && err != "" { TextRenderer.DrawText(g, err, subF, Rectangle(Sc(170), H0 - Sc(64), W0 - Sc(370), Sc(44)), Pix.C(0xC0392B), [TextFormatFlags.HorizontalCenter, TextFormatFlags.VerticalCenter, TextFormatFlags.WordBreak, TextFormatFlags.NoPrefix]) }
+    }
+
+    func Steps(_ g: Graphics, _ W0: Int, _ y: Int) {
+        let names: [String] = ["選照片", "去背", "動起來", "取名字"]
+        let n = names.count, pw = Sc(104), ph = Sc(26), gap = Sc(14), x0 = (W0 - n * pw - (n - 1) * gap) / 2
+        for i in 0..<n {
+            let x = x0 + i * (pw + gap)
+            if i > 0 { var sx = x - gap + U; while sx + U <= x - U { Pix.Box(g, Pix.C(0xD8BF94), sx, y + ph / 2 - U / 2, U, U); sx += 2 * U } }
+            Pix.Round(g, i == step ? Pix.C(0x8A5A2A) : Pix.C(0xC9B08A), x, y, pw, ph, U)
+            Pix.Box(g, i == step ? Pix.C(0xF6C453) : (i < step ? Pix.C(0xD9F0C4) : Pix.C(0xF3EADB)), x + U, y + U, pw - 2 * U, ph - 2 * U)
+            let s = String(i + 1) + ". " + names[i]
+            let sw = Pix.TextW(s, subF)
+            var cx = x + (pw - sw) / 2
+            if i < step { cx += 3 * U; Pix.Mono(g, Pix.CHECK, Pix.C(0x3F8A30), cx - 7 * U, y + ph / 2 - 3 * U, U) }
+            TextRenderer.DrawText(g, s, subF, Rectangle(cx, y, sw + 4, ph), i <= step ? Pix.TextC : Pix.Dim, Pix.LeftMid)
+        }
+    }
+
+    // 第一步：大大的「拖進來／點這裡」
+    func PaintPick(_ g: Graphics) {
+        let o: Btn! = Find("open")
+        if o == nil { return }
+        let r = o.R
+        let hot = hoverId == "open"
+        Pix.Box(g, hot ? Pix.C(0xFFF3D6) : Pix.C(0xFFFBF0), r.X, r.Y, r.Width, r.Height)
+        let dash = Pix.C(0xC08A2C)
+        var x = r.X
+        while x < r.Right { Pix.Box(g, dash, x, r.Y, 2 * U, U); Pix.Box(g, dash, x, r.Bottom - U, 2 * U, U); x += 4 * U }
+        var y = r.Y
+        while y < r.Bottom { Pix.Box(g, dash, r.X, y, U, 2 * U); Pix.Box(g, dash, r.Right - U, y, U, 2 * U); y += 4 * U }
+        let pal = Dict<Character, Color>()
+        pal["k"] = Pix.Ink; pal["w"] = Pix.C(0xFFFDF7); pal["b"] = Pix.C(0xBFE3F2); pal["p"] = Pix.C(0xF27A90); pal["o"] = Pix.C(0xE8A25A); pal["y"] = Pix.C(0xF6C453); pal["g"] = Pix.C(0x7CC36A)
+        let c = Math.Max(3, Sc(5)), aw = CuMaker.CAT[0].Length * c
+        Pix.Art(g, CuMaker.CAT, pal, r.X + (r.Width - aw) / 2, r.Y + Sc(22), c)
+        TextRenderer.DrawText(g, "把照片拖進來，或點這裡選一張", bigF, Rectangle(r.X, r.Y + Sc(22) + CuMaker.CAT.count * c + Sc(10), r.Width, Sc(28)), Pix.TextC, Pix.Mid)
+        TextRenderer.DrawText(g, "PNG・JPG・GIF・BMP 都可以", subF, Rectangle(r.X, r.Y + Sc(22) + CuMaker.CAT.count * c + Sc(40), r.Width, Sc(20)), Pix.C(0x9A6338), Pix.Mid)
+        // 小技巧
+        let tip = Rectangle(r.X, r.Bottom + Sc(14), r.Width, Sc(78))
+        Pix.Round(g, Pix.C(0xE6D3B0), tip.X, tip.Y, tip.Width, tip.Height, U)
+        Pix.Box(g, Pix.C(0xFFF8EA), tip.X + U, tip.Y + U, tip.Width - 2 * U, tip.Height - 2 * U)
+        let tips: [String] = [
+            "・去背好的透明 PNG 效果最好；主角站在單純的背景前（白牆、地板）也很好去背。",
+            "・背景很亂的照片：可以先用免費的線上去背工具做成透明 PNG，再放進來。",
+            "・照片只存在你的電腦裡，不會上傳到任何地方。"]
+        for i in 0..<tips.count { TextRenderer.DrawText(g, tips[i], subF, Rectangle(tip.X + Sc(12), tip.Y + Sc(8) + i * Sc(22), tip.Width - Sc(24), Sc(20)), Pix.TextC, [Pix.LeftMid, TextFormatFlags.EndEllipsis]) }
+        let tb: Btn! = Find("template")
+        if tb != nil { TextRenderer.DrawText(g, "進階：自己畫每個動作（動作表）、或匯入朋友傳來的公仔", smallF, Rectangle(r.X, tb.R.Y - Sc(22), r.Width, Sc(18)), Pix.C(0x9A6338), Pix.LeftMid) }
+    }
+
+    static let CAT: [String] = [
+        "..kk..........kk..",
+        ".kook........kook.",
+        ".kopok......kopok.",
+        ".kooookkkkkkooook.",
+        "kooooooooooooooook",
+        "kooooooooooooooook",
+        "koookkooooookkoook",
+        "kookwkooooookwkook",
+        "koookkooooookkoook",
+        "koooooooppoooooook",
+        "kooooooookoooooook",
+        ".kooooookkkooooook",
+        "..kkooooooooookk..",
+        "....kkkkkkkkkk...."]
+
+    // 棋盤格（透明的地方）
+    static func Checker(_ g: Graphics, _ r: Rectangle, _ cell: Int) {
+        let a = SolidBrush(Color.FromArgb(0xEE, 0xEA, 0xE2))
+        let b = SolidBrush(Color.FromArgb(0xD9, 0xD3, 0xC8))
+        var y = r.Y, j = 0
+        while y < r.Bottom {
+            var x = r.X, i = 0
+            while x < r.Right {
+                g.FillRectangle(((i + j) & 1) == 0 ? a : b, x, y, Math.Min(cell, r.Right - x), Math.Min(cell, r.Bottom - y))
+                x += cell; i += 1
+            }
+            y += cell; j += 1
+        }
+    }
+
+    // 第二步：去背
+    func PaintBg(_ g: Graphics) {
+        let l = LeftRect()
+        Pix.Round(g, Pix.C(0x8A6A4A), l.X - U, l.Y - U, l.Width + 2 * U, l.Height + 2 * U, U)
+        CuMaker.Checker(g, l, Sc(12))
+        if meta.Sheet {
+            if src != nil { let v = ViewRect(); g.DrawImage(src, v) }
+        }
+        else if src != nil && viewBmp != nil {
+            let v = ViewRect()
+            g.InterpolationMode = InterpolationMode.HighQualityBilinear
+            // 被去掉的部分淡淡地留著（知道哪裡可以補回）
+            do {
+                let ia = ImageAttributes()
+                let cm = ColorMatrix(); cm.Matrix33 = 0.13
+                ia.SetColorMatrix(cm)
+                g.DrawImage(srcDim, v, 0, 0, src.Width, src.Height, GraphicsUnit.Pixel, ia)
+            }
+            g.DrawImage(viewBmp, v)
+            g.InterpolationMode = InterpolationMode.Default
+            if brushOn {
+                let cp = PointToClient(Cursor.Position)
+                if v.Contains(cp) {
+                    let rr = BrushR() * Double(Math.Max(v.Width, v.Height))
+                    let pp = Pen(brushErase ? Color.FromArgb(220, 200, 60, 60) : Color.FromArgb(220, 50, 140, 70), 2.0)
+                    g.SmoothingMode = SmoothingMode.AntiAlias; g.DrawEllipse(pp, Double(cp.X) - rr, Double(cp.Y) - rr, 2 * rr, 2 * rr); g.SmoothingMode = SmoothingMode.None
+                }
+            }
+        }
+        let r = RightRect()
+        // 背景
+        Section(g, "背景", r.X, r.Y)
+        if meta.Sheet { TextRenderer.DrawText(g, "動作表每一格會自己去背", subF, Rectangle(r.X + Sc(10), r.Y + Sc(30), r.Width - Sc(20), Sc(20)), Pix.TextC, Pix.LeftMid) }
+        else if srcAlpha && meta.UseAlpha { TextRenderer.DrawText(g, "本來就是透明背景 ✓", subF, Rectangle(r.X + Sc(190), r.Y + Sc(42), r.Width - Sc(200), Sc(30)), Pix.C(0x3F8A30), Pix.LeftMid) }
+        else {
+            let s = SliderRect()
+            TextRenderer.DrawText(g, "去背強度  " + String(meta.Tol), subF, Rectangle(r.X + Sc(10), r.Y + Sc(26), r.Width, Sc(20)), Pix.TextC, Pix.LeftMid)
+            Pix.Round(g, Pix.C(0x8A6A4A), s.X, s.Y + s.Height / 2 - 2 * U, s.Width, 4 * U, U)
+            Pix.Box(g, Pix.C(0xF6C453), s.X + U, s.Y + s.Height / 2 - U, CInt(Double(s.Width - 2 * U) * Double(meta.Tol) / 100.0), 2 * U)
+            let kx = s.X + CInt(Double(s.Width) * Double(meta.Tol) / 100.0) - 4 * U
+            Pix.Round(g, Pix.Ink, kx, s.Y, 8 * U, s.Height, U)
+            Pix.Box(g, Pix.C(0xFFFBF0), kx + U, s.Y + U, 6 * U, s.Height - 2 * U)
+            TextRenderer.DrawText(g, "少去一點", smallF, Rectangle(s.X, s.Bottom + U, Sc(80), Sc(16)), Pix.C(0x9A6338), Pix.LeftMid)
+            TextRenderer.DrawText(g, "多去一點", smallF, Rectangle(s.Right - Sc(80), s.Bottom + U, Sc(80), Sc(16)), Pix.C(0x9A6338), [TextFormatFlags.Right, TextFormatFlags.VerticalCenter])
+        }
+        Section(g, "修一下（在左邊的圖上塗）", r.X, r.Y + Sc(92))
+        Section(g, "風格", r.X, r.Y + Sc(204))
+        // 實際大小預覽（桌面上就是這麼大）：左邊圖的右下角一小格
+        if spr != nil {
+            let mw = Sc(120), mh = Sc(104)
+            let mini = Rectangle(l.Right - mw - Sc(6), l.Bottom - mh - Sc(6), mw, mh)
+            Pix.Round(g, Pix.C(0x8A6A4A), mini.X - U, mini.Y - U, mini.Width + 2 * U, mini.Height + 2 * U, U)
+            do { let lb = LinearGradientBrush(mini, Color.FromArgb(0x7D, 0x9E, 0xC8), Color.FromArgb(0x5B, 0x7D, 0xA8), 90.0); g.FillRectangle(lb, mini) }
+            do { let bar = SolidBrush(Color.FromArgb(0x20, 0x22, 0x2A)); g.FillRectangle(bar, mini.X, mini.Bottom - Sc(16), mini.Width, Sc(16)) }
+            Pet.CuDrawStill(g, spr, Double(mini.X) + Double(mini.Width) / 2.0, Double(mini.Bottom - Sc(16)), w.S, false, false, Color.White)
+            TextRenderer.DrawText(g, "桌面上的大小", smallF, Rectangle(mini.X, mini.Bottom - Sc(16), mini.Width, Sc(16)), Color.White, Pix.Mid)
+        }
+    }
+
+    func Section(_ g: Graphics, _ s: String, _ x: Int, _ y: Int) {
+        TextRenderer.DrawText(g, s, btnF, Rectangle(x, y, Sc(320), Sc(24)), Pix.TextC, Pix.LeftMid)
+        Pix.Box(g, Pix.C(0xE6D3B0), x, y + Sc(24), RightRect().Width, U)
+    }
+
+    // 第三步：兩條線＋動起來的預覽
+    func PaintRig(_ g: Graphics) {
+        let l = LeftRect()
+        if spr == nil { return }
+        let area = Rectangle(l.X, l.Y + Sc(42), l.Width, l.Height - Sc(42))
+        Pix.Round(g, Pix.C(0x8A6A4A), area.X - U, area.Y - U, area.Width + 2 * U, area.Height + 2 * U, U)
+        CuMaker.Checker(g, area, Sc(12))
+        if meta.Sheet {
+            // 動作表：每一格的結果
+            let n = CuSprite.SheetKeys.count, cols = 4, cw = area.Width / cols, chh = area.Height / 2
+            for i in 0..<n {
+                let c = Rectangle(area.X + (i % cols) * cw, area.Y + (i / cols) * chh, cw, chh)
+                var fb: Bitmap? = nil
+                let key = CuSprite.SheetKeys[i]
+                let has = spr.Frames.TryGetValue(key, &fb) && fb != nil
+                if has {
+                    let f: Bitmap = fb!
+                    let s = Math.Min(Double(c.Width - Sc(16)) / Double(f.Width), Double(c.Height - Sc(36)) / Double(f.Height))
+                    g.InterpolationMode = spr.Pixel ? InterpolationMode.NearestNeighbor : InterpolationMode.HighQualityBicubic
+                    g.PixelOffsetMode = PixelOffsetMode.Half
+                    g.DrawImage(f, Rectangle(c.X + (c.Width - CInt(Double(f.Width) * s)) / 2, c.Y + Sc(8), CInt(Double(f.Width) * s), CInt(Double(f.Height) * s)))
+                    g.PixelOffsetMode = PixelOffsetMode.Default
+                }
+                TextRenderer.DrawText(g, CuSprite.SheetLabels[i] + (has ? "" : "（自動）"), subF, Rectangle(c.X, c.Bottom - Sc(24), c.Width, Sc(20)), has ? Pix.TextC : Pix.Dim, Pix.Mid)
+            }
+        }
+        else {
+            let sr = SpriteRect()
+            g.InterpolationMode = spr.Pixel ? InterpolationMode.NearestNeighbor : InterpolationMode.HighQualityBicubic
+            g.PixelOffsetMode = PixelOffsetMode.Half
+            g.DrawImage(spr.Stand, sr)
+            g.PixelOffsetMode = PixelOffsetMode.Default
+            if meta.Rig {
+                let ny = sr.Y + CInt(spr.NeckF * Double(sr.Height)), hy = sr.Y + CInt(spr.HipF * Double(sr.Height))
+                Line(g, area, ny, Pix.C(0xE2557A), "頭", "身體")
+                Line(g, area, hy, Pix.C(0x3D7BD9), "身體", "腳")
+                // 兩隻腳的分界（虛線）
+                let sx = sr.X + CInt(Double(spr.Split) / Double(spr.W) * Double(sr.Width))
+                do { let p = Pen(Color.FromArgb(160, 0x3D, 0x7B, 0xD9), Math.Max(1, U / 2)); p.DashPattern = [3, 3]; p.DashStyle = DashStyle.Custom; g.DrawLine(p, sx, hy, sx, sr.Bottom) }
+            }
+        }
+        // 右邊：動起來
+        let pr = PreviewRect()
+        DrawStage(g, pr)
+        TextRenderer.DrawText(g, meta.Sheet ? "空著的格子用「站」那格自動動起來" : (meta.Rig ? "上下拖粉紅線、藍線，對準脖子和腿" : "沒切線：整隻一起搖搖晃晃（也很可愛）"), subF,
+            Rectangle(pr.X, pr.Bottom + Sc(50), pr.Width, Sc(40)), Pix.C(0x9A6338), [TextFormatFlags.HorizontalCenter, TextFormatFlags.Top, TextFormatFlags.WordBreak, TextFormatFlags.NoPrefix])
+    }
+
+    func Line(_ g: Graphics, _ area: Rectangle, _ y: Int, _ c: Color, _ up: String, _ down: String) {
+        Pix.Box(g, c, area.X, y - U / 2, area.Width, Math.Max(2, U))
+        let tw = Math.Max(Pix.TextW(up, smallF), Pix.TextW(down, smallF)) + Sc(14)
+        let tag = Rectangle(area.Right - tw - Sc(4), y - Sc(30), tw, Sc(58))
+        Pix.Round(g, c, tag.X, tag.Y + Sc(8), tag.Width, Sc(18), U)
+        Pix.Round(g, c, tag.X, tag.Y + Sc(32), tag.Width, Sc(18), U)
+        TextRenderer.DrawText(g, "▲ " + up, smallF, Rectangle(tag.X, tag.Y + Sc(8), tag.Width, Sc(18)), Color.White, Pix.Mid)
+        TextRenderer.DrawText(g, "▼ " + down, smallF, Rectangle(tag.X, tag.Y + Sc(32), tag.Width, Sc(18)), Color.White, Pix.Mid)
+        // 左邊的把手
+        Pix.Round(g, c, area.X - U, y - 3 * U, 6 * U, 6 * U, U)
+        Pix.Box(g, Color.White, area.X + U, y - U, 2 * U, 2 * U)
+    }
+
+    // 小舞台：桌面色的背景＋公仔照選的動作動
+    func DrawStage(_ g: Graphics, _ pr: Rectangle) {
+        Pix.Round(g, Pix.C(0x8A6A4A), pr.X - U, pr.Y - U, pr.Width + 2 * U, pr.Height + 2 * U, U)
+        do { let lb = LinearGradientBrush(pr, Color.FromArgb(0x8A, 0xAB, 0xD4), Color.FromArgb(0x5B, 0x7D, 0xA8), 90.0); g.FillRectangle(lb, pr) }
+        do { let fl = SolidBrush(Color.FromArgb(0x20, 0x22, 0x2A)); g.FillRectangle(fl, pr.X, pr.Bottom - Sc(18), pr.Width, Sc(18)) }
+        if pv == nil { return }
+        let st = g.Save()
+        g.SetClip(pr)
+        let ps = Math.Max(2, w.S * 2)
+        pv.CuPreview(g, Double(pr.X) + Double(pr.Width) / 2.0, Double(pr.Bottom - Sc(18)), ps, anim, animT, Double(pr.Width) / 2.0 - Double(Sc(50)))
+        g.Restore(st)
+    }
+
+    // 第四步：名字＋個性
+    func PaintName(_ g: Graphics) {
+        let r = ContentRect()
+        TextRenderer.DrawText(g, "他叫什麼名字？", bigF, Rectangle(r.X, r.Y + Sc(6), Sc(150), Sc(40)), Pix.TextC, Pix.LeftMid)
+        let nf = Rectangle(r.X + Sc(150), r.Y + Sc(6), Sc(260), Sc(40))
+        Pix.Round(g, Pix.C(0x8A6A4A), nf.X, nf.Y, nf.Width, nf.Height, U)
+        Pix.Box(g, Color.FromArgb(0xFF, 0xFD, 0xF7), nf.X + U, nf.Y + U, nf.Width - 2 * U, nf.Height - 2 * U)
+        if meta.Name == "" { TextRenderer.DrawText(g, "例如：小黑、麻糬、阿肥", subF, Rectangle(nf.X + Sc(14), nf.Y, nf.Width, nf.Height), Pix.Dim, Pix.LeftMid) }
+        TextRenderer.DrawText(g, "最多 10 個字", smallF, Rectangle(nf.Right + Sc(10), nf.Y, Sc(120), nf.Height), Pix.C(0x9A6338), Pix.LeftMid)
+        TextRenderer.DrawText(g, "個性", bigF, Rectangle(r.X, r.Y + Sc(54), Sc(150), Sc(26)), Pix.TextC, Pix.LeftMid)
+        // 選到的個性：他會這樣跟你打招呼
+        if draft != nil {
+            var hi: [String]? = nil
+            if draft.Lines.TryGetValue("hi", &hi) && hi != nil && hi!.count > 0 {
+                let say = Rectangle(r.X, r.Bottom - Sc(56), r.Width, Sc(50))
+                Pix.Round(g, Pix.C(0xE6D3B0), say.X, say.Y, say.Width, say.Height, U)
+                Pix.Box(g, Pix.C(0xFFF8EA), say.X + U, say.Y + U, say.Width - 2 * U, say.Height - 2 * U)
+                Pet.CuDrawStill(g, spr, Double(say.X + Sc(36)), Double(say.Bottom - Sc(4)), Math.Max(1, w.S / 2 + 1), false, false, Color.White)
+                TextRenderer.DrawText(g, (meta.Name == "" ? "他" : meta.Name) + "：「" + World.NoEmoji(hi![0]) + "」", btnF, Rectangle(say.X + Sc(70), say.Y, say.Width - Sc(80), say.Height), Pix.TextC, [Pix.LeftMid, TextFormatFlags.EndEllipsis])
+            }
+        }
+    }
+
+    // 離屏截圖：TextBox 不會畫出來，自己畫名字
+    func DrawNameText(_ g: Graphics) {
+        if meta.Name == "" { return }
+        let r = ContentRect()
+        let nf = Rectangle(r.X + Sc(150), r.Y + Sc(6), Sc(260), Sc(40))
+        TextRenderer.DrawText(g, meta.Name, nameBox.Font, Rectangle(nf.X + Sc(12), nf.Y, nf.Width - Sc(24), nf.Height), Pix.TextC, Pix.LeftMid)
+    }
+
+    func DrawBtn(_ g: Graphics, _ b: Btn) {
+        let r = b.R
+        let hot = b.Id == hoverId && b.Enabled
+        if b.Id == "open" { return }   // 第一步的大框自己畫
+        if b.Kind >= 2 {
+            let small = b.Kind == 4
+            let face: Color = !b.Enabled ? Pix.C(0xE9E0D0) : (b.Kind == 3 ? (hot ? Pix.C(0xFFD36A) : Pix.C(0xF6C453)) : (b.On ? Pix.C(0xFFE08A) : (hot ? Pix.C(0xFFF3D6) : Pix.C(0xFFFBF0))))
+            let shade: Color = !b.Enabled ? Pix.C(0xD3C7B2) : (b.Kind == 3 || b.On ? Pix.C(0xC8902C) : Pix.C(0xDCC6A2))
+            Pix.Round(g, !b.Enabled ? Pix.C(0xBBA98C) : Pix.Ink, r.X, r.Y, r.Width, r.Height, U)
+            Pix.Box(g, face, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U)
+            Pix.Box(g, shade, r.X + U, r.Bottom - (small ? 2 : 3) * U, r.Width - 2 * U, (small ? 1 : 2) * U)
+            let f: FontT = small ? subF : btnF
+            TextRenderer.DrawText(g, b.Text, f, Rectangle(r.X, r.Y, r.Width, r.Height - (small ? U : 2 * U)), b.Enabled ? Pix.TextC : Pix.Dim, Pix.Mid)
+            return
+        }
+        let edge = b.On ? Pix.C(0xC08A2C) : Pix.C(0x8A6A4A)
+        let fill = b.On ? Pix.C(0xFFEDB8) : (hot ? Pix.C(0xFFF6DE) : Pix.C(0xFFFDF7))
+        Pix.Round(g, Pix.C(0xE6D3B0), r.X + 2 * U, r.Y + 2 * U, r.Width, r.Height, U)
+        Pix.Round(g, edge, r.X, r.Y, r.Width, r.Height, U)
+        let ins = b.On ? 2 * U : U
+        if b.On { Pix.Box(g, edge, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U) }
+        Pix.Box(g, fill, r.X + ins, r.Y + ins, r.Width - 2 * ins, r.Height - 2 * ins)
+        if b.Id.StartsWith("persona:") {
+            let id = b.Id.Substring(8)
+            TextRenderer.DrawText(g, b.Text, bigF, Rectangle(r.X + Sc(12), r.Y + Sc(8), r.Width - Sc(24), Sc(28)), Pix.TextC, Pix.LeftMid)
+            TextRenderer.DrawText(g, Pal.PersonaDesc(id), subF, Rectangle(r.X + Sc(12), r.Y + Sc(38), r.Width - Sc(24), Sc(36)), Pix.C(0x9A6338), [TextFormatFlags.Left, TextFormatFlags.Top, TextFormatFlags.WordBreak, TextFormatFlags.NoPrefix])
+        }
+        else {
+            let sub = b.Id == "pixel" ? "跟內建公仔同畫風" : "照片原本的樣子"
+            TextRenderer.DrawText(g, b.Text, btnF, Rectangle(r.X, r.Y + Sc(6), r.Width, Sc(24)), Pix.TextC, Pix.Mid)
+            TextRenderer.DrawText(g, sub, smallF, Rectangle(r.X + Sc(4), r.Y + Sc(30), r.Width - Sc(8), Sc(20)), Pix.C(0x9A6338), [Pix.Mid, TextFormatFlags.EndEllipsis])
+        }
+        if b.On {
+            let s = 7 * U, bx = r.Right - s - 2 * U, by2 = r.Y + 2 * U
+            Pix.Round(g, Pix.C(0x2F6E24), bx, by2, s, s, U)
+            Pix.Box(g, Pix.C(0x5FB04A), bx + U, by2 + U, s - 2 * U, s - 2 * U)
+        }
+    }
+}
+
+// ================= 預覽：做公仔視窗、分享短片用（不改真的公仔） =================
+extension Pet {
+    // 照指定的動作畫一格（走路左右來回、跳、睡、開心冒愛心、被抓著晃）
+    func CuPreview(_ g: Graphics, _ cx: Double, _ feetY: Double, _ ps: Int, _ act: String, _ t: Double, _ range: Double) {
+        var fx = cx, fy = feetY
+        var d = 1
+        anim = t; rolling = false; cuAct = ""; cuLandT = 0; vy = 0; knock = 0
+        switch act {
+        case "walk":
+            let per = 6.0, ph = (t % per) / per          // 來回走
+            let tri = ph < 0.5 ? ph * 2 : 2 - ph * 2
+            fx = cx - range + tri * 2 * range; d = ph < 0.5 ? 1 : -1
+            state = "walk"
+        case "jump":
+            let c = t % 1.4
+            if c < 0.8 { state = "air"; let u = c / 0.8; fy -= Math.Sin(u * Math.PI) * Double(ps) * 9; vy = u < 0.5 ? -1 : 1 }
+            else { state = "idle"; cuLandT = Math.Max(0.0, 0.2 - (c - 0.8)) }
+        case "sleep": state = "sleep"; z = t
+        case "happy": state = "hug"
+        case "held": state = "drag"; fy -= Double(ps * 3)
+        default: state = "idle"
+        }
+        dir = d
+        CuPoseNow(cuPose)
+        CuDraw(g, cuPose, fx, fy, ps, d < 0)
+        let hp = Math.Max(2, ps / 2)
+        if act == "sleep" {
+            for i in 0..<3 {
+                let p = (t * 0.6 + Double(i) / 3.0) % 1
+                if p > 0.85 { continue }
+                DrawPix(g, Pet.ZZ, CInt(fx + P.Spr.Wc / 2 * Double(ps) + p * 6 * Double(ps)), CInt(fy - P.Spr.Hc * Double(ps) - p * 10 * Double(ps)), hp, false, false, false)
+            }
+        }
+        if act == "happy" {
+            for i in 0..<3 {
+                let p = (t * 0.7 + Double(i) / 3.0) % 1
+                DrawPix(g, Pet.HEART, CInt(fx + Double((i - 1) * 5 * ps) + Math.Sin(p * 6 + Double(i)) * Double(ps)), CInt(fy - P.Spr.Hc * Double(ps) - Double(2 * ps) - p * 9 * Double(ps)), hp, false, false, true)
+            }
+        }
+    }
+}
+
+// ================= World：開「做公仔」視窗、測試用 pipe 指令 =================
+
+extension World {
+    func CuOpenMaker(_ editId: String!, _ first: Bool) {
+        if maker != nil && !maker.IsDisposed { maker.Close() }
+        maker = CuMaker(self, first, editId)
+        let wa: Rectangle = App.Offscreen ? screens[0].WorkingArea : Screen.FromPoint(Cursor.Position).WorkingArea
+        maker.Location = Point(wa.Left + (wa.Width - maker.Width) / 2, wa.Top + Math.Max(0, (wa.Height - maker.Height) / 2))
+        maker.Show()
+        if App.Offscreen { return }
+        ActivateForm(maker)
+        let mk: CuMaker = maker
+        Later(0.2) { if !mk.IsDisposed && mk.Visible { self.ActivateForm(mk) } }
+    }
+
+    func CuSnap(_ g: Graphics) {
+        if maker != nil && !maker.IsDisposed && maker.VVisible { maker.PaintTo(g) }
+    }
+
+    func CuSaveTemplateDialog() {
+        if App.Offscreen { App.Log("custom: template dialog skipped (offscreen)"); return }
+        // mac: SaveFileDialog（PNG 圖片）→ NSSavePanel
+        guard let file = CuDialogs.Save("存動作表範本", "DeskPals動作表範本.png", ["png"], Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)) else { return }
+        World.CuSaveTemplate(file)
+        Lead().Say("範本存好了：每一格畫一個動作，畫好再按「上傳畫好的動作表」🎨", 4)
+    }
+
+    static func CuSaveTemplate(_ path: String) {
+        let b: Bitmap! = CuSprite.Template()
+        if b == nil { App.Log("template: failed"); return }
+        b.Save(path, ImageFormat.Png)
+    }
+
+    // pipe：custom <指令> …（測試、VS Code 用）
+    func CuMsg(_ c: Client, _ line: String) {
+        let t = line.Trim()
+        let p = t.Split(" ")
+        if p.count < 2 { return }
+        let cmd = p[1]
+        let rest = p.count > 2 ? t.Substring(t.IndexOf(" ", t.IndexOf(" ") + 1) + 1) : ""
+        var a0 = 0.0, a1 = 0.0, a2 = 0.0, a3 = 0.0
+        if p.count > 2 { _ = double.TryParse(p[2], &a0) }   // NumberStyles.Float, InvariantCulture
+        if p.count > 3 { _ = double.TryParse(p[3], &a1) }
+        if p.count > 4 { _ = double.TryParse(p[4], &a2) }
+        if p.count > 5 { _ = double.TryParse(p[5], &a3) }
+        let mk = maker != nil && !maker.IsDisposed
+        switch cmd {
+        case "list": World.Send(c, "pals " + CuPalsJson() + "\n"); return
+        case "new": CuOpenMaker(nil, false)
+        case "first": CuOpenMaker(nil, true)
+        case "edit": CuOpenMaker(rest, false)
+        case "import": if !mk { CuOpenMaker(nil, false) }; maker.LoadImage(rest, false)
+        case "sheet": if !mk { CuOpenMaker(nil, false) }; maker.LoadImage(rest, true)
+        case "template": World.CuSaveTemplate(rest)
+        case "tol": if mk { maker.SetTol(CInt(a0)) }
+        case "lines": if mk { maker.SetLines(a0, a1) }
+        case "brush": if mk { maker.Brush(p.count > 2 && p[2] == "erase", a1, a2, a3) }
+        case "name": if mk { maker.SetName(rest) }
+        case "step": if mk { maker.SetStep(CInt(a0)) }
+        case "anim": if mk { maker.SetAnim(p.count > 2 ? p[2] : "walk", a1) }
+        case "press": if mk { maker.Press(rest) }
+        case "cancel": if mk { maker.Press("cancel") }
+        case "delete": CuDelete(rest)
+        case "export": if p.count > 3 { CuExport(p[2], t.Substring(t.IndexOf(p[2]) + p[2].Length + 1)) }
+        case "importpal": CuImportFile(rest, false)
+        case "mine":
+            let l = List<String>(rest.Split(Character(","), StringSplitOptions.RemoveEmptyEntries))
+            Pal.SaveMine(l)
+            if lineup == Pal.Mine { CuReload(l.Count > 0 ? l[0] : "") } else { CuStore.Reset(false) }
+        case "callout": CuCallOut(rest)
+        case "fakewin": CuSetFakeWin(Rectangle(CInt(a0), CInt(a1), CInt(a2), CInt(a3)))   // 測試：custom fakewin x y w h
+        case "pet":
+            // 測試：custom pet <id> <動作>（loaf push ignore wag fetch return jumpwin）
+            let tp: Pet! = Get(p.count > 2 ? p[2] : "")
+            if tp != nil && p.count > 3 { tp.CuTest(p[3]) }
+        case "share": if rest.Trim() == "" { ShareClip(nil) } else { ShareClipTo(rest, nil) }
+        case "icon":
+            // custom icon <id> <ps> <png>
+            let m: CuMeta! = p.count > 4 ? CuStore.Get(p[2]) : nil
+            let s: CuSprite! = m == nil ? nil : CuStore.Sprite(m)
+            if s != nil { let b: Bitmap! = CuStore.Icon(m, s, CInt(Math.Max(1.0, a1))); if b != nil { b.Save(p[4], ImageFormat.Png) } }
+        default: break
+        }
+        World.Send(c, "custom-ok " + cmd + "\n")
+    }
+}
+
+// ===== 57_share.swift =====
+// 57_share.swift — port of extension/desktop/DeskPals.Share.cs
+// Desk Pals：一鍵分享短片（離屏畫出來、自己寫的 GIF 編碼器）＋自己做的公仔匯出／匯入（.deskpal＝JSON 包 PNG）。
+// 不擷取真的螢幕（隱私）；不連網；不用任何外部套件。
+// mac: 剪貼簿 → NSPasteboard（同一個項目放檔案網址＋說明文字）；打開資料夾 → NSWorkspace.activateFileViewerSelecting；
+//      存檔／開檔視窗 → NSSavePanel／NSOpenPanel（04_shim_custom_b.swift 的 CuDialogs）。GIF 編碼器逐行照搬，輸出的位元組跟 Windows 一樣。
+import Foundation
+import AppKit
+
+// ================= GIF89a 編碼器（減色＋LZW，只用來存分享短片） =================
+enum GifWriter {
+    // frames：每格 ARGB（不透明）；delayCs：每格幾個 1/100 秒
+    static func Write(_ path: String, _ frames: List<[Int]>, _ w: Int, _ h: Int, _ delayCs: Int) throws {
+        // 1) 全部格子共用一組 255 色（取樣做中位切割）
+        let samples = List<Int>()
+        let stride = Math.Max(1, (w * h * frames.Count) / 400000)
+        let off = 0
+        var f = 0
+        while f < frames.Count {
+            let fr = frames[f]
+            var i = off
+            while i < fr.count { samples.Add(fr[i] | 0xFF000000); i += stride }
+            f += 2
+        }
+        let pal = CuImg.MedianCut(samples, 255)
+        var cache: [Int: UInt8] = [:]
+        var idx: [[UInt8]] = []
+        idx.reserveCapacity(frames.Count)
+        for fi in 0..<frames.Count {
+            let px = frames[fi]
+            var o = [UInt8](repeating: 0, count: px.count)
+            for i in 0..<px.count {
+                let v = px[i] & 0xFFFFFF
+                if let b = cache[v] { o[i] = b }
+                else { let b = UInt8(truncatingIfNeeded: Nearest(pal, v)); cache[v] = b; o[i] = b }
+            }
+            idx.append(o)
+        }
+        var bw: [UInt8] = []
+        bw.reserveCapacity(1 << 20)
+        func U16(_ v: Int) { bw.append(UInt8(v & 255)); bw.append(UInt8((v >> 8) & 255)) }   // BinaryWriter.Write(ushort)：little-endian
+        bw.append(contentsOf: Array("GIF89a".utf8))
+        U16(w); U16(h)
+        bw.append(0xF7); bw.append(0); bw.append(0)
+        for i in 0..<256 {
+            let c = i < pal.Count ? pal[i] : 0
+            bw.append(UInt8((c >> 16) & 255)); bw.append(UInt8((c >> 8) & 255)); bw.append(UInt8(c & 255))
+        }
+        // 一直重播
+        bw.append(contentsOf: [0x21, 0xFF, 0x0B])
+        bw.append(contentsOf: Array("NETSCAPE2.0".utf8))
+        bw.append(contentsOf: [0x03, 0x01, 0x00, 0x00, 0x00])
+        for fi in 0..<idx.count {
+            // 只存跟上一格不一樣的那一塊（檔案小很多）
+            var x0 = 0, y0 = 0, x1 = w - 1, y1 = h - 1
+            if fi > 0 {
+                let a = idx[fi], p = idx[fi - 1]
+                x0 = w; y0 = h; x1 = -1; y1 = -1
+                for y in 0..<h {
+                    for x in 0..<w {
+                        if a[y * w + x] != p[y * w + x] { if x < x0 { x0 = x }; if x > x1 { x1 = x }; if y < y0 { y0 = y }; if y > y1 { y1 = y } }
+                    }
+                }
+                if x1 < 0 { x0 = 0; y0 = 0; x1 = 0; y1 = 0 }
+            }
+            let rw = x1 - x0 + 1, rh = y1 - y0 + 1
+            var sub = [UInt8](repeating: 0, count: rw * rh)
+            let src = idx[fi]
+            for y in 0..<rh { let s0 = (y0 + y) * w + x0, d0 = y * rw; for x in 0..<rw { sub[d0 + x] = src[s0 + x] } }
+            bw.append(contentsOf: [0x21, 0xF9, 0x04, 0x04])
+            U16(delayCs); bw.append(0); bw.append(0)
+            bw.append(0x2C)
+            U16(x0); U16(y0); U16(rw); U16(rh)
+            bw.append(0)
+            bw.append(8)
+            Lzw(&bw, sub)
+        }
+        bw.append(0x3B)
+        try File.WriteAllBytes(path, bw)
+    }
+
+    static func Nearest(_ pal: List<Int>, _ v: Int) -> Int {
+        let r = (v >> 16) & 255, g = (v >> 8) & 255, b = v & 255
+        var best = 0, bd = int.MaxValue
+        for i in 0..<pal.Count {
+            let p = pal[i], dr = ((p >> 16) & 255) - r, dg = ((p >> 8) & 255) - g, db = (p & 255) - b
+            let dd = 3 * dr * dr + 4 * dg * dg + 2 * db * db
+            if dd < bd { bd = dd; best = i }
+        }
+        return best
+    }
+
+    // LZW（GIF 版：8 位元起跳、最多 12 位元、滿了就清表）
+    static func Lzw(_ bw: inout [UInt8], _ data: [UInt8]) {
+        let clear = 256, eoi = 257
+        var codeSize = 9, next = 258
+        var dict: [Int: Int] = [:]
+        var outb: [UInt8] = []
+        var acc = 0, nbits = 0
+        func emit(_ code: Int) {
+            acc |= code << nbits; nbits += codeSize
+            while nbits >= 8 { outb.append(UInt8(acc & 255)); acc >>= 8; nbits -= 8 }
+        }
+        emit(clear)
+        var prefix = data.count > 0 ? Int(data[0]) : 0
+        var i = 1
+        while i < data.count {
+            let k = Int(data[i]), key = (prefix << 8) | k
+            if let code = dict[key] { prefix = code; i += 1; continue }
+            emit(prefix)
+            if next < 4096 {
+                if next > (1 << codeSize) - 1 && codeSize < 12 { codeSize += 1 }
+                dict[key] = next; next += 1
+            } else {
+                emit(clear)
+                dict.removeAll(keepingCapacity: true); next = 258; codeSize = 9
+            }
+            prefix = k
+            i += 1
+        }
+        emit(prefix)
+        if next > (1 << codeSize) - 1 && codeSize < 12 { codeSize += 1 }
+        emit(eoi)
+        if nbits > 0 { outb.append(UInt8(acc & 255)) }
+        var j = 0
+        while j < outb.count {
+            let n = Math.Min(255, outb.count - j)
+            bw.append(UInt8(n))
+            bw.append(contentsOf: outb[j..<(j + n)])
+            j += 255
+        }
+        bw.append(0)
+    }
+}
+
+// ================= 分享短片：照劇本畫出來（走進來 → 揮手打招呼 → 開心跳兩下冒愛心） =================
+extension Pet {
+    // 分享短片用：在指定位置、指定大小畫一格（不動到真的公仔）
+    func ShareDraw(_ g: Graphics, _ feetX: Double, _ feetY: Double, _ ps: Int, _ st: String, _ an: Double, _ d: Int, _ vyHint: Double, _ landT: Double) {
+        let wasOut = Out
+        Out = true; state = st; anim = an; dir = d; vy = vyHint; rolling = false; Bt = 0; knock = 0; cuAct = ""; cuLandT = landT; poseKind = ""
+        sc = Double(ps) / Double(S)
+        x = feetX - Double(SW) / 2.0; y = feetY - Double(SH)
+        PaintPet(g, 0, 0)
+        sc = 1; Out = wasOut
+    }
+    func ShareLine(_ key: String) -> String { return L(key) }
+}
+
+
+extension World {
+    // 選單：做分享短片（存到 圖片\Desk Pals、說明文字放進剪貼簿、打開資料夾）
+    func ShareClip(_ who: Pet!) {
+        if sharing2 { return }
+        let dir = App.Offscreen ? Path.Combine(World.DataDir, "share") : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Desk Pals")
+        ShareClipTo(dir, who)
+    }
+
+    func ShareClipTo(_ dir: String, _ who: Pet!) {
+        if sharing2 { return }
+        sharing2 = true
+        var l0: Pet! = who
+        if l0 == nil { l0 = Lead() }
+        let l: Pet = l0
+        l.Say("拍攝中…🎬 （大概 5 秒的小短片）", 2.5)
+        Later(0.15) { [self] in
+            // 主角：你點的那隻；從小屋拍的話，有自己做的公仔在外面就讓他當主角
+            var star: Pet = l
+            if who == nil && !l.P.Cu { for p in OutPets() { if p.P.Cu { star = p; break } } }
+            let cast = List<Pal>()
+            cast.Add(star.P)
+            for p in OutPets() { if p !== star && cast.Count < 4 { cast.Add(p.P) } }
+            let W0 = 540, H0 = 540, fps = 15, n = 5 * fps
+            var caption: String! = nil
+            let frames: List<[Int]> = ShareFrames(cast, W0, H0, fps, n, &caption)
+            if frames.Count == 0 { App.Log("share: no frames"); sharing2 = false; l.Say("拍攝失敗了…再試一次？", 2.4); return }
+            let name = "DeskPals-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".gif"
+            let path = Path.Combine(dir, name)
+            let cap: String = caption
+            let th = Thread {
+                var err: String! = nil
+                do {
+                    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)   // Directory.CreateDirectory
+                    try GifWriter.Write(path, frames, W0, H0, 100 / fps)
+                    try File.WriteAllText(Path.ChangeExtension(path, ".txt"), cap, UTF8Encoding(false))
+                } catch { err = error.Message }
+                let e2: String! = err
+                self.Post { self.ShareDone(l, path, cap, e2) }
+            }
+            th.IsBackground = true
+            th.Start()
+        }
+    }
+
+    func ShareDone(_ l: Pet, _ path: String, _ caption: String, _ err: String!) {
+        sharing2 = false
+        if err != nil { App.Log("share: " + err); l.Say("存不起來…（" + err + "）", 3); return }
+        let kb = FileInfo(path).Length / 1024
+        App.Log("share saved " + path + " " + String(kb) + "KB")
+        if !App.Offscreen {
+            // 剪貼簿：同時放 GIF 檔（貼到聊天室＝傳圖）和說明文字（貼到文字框＝那句話）
+            // mac: NSPasteboard，同一個項目放 public.file-url＋public.utf8-plain-text
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            let item = NSPasteboardItem()
+            item.setString(URL(fileURLWithPath: path).absoluteString, forType: .fileURL)
+            item.setString(caption, forType: .string)
+            if !pb.writeObjects([item]) { App.Log("share clipboard: write failed") }
+            // mac: explorer /select → Finder 選取
+            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+        }
+        l.Say("短片做好了！存在「圖片/Desk Pals」，說明文字也複製好了，直接貼上就能分享 🎬", 5)   // mac: 路徑分隔用 /
+    }
+
+    // 畫每一格：可愛的小桌面背景＋公仔照劇本動
+    func ShareFrames(_ cast: List<Pal>, _ W0: Int, _ H0: Int, _ fps: Int, _ n: Int, _ caption: inout String!) -> List<[Int]> {
+        let pw = World(S, Pal.Classic)
+        let pets = List<Pet>()
+        var seed = 11
+        for p in cast { pets.Add(Pet(pw, p, S, seed)); seed += 1 }
+        let hero: Pal = cast[0]
+        let heroPet: Pet = pets[0]
+        caption = nil
+        for p in pets { if p.P.Cu { caption = p.ShareLine("x_share"); break } }
+        if string.IsNullOrEmpty(caption) { caption = "我的桌面公仔在螢幕上陪我上班 ✨ #我的桌面公仔 #DeskPals" }
+        let hi = World.NoEmoji(heroPet.ShareLine("hi"))
+        let ps = cast.Count == 1 ? 13 : (cast.Count == 2 ? 11 : (cast.Count == 3 ? 9 : 7))
+        let frames = List<[Int]>()
+        let bg = World.ShareBackground(W0, H0, hero)
+        let fr = Bitmap(W0, H0, PixelFormat.Format32bppArgb, 1)   // mac: 1 倍（GIF 是 540×540 實際像素）
+        let bf = FontT("Microsoft JhengHei UI", 15, FontStyle.Bold, GraphicsUnit.Pixel)
+        let floor = Double(H0) * 0.80
+        for i in 0..<n {
+            let t = Double(i) / Double(fps)
+            do {
+                let g = Graphics.FromImage(fr)
+                g.DrawImageUnscaled(bg, 0, 0)
+                g.SmoothingMode = SmoothingMode.AntiAlias
+                for j in 0..<pets.Count {
+                    let tx = Double(W0 * (j + 1)) / Double(pets.Count + 1)
+                    let t0 = Double(j) * 0.25, walkEnd = 1.9 + t0
+                    let sx = -Double(W0) * 0.18 - Double(j) * Double(W0) * 0.1
+                    var fx = tx, fy = floor, vyh = 0.0, land = 0.0
+                    var st: String; var d = 1
+                    if t < walkEnd {
+                        let u = Math.Max(0.0, (t - t0) / (walkEnd - t0))
+                        fx = sx + (tx - sx) * (1 - (1 - u) * (1 - u))
+                        st = "walk"
+                    }
+                    else if t < 2.6 { st = "idle"; d = tx < Double(W0 / 2) ? 1 : -1 }
+                    else if t < 3.5 { st = "wave"; d = tx < Double(W0 / 2) ? 1 : -1 }
+                    else {
+                        // 開心跳兩下
+                        let c = (t - 3.5 - Double(j) * 0.08)
+                        st = "hug"; d = tx < Double(W0 / 2) ? 1 : -1
+                        let hc = c % 0.75
+                        if c > 0 && c < 1.5 && hc < 0.5 { st = pets[j].P.Cu ? "air" : "hug"; let u = hc / 0.5; fy -= Math.Sin(u * Math.PI) * Double(ps) * 4; vyh = u < 0.5 ? -1 : 1 }
+                        else if c > 0 && hc < 0.62 { land = 0.2 - (hc - 0.5) * 1.6 }
+                    }
+                    if pets.Count == 1 && t >= walkEnd { d = 1 }
+                    pets[j].ShareDraw(g, fx, fy, ps, st, t, d, vyh, Math.Max(0.0, land))
+                    // 愛心
+                    if t >= 3.5 {
+                        for k in 0..<3 {
+                            let ph = ((t - 3.5) * 0.8 + Double(k) / 3.0) % 1
+                            let hp = Math.Max(3, ps / 2)
+                            let hx: Double = fx + Double((k - 1) * ps * 4) + Math.Sin(ph * 6 + Double(k)) * Double(ps)
+                            let hy: Double = floor - Double(17 * ps) - ph * Double(ps) * 9
+                            World.ShareHeart(g, hx, hy, hp, CInt(255 * Math.Min(1.0, (1 - ph) * 2.5)))
+                        }
+                    }
+                }
+                // 打招呼的泡泡
+                if t >= 2.4 && t < 3.7 && !string.IsNullOrEmpty(hi) {
+                    let tx = Double(W0) / Double(pets.Count + 1)
+                    let rows: Double = hero.Cu ? hero.Spr.Hc : Double(16 + hero.TopRows)
+                    World.ShareBubble(g, hi, bf, tx, floor - rows * Double(ps) - 22, W0, hero.Accent)
+                }
+            }
+            frames.Add(CuImg.Pixels(fr))
+        }
+        return frames
+    }
+
+    static func ShareHeart(_ g: Graphics, _ cx: Double, _ cy: Double, _ u: Int, _ alpha: Int) {
+        if alpha <= 10 { return }
+        let h: [String] = [".pp.pp.", "ppppppp", "ppppppp", ".ppppp.", "..ppp..", "...p..."]
+        let wb = SolidBrush(Color.FromArgb(alpha, 255, 255, 255))
+        let pb = SolidBrush(Color.FromArgb(alpha, 0xFF, 0x6F, 0x9C))
+        let x0 = CInt(cx - 3.5 * Double(u)), y0 = CInt(cy - 3 * Double(u))
+        for pass in 0..<2 {
+            for r in 0..<h.count {
+                let row = Array(h[r])
+                for c in 0..<row.count {
+                    if row[c] == "." { continue }
+                    if pass == 0 { g.FillRectangle(wb, x0 + c * u - u / 2, y0 + r * u - u / 2, 2 * u, 2 * u) }
+                    else { g.FillRectangle(pb, x0 + c * u, y0 + r * u, u, u) }
+                }
+            }
+        }
+    }
+
+    // 像素風泡泡（跟桌面上的一樣：切角方框＋往下的小尾巴）
+    static func ShareBubble(_ g: Graphics, _ s: String, _ f: Font, _ cx: Double, _ bottom: Double, _ W0: Int, _ accent: Color) {
+        let ts = TextRenderer.MeasureText(s, f, SizeT(4000, 400), TextFormatFlags.NoPadding)
+        let w = ts.Width + 28, h = ts.Height + 18
+        let x = CInt(Math.Max(10.0, Math.Min(Double(W0 - w - 10), cx - Double(w) / 2.0))), y = CInt(bottom - Double(h) - 8)
+        let lb = SolidBrush(accent)
+        let fill = SolidBrush(Color.White)
+        g.SmoothingMode = SmoothingMode.None
+        g.FillRectangle(lb, x + 3, y, w - 6, h); g.FillRectangle(lb, x, y + 3, w, h - 6); g.FillRectangle(lb, x + 1, y + 1, w - 2, h - 2)
+        g.FillRectangle(fill, x + 4, y + 3, w - 8, h - 6); g.FillRectangle(fill, x + 3, y + 4, w - 6, h - 8)
+        let tx = CInt(Math.Max(Double(x + 14), Math.Min(Double(x + w - 14), cx)))
+        for i in 0..<9 { g.FillRectangle(lb, tx - 9 + i, y + h - 1 + i, 18 - 2 * i, 1) }
+        for i in 0..<7 { g.FillRectangle(fill, tx - 7 + i, y + h - 3 + i, 14 - 2 * i, 1) }
+        TextRenderer.DrawText(g, s, f, Rectangle(x, y, w, h), Color.FromArgb(0x2A, 0x2F, 0x45), [TextFormatFlags.HorizontalCenter, TextFormatFlags.VerticalCenter, TextFormatFlags.NoPadding])
+    }
+
+    // 背景：一面淡淡的牆（色帶）、窗戶、小星星、木頭桌面、右下角浮水印
+    static func ShareBackground(_ W0: Int, _ H0: Int, _ hero: Pal) -> Bitmap {
+        let b = Bitmap(W0, H0, PixelFormat.Format32bppArgb, 1)   // mac: 1 倍
+        let g = Graphics.FromImage(b)
+        let top = Pix.Mix(hero.Panel, Color.White, 0.35), bot = Pix.Mix(hero.Panel, Pix.C(0xF6D9C0), 0.45)
+        let floorY = CInt(Double(H0) * 0.80), bands = 9
+        for i in 0..<bands {
+            let y0 = floorY * i / bands, y1 = floorY * (i + 1) / bands
+            let sb = SolidBrush(Pix.Mix(top, bot, Double(i) / Double(bands - 1))); g.FillRectangle(sb, 0, y0, W0, y1 - y0)
+        }
+        // 窗戶（左上）
+        let u = 6, wx = 46, wy = 54, ww = 22 * u, wh = 17 * u
+        do { let fr = SolidBrush(Pix.C(0x9A6338)); g.FillRectangle(fr, wx - u, wy - u, ww + 2 * u, wh + 2 * u) }
+        do { let sky = SolidBrush(Pix.C(0xBFE3F2)); g.FillRectangle(sky, wx, wy, ww, wh) }
+        do { let cl = SolidBrush(Color.White); g.FillRectangle(cl, wx + 3 * u, wy + 4 * u, 6 * u, 2 * u); g.FillRectangle(cl, wx + 4 * u, wy + 3 * u, 3 * u, u); g.FillRectangle(cl, wx + 12 * u, wy + 9 * u, 5 * u, 2 * u) }
+        do { let fr = SolidBrush(Pix.C(0x9A6338)); g.FillRectangle(fr, wx + ww / 2 - u / 2, wy, u, wh); g.FillRectangle(fr, wx, wy + wh / 2 - u / 2, ww, u) }
+        // 小星星
+        let r = Random(7)
+        do {
+            let st = SolidBrush(Color.FromArgb(200, 255, 255, 255))
+            for _ in 0..<14 {
+                let sx = 220 + r.Next(W0 - 250), sy = 30 + r.Next(floorY - 150)
+                g.FillRectangle(st, sx, sy - 4, 4, 12); g.FillRectangle(st, sx - 4, sy, 12, 4)
+            }
+        }
+        // 木頭桌面
+        do { let d1 = SolidBrush(Pix.C(0xB97F4E)); g.FillRectangle(d1, 0, floorY, W0, H0 - floorY) }
+        do { let d2 = SolidBrush(Pix.C(0xD9A06A)); g.FillRectangle(d2, 0, floorY, W0, 6) }
+        do {
+            let d3 = SolidBrush(Pix.C(0x9A6338))
+            g.FillRectangle(d3, 0, floorY + 6, W0, 3)
+            for _ in 0..<7 {
+                // C# 的參數由左到右算：x、y、寬各抽一次亂數
+                let rx = 30 + r.Next(W0 - 120)
+                let ry = floorY + 24 + r.Next(H0 - floorY - 40)
+                let rw = 40 + r.Next(60)
+                g.FillRectangle(d3, rx, ry, rw, 3)
+            }
+        }
+        // 浮水印
+        do {
+            let f = FontT("Microsoft JhengHei UI", 16, FontStyle.Bold, GraphicsUnit.Pixel)
+            let s = "Desk Pals"
+            let ts = TextRenderer.MeasureText(s, f, SizeT(4000, 400), TextFormatFlags.NoPadding)
+            let tx = W0 - ts.Width - 18, ty = H0 - ts.Height - 14
+            TextRenderer.DrawText(g, s, f, Point(tx + 1, ty + 1), Pix.C(0x7A4A28), TextFormatFlags.NoPadding)
+            TextRenderer.DrawText(g, s, f, Point(tx, ty), Pix.C(0xFFF6E4), TextFormatFlags.NoPadding)
+            do {
+                let hb = SolidBrush(Pix.C(0xF27A90))
+                let h: [String] = [".#.#.", "#####", ".###.", "..#.."]
+                for rr in 0..<h.count { let row = Array(h[rr]); for c in 0..<row.count { if row[c] == "#" { g.FillRectangle(hb, tx - 22 + c * 3, ty + 4 + rr * 3, 3, 3) } } }
+            }
+        }
+        return b
+    }
+
+    // ================= 匯出／匯入（.deskpal：一個 JSON，裡面是設定＋原圖 PNG 的 base64） =================
+    static let MaxPalFile = 30 << 20
+
+    func CuExportDialog(_ id: String) {
+        let m: CuMeta! = CuStore.Get(id)
+        if m == nil { return }
+        if App.Offscreen { App.Log("custom: export dialog skipped (offscreen)"); return }
+        // mac: SaveFileDialog → NSSavePanel
+        guard let file = CuDialogs.Save("匯出「" + m.Name + "」", CuMeta.CleanName(m.Name) + ".deskpal", ["deskpal"], Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)) else { return }
+        if CuExport(id, file) { Lead().Say("匯出好了！把「" + Path.GetFileName(file) + "」傳給朋友，他在小屋按「匯入朋友的公仔」就能養 🧸", 5) }
+    }
+
+    @discardableResult
+    func CuExport(_ id: String, _ path: String) -> Bool {
+        let m: CuMeta! = CuStore.Get(id)
+        if m == nil { return false }   // 只有自己做的公仔能匯出（內建的不行）
+        do {
+            let src = try File.ReadAllBytes(Path.Combine(CuStore.Dir(id), "source.png"))
+            guard let meta = try JavaScriptSerializer().DeserializeObject(m.ToJson()) as? Dict<String, Any> else { return false }
+            meta.Remove("id"); meta.Remove("created")
+            let d = Dict<String, Any>()
+            d["deskpal"] = 1; d["app"] = "Desk Pals"; d["meta"] = meta; d["source"] = Data(src).base64EncodedString()   // Convert.ToBase64String
+            let js = JavaScriptSerializer(); js.MaxJsonLength = int.MaxValue
+            try File.WriteAllText(path, js.Serialize(d), UTF8Encoding(false))
+            App.Log("custom exported " + id + " -> " + path)
+            return true
+        }
+        catch { App.Log("export: " + error.Message); Lead().Say("匯出失敗了…（" + error.Message + "）", 3); return false }
+    }
+
+    func CuImportDialog(_ first: Bool) {
+        if App.Offscreen { App.Log("custom: import dialog skipped (offscreen)"); if first { ShowSetup(true) }; return }
+        // mac: OpenFileDialog → NSOpenPanel（只列 .deskpal）
+        guard let file = CuDialogs.Open("匯入朋友的公仔", ["deskpal"], Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)) else { if first { ShowSetup(true) }; return }
+        CuImportFile(file, first)
+    }
+
+    // Convert.ToInt32(object)
+    static func CuToInt32(_ o: Any?) throws -> Int {
+        guard let o = o, !(o is NSNull) else { return 0 }
+        if let b = o as? Bool { return b ? 1 : 0 }
+        if let i = o as? Int { return i }
+        if let d = o as? Double { return CInt(Math.Round(d)) }
+        if let s = o as? String { var v = 0; if int.TryParse(s, &v) { return v }; throw FormatException("Input string was not in a correct format.") }
+        throw FormatException("Unable to cast object to type 'System.IConvertible'.")
+    }
+
+    // 讀進來每一樣都檢查：檔案大小、JSON、圖片解得開、名字清乾淨；id 一律重新產生（不信任檔案裡的路徑、id）
+    func CuImportFile(_ path: String, _ first: Bool) {
+        var err: String! = nil, newId: String! = nil
+        do {
+            let fi = FileInfo(path)
+            if !fi.Exists { err = "找不到這個檔案" }
+            else if fi.Length > World.MaxPalFile { err = "檔案太大了（超過 30MB），應該不是公仔檔" }
+            else {
+                let js = JavaScriptSerializer(); js.MaxJsonLength = World.MaxPalFile * 2
+                let text = try File.ReadAllText(path, Encoding.UTF8)
+                let d = try js.DeserializeObject(text) as? Dict<String, Any>
+                var ver: Any? = nil, mo: Any? = nil, so: Any? = nil
+                var isPal = false   // C#：d == null || !TryGetValue || Convert.ToInt32(ver) != 1（短路：前面不成立才轉）
+                if d != nil && d!.TryGetValue("deskpal", &ver) { isPal = try World.CuToInt32(ver) == 1 }
+                if !isPal { err = "這不是 Desk Pals 的公仔檔" }
+                else if !d!.TryGetValue("meta", &mo) || !(mo is Dict<String, Any>) || !d!.TryGetValue("source", &so) || !(so is String) { err = "公仔檔缺東西（可能壞掉了）" }
+                else {
+                    let m: CuMeta = CuMeta.FromDict(mo as! Dict<String, Any>)
+                    let b64 = so as! String
+                    if b64.Length > World.MaxPalFile * 4 / 3 + 16 { err = "公仔檔裡的圖太大了" }
+                    else {
+                        // Convert.FromBase64String：空白略過，其他不合法就丟例外
+                        let clean = b64.filter { !($0 == " " || $0 == "\t" || $0 == "\r" || $0 == "\n") }
+                        guard let pngData = Data(base64Encoded: clean) else { throw FormatException("The input is not a valid Base-64 string as it contains a non-base 64 character, more than two padding characters, or an illegal character among the padding characters.") }
+                        let png = [UInt8](pngData)
+                        var e2: String! = nil
+                        let src: Bitmap! = CuImg.Decode(png, m.Sheet ? 1400 : CuImg.MaxSrc, &e2)
+                        if src == nil { err = e2 }
+                        else {
+                            let s: CuSprite! = CuSprite.Build(m, src, &e2)
+                            if s == nil { err = e2; src.Dispose() }
+                            else {
+                                m.Id = CuStore.NewId(); m.Created = ""
+                                if m.Name == "" { m.Name = "朋友的公仔" }
+                                try CuStore.Save(m, src, s)
+                                src.Dispose()
+                                newId = m.Id
+                                App.Log("custom imported " + newId + " name=" + m.Name)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch { err = "這個檔案打不開（" + error.Message + "）" }
+        if newId == nil {
+            App.Log("import failed: " + (err ?? ""))
+            Lead().Say("匯入失敗：" + (err ?? ""), 4)
+            if first { ShowSetup(true) }
+            return
+        }
+        CuCreated(newId, first, false)
     }
 }
 

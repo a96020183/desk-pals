@@ -719,6 +719,9 @@ final class FormView: NSView {
         let d = Int((e.scrollingDeltaY * (e.hasPreciseScrollingDeltas ? 4 : 40)).rounded())
         form?.OnMouseWheel(args(e, MouseButtons.None, d))
     }
+    // drag & drop（Form.AllowDrop／DragEnter／DragDrop：04_shim_custom_b.swift）
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { return form?._dragEntered(sender) ?? [] }
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool { return form?._performDrag(sender) ?? false }
 }
 
 class Form: Control {

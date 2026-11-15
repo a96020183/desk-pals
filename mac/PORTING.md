@@ -26,6 +26,14 @@ mac/
     43_ui.swift         C# last section, from "公仔小屋（蛋的右鍵）" to the end (World: features/小屋 menu/只要一隻/設定;
                         Pet.IconPic; Pix pixel helpers; PixelMenu; SetupForm)
     50_pikmin.swift     DeskPals.Pikmin.cs（皮克敏一櫃：Pal／Pet／ShelfForm／World partials；DeskPals.cs 裡的一行 hook 對應到各檔的一行 hook）
+    51_original.swift   DeskPals.Original.cs（續命小隊：Pal 資料＋像素圖／Pet「orig」狀態／ShelfForm 方格紙背板／World 串場；hook 同上）
+    52_study.swift      DeskPals.Study.cs（讀書小幫手：Ics／School／World 提醒與設定／ExamForm／StudySettingsForm／Pet.DrawCapIcon）
+    53_custom.swift     DeskPals.Custom.cs（CuMeta／CuSprite／CuStore／我的櫃／Pet 姿勢與個性／World 選單與 pipe）
+    54_custom_lines.swift DeskPals.CustomLines.cs（六種個性的台詞，script 產生）
+    55_custom_image.swift DeskPals.CustomImage.cs（CuCut／CuImg：解碼、去背、像素化）
+    56_custom_make.swift  DeskPals.CustomMake.cs（CuMaker 做公仔視窗、拖放、開檔／存檔、`custom …` 測試指令）
+    57_share.swift      DeskPals.Share.cs（分享短片 GIF89a 編碼器、`.deskpal` 匯出匯入）
+    03_shim_custom_a.swift / 04_shim_custom_b.swift  做公仔用到的 shim（Matrix、ColorMatrix 像素處理、拖放、NSOpenPanel／NSSavePanel）
 ```
 (Line numbers above are from the first port and drift as the C# grows — find your range by the section comments.)
 
@@ -152,50 +160,43 @@ are spread across files, so:
 - No `TODO`s that drop behaviour. Where mac truly can't do something, implement the closest equivalent and leave a `// mac:` comment.
 - Your part has no errors of its own when assembled and compiled (errors referencing names owned by other parts are fine while they're in progress).
 
-## 續命小隊（original lineup）— not ported yet
+## 續命小隊（original lineup）— ported (`mac/src/51_original.swift`)
 
-`extension/desktop/DeskPals.Original.cs` (Windows, added after the Pikmin lineup) holds the original lineup
-「續命小隊」: 半糖 boba / 醒醒 coffee / 糰糰 onigiri / 貼貼 sticky — `Pal` data (art is generated from the design
-source `final_art.py` into the `像素圖` block; every pal has HEAD / HEAD_UP / BODY / BODY_UP / BODY_HUG / LEGS_* plus `F_<face>`
-rows that are merged into the stacked frame at `FaceRow`, keeping non-'.' pixels of the head), the `Pet` behaviour
-(state `"orig"` + `oAct`, like Pikmin's `"pik"`), a grid-paper `ShelfForm` background and the `World` scenes.
-DeskPals.cs only has one-line hooks (`P.Orig`, `OrigLineup`, `StartLineup()`); grep `Orig` to find them.
-Port it like the Pikmin partial: one new `mac/src/` file, same names. Until then the Mac build falls back to the classic
-lineup when asked for `original` (`NormLineup`), and VS Code only passes `-Lineup` when the user set it explicitly.
-Note: a fresh install (no `lineup.txt`, `out.txt`, `profile.txt`, `usage.txt`, no old SpideyDesktop folder) starts in
-`original` and writes `lineup.txt`.
+`extension/desktop/DeskPals.Original.cs` holds the original lineup 「續命小隊」: 半糖 boba / 醒醒 coffee / 糰糰 onigiri / 貼貼 sticky
+— `Pal` data (art is generated from the design source `tools/original_art/final_art.py` into the `像素圖` block; every pal has
+HEAD / HEAD_UP / BODY / BODY_UP / BODY_HUG / LEGS_* plus `F_<face>` rows merged into the stacked frame at `FaceRow`, keeping non-'.'
+pixels of the head), the `Pet` behaviour (state `"orig"` + `oAct`, like Pikmin's `"pik"`), a grid-paper `ShelfForm` background and
+the `World` scenes. DeskPals.cs only has one-line hooks (`P.Orig`, `OrigLineup`, `StartLineup()`); grep `Orig` to find them — every
+one has a Swift counterpart in the core parts (same count: 56 lines).
+When the art changes: re-run `export_cs.py` for the C#, then convert the `像素圖` block the same way (`p.Col('x', …)` → `p.Col("x", …)`,
+`new string[] { … };` → `[ … ]`) — the strings must stay byte-identical.
+Mac differences (all marked `// mac:`):
+- `World.StartLineup()` is `static` (it runs in `World.init` before `super.init`).
+- Fresh install = no `lineup.txt`, `out.txt`, `profile.txt`, `usage.txt` in the data dir → `original` (writes `lineup.txt`), same as
+  Windows. Windows treats an existing `%LOCALAPPDATA%\SpideyDesktop` folder as "upgraded from old Spidey"; on mac
+  `~/Library/Application Support/SpideyDesktop` always exists (VS Code keeps the binary and socket there), so the mac checks for the old
+  Spidey data files `bond.txt` / `pats.txt` in it instead (the files `Migrate()` copies).
+- `OrigPairScene` skips a pair scene when one of the two pets is missing (C# throws inside `Begin` and the exception is swallowed by `Later`).
 
-## Still to port: 讀書小幫手 (`DeskPals.Study.cs`, branch study-tools)
+## 讀書小幫手 — ported (`mac/src/52_study.swift`)
 
-New partial file + one-line hooks in `DeskPals.cs`; the Swift port needs a new part (e.g. `mac/src/44_study.swift`) plus the same hooks in the
-existing parts. The desktop app owns everything (works without VS Code); VS Code only pushes settings it has set (`study-vs`, `study-set …`).
+Same names and behaviour as `DeskPals.Study.cs`; hooks in 40/41/42/43 (`StudyTick`, `StudyMsg`, `ExamNear`/`AddStudyMenus`, focus wording,
+`StudyPriority`, `StudyFlavor`, `MeetingLike`, `StudyClicked`, `WeekTomatoNote`/`StudyWrapParts`, 讀書小幫手設定…, `StudySnap`,
+`Ticket.Kind`/`CourseLine`/`CheckClock(url, what)`/`AddTicketMenus(items, kind)`/`TicketForm(w, accent, kind)`/`BadgeIsCourse`→`DrawCapIcon`).
+Mac differences (all marked `// mac:`):
+- Time zones: `TimeZone(identifier:)` takes IANA names directly; Windows names from Outlook exports are mapped back through the same
+  `IanaToWin` table. `ConvertTimeToUtc` mirrors .NET: a wall time in the spring-forward gap fails (→ retried +1 h like C#), an ambiguous
+  fall-back time resolves to standard time. The VTIMEZONE fixed-offset, `UTC`/`Z` and floating = local rules are unchanged.
+- Regexes: the `RegexOptions.ECMAScript` patterns are written with explicit ASCII classes (`(?<![A-Za-z0-9_])…(?![A-Za-z0-9_])`, `[0-9]`,
+  `[ \t\n\x0B\f\r]`) because `NSRegularExpression` has no ECMAScript mode.
+- ICS fetch: `URLSession` on the fetch thread (20 s idle timeout, ≤ 4 redirects, stops at 8 MB of bytes), cache `school-<md5>.ics` via CryptoKit MD5.
+- Settings window: the URL box is a multi-line `NSTextField` (Return inserts a newline; no scroll bar).
+- `test/desktop-study.js` takes a unix socket path on Mac; CI runs it with `TZ=Asia/Taipei`.
 
-- **Types**: `IcsTime`, `IcsEvent`, `IcsOcc`, static `Ics` (Parse / ParseTime / WallToUtc / Occurrences / MeetLink), `SchoolFeed`, `SchoolTimed`,
-  `SchoolDue`, `SchoolExam`, `SchoolScan`, `SchoolPlanItem`, static `School` (KindOf / Feed / Classify / Scan / Plan),
-  World members (`exams`, `deadlines`, `plan`, settings fields, `StudyTick`, `StudyMsg`, `AddStudyMenus`, `ExamNear`, `StudyPriority`,
-  `StudyFlavor`, `MeetingLike`, `StudyClicked`, `WeekTomatoNote`, `StudyWrapParts`, `CourseLine`, `BadgeIsCourse`, `ShowStudySettings`, `StudySnap`),
-  `Pet.DrawCapIcon`, `ExamForm`, `StudySettingsForm` (pixel style like `SetupForm`, with real text fields).
-- **Hooks in DeskPals.cs to mirror**: TickInner → `StudyTick()`; OnMsg `default:` → `StudyMsg`; AddHelpers → focus label via `ExamNear()` +
-  `AddStudyMenus`; StartFocus/StopFocus wording; `Priority` → `StudyPriority`; `Flavor` → `StudyFlavor`; OnNotify quiet branch and Deliver use
-  `MeetingLike`; NoticeClicked → `StudyClicked`; DailyWrap → `WeekTomatoNote` + `StudyWrapParts`; HouseMenu「讀書小幫手設定…」; Snap → `StudySnap`;
-  ticket section: `Ticket.Kind` (ticket|course, 6th column in tickets.txt), `AddTicket(…, kind)`, `TicketLine` → `CourseLine`, kind-aware hint /
-  `CheckClock(url, what)` (skipped offscreen) / 「開放囉！」/ menus `AddTicketMenus(items, kind)` / `TicketForm(w, accent, kind)`; badge icon
-  `BadgeIsCourse()` → `DrawCapIcon`.
-- **Platform bits**: HTTPS GET of the ICS URLs on a background thread every 10 min (20 s timeout, 8 MB cap, cache to `school-<md5>.ics` in the data
-  dir, never on the UI thread) → `URLSession`. Time zones: C# maps IANA → Windows ids and uses fixed offsets from VTIMEZONE without DAYLIGHT;
-  on mac `TimeZone(identifier:)` takes IANA names directly (keep the VTIMEZONE fixed-offset path and the `UTC`/`Z` and floating=local rules).
-  Regexes use ECMAScript semantics (`\b`/`\w` ASCII-only, like the JS) — `NSRegularExpression` treats CJK as word chars, so `\bdue\b` next to
-  Chinese differs; port those patterns with explicit `(?<![A-Za-z0-9_])…(?![A-Za-z0-9_])` boundaries.
-  User idle → existing `W.IdleSeconds()` port. `Process.Start(url)` → `NSWorkspace.open`.
-- **Data files**: `exams.txt`, `deadlines.txt`, `study-done.txt`, `study-config.txt` (url=…, remind, autoquiet, late, lateon, nudge, workcal, vs),
-  `late.txt`, `school-*.ics`; the `classes` counter in `day-*.txt`.
-- **Pipe** (see the header comment of DeskPals.Study.cs): `course`, `exam`, `exam-del`, `study-vs`, `study-set`, `study-hello` → `study-state <json>`,
-  `study-done`; test-only (offscreen): `study-ics`, `study-clock`, `study-idle`, `study-dump`, `study-settings`.
-- **Tests**: `test/desktop-study.js <pipe>` drives an offscreen instance with `test/fixtures/*.ics` and a fake clock; it must pass unchanged on mac
-  (run it with TZ=Asia/Taipei — the fixtures are written in Taipei time).
+## 自己做的公仔、分享短片、.deskpal — ported (`mac/src/53_custom.swift` … `57_share.swift`)
 
-## To port next: 自己做的公仔、分享短片、.deskpal（Windows-first, added in 0.7.0）
-New C# partial files (Windows has them; the Mac port doesn't yet — the docs say "Windows-first for now"):
+The table below is the porting map that was used (C# file → Mac approach). CI drives the whole flow offscreen with `.github/custom-smoke.js`
+(a generated test image → maker → finish → icon, `.deskpal` export, share GIF).
 
 | C# file | What it is | Mac notes |
 |---|---|---|

@@ -87,7 +87,7 @@ final class World: Form {
     init(_ pipeName: String, _ pet: String, _ lineupArg: String) {
         self.pipeName = pipeName
         // 哪一櫃：有傳就用（並記住），沒傳（開機捷徑）就照上次的
-        lineup = Pal.NormLineup(lineupArg.isEmpty ? World.ReadText("lineup.txt") : lineupArg)
+        lineup = Pal.NormLineup(lineupArg.isEmpty ? World.StartLineup() : lineupArg)   // 全新安裝：續命小隊（51_original.swift）
         if !lineupArg.isEmpty { World.WriteText("lineup.txt", lineup) }
         // mac: 用 point，dpi 一律當 96
         let dpi: Double = 96
@@ -127,7 +127,8 @@ final class World: Form {
 extension World {
     func DefaultPetFor(_ pet: String) -> String {
         for id in Pal.LineupIds(lineup) { if id == pet { return pet } }
-        return lineup == Pal.Teletubbies ? "po" : (lineup == Pal.Pikmin ? "pkred" : "spidey")
+        if lineup == Pal.Mine { let mi = Pal.MineIds(); if mi.count > 0 { return mi[0] } }
+        return lineup == Pal.Teletubbies ? "po" : (lineup == Pal.Pikmin ? "pkred" : (lineup == Pal.Original ? "boba" : "spidey"))
     }
 
     // 每一櫃各自記：誰在外面、最近一隻、最愛（經典一櫃沿用原本的檔名）
@@ -174,7 +175,7 @@ extension World {
             delay += 0.5
         }
         active = Get(ids.Count > 0 ? ids[ids.Count - 1] : defaultPet) ?? Get(defaultPet)
-        if ids.Count == 0 && active != nil { active.Say(TubbyLineup ? "Eh-oh! 天線寶寶一櫃 ☀" : "經典一櫃回來囉！", 2.4) }
+        if ids.Count == 0 && active != nil { active.Say(OrigLineup ? "續命小隊，報到！🥤" : (TubbyLineup ? "Eh-oh! 天線寶寶一櫃 ☀" : (CuLineup ? "我的櫃！大家都在 🧸" : "經典一櫃回來囉！")), 2.4) }
         Broadcast()
         lock(clients) { for c in clients { World.Send(c, "lineup " + lineup + "\n") } }   // 在桌面換櫃（小屋、設定）：VS Code 跟著改設定
         App.Log("lineup " + lineup)
@@ -234,7 +235,7 @@ extension World {
         timer.Interval = 30
         timer.Tick = { self.Tick() }
         timer.Start()
-        if !FileManager.default.fileExists(atPath: World.FilePath("profile.txt")) { Later(1.2) { self.ShowSetup(true) } }   // 第一次：設定視窗（你是？選一櫃、擺法）
+        if !FileManager.default.fileExists(atPath: World.FilePath("profile.txt")) { Later(1.2) { self.ShowSetup(true) } }   // 第一次：設定視窗（做一隻自己的或選一櫃、擺法）
         App.Log("started pipe=" + pipeName + " lineup=" + lineup + " out=" + outIds.ToArray().joined(separator: ",") + " data=" + World.DataDir)
     }
 
@@ -385,7 +386,7 @@ extension World {
         for i in 0..<4 { o[i] = c[i] != nil && c[i]!.Out }
         var hot = false, over = false
         for p in Pets { if p.Out && p.Dragging { hot = true; if InShelf(p.Cx, p.y + Double(p.SH) / 2.0) { over = true } } }
-        shelf.Hot = hot; shelf.Over = over; shelf.Night = Night; shelf.Tubby = TubbyLineup; shelf.Pik = PikLineup; shelf.Lunch = Lunch; shelf.Attention = EggAttention()
+        shelf.Hot = hot; shelf.Over = over; shelf.Night = Night; shelf.Tubby = TubbyLineup; shelf.Pik = PikLineup; shelf.Orig = OrigLineup; shelf.Lunch = Lunch; shelf.Attention = EggAttention()
         shelf.Render(c, o, Now)
         if !W.Shown(shelf) { shelf.Show(); Zorder() }
     }
@@ -503,6 +504,7 @@ extension World {
         QuietTick()
         ReminderTick()
         TicketTick()
+        StudyTick()          // 讀書小幫手（52_study.swift）：學校行事曆、作業死線、考試倒數、熬夜
         DownloadTick(dt)
         ExpireNotice()
         MenuWatch()
@@ -515,6 +517,7 @@ extension World {
         UpdateBall(dt)
         StepProps(dt)
         PikTick(dt)
+        OrigTick(dt)
         if fx != nil { fx.Step(dt) }
         StepScene(dt)
         proxT -= dt
@@ -604,6 +607,7 @@ extension World {
                 if s[1] - s[0] >= SW { let p = Plat(); p.H = wi.H; p.Top = wi.T; p.Left = s[0]; p.Right = s[1]; p.WinLeft = wi.L; np.Add(p) }
             }
         }
+        CuFakeWins(nw, nc, np)   // 測試用的假視窗（只有離屏隔離模式）
         Wins = nw; Cands = nc; Plats = np
         if shareFound != sharing {
             sharing = shareFound
@@ -964,7 +968,7 @@ extension World {
     // ================= 右鍵選單 =================
     func FillMenu(_ p: Pet, _ m: ContextMenuStrip) {
         m.Items.Clear()
-        var items: [[String]]! = p.P.Pik ? PikMenuItems(p) : nil
+        var items: [[String]]! = p.P.Pik ? PikMenuItems(p) : (p.P.Orig ? OrigMenuItems(p) : (p.P.Cu ? p.CuMenuItems() : nil))
         if items == nil { switch p.P.Id {
         case "po":
             items = [["大抱抱 ♥", "hug"], ["打招呼 Eh-oh!", "hi"], ["敲敲螢幕", "knock"], ["騎車兜風", "ride"],
@@ -994,6 +998,7 @@ extension World {
             m.Items.Add(it[0], nil, { if a == "ball" { self.StartBall() } else { p.Act(a) } })
         }
         m.Items.Add(p.P.Name + " 的好感度 ♥", nil, { p.ShowBond() })
+        CuPetMenu(p, m)
         m.Items.Add(ToolStripSeparator())
         let help = ToolStripMenuItem("小幫手（專注、安靜、提醒）")
         AddHelpers(help.DropDownItems)
@@ -1009,6 +1014,7 @@ extension World {
             m.Items.Add(grp)
         }
         if PikLineup { AddPikMenu(m) }
+        if OrigLineup && !Single { AddOrigMenu(m) }
         if !Single {
             let sw = ToolStripMenuItem("換角色")
             for o in Pets {
@@ -1032,10 +1038,11 @@ extension World {
     // 專注、安靜、提醒、搶票、今天的小結（公仔、櫃子、小屋的選單都有）
     func AddHelpers(_ items: ToolStripItemCollection) {
         if focusOn { items.Add("結束專注（還剩 " + String(FocusLeft()) + " 分）", nil, { self.StopFocus(false) }) }
-        else { items.Add("專注 25 分鐘 🍅", nil, { self.StartFocus(25) }) }
+        else { items.Add(ExamNear() ? "讀書 25 分鐘 📚" : "專注 25 分鐘 🍅", nil, { self.StartFocus(25) }) }   // 7 天內有考試：讀書
         AddQuietMenu(items)
         AddReminderMenus(items)
         AddTicketMenus(items)
+        AddStudyMenus(items)   // 搶課、考試倒數、這週要交的
         items.Add("今天的小結", nil, { self.DailyWrap(true) })
     }
 
@@ -1259,7 +1266,8 @@ extension World {
         let l: Pet = Lead()
         let outs = OutPets()
         switch p[0] {
-        case "hello": if active != nil { World.Send(c, "active " + active.P.Id + "\n") }; World.Send(c, "lineup " + lineup + "\n")   // 櫃子以桌面版為準（第一次設定在桌面做）
+        case "hello": CuHello(c); if active != nil { World.Send(c, "active " + active.P.Id + "\n") }; World.Send(c, "lineup " + lineup + "\n")   // 櫃子以桌面版為準（第一次設定在桌面做）
+        case "custom": CuMsg(c, line)   // 自己做的公仔（53_custom.swift／56_custom_make.swift）
         case "save":
             Count("saves")
             for x in outs { x.OnSave(x === l) }
@@ -1332,7 +1340,7 @@ extension World {
                 }
             }
         case "quit": QuitAll()
-        default: break
+        default: StudyMsg(c, p, line)   // course／exam／study-…（52_study.swift）
         }
     }
 
@@ -1349,6 +1357,7 @@ extension World {
         case "shelf": if l.Out { l.StowToShelf(true) }; return
         case "ball": StartBall(arg == "here"); return
         case "hide": ToggleHide(); return
+        case "show": if userHidden { ToggleHide() } else { l.Act("hi") }; return   // 獨立版又被打開一次（Dock）：躲起來的就出來，不然打個招呼
         case "fireworks": for x in OutPets() { x.Celebrate("dev", x === l) }; if OutCount() == 0 { l.Celebrate("dev", true) }; return
         case "dark", "night": forceNight = 1; nightChecked = -1; CheckNight(); return
         case "light", "day": forceNight = 0; nightChecked = -1; CheckNight(); return

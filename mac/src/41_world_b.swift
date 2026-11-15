@@ -443,7 +443,7 @@ extension World {
         if outs.Count < 2 { return }
         let free = List<Pet>()
         for p in outs { if p.Free() { free.Add(p) } }
-        if free.Count >= 3 && groupCd <= 0 && rnd.NextDouble() < (TubbyLineup && free.Count >= 4 ? 0.04 : 0.02) { groupCd = 600; if TubbyLineup { TubbyGroup(free.Count) } else if PikLineup { PikGroup(free.Count) } else if rnd.NextDouble() < 0.6 { GroupPhoto() } else { GroupHug() }; return }
+        if free.Count >= 3 && groupCd <= 0 && rnd.NextDouble() < (TubbyLineup && free.Count >= 4 ? 0.04 : 0.02) { groupCd = 600; if TubbyLineup { TubbyGroup(free.Count) } else if PikLineup { PikGroup(free.Count) } else if OrigLineup { OrigGroup(free.Count) } else if rnd.NextDouble() < 0.6 { GroupPhoto() } else { GroupHug() }; return }
         var i = 0
         while i < free.Count {
             var j = i + 1
@@ -472,6 +472,7 @@ extension World {
         var ids = key.components(separatedBy: "-")
         if ids.count == 1 && (key == "photo" || key == "group") { GroupPhoto(); return }
         if ids.count == 1 && PikLineup { PikScene(key); return }
+        if ids.count == 1 && OrigLineup { OrigScene(key); return }
         if ids.count == 1 {
             switch key {
             case "bighug": SceneBigHug(); return
@@ -492,7 +493,7 @@ extension World {
         pairCd[k2] = Now + 180 + rnd.NextDouble() * 120
         let d0: Double = a.Out && b.Out && a.state != "exit" && b.state != "exit" ? 0 : 1.6
         // 離太遠：先湊到一起再演
-        if TubbyLineup || PikLineup { Later(d0) { [self] in GatherPair(k2, a, b, 0) }; return }
+        if TubbyLineup || PikLineup || OrigLineup { Later(d0) { [self] in GatherPair(k2, a, b, 0) }; return }
         Later(d0) { [self] in
             if !Pets.Contains(a) || !Pets.Contains(b) { return }   // 中間換櫃了
             AbortScene()
@@ -536,7 +537,7 @@ extension World {
         case "po-tinky": if let x = g("po"), let y = g("tinky") { SceneScooterRide(x, y) }
         case "dipsy-po": if let x = g("po"), let y = g("dipsy") { SceneHatBaseball(x, y) }
         case "laalaa-po": if let x = g("laalaa"), let y = g("po") { SceneBallFetch(x, y) }
-        default: if PikLineup { PikPairScene(key) }
+        default: if PikLineup { PikPairScene(key) } else if OrigLineup { OrigPairScene(key) } else if a.P.Cu || b.P.Cu { CuPairScene(key, a, b) }
         }
     }
 
@@ -625,6 +626,7 @@ extension World {
 
     // 三隻以上：大合照（排一排、閃光、笑一個）
     func GroupPhoto() {
+        if OrigLineup { OrigPhoto(); return }
         let outs = OutPets()
         if outs.Count < 2 { AllOut(); Later(2.5) { [self] in GroupPhoto() }; return }
         let l: Pet = Lead()
@@ -674,7 +676,7 @@ extension World {
                 case "stitch": p.Say("Ohana！", 1.8)
                 case "hangyodon": p.Say("我有被拍進去嗎？嘴唇太大了嗎？", 1.8)
                 case "pkred", "pkyellow", "pkblue": p.Say("噗咿！", 1.8)
-                default: p.Say("帥！", 1.8)
+                default: p.Say(p.P.Cu ? p.L("x_photo") : "帥！", 1.8)
                 }
             }
         }
@@ -704,6 +706,7 @@ extension World {
     func StartRollCall(_ ids: List<String>) {
         if TubbyLineup { TubbyRollCall(ids); return }
         if PikLineup { PikRollCall(ids); return }
+        if OrigLineup { OrigRollCall(ids); return }
         var d = 0.4
         for id in ids {
             guard let p = Get(id) else { continue }
@@ -718,6 +721,7 @@ extension World {
     func NightRitual() {
         if TubbyLineup { SceneByeBye(true); return }
         if PikLineup { PikNight(true); return }
+        if OrigLineup { OrigNight(true); return }
         let outs = OutPets()
         // C# List.Sort（不穩定）；這裡穩定排序：人魚漢頓排第一
         let sorted = outs.ToArray().enumerated().sorted { a, b in
@@ -1226,6 +1230,8 @@ extension World {
         if flowerBub != nil && flowerBub.VVisible { flowerBub.PaintTo(g) }
         if flash != nil && flash.VVisible { flash.PaintTo(g) }
         if setupForm != nil && !setupForm.IsDisposed && setupForm.VVisible { setupForm.PaintTo(g) }
+        StudySnap(g)
+        CuSnap(g)
         if pmenu != nil && pmenu.VVisible { pmenu.PaintTo(g) }
         // 游標位置（只畫一個小十字，方便看）
         let c = World.CursorPos()
