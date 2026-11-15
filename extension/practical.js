@@ -30,6 +30,7 @@ function setup(context, desktop) {
 	subs.push(vscode.commands.registerCommand("deskPals.jiraSetup", () => jiraSetup(context, jira)));
 	subs.push(vscode.commands.registerCommand("deskPals.remind", () => remindMe(desktop)));
 	subs.push(vscode.commands.registerCommand("deskPals.ticket", () => ticketMe(desktop)));
+	studySetup(context, desktop);
 }
 
 // ---------------- 終端機：長指令跑完、推 tag 盯 CI ----------------
@@ -589,22 +590,35 @@ function parseTicketTime(dateText, timeText, now = new Date()) {
 	return d.getTime() > now.getTime() ? d.getTime() : null;
 }
 
-async function ticketMe(desktop) {
-	const name = await vscode.window.showInputBox({ title: "搶票提醒（1/4）：什麼票？", placeHolder: "例如：五月天 演唱會" });
+// 搶票、搶課（選課系統開放）共用同一套：只有用字、圖示和送給桌面版的指令不同
+const RUSH = {
+	ticket: {
+		icon: "🎫", title: "搶票提醒", what: "什麼票？", whatEg: "例如：五月天 演唱會", day: "哪一天開賣？", time: "幾點開賣？", timeEg: "例如 12:00",
+		url: "售票網址（可留空）", urlEg: "https://…  開搶時點公仔直接打開", verb: "開賣", go: "開搶",
+	},
+	course: {
+		icon: "🎓", title: "搶課提醒", what: "搶哪門課？", whatEg: "例如：通識熱門課、體育（羽球）", day: "選課系統哪一天開放？", time: "幾點開放？", timeEg: "例如 09:00",
+		url: "選課系統網址（可留空）", urlEg: "https://…  開放時點公仔直接打開選課系統", verb: "開放選課", go: "開放",
+	},
+};
+
+async function ticketMe(desktop, kind = "ticket") {
+	const w = RUSH[kind] || RUSH.ticket;
+	const name = await vscode.window.showInputBox({ title: `${w.title}（1/4）：${w.what}`, placeHolder: w.whatEg });
 	if (!name) return;
-	const date = await vscode.window.showInputBox({ title: "搶票提醒（2/4）：哪一天開賣？", placeHolder: "例如 2026-12-20 或 12/20" });
+	const date = await vscode.window.showInputBox({ title: `${w.title}（2/4）：${w.day}`, placeHolder: "例如 2026-12-20 或 12/20" });
 	if (!date) return;
-	const time = await vscode.window.showInputBox({ title: "搶票提醒（3/4）：幾點開賣？", placeHolder: "例如 12:00" });
+	const time = await vscode.window.showInputBox({ title: `${w.title}（3/4）：${w.time}`, placeHolder: w.timeEg });
 	if (!time) return;
 	const at = parseTicketTime(date, time);
 	if (!at) { vscode.window.showWarningMessage("看不懂這個日期／時間，或已經過了。日期打 2026-12-20 或 12/20，時間打 12:00。"); return; }
-	const url = await vscode.window.showInputBox({ title: "搶票提醒（4/4）：售票網址（可留空）", placeHolder: "https://…  開搶時點公仔直接打開", validateInput: (v) => !v || /^https?:\/\//i.test(v) ? null : "要 http:// 或 https:// 開頭" });
+	const url = await vscode.window.showInputBox({ title: `${w.title}（4/4）：${w.url}`, placeHolder: w.urlEg, validateInput: (v) => !v || /^https?:\/\//i.test(v) ? null : "要 http:// 或 https:// 開頭" });
 	if (url === undefined) return;
 	const lead = await vscode.window.showQuickPick([{ label: "提前 2 小時開始提醒", v: 120 }, { label: "提前 1 小時開始提醒", v: 60 }], { title: "什麼時候開始提醒？" });
 	if (!lead) return;
-	desktop.send(`ticket ${at} ${lead.v} ${url ? url.trim() : "-"} ${clean(name)}`);
+	desktop.send(`${kind === "course" ? "course" : "ticket"} ${at} ${lead.v} ${url ? url.trim() : "-"} ${clean(name)}`);
 	const when = new Date(at).toLocaleString("zh-TW", { month: "numeric", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false });
-	vscode.window.showInformationMessage(`🎫 記下來了：${clean(name)}，${when} 開賣。開賣前 ${lead.v / 60} 小時、30 分、10 分、1 分和開搶時都會叫你。`);
+	vscode.window.showInformationMessage(`${w.icon} 記下來了：${clean(name)}，${when} ${w.verb}。${w.verb}前 ${lead.v / 60} 小時、30 分、10 分、1 分和${w.go}時都會叫你。`);
 }
 
 // ---------------- 提醒我…（存在桌面版，VS Code 關了也照樣提醒）----------------
@@ -639,4 +653,141 @@ async function remindMe(desktop) {
 	vscode.window.setStatusBarMessage(`⏰ ${hhmm} 提醒你：${clean(what)}`, 4000);
 }
 
-module.exports = { setup, parseIcs, occurrences, parseWhen, parseTicketTime, rainText, rainFromWttr, rainFromMetno };
+// ================= 讀書小幫手：學校行事曆（上課提醒、作業死線）、考試倒數、搶課 =================
+// 全部在桌面版做（DeskPals.Study.cs：自己抓 ICS、分類、提醒；沒有 VS Code 也能用）。
+// 這裡只做三件事：把你在 VS Code 設過的設定推給桌面版（以 VS Code 為準）、指令（搶課、考試、這週要交的、加行事曆）、
+// 狀態列顯示最近的死線／考試（桌面版送 study-state 過來）。上課提醒不在這裡排，免得跟桌面版重複。
+
+// 設定可以是一個網址、好幾個（陣列，或用空白／逗號／換行隔開）；webcal:// 當成 https://
+function schoolUrls(v) {
+	const list = Array.isArray(v) ? v : String(v || "").split(/[\s,，]+/);
+	const out = [];
+	for (let u of list) {
+		u = String(u || "").trim().replace(/^webcals?:\/\//i, "https://");
+		if (/^https:\/\/\S+$/i.test(u) && !out.includes(u)) out.push(u);
+	}
+	return out;
+}
+
+// "01:00" → "01:00"；空白 → "off"；看不懂 → 預設
+const hhmmOk = (v, d) => { const s = String(v === undefined || v === null ? d : v).trim(); return /^\d{1,2}[:：]\d{2}$/.test(s) ? s.replace("：", ":") : (s === "" ? "off" : d); };
+
+// 你在 VS Code 設過的（使用者／工作區設定有值）才推給桌面版；沒設過的就用桌面版自己的設定（公仔小屋 → 讀書小幫手設定）
+function studySetLines(get, isSet) {
+	const lines = [];
+	const keys = [["schoolIcsUrl", "urls"], ["classRemindMinutes", "remind"], ["classAutoQuiet", "autoquiet"], ["lateNightStart", "late"], ["examNudgeTime", "nudge"]].filter((k) => isSet(k[0])).map((k) => k[1]);
+	lines.push(`study-vs ${keys.join(",") || "-"}`);   // 哪幾項由 VS Code 管（拿掉的那幾項，桌面版設定視窗就能改回來）
+	if (isSet("schoolIcsUrl")) lines.push(("study-set urls " + schoolUrls(get("schoolIcsUrl", [])).join(" ")).trim());
+	if (isSet("classRemindMinutes")) lines.push(`study-set remind ${Math.max(1, Math.min(120, Number(get("classRemindMinutes", 10)) || 10))}`);
+	if (isSet("classAutoQuiet")) lines.push(`study-set autoquiet ${get("classAutoQuiet", true) ? 1 : 0}`);
+	if (isSet("lateNightStart")) lines.push(`study-set late ${hhmmOk(get("lateNightStart", "01:00"), "01:00")}`);
+	if (isSet("examNudgeTime")) lines.push(`study-set nudge ${hhmmOk(get("examNudgeTime", "20:00"), "20:00")}`);
+	lines.push(`study-set workcal ${schoolUrls(get("calendarIcsUrl", ""))[0] || "-"}`);   // 開會提醒用的那份：桌面版不重複提醒
+	return lines;
+}
+
+const shortName = (s, n = 8) => (s.length > n ? s.slice(0, n) + "…" : s);
+const fmtWhen = (t) => new Date(t).toLocaleString("zh-TW", { month: "numeric", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false });
+function leftText(ms) {
+	if (ms < 3600e3) return `剩 ${Math.max(1, Math.ceil(ms / 60e3))} 分`;
+	if (ms < 48 * 3600e3) return `剩 ${Math.floor(ms / 3600e3)} 小時`;
+	return `剩 ${Math.floor(ms / 864e5)} 天`;
+}
+function daysLeft(at, now) {
+	const a = new Date(at), b = new Date(now);
+	a.setHours(0, 0, 0, 0); b.setHours(0, 0, 0, 0);
+	return Math.round((a - b) / 864e5);
+}
+
+function studySetup(context, desktop) {
+	const subs = context.subscriptions;
+	const st = { state: null };   // 桌面版送來的：{ bar, school, d:[{id,due,title,course,url}], e:[{id,at,name}] }
+	const bar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 999);
+	bar.command = "deskPals.deadlines";
+	bar.tooltip = "公仔櫃：最近的作業死線／考試（點我看這週要交的）";
+	const refresh = () => { const t = st.state && st.state.bar; if (t) { bar.text = t; bar.show(); } else bar.hide(); };
+	subs.push(bar);
+
+	const sync = () => {
+		const c = cfg();
+		const isSet = (k) => { const i = c.inspect(k); return !!i && (i.globalValue !== undefined || i.workspaceValue !== undefined || i.workspaceFolderValue !== undefined); };
+		for (const line of studySetLines((k, d) => c.get(k, d), isSet)) desktop.send(line);
+		desktop.send("study-hello");
+	};
+	const prevCfg = desktop.onConfig;
+	desktop.onConfig = () => { if (prevCfg) prevCfg(); sync(); };   // 每次連上桌面版都推一次
+	const prevLine = desktop.onLine;
+	desktop.onLine = (line) => {
+		if (prevLine) prevLine(line);
+		const m = /^study-state (.*)$/.exec(line);
+		if (m) { try { st.state = JSON.parse(m[1]); } catch (e) { st.state = null; } refresh(); }
+	};
+	subs.push(vscode.workspace.onDidChangeConfiguration((e) => {
+		if (["schoolIcsUrl", "classRemindMinutes", "classAutoQuiet", "lateNightStart", "examNudgeTime", "calendarIcsUrl"].some((k) => e.affectsConfiguration("deskPals." + k))) sync();
+	}));
+	subs.push(vscode.commands.registerCommand("deskPals.course", () => ticketMe(desktop, "course")));
+	subs.push(vscode.commands.registerCommand("deskPals.exam", () => examMe(desktop)));
+	subs.push(vscode.commands.registerCommand("deskPals.deadlines", () => showDeadlines(st, desktop)));
+	subs.push(vscode.commands.registerCommand("deskPals.schoolSetup", () => schoolSetupCmd()));
+}
+
+async function examMe(desktop) {
+	const name = await vscode.window.showInputBox({ title: "考試倒數（1/3）：什麼考試？", placeHolder: "例如：微積分期末考" });
+	if (!name) return;
+	const date = await vscode.window.showInputBox({ title: "考試倒數（2/3）：哪一天？", placeHolder: "例如 2027-01-08 或 1/8" });
+	if (!date) return;
+	const time = await vscode.window.showInputBox({ title: "考試倒數（3/3）：幾點開始？", value: "09:00" });
+	if (!time) return;
+	const at = parseTicketTime(date, time);
+	if (!at) { vscode.window.showWarningMessage("看不懂這個日期／時間，或已經過了。日期打 2027-01-08 或 1/8，時間打 09:00。"); return; }
+	desktop.send(`exam ${at} ${clean(name)}`);
+	vscode.window.showInformationMessage(`📚 記下來了：${clean(name)}，${fmtWhen(at)}。考前兩週每天倒數、前一天晚上和當天早上都會提醒你；7 天內專注會變成「讀書 25 分鐘」。`);
+}
+
+async function showDeadlines(st, desktop) {
+	const now = Date.now(), s = st.state || {};
+	const items = [];
+	if (s.school) {
+		const ds = (s.d || []).filter((x) => x.due > now);
+		items.push({ label: "這週要交的", kind: vscode.QuickPickItemKind.Separator });
+		if (!ds.length) items.push({ label: "🎉 這週沒有要交的作業" });
+		for (const x of ds) items.push({ label: `📝 ${x.title}`, description: x.course, detail: `${fmtWhen(x.due)} 截止（${leftText(x.due - now)}）`, d: x });
+	}
+	const ex = (s.e || []).filter((e) => e.at > now);
+	if (ex.length) {
+		items.push({ label: "考試", kind: vscode.QuickPickItemKind.Separator });
+		for (const e of ex) { const d = daysLeft(e.at, now); items.push({ label: `📚 ${e.name}`, detail: `${fmtWhen(e.at)}（${d <= 0 ? "今天" : d === 1 ? "明天" : `還有 ${d} 天`}）`, e }); }
+	}
+	items.push({ label: "", kind: vscode.QuickPickItemKind.Separator });
+	items.push({ label: "📚 新增考試倒數…", cmd: "deskPals.exam" });
+	if (!s.school) items.push({ label: "🎒 加入學校行事曆（Canvas／NTU COOL／Moodle／Google Classroom）…", cmd: "deskPals.schoolSetup" });
+	const pick = await vscode.window.showQuickPick(items, { title: "公仔櫃：這週要交的", placeHolder: s.school ? "選一份作業：打開或標成交了" : "還沒設定學校行事曆" });
+	if (!pick) return;
+	if (pick.cmd) { vscode.commands.executeCommand(pick.cmd); return; }
+	if (pick.d) {
+		const acts = [{ label: "✅ 交了，不用再提醒", v: "done" }];
+		if (pick.d.url) acts.unshift({ label: "🔗 打開作業頁", v: "open" });
+		const a = await vscode.window.showQuickPick(acts, { title: pick.d.title });
+		if (!a) return;
+		if (a.v === "open") vscode.env.openExternal(vscode.Uri.parse(pick.d.url));
+		else desktop.send(`study-done ${pick.d.id}`);
+	} else if (pick.e) {
+		const a = await vscode.window.showQuickPick([{ label: "🗑 取消這個考試倒數", v: "del" }], { title: pick.e.name });
+		if (a) desktop.send(`exam-del ${pick.e.id}`);
+	}
+}
+
+async function schoolSetupCmd() {
+	const url = await vscode.window.showInputBox({
+		title: "加入學校行事曆（ICS 網址）",
+		placeHolder: "https://…（Canvas／NTU COOL：行事曆 → 行事曆摘要；Moodle：行事曆 → 匯出；Google 日曆：iCal 格式的私密網址）",
+		validateInput: (v) => schoolUrls(v).length ? null : "要 https:// 或 webcal:// 開頭的網址",
+	});
+	if (!url) return;
+	const now = schoolUrls(cfg().get("schoolIcsUrl", []));
+	for (const u of schoolUrls(url)) if (!now.includes(u)) now.push(u);
+	await cfg().update("schoolIcsUrl", now, vscode.ConfigurationTarget.Global);   // 設定改變 → 推給桌面版
+	vscode.window.showInformationMessage(`🎒 加好了（共 ${now.length} 個學校行事曆）。上課前會提醒你，作業截止前 3 天、1 天、3 小時、1 小時也會叫你。`);
+}
+
+module.exports = { setup, parseIcs, occurrences, parseWhen, parseTicketTime, rainText, rainFromWttr, rainFromMetno, schoolUrls, hhmmOk, studySetLines };

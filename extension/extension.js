@@ -367,6 +367,7 @@ class Desktop {
 		this.send(`birthday ${/^\d{2}-\d{2}$/.test(bd) ? bd : ""}`);
 		const host = String(cfg.get("companyHost", "") || "").trim();
 		if (/^[\w.-]+$/.test(host)) this.send(`config-host ${host}`);
+		if (this.onConfig) this.onConfig();   // 讀書小幫手（practical.js）：熬夜／考試設定、學校行事曆的作業
 	}
 
 	forward(msg) {
@@ -405,6 +406,7 @@ class Desktop {
 				if (f) this.onFocus(f[1] === "on", +(f[2] || 0));
 				const q = /^quiet (on|off)(?: (\d+))?$/.exec(line);
 				if (q) this.onQuiet(q[1] === "on", +(q[2] || 0));
+				if (this.onLine) this.onLine(line);   // 其他訊息交給 practical.js（考試清單、作業標成交了）
 			}
 		});
 		s.on("error", () => {});
@@ -434,7 +436,7 @@ class Desktop {
 		const src = path.join(this.context.extensionPath, "desktop");
 		fs.mkdirSync(this.home, { recursive: true });
 		const files = this.win
-			? ["DeskPals.cs", "DeskPals.Pikmin.cs", "desk-pals.ps1", "claude-hook.js", "ci-watch.js"]
+			? ["DeskPals.cs", "DeskPals.Pikmin.cs", "DeskPals.Study.cs", "desk-pals.ps1", "claude-hook.js", "ci-watch.js"]
 			: ["DeskPals.swift", this.sh, "claude-hook.js", "ci-watch.js"];
 		const copy = (f, dir) => {
 			const from = path.join(src, f), to = path.join(dir, f);

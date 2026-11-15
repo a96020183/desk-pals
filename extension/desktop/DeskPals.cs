@@ -5931,6 +5931,7 @@ namespace DeskPals
                 QuietTick();
                 ReminderTick();
                 TicketTick();
+                StudyTick();          // 讀書小幫手（DeskPals.Study.cs）：學校行事曆、作業死線、考試倒數、熬夜
                 DownloadTick(dt);
                 ExpireNotice();
                 MenuWatch();
@@ -6506,10 +6507,11 @@ namespace DeskPals
         void AddHelpers(ToolStripItemCollection items)
         {
             if (focusOn) items.Add("結束專注（還剩 " + FocusLeft() + " 分）", null, delegate { StopFocus(false); });
-            else items.Add("專注 25 分鐘 🍅", null, delegate { StartFocus(25); });
+            else items.Add(ExamNear() ? "讀書 25 分鐘 📚" : "專注 25 分鐘 🍅", null, delegate { StartFocus(25); });   // 7 天內有考試：讀書
             AddQuietMenu(items);
             AddReminderMenus(items);
             AddTicketMenus(items);
+            AddStudyMenus(items);   // 搶課、考試倒數、這週要交的
             items.Add("今天的小結", null, delegate { DailyWrap(true); });
         }
 
@@ -6808,6 +6810,7 @@ namespace DeskPals
                     }
                     break;
                 case "quit": QuitAll(); break;
+                default: StudyMsg(c, p, line); break;   // course／exam／study-…（DeskPals.Study.cs）
             }
         }
 
@@ -8144,6 +8147,7 @@ namespace DeskPals
                 if (flowerBub != null && flowerBub.VVisible) flowerBub.PaintTo(g);
                 if (flash != null && flash.VVisible) flash.PaintTo(g);
                 if (setupForm != null && !setupForm.IsDisposed && setupForm.VVisible) setupForm.PaintTo(g);
+                StudySnap(g);
                 if (pmenu != null && pmenu.VVisible) pmenu.PaintTo(g);
                 // 游標位置（只畫一個小十字，方便看）
                 Point c = Cursor.Position;
@@ -8194,6 +8198,7 @@ namespace DeskPals
 
         static int Priority(string kind)
         {
+            int sp = StudyPriority(kind); if (sp >= 0) return sp;   // 上課、考試、作業死線
             switch (kind)
             {
                 case "ci-fail": case "meeting": case "meeting-now": case "remind": return 2;
@@ -8225,7 +8230,7 @@ namespace DeskPals
             if (quietOn)
             {
                 // 安靜中：會議、CI 失敗還是說，但只冒泡泡；其他先存著
-                if (n.Kind.StartsWith("meeting") || n.Kind == "ci-fail") { DeliverGentle(n); return; }
+                if (MeetingLike(n.Kind) || n.Kind == "ci-fail") { DeliverGentle(n); return; }
                 heldQuiet.Add(n); return;
             }
             if (focusOn && n.Pri < 2) { heldFocus.Add(n); return; }
@@ -8251,6 +8256,7 @@ namespace DeskPals
         static string Flavor(string id, string kind, bool night)
         {
             string pk = PikFlavor(id, kind); if (pk != null) return pk;
+            string sd = StudyFlavor(id, kind); if (sd != null) return sd;
             string extra = FlavorExtra(id, kind);
             if (extra != null) return extra;
             if (night && kind == "worklog")
@@ -8288,7 +8294,7 @@ namespace DeskPals
             string hint = n.Url != null ? "點我打開" : null;
             if (n.Pri >= 2)
             {
-                l.Notify(text, hint, 2, focusOn, n.Kind.StartsWith("meeting"));
+                l.Notify(text, hint, 2, focusOn, MeetingLike(n.Kind));
                 foreach (Pet p in OutPets()) if (p != l && !focusOn) p.React();
                 if (!repeat && !n.Repeated)
                 {
@@ -8313,6 +8319,7 @@ namespace DeskPals
             p.SetClickableBubble(false);
             if (n.NextRound) { StartFocus(focusMin); return true; }
             if (ReminderClicked(p, n)) return true;
+            if (StudyClicked(p, n)) return true;   // 作業：打開／交了
             if (n.Url != null)
             {
                 try { Process.Start(new ProcessStartInfo(n.Url) { UseShellExecute = true }); p.Say("好～幫你打開了 👍", 1.4); }
@@ -8469,7 +8476,7 @@ namespace DeskPals
             AbortScene();
             foreach (Pet p in OutPets()) p.QuietDown();
             Pet l = Lead();
-            l.Say(focusMin + " 分鐘專注開始 🍅 我們安靜陪你", 2.4);
+            l.Say(ExamNear() ? focusMin + " 分鐘讀書開始 📚 我們安靜陪你" : focusMin + " 分鐘專注開始 🍅 我們安靜陪你", 2.4);
             lastFocusLeft = FocusLeft();
             BroadcastFocus();
         }
@@ -8493,7 +8500,7 @@ namespace DeskPals
                 case "laalaa": end = "專注結束！休息 5 分鐘 ☕ 啦啦啦～好棒棒"; break;
                 default: end = "專注結束！休息 5 分鐘 ☕ 你超強的"; break;
             }
-            l.Knock(end + "　今天第 " + n + " 顆 🍅", "high");
+            l.Knock((ExamNear() ? end.Replace("專注結束", "讀書結束") : end) + "　今天第 " + n + " 顆 🍅", "high");
             foreach (Pet p in OutPets()) if (p != l) p.React();
             breakOn = true; breakEnd = Now + 300;
             FlushFocusHeld(5);
@@ -8940,12 +8947,13 @@ namespace DeskPals
             int tom = 0; int.TryParse(ReadText("tomato-" + DateTime.Now.ToString("yyyyMMdd") + ".txt"), out tom);
             List<string> parts = new List<string>();
             if (Day("meetings") > 0) parts.Add("開了 " + Day("meetings") + " 場會");
-            if (tom > 0) parts.Add("吃了 " + tom + " 顆番茄🍅");
+            if (tom > 0) parts.Add("吃了 " + tom + " 顆番茄🍅" + WeekTomatoNote(tom));
             if (Day("deploys") > 0) parts.Add("上版／CI " + Day("deploys") + " 次");
             if (Day("tasks") > 0) parts.Add("Claude／Codex 幫你做完 " + Day("tasks") + " 件事");
             if (Day("saves") > 0) parts.Add("存檔 " + Day("saves") + " 次");
             if (Day("reminders") > 0) parts.Add("完成 " + Day("reminders") + " 個提醒");
             if (Day("pats") > 0) parts.Add("摸了我們 " + Day("pats") + " 下");
+            StudyWrapParts(parts);   // 上了幾堂課、這週還有幾份作業、離考試幾天
             List<Pet> outs = OutPets();
             Pet l = Lead();
             if (parts.Count == 0) { l.Say("今天很安靜呢～今天辛苦了 ♥", 4); return; }
@@ -9046,7 +9054,7 @@ namespace DeskPals
     // 你自己排的：不受安靜／專注影響。開賣前 1～2 小時、30 分、10 分（對時）、1 分、開賣當下，一段一段提醒。
     partial class World
     {
-        class Ticket { public long At; public int Lead; public string Url, Name; public int Stage; }
+        class Ticket { public long At; public int Lead; public string Url, Name; public int Stage; public string Kind = "ticket"; }   // Kind：ticket｜course（搶課）
         readonly List<Ticket> tickets = new List<Ticket>();
 
         void LoadTickets()
@@ -9059,6 +9067,7 @@ namespace DeskPals
                 if (a.Length >= 5 && long.TryParse(a[0], out at) && int.TryParse(a[1], out lead) && int.TryParse(a[3], out stage))
                 {
                     Ticket t = new Ticket(); t.At = at; t.Lead = lead; t.Url = a[2] == "-" ? null : a[2]; t.Stage = stage; t.Name = a[4];
+                    if (a.Length >= 6 && a[5] == "course") t.Kind = "course";
                     tickets.Add(t);
                 }
             }
@@ -9067,14 +9076,17 @@ namespace DeskPals
         void SaveTickets()
         {
             StringBuilder sb = new StringBuilder();
-            foreach (Ticket t in tickets) sb.Append(t.At + "\t" + t.Lead + "\t" + (t.Url ?? "-") + "\t" + t.Stage + "\t" + t.Name.Replace("\t", " ").Replace("\n", " ") + "\n");
+            foreach (Ticket t in tickets) sb.Append(t.At + "\t" + t.Lead + "\t" + (t.Url ?? "-") + "\t" + t.Stage + "\t" + t.Name.Replace("\t", " ").Replace("\n", " ") + "\t" + t.Kind + "\n");
             WriteText("tickets.txt", sb.ToString());
         }
 
-        public void AddTicket(long at, int lead, string url, string name)
+        public void AddTicket(long at, int lead, string url, string name) { AddTicket(at, lead, url, name, "ticket"); }
+        public void AddTicket(long at, int lead, string url, string name, string kind)
         {
             Ticket t = new Ticket();
-            t.At = at; t.Lead = lead == 60 ? 60 : 120; t.Name = string.IsNullOrEmpty(name) ? "搶票" : name;
+            bool course = kind == "course";
+            t.Kind = course ? "course" : "ticket";
+            t.At = at; t.Lead = lead == 60 ? 60 : 120; t.Name = string.IsNullOrEmpty(name) ? (course ? "搶課" : "搶票") : name;
             t.Url = SafeUrl(url);
             if (t.Url != null && !t.Url.StartsWith("http")) t.Url = null;   // 購票頁只收 http/https
             // 已經過了的階段就不補（例如只剩 20 分鐘才設定，就從 10 分鐘那段開始）
@@ -9086,13 +9098,14 @@ namespace DeskPals
             tickets.Add(t);
             tickets.Sort(delegate(Ticket a, Ticket b) { return a.At.CompareTo(b.At); });
             SaveTickets();
-            Lead().Say("🎫 記住了：" + t.Name + "，" + FromUnixMs(at).ToString("MM/dd HH:mm") + " 開賣，提前 " + (t.Lead / 60) + " 小時叫你", 3);
+            Lead().Say((course ? "🎓 記住了：" : "🎫 記住了：") + t.Name + "，" + FromUnixMs(at).ToString("MM/dd HH:mm") + (course ? " 開放選課" : " 開賣") + "，提前 " + (t.Lead / 60) + " 小時叫你", 3);
         }
 
         static int[] StagesOf(Ticket t) { return new int[] { t.Lead, 30, 10, 1, 0 }; }
 
         static string TicketLine(string id, int stage, Ticket t)
         {
+            if (t.Kind == "course") return CourseLine(id, stage, t);   // 搶課：DeskPals.Study.cs
             string h = (t.Lead / 60) + " 小時", n = t.Name;
             string pk = PikTicket(id, stage, n, h); if (pk != null) return pk;
             string[] sp = { "🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款", "🎫 " + n + " 再 30 分鐘開賣，網頁先開好", "🎫 " + n + " 剩 10 分鐘！蜘蛛感應全開", "🎫 準備！手指放在按鈕上", "🎫 開搶！！Thwip!" };
@@ -9132,7 +9145,7 @@ namespace DeskPals
             if (userHidden) { userHidden = false; ApplyHidden(); }
             Pet l = Lead();
             string text = TicketLine(l.P.Id, stage, t);
-            string hint = t.Url != null ? "點我打開購票頁" : null;
+            string hint = t.Url != null ? (t.Kind == "course" ? "點我打開選課系統" : "點我打開購票頁") : null;
             if (stage == 1) l.Notify(text, hint, 1, false, false);
             else if (stage == 0 || stage == 2) l.Notify(text, hint, 2, false, false);
             else
@@ -9142,7 +9155,7 @@ namespace DeskPals
                 l.ForceGlass(text, hint, stage == 4);
                 if (stage == 4) { Fireworks(WA(l.Cx, l.y), 4, (int)l.Cx); foreach (Pet p in OutPets()) if (p != l) p.React(); }
             }
-            if (stage == 2) CheckClock(t.Url);
+            if (stage == 2) CheckClock(t.Url, t.Kind == "course" ? "搶課" : "搶票");
             Notice n = new Notice(); n.Kind = "ticket"; n.Url = t.Url; n.Text = t.Name; n.Pri = 2; n.By = l; n.Expire = Now + 600;
             if (t.Url != null) { current = n; l.SetClickableBubble(true); }
         }
@@ -9156,14 +9169,15 @@ namespace DeskPals
             {
                 long ms = t.At - now;
                 if (ms > 0 && ms <= 10 * 60000) { long s = (ms + 999) / 1000; return (s / 60).ToString("00") + ":" + (s % 60).ToString("00"); }
-                if (ms <= 0 && ms > -60000) return "開搶中！";
+                if (ms <= 0 && ms > -60000) return t.Kind == "course" ? "開放囉！" : "開搶中！";
             }
             return null;
         }
 
         // 對時：拿 HTTP 回應的 Date 標頭跟電腦時間比
-        void CheckClock(string url)
+        void CheckClock(string url, string what)
         {
+            if (App.Offscreen) return;   // 離屏測試不連網路
             string target = "https://www.google.com/";
             Uri u;
             if (url != null && Uri.TryCreate(url, UriKind.Absolute, out u)) target = u.Scheme + "://" + u.Host + "/";
@@ -9176,7 +9190,7 @@ namespace DeskPals
                 if (Math.Abs(off) <= 2) return;
                 int sec = (int)Math.Round(Math.Abs(off));
                 string msg = off < 0 ? "電腦時間比標準時間慢 " + sec + " 秒" : "電腦時間比標準時間快 " + sec + " 秒";
-                Post(delegate { Lead().Say("⏱ " + msg + "，搶票要看標準時間喔", 6, true); });
+                Post(delegate { Lead().Say("⏱ " + msg + "，" + what + "要看標準時間喔", 6, true); });
             });
             th.IsBackground = true; th.Start();
         }
@@ -9217,27 +9231,32 @@ namespace DeskPals
             catch { return double.NaN; }
         }
 
-        void AddTicketMenus(ToolStripItemCollection items)
+        void AddTicketMenus(ToolStripItemCollection items) { AddTicketMenus(items, "ticket"); }
+        void AddTicketMenus(ToolStripItemCollection items, string kind)
         {
-            items.Add("搶票提醒…", null, delegate { ShowTicketForm(); });
-            if (tickets.Count > 0)
+            string word = kind == "course" ? "搶課" : "搶票";
+            items.Add(word + "提醒…", null, delegate { ShowTicketForm(kind); });
+            List<Ticket> mine = tickets.FindAll(delegate(Ticket x) { return x.Kind == kind; });
+            if (mine.Count > 0)
             {
-                ToolStripMenuItem my = new ToolStripMenuItem("我的搶票（" + tickets.Count + "）");
-                foreach (Ticket t in tickets)
+                ToolStripMenuItem my = new ToolStripMenuItem("我的" + word + "（" + mine.Count + "）");
+                foreach (Ticket t in mine)
                 {
                     Ticket tt = t;
                     my.DropDownItems.Add(FromUnixMs(t.At).ToString("MM/dd HH:mm") + "　" + (t.Name.Length > 18 ? t.Name.Substring(0, 18) + "…" : t.Name) + "　（點一下取消）", null,
-                        delegate { tickets.Remove(tt); SaveTickets(); Lead().Say("取消搶票提醒：" + tt.Name, 1.8); });
+                        delegate { tickets.Remove(tt); SaveTickets(); Lead().Say("取消" + word + "提醒：" + tt.Name, 1.8); });
                 }
                 items.Add(my);
             }
         }
 
         TicketForm ticketForm;
-        void ShowTicketForm()
+        void ShowTicketForm() { ShowTicketForm("ticket"); }
+        void ShowTicketForm(string kind)
         {
             if (App.Offscreen) return;
-            if (ticketForm == null || ticketForm.IsDisposed) ticketForm = new TicketForm(this, Lead().P.Accent);
+            if (ticketForm != null && !ticketForm.IsDisposed && ticketForm.Kind != kind) { ticketForm.Dispose(); ticketForm = null; }
+            if (ticketForm == null || ticketForm.IsDisposed) ticketForm = new TicketForm(this, Lead().P.Accent, kind);
             Point c = Cursor.Position;
             Rectangle wa = WA(c.X, c.Y);
             ticketForm.StartPosition = FormStartPosition.Manual;
@@ -9283,28 +9302,36 @@ namespace DeskPals
                     using (SolidBrush b = new SolidBrush(hot ? Color.FromArgb(240, 0xD8, 0x3A, 0x3A) : Color.FromArgb(235, 0x2A, 0x2F, 0x45))) g.FillPath(b, p);
                     using (Pen rim = new Pen(Color.FromArgb(220, 255, 255, 255), Math.Max(1.5f, (float)k))) g.DrawPath(rim, p);
                 }
-                // 小票券圖示
+                // 小票券圖示（搶課是學士帽）
                 float tx = bx + 5 * (float)k, ty = by + bh / 2 - 3.5f * (float)k;
-                using (SolidBrush tb = new SolidBrush(Color.FromArgb(0xFF, 0xD8, 0x4A))) g.FillRectangle(tb, tx, ty, iw - 2 * (float)k, 7 * (float)k);
-                using (SolidBrush hole = new SolidBrush(hot ? Color.FromArgb(0xD8, 0x3A, 0x3A) : Color.FromArgb(0x2A, 0x2F, 0x45))) g.FillEllipse(hole, tx - 1.5f * (float)k, ty + 2.2f * (float)k, 3 * (float)k, 2.6f * (float)k);
+                if (w.BadgeIsCourse()) DrawCapIcon(g, tx - (float)k, ty, iw, (float)k, hot);
+                else
+                {
+                    using (SolidBrush tb = new SolidBrush(Color.FromArgb(0xFF, 0xD8, 0x4A))) g.FillRectangle(tb, tx, ty, iw - 2 * (float)k, 7 * (float)k);
+                    using (SolidBrush hole = new SolidBrush(hot ? Color.FromArgb(0xD8, 0x3A, 0x3A) : Color.FromArgb(0x2A, 0x2F, 0x45))) g.FillEllipse(hole, tx - 1.5f * (float)k, ty + 2.2f * (float)k, 3 * (float)k, 2.6f * (float)k);
+                }
                 g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
                 using (SolidBrush wb = new SolidBrush(Color.White)) g.DrawString(cd, use, wb, bx + iw + 7 * (float)k, by + 2 * (float)k);
             }
         }
     }
 
-    // 「搶票提醒…」的小視窗
+    // 「搶票提醒…」「搶課提醒…」的小視窗（Kind：ticket｜course）
     class TicketForm : Form
     {
         readonly World w;
+        public readonly string Kind;
         readonly TextBox name = new TextBox(), time = new TextBox(), url = new TextBox();
         readonly DateTimePicker date = new DateTimePicker();
         readonly RadioButton lead1 = new RadioButton(), lead2 = new RadioButton();
         readonly Label hint = new Label();
-        public TicketForm(World w, Color accent)
+        public TicketForm(World w, Color accent) : this(w, accent, "ticket") { }
+        public TicketForm(World w, Color accent, string kind)
         {
             this.w = w;
-            Text = "🎫 搶票提醒";
+            Kind = kind == "course" ? "course" : "ticket";
+            bool course = Kind == "course";
+            Text = course ? "🎓 搶課提醒" : "🎫 搶票提醒";
             FormBorderStyle = FormBorderStyle.FixedToolWindow;
             ShowInTaskbar = false; TopMost = true; MaximizeBox = false; MinimizeBox = false;
             BackColor = Color.FromArgb(0xFF, 0xFB, 0xF4);
@@ -9312,11 +9339,11 @@ namespace DeskPals
             AutoScaleMode = AutoScaleMode.Dpi;
             ClientSize = new Size(360, 268);
             int y0 = 12;
-            AddLabel("要搶什麼？（例如：五月天 演唱會）", y0); name.Location = new Point(14, y0 + 22); name.Width = 332; Controls.Add(name);
-            AddLabel("開賣日期與時間", y0 + 56);
+            AddLabel(course ? "要搶哪門課？（例如：通識熱門課、體育羽球）" : "要搶什麼？（例如：五月天 演唱會）", y0); name.Location = new Point(14, y0 + 22); name.Width = 332; Controls.Add(name);
+            AddLabel(course ? "選課系統開放日期與時間" : "開賣日期與時間", y0 + 56);
             date.Format = DateTimePickerFormat.Custom; date.CustomFormat = "yyyy-MM-dd"; date.Location = new Point(14, y0 + 78); date.Width = 150; Controls.Add(date);
-            time.Location = new Point(176, y0 + 78); time.Width = 80; time.Text = "12:00"; Controls.Add(time);
-            AddLabel("購票網址（可以不填）", y0 + 112); url.Location = new Point(14, y0 + 134); url.Width = 332; Controls.Add(url);
+            time.Location = new Point(176, y0 + 78); time.Width = 80; time.Text = course ? "09:00" : "12:00"; Controls.Add(time);
+            AddLabel(course ? "選課系統網址（可以不填）" : "購票網址（可以不填）", y0 + 112); url.Location = new Point(14, y0 + 134); url.Width = 332; Controls.Add(url);
             lead2.Text = "提前 2 小時"; lead2.Checked = true; lead2.Location = new Point(14, y0 + 168); lead2.AutoSize = true; Controls.Add(lead2);
             lead1.Text = "提前 1 小時"; lead1.Location = new Point(130, y0 + 168); lead1.AutoSize = true; Controls.Add(lead1);
             Button ok = new Button(); ok.Text = "好，幫我盯著"; ok.Location = new Point(206, y0 + 200); ok.Size = new Size(140, 34);
@@ -9343,7 +9370,7 @@ namespace DeskPals
             string u = url.Text.Trim();
             if (u != "" && !(u.StartsWith("http://") || u.StartsWith("https://"))) { hint.Text = "網址要 http:// 或 https:// 開頭"; return; }
             long ms = (long)(t.ToUniversalTime() - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalMilliseconds;
-            w.AddTicket(ms, lead1.Checked ? 60 : 120, u == "" ? "-" : u, name.Text.Trim());
+            w.AddTicket(ms, lead1.Checked ? 60 : 120, u == "" ? "-" : u, name.Text.Trim(), Kind);
             name.Text = ""; url.Text = ""; hint.Text = "";
             Hide();
         }
@@ -9808,6 +9835,7 @@ namespace DeskPals
             }
             m.Items.Add(sw);
             m.Items.Add("重新設定…", null, delegate { ShowSetup(false); });
+            m.Items.Add("讀書小幫手設定（學校行事曆、熬夜）…", null, delegate { ShowStudySettings(); });
             m.Items.Add("躲起來（Ctrl+Alt+S）", null, delegate { ToggleHide(); });
             m.Items.Add(new ToolStripSeparator());
             m.Items.Add("收工（關掉 Desk Pals）", null, delegate { QuitAll(); });
