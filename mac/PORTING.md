@@ -25,6 +25,7 @@ mac/
     42_world_c.swift    C# 8108–9616  (notices, reminders, system stats, downloads, tickets, misc)
     43_ui.swift         C# last section, from "公仔小屋（蛋的右鍵）" to the end (World: features/小屋 menu/只要一隻/設定;
                         Pet.IconPic; Pix pixel helpers; PixelMenu; SetupForm)
+    50_pikmin.swift     DeskPals.Pikmin.cs（皮克敏一櫃：Pal／Pet／ShelfForm／World partials；DeskPals.cs 裡的一行 hook 對應到各檔的一行 hook）
 ```
 (Line numbers above are from the first port and drift as the C# grows — find your range by the section comments.)
 
