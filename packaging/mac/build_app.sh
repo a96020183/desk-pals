@@ -14,11 +14,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 OUT="${1:-$ROOT/dist}"
-BUILD="$ROOT/build/mac$SUFFIX"
 PY="${PYTHON:-python3}"
 VERSION="$("$PY" -c 'import json,sys; print(json.load(open("extension/package.json", encoding="utf-8"))["version"])')"
 VARIANT="${VARIANT:-public}"
 case "$VARIANT" in public) SUFFIX="" ;; personal) SUFFIX="-personal" ;; *) echo "VARIANT must be public or personal" >&2; exit 2 ;; esac
+BUILD="$ROOT/build/mac$SUFFIX"
 BUNDLE_ID="${MAC_BUNDLE_ID:-io.github.a96020183.deskpals}"
 MIN_MACOS="${MAC_MIN_MACOS:-13.0}"
 APP_NAME="Desk Pals"
