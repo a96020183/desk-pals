@@ -150,3 +150,17 @@ are spread across files, so:
 - Every member of your C# range has a Swift counterpart with the same name and semantics.
 - No `TODO`s that drop behaviour. Where mac truly can't do something, implement the closest equivalent and leave a `// mac:` comment.
 - Your part has no errors of its own when assembled and compiled (errors referencing names owned by other parts are fine while they're in progress).
+
+## To port next: 自己做的公仔、分享短片、.deskpal（Windows-first, added in 0.7.0）
+New C# partial files (Windows has them; the Mac port doesn't yet — the docs say "Windows-first for now"):
+
+| C# file | What it is | Mac notes |
+|---|---|---|
+| `DeskPals.CustomImage.cs` | `CuImg`: decode (EXIF orientation), auto background removal (border k-means → region grow → soft alpha + decontamination → keep main component), brush strokes, crop, pixel-art conversion (median-cut palette, outline), smooth resample, head/hip line guess | Pure pixel math on `int[]` ARGB — port 1:1. Image decode → `CGImageSource` (honour `kCGImagePropertyOrientation`); `LockBits`/`Marshal.Copy` → `CGContext` bitmap buffers. |
+| `DeskPals.Custom.cs` | `CuMeta` (meta.json), `CuSprite` (stand bitmap + head/body/leg parts, sheet frames, template PNG), `CuStore` (data dir `custom/<id>/`), `Pal.MakeCu`, lineup `mine` (`custom/mine.txt`), Pet pose/rig renderer (`CuPoseNow`, `CuCompose` = GDI+ `Matrix` transforms onto a small canvas, `CuBlit` = halo via 8 tinted offset draws + night `ColorMatrix`), persona behaviours (cat/dog…), World menus/pipe (`custom …`) | `Matrix` → `CGAffineTransform` (same prepend order: translate·rotate·scale); `ColorMatrix` tint → draw the canvas as a mask filled with the halo colour (`clip(to:mask:)`), night → multiply blend; NearestNeighbor ↔ `interpolationQuality = .none`. |
+| `DeskPals.CustomMake.cs` | `CuMaker` form (4 steps, all self-drawn like `SetupForm`; real `TextBox` for the name so IME works), drag-drop, `OpenFileDialog`/`SaveFileDialog`, offscreen `PaintTo`, test pipe commands | `OpenFileDialog` → `NSOpenPanel` (allowedContentTypes png/jpeg/gif/bmp; `.deskpal`), `SaveFileDialog` → `NSSavePanel`; drag-drop → `registerForDraggedTypes([.fileURL])` on the window's content view. |
+| `DeskPals.CustomLines.cs` | six personas × full dialogue key set (Po's keys + `x_*` keys) | Pure data — port 1:1 (or generate). |
+| `DeskPals.Share.cs` | share clip: scripted frames rendered offscreen via `Pet.ShareDraw` (no screen capture), own GIF89a encoder (median cut + LZW, frame deltas); `.deskpal` = JSON `{deskpal:1, meta, source:<base64 PNG>}` export/import with validation | Port the encoder 1:1 (or use `CGImageDestination` with `kUTTypeGIF`). Output folder `~/Pictures/Desk Pals`; clipboard → `NSPasteboard` with both a file URL and the caption string; "open folder" → `NSWorkspace.activateFileViewerSelecting`. |
+
+Hooks in DeskPals.cs are one-liners (`P.Cu ? … : …`, `if (P.Cu) { CuXxx(); return; }`), next to the existing `P.Pik` hooks — port them in the same places.
+`SetupForm` changed: two steps (選公仔 with the "把你家的貓狗變成桌面公仔" hero card + 匯入, 怎麼擺 with 只要一隻 first); the old 你是？(student/work) step and `World.Student` are gone; first run with no `mode.txt` defaults to 只要一隻.

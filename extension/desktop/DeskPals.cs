@@ -598,7 +598,7 @@ namespace DeskPals
         void Say(string key, params string[] lines) { Lines[key] = lines; }
 
         static List<Pal> all;
-        public static List<Pal> All { get { if (all == null) { all = new List<Pal>(new Pal[] { Spidey(), Po(), Stitch(), Hangyodon(), Tinky(), Dipsy(), LaaLaa() }); all.AddRange(PikminPals()); } return all; } }
+        public static List<Pal> All { get { if (all == null) { all = new List<Pal>(new Pal[] { Spidey(), Po(), Stitch(), Hangyodon(), Tinky(), Dipsy(), LaaLaa() }); all.AddRange(PikminPals()); all.AddRange(CuPals()); } return all; } }
         public static Pal Get(string id)
         {
             foreach (Pal p in All) if (p.Id == id) return p;
@@ -607,23 +607,24 @@ namespace DeskPals
 
         // ---- 兩櫃：經典（Spidey、小波、史迪仔、人魚漢頓）／天線寶寶（丁丁、迪西、拉拉、小波；大格是小波）----
         public const string Classic = "classic", Teletubbies = "teletubbies";
-        public static string NormLineup(string s) { string t = s == null ? "" : s.Trim().ToLowerInvariant(); return t == Teletubbies || t == Pikmin ? t : Classic; }
+        public static string NormLineup(string s) { string t = s == null ? "" : s.Trim().ToLowerInvariant(); return t == Teletubbies || t == Pikmin || (t == Mine && HasCustom()) ? t : Classic; }
         public static string[] LineupIds(string lineup)
         {
             if (NormLineup(lineup) == Pikmin) return (string[])PikminIds.Clone();   // 皮克敏一櫃：大格是休息花（DeskPals.Pikmin.cs）
+            if (NormLineup(lineup) == Mine) return MineIds();                       // 我的櫃：自己做的公仔（DeskPals.Custom.cs）
             return NormLineup(lineup) == Teletubbies ? new string[] { "tinky", "dipsy", "laalaa", "po" } : new string[] { "spidey", "po", "stitch", "hangyodon" };
         }
         public static List<Pal> Lineup(string lineup)
         {
             List<Pal> l = new List<Pal>();
-            foreach (string id in LineupIds(lineup)) l.Add(Get(id));
+            foreach (string id in LineupIds(lineup)) if (Get(id) != null) l.Add(Get(id));
             return l;
         }
         // 這一櫃預設放在大格的（經典一櫃照用最久的那隻）
         public static string LineupFav(string lineup) { return NormLineup(lineup) == Teletubbies ? "po" : null; }
         // 設定視窗、小屋「換一櫃」列出來的櫃子（之後新增一櫃：這裡加一個 id、LineupIds／LineupName 加一行）
         public static readonly string[] Lineups = { Classic, Teletubbies, Pikmin };
-        public static string LineupName(string lineup) { string n = NormLineup(lineup); return n == Teletubbies ? "天線寶寶一櫃" : (n == Pikmin ? "皮克敏一櫃" : "經典一櫃"); }
+        public static string LineupName(string lineup) { string n = NormLineup(lineup); return n == Teletubbies ? "天線寶寶一櫃" : (n == Pikmin ? "皮克敏一櫃" : (n == Mine ? "我的櫃" : "經典一櫃")); }
 
         void Shared()
         {
@@ -1643,7 +1644,7 @@ namespace DeskPals
 
         bool Night { get { return w.Night; } }
         public bool Grounded() { return state == "walk" || state == "idle" || state == "sleep" || state == "hug" || state == "seek" || state == "dizzy" || state == "fetch" || state == "dance" || state == "kick" || state == "wave" || state == "pose" || state == "bat" || state == "catch" || state == "header" || state == "capetrip" || state == "elvis" || state == "chomp" || state == "think" || state == "hide" || state == "nudge" || state == "spin" || state == "goto"
-            || state == "plop" || state == "twirl" || state == "hattoss" || state == "juggle" || state == "bagdig" || state == "pik"; }
+            || state == "plop" || state == "twirl" || state == "hattoss" || state == "juggle" || state == "bagdig" || state == "pik" || state == "cu"; }
         public bool Free() { return Out && !InScene && !dragging && Grounded() && state != "sleep" && state != "hug" && !(Bt > 0 && bubblePri > 0); }
         void SetState(string s, double dur) { state = s; t = dur; }
         public void Say(string s, double sec) { Say(s, sec, false); }
@@ -1784,6 +1785,7 @@ namespace DeskPals
                 AddHeart(); AddHeart(); AddHeart();
                 return;
             }
+            if (P.Cu && CuPat()) return;
             string line = !Night && Level() >= 4 && rnd.NextDouble() < 0.4 ? L("pats_hi") : L("pats");
             if (Is("hangyodon") && !Night && Array.IndexOf(P.Lines["pats"], line) >= 0) jokeT = 2.6;
             if (Grounded()) Hug(line, 2.6);
@@ -1795,6 +1797,7 @@ namespace DeskPals
         {
             AddHeart();
             if (P.Pik) { PikCombo(); return; }
+            if (P.Cu) { CuCombo(); return; }
             switch (P.Id)
             {
                 case "po":   // 咯咯笑＋原地轉一圈「再來一次！」
@@ -2071,6 +2074,7 @@ namespace DeskPals
         void FollowFast()
         {
             if (supH == IntPtr.Zero || !Grounded()) return;
+            if (w.CuFake(supH)) return;   // 測試用的假視窗（DeskPals.Custom.cs）
             W.RECT r;
             if (!W.IsWindowVisible(supH) || W.IsIconic(supH) || !W.Rect(supH, out r)) { Jump(0, 0); Say(Is("hangyodon") ? "哇！地板游走了！" : "哇！地板不見了", 1.2); return; }
             int dl = r.L - supWinL;
@@ -2231,7 +2235,7 @@ namespace DeskPals
             if (speed > 900 * k)
             {
                 Say(L("throw"), 0.9);
-                if (Is("po") || Is("stitch") || Is("laalaa")) rolling = true;
+                if (Is("po") || Is("stitch") || Is("laalaa") || P.Cu) rolling = true;
             }
         }
 
@@ -2244,7 +2248,7 @@ namespace DeskPals
             fx1 = tfx - SW / 2.0; fy1 = tfy - SH;
             vx = tvx; vy = tvy; flyT = 0;
             supH = IntPtr.Zero; sc = 1; fetching = false; InScene = false;
-            rolling = Is("po") || Is("stitch") || Is("laalaa");
+            rolling = Is("po") || Is("stitch") || Is("laalaa") || P.Cu;
             SetState("fling", 99);
         }
 
@@ -2277,7 +2281,7 @@ namespace DeskPals
                 case "dipsy": line = "進球。🏀 帽子還在，酷。"; break;
                 case "laalaa": line = "進球！🏀 啦啦啦～"; break;
                 case "pkred": case "pkyellow": case "pkblue": line = PikLine("goal"); break;
-                default: line = "進球！🏀 Thwip!"; break;
+                default: line = P.Cu ? L("x_goal") : "進球！🏀 Thwip!"; break;
             }
             Say(line, 2.4);
             Burst(14);
@@ -2298,7 +2302,7 @@ namespace DeskPals
                 case "dipsy": line = "酷！"; break;
                 case "laalaa": line = "啦啦～進了！"; break;
                 case "pkred": case "pkyellow": case "pkblue": line = PikLine("cheer"); break;
-                default: line = "好球！"; break;
+                default: line = P.Cu ? L("x_cheer") : "好球！"; break;
             }
             Say(line, 1.4);
             Mark(0);
@@ -2317,7 +2321,7 @@ namespace DeskPals
                 case "laalaa": return "差一點！再來一次！";
                 case "pkred": case "pkyellow": case "pkblue": return PikLine("miss");
             }
-            return "差一點！再一次？";
+            return P.Cu ? L("x_miss") : "差一點！再一次？";
         }
 
         // ================= 公仔櫃：回櫃子／出來 =================
@@ -2445,6 +2449,7 @@ namespace DeskPals
             if (ballXp < 20) { ballXp += 2; AddXp(2); }
             Burst(6);
             if (P.Pik) { PikBall(); return true; }
+            if (P.Cu) { CuBall(); return true; }
             switch (P.Id)
             {
                 case "po": PoBall(); return true;
@@ -2494,6 +2499,7 @@ namespace DeskPals
                 else if (Is("dipsy") && Grounded()) { poseKind = "hatdown"; SetState("pose", 2.6); }
                 else if (Is("laalaa") && hideFrom != null && Grounded()) HideBehindPet(hideFrom);
                 else if (P.Pik && Grounded()) PikReact("errors");
+                else if (P.Cu && Grounded()) CuReact("errors");
                 else if (state == "walk") SetState("idle", 3);
                 Say(line, 3, true);
             }
@@ -2538,7 +2544,7 @@ namespace DeskPals
             {
                 bool was = state == "sleep";
                 WakeIfSleep();
-                if (was && Out) Knock(L("welcome"), "ambient");
+                if (was && Out && !(P.Cu && CuWelcome())) Knock(L("welcome"), "ambient");
             }
         }
 
@@ -2712,6 +2718,7 @@ namespace DeskPals
             if (HoldToast && rnd.NextDouble() < dt * 2.5 && notes.Count < 10) notes.Add(new double[] { R(-8, 8) * k, 0, 7 });   // 吐司屑屑
             if (P.Tubby && TubbyStep(dt)) return true;
             if (P.Pik && PikStep(dt)) return true;
+            if (P.Cu && CuStep(dt)) return true;
             switch (state)
             {
                 case "plop":
@@ -2767,6 +2774,7 @@ namespace DeskPals
         int EdgeOfWindow(bool right)
         {
             if (P.Pik) return PikEdge(right);
+            if (P.Cu) return CuEdge(right);
             switch (P.Id)
             {
                 case "spidey":
@@ -2845,6 +2853,7 @@ namespace DeskPals
         {
             string a = afterLand; afterLand = "";
             if (P.Pik && PikLand(a)) return;
+            if (P.Cu && CuLand(a)) return;
             switch (a)
             {
                 case "wave": SetState("wave", 1.8); Say("Eh-oh!", 1.6); break;
@@ -2873,6 +2882,7 @@ namespace DeskPals
             }
             if (w.OutCount() > 1 && rnd.NextDouble() < 0.12 && VisitFriend()) return;
             if (P.Pik) { PikDecide(r, wa); return; }
+            if (P.Cu) { CuDecide(r, wa); return; }
             switch (P.Id)
             {
                 case "spidey":
@@ -3002,6 +3012,7 @@ namespace DeskPals
         {
             if (!Out) return;
             if (P.Pik) { PikSignature(); return; }
+            if (P.Cu) { CuSignature(); return; }
             switch (P.Id)
             {
                 case "spidey": if (!ShootTo("swing")) Say("這裡太低了，甩不起來", 1.6); break;
@@ -3039,6 +3050,7 @@ namespace DeskPals
         void ActSpecial(string a)
         {
             if (P.Pik && PikAct(a)) return;
+            if (P.Cu && CuAct(a)) return;
             switch (a)
             {
                 case "swing": if (Is("spidey")) { if (!ShootTo("swing")) Say("這裡太低了，甩不起來", 1.6); } else Signature(); break;
@@ -3075,7 +3087,7 @@ namespace DeskPals
             {
                 case "spidey": if (!ZipToWindow(win, L("newwin"))) Say("有新視窗！👀", 1.5); break;
                 default:
-                    if (!GoToWindow(win, L("newwin"), Is("po") || Is("tinky") ? "wave" : (Is("hangyodon") ? "bubbles" : (Is("dipsy") ? "hattip" : (Is("laalaa") ? "twirl" : "sniff"))))) Say(L("newwin"), 1.5);
+                    if (!GoToWindow(win, L("newwin"), Is("po") || Is("tinky") ? "wave" : (Is("hangyodon") ? "bubbles" : (Is("dipsy") ? "hattip" : (Is("laalaa") ? "twirl" : (P.Cu ? "" : "sniff")))))) Say(L("newwin"), 1.5);
                     break;
             }
         }
@@ -4054,6 +4066,7 @@ namespace DeskPals
         Fr Frame()
         {
             if (P.Pik) return FramePik();
+            if (P.Cu) return FrameCu();
             switch (P.Id)
             {
                 case "po": return FramePo();
@@ -4404,7 +4417,7 @@ namespace DeskPals
             l = Math.Min(l, px); r = Math.Max(r, px); tp = Math.Min(tp, py); b = Math.Max(b, py);
         }
         bool SilkVisible() { return state == "swing" || state == "hang" || state == "zip" || state == "shoot" || state == "webcatch" || state == "sling"; }
-        double Bob() { if (P.Pik) return PikBob(); if (P.Tubby) return TubbyBob(); return state == "dance" || state == "elvis" ? Math.Abs(Math.Sin(anim * 8)) * 6 * k : (Is("hangyodon") && state == "walk" ? (Step2(4) ? k : 0) : 0); }
+        double Bob() { if (P.Cu) return 0; if (P.Pik) return PikBob(); if (P.Tubby) return TubbyBob(); return state == "dance" || state == "elvis" ? Math.Abs(Math.Sin(anim * 8)) * 6 * k : (Is("hangyodon") && state == "walk" ? (Step2(4) ? k : 0) : 0); }
 
         public void Render()
         {
@@ -4613,6 +4626,7 @@ namespace DeskPals
         // 畫一隻（身體＋前後道具＋配件＋肚子螢幕）；櫃子裡也用這個
         void DrawFigure(Graphics g, Fr f, int sbx, int sby, int sps, bool fx, bool extras)
         {
+            if (P.Cu) { DrawFigureCu(g, f, sbx, sby, sps, fx, extras); return; }   // 自己做的公仔（DeskPals.Custom.cs）
             // 圖一律貼齊 16 格框的底（比較高的角色往上長），Top 再額外上下移
             string[] rows = f.Rows;
             int top = f.Top + 16 - rows.Length;
@@ -5328,6 +5342,7 @@ namespace DeskPals
             bool flip = (Math.Floor(tt / 9) % 2) == 1;
             string[] head = (string[])A("HEAD").Clone();
             Fr f;
+            if (P.Cu) DrawCuShelf(g, fx, fy, ps, cell, tt); else
             switch (P.Id)
             {
                 case "spidey":
@@ -5418,7 +5433,7 @@ namespace DeskPals
                     break;
             }
             // 午餐時間：櫃子裡的公仔也拿著午餐
-            if (w.Lunch && !(Is("spidey") && (tt % 11) < 8)) DrawLunchShelf(g, bx, by, ps, flip);
+            if (w.Lunch && !P.Cu && !(Is("spidey") && (tt % 11) < 8)) DrawLunchShelf(g, bx, by, ps, flip);
             // 剛回櫃子：一圈小星星
             if (ShelfFx < 1)
             {
@@ -5549,6 +5564,7 @@ namespace DeskPals
         string DefaultPetFor(string pet)
         {
             foreach (string id in Pal.LineupIds(lineup)) if (id == pet) return pet;
+            if (lineup == Pal.Mine) { string[] mi = Pal.MineIds(); if (mi.Length > 0) return mi[0]; }
             return lineup == Pal.Teletubbies ? "po" : (lineup == Pal.Pikmin ? "pkred" : "spidey");
         }
 
@@ -5592,7 +5608,7 @@ namespace DeskPals
                 delay += 0.5;
             }
             active = Get(ids.Count > 0 ? ids[ids.Count - 1] : defaultPet) ?? Get(defaultPet);
-            if (ids.Count == 0 && active != null) active.Say(TubbyLineup ? "Eh-oh! 天線寶寶一櫃 ☀" : "經典一櫃回來囉！", 2.4);
+            if (ids.Count == 0 && active != null) active.Say(TubbyLineup ? "Eh-oh! 天線寶寶一櫃 ☀" : (CuLineup ? "我的櫃！大家都在 🧸" : "經典一櫃回來囉！"), 2.4);
             Broadcast();
             lock (clients) foreach (Client c in clients) Send(c, "lineup " + lineup + "\n");   // 在桌面換櫃（小屋、設定）：VS Code 跟著改設定
             App.Log("lineup " + lineup);
@@ -5670,7 +5686,7 @@ namespace DeskPals
             timer.Interval = 30;
             timer.Tick += delegate { Tick(); };
             timer.Start();
-            if (!File.Exists(FilePath("profile.txt"))) Later(1.2, delegate { ShowSetup(true); });   // 第一次：設定視窗（你是？選一櫃、擺法）
+            if (!File.Exists(FilePath("profile.txt"))) Later(1.2, delegate { ShowSetup(true); });   // 第一次：設定視窗（做一隻自己的或選一櫃、擺法）
             App.Log("started pipe=" + pipeName + " lineup=" + lineup + " out=" + string.Join(",", outIds.ToArray()) + " data=" + DataDir);
         }
 
@@ -6027,6 +6043,7 @@ namespace DeskPals
                 foreach (int[] s in segs)
                     if (s[1] - s[0] >= SW) { Plat p = new Plat(); p.H = wi.H; p.Top = wi.T; p.Left = s[0]; p.Right = s[1]; p.WinLeft = wi.L; np.Add(p); }
             }
+            CuFakeWins(nw, nc, np);   // 測試用的假視窗（只有離屏隔離模式）
             Wins = nw; Cands = nc; Plats = np;
             if (shareFound != sharing)
             {
@@ -6425,7 +6442,7 @@ namespace DeskPals
         public void FillMenu(Pet p, ContextMenuStrip m)
         {
             m.Items.Clear();
-            string[][] items = p.P.Pik ? PikMenuItems(p) : null;
+            string[][] items = p.P.Pik ? PikMenuItems(p) : (p.P.Cu ? p.CuMenuItems() : null);
             if (items == null) switch (p.P.Id)
             {
                 case "po":
@@ -6464,6 +6481,7 @@ namespace DeskPals
                 m.Items.Add(it[0], null, delegate { if (a == "ball") StartBall(); else p.Act(a); });
             }
             m.Items.Add(p.P.Name + " 的好感度 ♥", null, delegate { p.ShowBond(); });
+            CuPetMenu(p, m);
             m.Items.Add(new ToolStripSeparator());
             ToolStripMenuItem help = new ToolStripMenuItem("小幫手（專注、安靜、提醒）");
             AddHelpers(help.DropDownItems);
@@ -6711,7 +6729,8 @@ namespace DeskPals
             List<Pet> outs = OutPets();
             switch (p[0])
             {
-                case "hello": if (active != null) Send(c, "active " + active.P.Id + "\n"); Send(c, "lineup " + lineup + "\n"); break;   // 櫃子以桌面版為準（第一次設定在桌面做）
+                case "hello": CuHello(c); if (active != null) Send(c, "active " + active.P.Id + "\n"); Send(c, "lineup " + lineup + "\n"); break;   // 櫃子以桌面版為準（第一次設定在桌面做）
+                case "custom": CuMsg(c, line); break;   // 自己做的公仔（DeskPals.Custom*.cs）
                 case "save":
                     Count("saves");
                     foreach (Pet x in outs) x.OnSave(x == l);
@@ -7407,7 +7426,7 @@ namespace DeskPals
                 case "po-tinky": SceneScooterRide(Get("po"), Get("tinky")); break;
                 case "dipsy-po": SceneHatBaseball(Get("po"), Get("dipsy")); break;
                 case "laalaa-po": SceneBallFetch(Get("laalaa"), Get("po")); break;
-                default: if (PikLineup) PikPairScene(key); break;
+                default: if (PikLineup) PikPairScene(key); else if (a.P.Cu || b.P.Cu) CuPairScene(key, a, b); break;
             }
         }
 
@@ -7559,7 +7578,7 @@ namespace DeskPals
                         case "stitch": p.Say("Ohana！", 1.8); break;
                         case "hangyodon": p.Say("我有被拍進去嗎？嘴唇太大了嗎？", 1.8); break;
                         case "pkred": case "pkyellow": case "pkblue": p.Say("噗咿！", 1.8); break;
-                        default: p.Say("帥！", 1.8); break;
+                        default: p.Say(p.P.Cu ? p.L("x_photo") : "帥！", 1.8); break;
                     }
             });
             At(9.5, delegate { });
@@ -8144,6 +8163,7 @@ namespace DeskPals
                 if (flowerBub != null && flowerBub.VVisible) flowerBub.PaintTo(g);
                 if (flash != null && flash.VVisible) flash.PaintTo(g);
                 if (setupForm != null && !setupForm.IsDisposed && setupForm.VVisible) setupForm.PaintTo(g);
+                CuSnap(g);
                 if (pmenu != null && pmenu.VVisible) pmenu.PaintTo(g);
                 // 游標位置（只畫一個小十字，方便看）
                 Point c = Cursor.Position;
@@ -8251,6 +8271,7 @@ namespace DeskPals
         static string Flavor(string id, string kind, bool night)
         {
             string pk = PikFlavor(id, kind); if (pk != null) return pk;
+            string cu = CuFlavor(id, kind, night); if (cu != null) return cu;
             string extra = FlavorExtra(id, kind);
             if (extra != null) return extra;
             if (night && kind == "worklog")
@@ -8384,7 +8405,7 @@ namespace DeskPals
                     case "tinky": line = "噓～丁丁抱著袋袋安靜陪你 🤫"; break;
                     case "dipsy": line = "噓。帽子拉低，安靜。"; break;
                     case "laalaa": line = "噓～拉拉小小聲 🤫"; break;
-                    default: line = "好，我安靜待著。"; break;
+                    default: line = l.P.Cu ? l.L("x_quiet_on") : "好，我安靜待著。"; break;
                 }
                 l.Say(line, 2.2);
             }
@@ -8407,7 +8428,7 @@ namespace DeskPals
                 case "tinky": line = "安靜時間結束～Eh-oh!"; break;
                 case "dipsy": line = "安靜結束。嘿～"; break;
                 case "laalaa": line = "安靜時間結束～啦啦啦！"; break;
-                default: line = "安靜時間結束～"; break;
+                default: line = l.P.Cu ? l.L("x_quiet_off") : "安靜時間結束～"; break;
             }
             if (heldQuiet.Count == 0) { l.Say(line, 2.4); return; }
             // 一次說完：最新一則有網址就可以點
@@ -8491,7 +8512,7 @@ namespace DeskPals
                 case "tinky": end = "專注結束！休息 5 分鐘 ☕ 丁丁跳舞給你看"; break;
                 case "dipsy": end = "專注結束。休息 5 分鐘 ☕ 你很酷"; break;
                 case "laalaa": end = "專注結束！休息 5 分鐘 ☕ 啦啦啦～好棒棒"; break;
-                default: end = "專注結束！休息 5 分鐘 ☕ 你超強的"; break;
+                default: end = l.P.Cu ? l.L("x_focus_end") : "專注結束！休息 5 分鐘 ☕ 你超強的"; break;
             }
             l.Knock(end + "　今天第 " + n + " 顆 🍅", "high");
             foreach (Pet p in OutPets()) if (p != l) p.React();
@@ -8589,6 +8610,7 @@ namespace DeskPals
         static string FlavorExtra(string id, string kind)
         {
             string pk = PikFlavor(id, kind); if (pk != null) return pk;
+            string cu = CuFlavor(id, kind, false); if (cu != null) return cu;
             string[] keys = { "remind", "pc-cpu", "pc-ram", "pc-disk", "net-down", "net-up", "vpn", "download" };
             string[] sp = { "⏰ 提醒你：", "蜘蛛感應！電腦好燙：", "蜘蛛感應！記憶體快滿了：", "硬碟快滿了：", "網路斷了！", "網路回來了 👍", "連不到公司網路（VPN 斷了？）", "下載好了：" };
             string[] po = { "⏰ 小波提醒你：", "電腦好忙好熱喔：", "記憶體要滿滿了：", "硬碟快塞滿了：", "網路斷掉了！嗚…", "網路回來了！Eh-oh!", "連不到公司網路耶（VPN 斷了？）", "下載好了！" };
@@ -8958,7 +8980,7 @@ namespace DeskPals
                 case "tinky": intro = "Eh-oh! 丁丁的魔法袋裝了今天的我們："; break;
                 case "dipsy": intro = "嘿，今天的我們："; break;
                 case "laalaa": intro = "啦啦～今天的我們："; break;
-                default: intro = "今天的我們："; break;
+                default: intro = l.P.Cu ? l.L("x_wrap") : "今天的我們："; break;
             }
             if (outs.Count >= 2 && !quietOn)
             {
@@ -9095,6 +9117,7 @@ namespace DeskPals
         {
             string h = (t.Lead / 60) + " 小時", n = t.Name;
             string pk = PikTicket(id, stage, n, h); if (pk != null) return pk;
+            string cu = CuTicket(id, stage, n, h); if (cu != null) return cu;
             string[] sp = { "🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款", "🎫 " + n + " 再 30 分鐘開賣，網頁先開好", "🎫 " + n + " 剩 10 分鐘！蜘蛛感應全開", "🎫 準備！手指放在按鈕上", "🎫 開搶！！Thwip!" };
             string[] po = { "🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款喔", "🎫 " + n + " 再 30 分鐘！小波陪你等", "🎫 " + n + " 剩 10 分鐘！好緊張～", "🎫 準備！深呼吸～", "🎫 開搶！！衝衝衝！" };
             string[] st = { "🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款！ih!", "🎫 " + n + " 30 分鐘！史迪仔幫你顧著", "🎫 " + n + " 10 分鐘！ih-ih-ih!", "🎫 準備！史迪仔也準備好了", "🎫 開搶！！衝啊！" };
@@ -9416,6 +9439,7 @@ namespace DeskPals
         public string LunchLine(string phase)
         {
             if (P.Pik) return PikLunchLine(phase);
+            if (P.Cu) return CuLunchLine(phase);
             switch (P.Id)
             {
                 case "po":
@@ -9492,6 +9516,7 @@ namespace DeskPals
             if (!HoldingFood() || state == "glass" || state == "hug") return;
             int bite = Step2(2.5) ? 1 : 0;   // 一口一口：手上的食物上下動
             if (P.Pik) { DrawPikLunch(g, f, bx, by, ps, fx, bite); return; }
+            if (P.Cu) { CuLunch(g, f, bx, by, ps, fx, bite); return; }
             switch (P.Id)
             {
                 case "po":
@@ -9548,6 +9573,7 @@ namespace DeskPals
         // 外出中的格子：淡淡的剪影，櫃子還是他的位置
         public void DrawGhost(Graphics g, int fx, int fy, int ps, bool night)
         {
+            if (P.Cu) { CuGhost(g, fx, fy, ps, night); return; }
             string[] rows = Pal.Stack(A("HEAD"), A("BODY"), A("LEGS_A"));
             int bx = fx - rows[0].Length * ps / 2, by = fy - rows.Length * ps;
             Color c = P.Accent;
@@ -9561,6 +9587,7 @@ namespace DeskPals
         public int ShelfRows()
         {
             if (P.Pik) return PikShelfRows();
+            if (P.Cu) return CuShelfRows();
             int hat = (w.SeasonNow == "xmas" || Level() >= 3) ? 4 : 0;
             switch (P.Id)
             {
@@ -9749,15 +9776,14 @@ namespace DeskPals
             Lead().Say(on ? "好～「" + name + "」打開囉" : "好～「" + name + "」先關掉", 1.8);
         }
 
-        // ---- 你是？（profile.txt：student｜work）、擺法（mode.txt：shelf｜single <id>）----
-        public bool Student;                          // 大學生（之後會有大學生的內容；現在先記著）
+        // ---- 設定過了沒（profile.txt）、擺法（mode.txt：shelf｜single <id>）----
         public bool Single;                           // 只要一隻：沒有櫃子，那隻的家是蛋，其他隻不出來
         string singleId = "";
 
         void LoadMode()
         {
-            Student = ReadText("profile.txt") == "student";
             string m = ReadText("mode.txt");
+            if (m == "" && !File.Exists(FilePath("profile.txt"))) m = "single";   // 第一次（還沒設定）：預設只要一隻
             Single = m.StartsWith("single");
             singleId = Single && m.Length > 6 ? m.Substring(6).Trim() : "";
         }
@@ -9799,7 +9825,7 @@ namespace DeskPals
             m.Items.Add(Single ? "叫" + Get(SinglePet()).P.Name + "出來" : "全部出來", null, delegate { AllOut(); });
             m.Items.Add(Single ? "回蛋裡" : "全部回家", null, delegate { AllHome(); });
             ToolStripMenuItem sw = new ToolStripMenuItem("換一櫃");
-            foreach (string lu in Pal.Lineups)
+            foreach (string lu in Pal.LineupsNow())
             {
                 string l2 = lu;
                 ToolStripMenuItem li = new ToolStripMenuItem(Pal.LineupName(lu), null, delegate { SwitchLineup(l2, Single ? singleId : ""); });
@@ -9809,6 +9835,7 @@ namespace DeskPals
             m.Items.Add(sw);
             m.Items.Add("重新設定…", null, delegate { ShowSetup(false); });
             m.Items.Add("躲起來（Ctrl+Alt+S）", null, delegate { ToggleHide(); });
+            CuHouseMenu(m);   // 自己做的公仔、分享短片（DeskPals.Custom.cs）
             m.Items.Add(new ToolStripSeparator());
             m.Items.Add("收工（關掉 Desk Pals）", null, delegate { QuitAll(); });
             ShowMenu(m, "公仔小屋", true, at);
@@ -9834,7 +9861,7 @@ namespace DeskPals
         public void ShowSetup(bool first)
         {
             if (setupForm == null || setupForm.IsDisposed)
-                setupForm = new SetupForm(this, first, ReadText("profile.txt"), lineup, Single, Single ? SinglePet() : "");
+                setupForm = new SetupForm(this, first, lineup, Single || first, Single ? SinglePet() : "");
             Rectangle wa = App.Offscreen ? screens[0].WorkingArea : Screen.FromPoint(Cursor.Position).WorkingArea;
             setupForm.Location = new Point(wa.Left + (wa.Width - setupForm.Width) / 2, wa.Top + Math.Max(0, (wa.Height - setupForm.Height) / 2));
             setupForm.Show();
@@ -9845,16 +9872,15 @@ namespace DeskPals
         }
 
         // 設定好了：馬上套用（不用重開）
-        public void ApplySetup(string prof, string lu, bool single, string pet, bool first)
+        public void ApplySetup(string lu, bool single, string pet, bool first)
         {
-            WriteText("profile.txt", prof == "student" ? "student" : "work");
-            Student = prof == "student";
+            WriteText("profile.txt", "done");
             lu = Pal.NormLineup(lu);
             bool wasSingle = Single;
             Single = single;
             singleId = single ? pet : "";
             WriteText("mode.txt", single ? "single " + pet : "shelf");
-            App.Log("setup profile=" + prof + " lineup=" + lu + " mode=" + (single ? "single " + pet : "shelf"));
+            App.Log("setup lineup=" + lu + " mode=" + (single ? "single " + pet : "shelf"));
             if (single)
             {
                 if (!shelf.Collapsed) { shelf.Collapsed = true; WriteText("shelf-state.txt", "egg"); }
@@ -10354,7 +10380,7 @@ namespace DeskPals
     }
 
     // ================= 設定視窗（第一次打開、小屋 → 重新設定）=================
-    // 一個視窗、三步：你是？→ 選一櫃 → 怎麼擺（整櫃／只要一隻）。全部自己畫（木框＋大按鈕），點哪裡自己算。
+    // 一個視窗、兩步：選公仔（做一隻自己的／選一櫃現成的）→ 怎麼擺（只要一隻／整櫃）。全部自己畫（木框＋大按鈕），點哪裡自己算。
     class SetupForm : Form
     {
         class Btn { public string Id, Text, Sub; public Rectangle R; public int Kind; public bool On, Enabled = true; }   // Kind：0 大卡片 1 公仔小卡 2 普通按鈕 3 主要按鈕
@@ -10363,7 +10389,7 @@ namespace DeskPals
         readonly double d;
         readonly int U;
         int step;
-        string prof, lu, mode, pet;
+        string lu, mode, pet;
         readonly List<Btn> btns = new List<Btn>();
         string hoverId = "";
         readonly Font titleF, qF, bigF, subF, btnF;
@@ -10371,46 +10397,28 @@ namespace DeskPals
         readonly Dictionary<string, Bitmap> petPics = new Dictionary<string, Bitmap>();
         public bool VVisible;
 
-        static readonly string[] STUDENT = {
-            "......kkkk......",
-            "....kkddddkk....",
-            "..kkddddddddkk..",
-            "kkddddddddddddkk",
-            "..kkddddddddkkY.",
-            "....kkddddkk..Y.",
-            "....kDDDDDDk..Y.",
-            "....kDDDDDDk.YYY",
-            "....kkkkkkkk.YYY",
-            "................",
-            "kkkkkkk..kkkkkkk",
-            "kwwwwwwkkwwwwwwk",
-            "kwlllwwkkwlllwwk",
-            "kwwwwwwkkwwwwwwk",
-            "kwllwwwkkwllwwwk",
+        // 「做一隻自己的公仔」那張卡的小圖：相框裡一個貓掌
+        static readonly string[] MAKE = {
+            "kkkkkkkkkkkkkkkk",
+            "kwwwwwwwwwwwwwwk",
+            "kwbbbbbbbbbbbbwk",
+            "kwbbkkbbbbkkbbwk",
+            "kwbkppkbbkppkbwk",
+            "kwbkppkbbkppkbwk",
+            "kwbbkkbkkbkkbbwk",
+            "kwbbbbkppkbbbbwk",
+            "kwbbbkppppkbbbwk",
+            "kwbbkppppppkbbwk",
+            "kwbbkppppppkbbwk",
+            "kwbbbkkkkkkbbbwk",
+            "kwbbbbbbbbbbbbwk",
+            "kwwwwwwwwwwwwwwk",
             "kkkkkkkkkkkkkkkk" };
-        static readonly string[] WORK = {
-            "................",
-            ".....kkkkkk.....",
-            "....kk....kk....",
-            "....k......k....",
-            ".kkkkkkkkkkkkkk.",
-            "kBBBBBBBBBBBBBBk",
-            "kbbbbbbbbbbbbbbk",
-            "kbbbbbbYYbbbbbbk",
-            "kkkkkkkYYkkkkkkk",
-            "kbbbbbbbbbbbbbbk",
-            "kbbbbbbbbbbbbbbk",
-            "kbbbbbbbbbbbbbbk",
-            "kbbbbbbbbbbbbbbk",
-            "kssssssssssssssk",
-            ".kkkkkkkkkkkkkk.",
-            "................" };
 
-        public SetupForm(World w, bool first, string prof, string lu, bool single, string pet)
+        public SetupForm(World w, bool first, string lu, bool single, string pet)
         {
             this.w = w; this.first = first;
-            this.prof = prof == "student" || prof == "work" ? prof : "";
-            this.lu = Pal.NormLineup(lu);
+            this.lu = first ? "" : Pal.NormLineup(lu);   // 第一次：先不幫你選，讓「做一隻自己的」跟現成的擺在一起選
             mode = single ? "single" : "shelf";
             this.pet = pet ?? "";
             d = w.S / 4.0;
@@ -10427,7 +10435,7 @@ namespace DeskPals
             bigF = new Font("Microsoft JhengHei UI", 13f, FontStyle.Bold);
             subF = new Font("Microsoft JhengHei UI", 9f, FontStyle.Bold);
             btnF = new Font("Microsoft JhengHei UI", 11f, FontStyle.Bold);
-            ClientSize = new Size(Sc(580), Sc(520));
+            ClientSize = new Size(Sc(620), Sc(560));
             KeyPreview = true;
             KeyDown += delegate(object s, KeyEventArgs e) { if (e.KeyCode == Keys.Escape) Close(); };
             LayoutBtns();
@@ -10456,11 +10464,11 @@ namespace DeskPals
         static string Members(string id)
         {
             List<string> names = new List<string>();
-            foreach (string x in Pal.LineupIds(id)) names.Add(Pal.Get(x).Name);
+            foreach (string x in Pal.LineupIds(id)) { Pal p = Pal.Get(x); if (p != null) names.Add(p.Name); }
             if (Pal.NormLineup(id) == Pal.Pikmin) names.Add("休息花");
             return string.Join("・", names.ToArray());
         }
-        bool CanNext() { return step == 0 ? prof != "" : (step == 1 || mode == "shelf" || InLineup(pet)); }
+        bool CanNext() { return step == 0 ? lu != "" : (mode == "shelf" || InLineup(pet)); }
 
         Btn Add(string id, string text, string sub, Rectangle r, int kind, bool on)
         {
@@ -10477,46 +10485,49 @@ namespace DeskPals
             int W0 = ClientSize.Width, H0 = ClientSize.Height, top = Sc(154), bottom = H0 - Sc(72);
             if (step == 0)
             {
-                int cw = Sc(220), ch = Sc(230), gap = Sc(28), x0 = (W0 - 2 * cw - gap) / 2;
-                Add("student", "大學生", "上課・報告・期末考", new Rectangle(x0, top, cw, ch), 0, prof == "student");
-                Add("work", "上班族", "上班・開會・準時下班", new Rectangle(x0 + cw + gap, top, cw, ch), 0, prof == "work");
-            }
-            else if (step == 1)
-            {
-                int n = Pal.Lineups.Length, gap = Sc(24), cw = Math.Min(Sc(240), (W0 - Sc(48) - (n - 1) * gap) / n), ch = bottom - top - Sc(8);
+                // 主打：用自己的照片做一隻；下面是現成的幾櫃
+                Rectangle hero = new Rectangle(Sc(30), top, W0 - Sc(60), Sc(108));
+                Add("make", "把你家的貓狗（或任何照片）變成桌面公仔", "選一張照片 → 去背 → 取名字、選個性，一分鐘做好。照片只存在你的電腦裡。", hero, 0, false);
+                Add("import", "匯入朋友的公仔…", "", new Rectangle(W0 - Sc(30) - Sc(190), hero.Bottom + Sc(10), Sc(190), Sc(32)), 2, false);
+                string[] lus = Pal.LineupsNow();
+                int n = lus.Length, gap = Sc(16), ly = hero.Bottom + Sc(52), cw = (W0 - Sc(60) - (n - 1) * gap) / n, ch = bottom - ly - Sc(6);
                 int x0 = (W0 - n * cw - (n - 1) * gap) / 2;
                 for (int i = 0; i < n; i++)
                 {
-                    string id = Pal.Lineups[i];
+                    string id = lus[i];
                     EnsurePics(id);
-                    Add("lu:" + id, Pal.LineupName(id), Members(id), new Rectangle(x0 + i * (cw + gap), top, cw, ch), 0, lu == id);
+                    Add("lu:" + id, Pal.LineupName(id), Members(id), new Rectangle(x0 + i * (cw + gap), ly, cw, ch), 0, lu == id);
                 }
             }
             else
             {
                 EnsurePics(lu);
-                int cw = Sc(230), ch = Sc(116), gap = Sc(24), x0 = (W0 - 2 * cw - gap) / 2;
-                Add("mode:shelf", lu == Pal.Pikmin ? "整櫃（三隻＋花）" : "整櫃（四隻）", lu == Pal.Pikmin ? "三隻皮克敏和休息花住在櫃子裡" : "四隻住在公仔櫃裡", new Rectangle(x0, top, cw, ch), 0, mode == "shelf");
-                Add("mode:single", "只要一隻", "沒有櫃子，他住在蛋裡", new Rectangle(x0 + cw + gap, top, cw, ch), 0, mode == "single");
+                int cw = Sc(240), ch = Sc(116), gap = Sc(24), x0 = (W0 - 2 * cw - gap) / 2;
+                Add("mode:single", "只要一隻", "沒有櫃子，他住在右下角的蛋裡", new Rectangle(x0, top, cw, ch), 0, mode == "single");
+                Add("mode:shelf", lu == Pal.Pikmin ? "整櫃（三隻＋花）" : "整櫃", lu == Pal.Pikmin ? "三隻皮克敏和休息花住在櫃子裡" : "大家住在公仔櫃裡，點格子叫他們出來", new Rectangle(x0 + cw + gap, top, cw, ch), 0, mode == "shelf");
                 if (mode == "single")
                 {
                     string[] ids = Pal.LineupIds(lu);
                     int pw = Sc(100), pg = Sc(14), px0 = (W0 - ids.Length * pw - (ids.Length - 1) * pg) / 2, py = top + ch + Sc(34);
                     for (int i = 0; i < ids.Length; i++)
-                        Add("pet:" + ids[i], Pal.Get(ids[i]).Name, "", new Rectangle(px0 + i * (pw + pg), py, pw, Math.Min(Sc(118), bottom - py - Sc(4))), 1, pet == ids[i]);
+                    {
+                        Pal pp = Pal.Get(ids[i]);
+                        if (pp == null) continue;
+                        Add("pet:" + ids[i], pp.Name, "", new Rectangle(px0 + i * (pw + pg), py, pw, Math.Min(Sc(130), bottom - py - Sc(4))), 1, pet == ids[i]);
+                    }
                 }
             }
             int by = H0 - Sc(64), bh = Sc(44);
             if (step > 0) Add("back", "上一步", "", new Rectangle(Sc(30), by, Sc(130), bh), 2, false);
             else if (first) Add("skip", "以後再說", "", new Rectangle(Sc(30), by, Sc(130), bh), 2, false);
-            Btn nx = Add("next", step < 2 ? "下一步" : "完成！", "", new Rectangle(W0 - Sc(30) - Sc(160), by, Sc(160), bh), 3, false);
+            Btn nx = Add("next", step < 1 ? "下一步" : "完成！", "", new Rectangle(W0 - Sc(30) - Sc(160), by, Sc(160), bh), 3, false);
             nx.Enabled = CanNext();
         }
 
         // 每一櫃：櫃子縮圖、每一隻的小照片（用預覽用的 World 畫，不開視窗）
         void EnsurePics(string id)
         {
-            if (shelfPics.ContainsKey(id)) return;
+            if (id == "" || shelfPics.ContainsKey(id)) return;
             World pv = new World(Math.Max(3, (int)Math.Round(3 * d)), id);
             shelfPics[id] = pv.SetupShelfPic();
             foreach (Pet p in pv.Pets) petPics[id + ":" + p.P.Id] = p.IconPic();
@@ -10530,13 +10541,14 @@ namespace DeskPals
         {
             Btn b = Find(id);
             if (b != null && !b.Enabled) return;
-            if (id == "student" || id == "work") prof = id;
-            else if (id.StartsWith("lu:")) { lu = Pal.NormLineup(id.Substring(3)); if (!InLineup(pet)) pet = ""; }
+            if (id == "make") { bool f = first; Close(); w.CuOpenMaker(null, f); return; }
+            if (id == "import") { bool f = first; Close(); w.CuImportDialog(f); return; }
+            if (id.StartsWith("lu:")) { lu = Pal.NormLineup(id.Substring(3)); if (!InLineup(pet)) pet = Pal.LineupIds(lu).Length > 0 ? Pal.LineupIds(lu)[0] : ""; }
             else if (id == "mode:shelf") mode = "shelf";
             else if (id == "mode:single") { mode = "single"; if (!InLineup(pet)) pet = Pal.LineupIds(lu)[0]; }
             else if (id.StartsWith("pet:")) { pet = id.Substring(4); mode = "single"; }
             else if (id == "back") { if (step > 0) step--; }
-            else if (id == "next") { if (step < 2) step++; else { w.ApplySetup(prof, lu, mode == "single", pet, first); Close(); return; } }
+            else if (id == "next") { if (step < 1) step++; else { w.ApplySetup(lu, mode == "single", pet, first); Close(); return; } }
             else if (id == "skip" || id == "close") { Close(); return; }
             else return;
             LayoutBtns();
@@ -10575,11 +10587,16 @@ namespace DeskPals
             Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.X - 9 * U, pr.Y + plh / 2 - 2 * U, U);
             Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.Right + 4 * U, pr.Y + plh / 2 - 2 * U, U);
             Steps(g, W0, Sc(68));
-            string q = step == 0 ? "你是？" : (step == 1 ? "選一櫃公仔" : "怎麼擺？");
-            string hint = step == 0 ? "公仔們會照你的生活陪你（之後在小屋可以改）" : (step == 1 ? "兩櫃都很可愛，之後隨時能換" : (mode == "single" ? "選一隻，他會住在右下角的蛋裡" : "公仔櫃放在右下角，點格子就叫他們出來"));
+            string q = step == 0 ? "選你的公仔" : "怎麼擺？";
+            string hint = step == 0 ? "用自己的照片做一隻，或選一櫃現成的（之後在小屋都能換、能再做）" : (mode == "single" ? "選一隻，他會住在右下角的蛋裡" : "公仔櫃放在右下角，點格子就叫他們出來");
             TextRenderer.DrawText(g, q, qF, new Rectangle(0, Sc(100), W0, Sc(30)), Pix.TextC, Pix.Mid);
             TextRenderer.DrawText(g, hint, subF, new Rectangle(0, Sc(130), W0, Sc(18)), Pix.C(0x9A6338), Pix.Mid);
-            if (step == 2 && mode == "single")
+            if (step == 0)
+            {
+                Btn im = Find("import");
+                if (im != null) TextRenderer.DrawText(g, "或選一櫃現成的：", btnF, new Rectangle(Sc(32), im.R.Y, Sc(300), im.R.Height), Pix.TextC, Pix.LeftMid);
+            }
+            if (step == 1 && mode == "single")
             {
                 Btn first2 = Find("mode:shelf");
                 if (first2 != null) TextRenderer.DrawText(g, "選哪一隻？", btnF, new Rectangle(0, first2.R.Bottom + Sc(6), W0, Sc(26)), Pix.TextC, Pix.Mid);
@@ -10587,12 +10604,12 @@ namespace DeskPals
             foreach (Btn b in btns) DrawBtn(g, b);
         }
 
-        // 上面的三個步驟：現在這步黃色、做完的綠色打勾
+        // 上面的兩個步驟：現在這步黃色、做完的綠色打勾
         void Steps(Graphics g, int W0, int y)
         {
-            string[] names = { "你是？", "選一櫃", "怎麼擺" };
-            int pw = Sc(112), ph = Sc(26), gap = Sc(18), x0 = (W0 - 3 * pw - 2 * gap) / 2;
-            for (int i = 0; i < 3; i++)
+            string[] names = { "選公仔", "怎麼擺" };
+            int n = names.Length, pw = Sc(112), ph = Sc(26), gap = Sc(18), x0 = (W0 - n * pw - (n - 1) * gap) / 2;
+            for (int i = 0; i < n; i++)
             {
                 int x = x0 + i * (pw + gap);
                 if (i > 0) for (int sx = x - gap + U; sx + U <= x - U; sx += 2 * U) Pix.Box(g, Pix.C(0xD8BF94), sx, y + ph / 2 - U / 2, U, U);
@@ -10618,24 +10635,26 @@ namespace DeskPals
                 Pix.Box(g, face, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U);
                 Pix.Box(g, shade, r.X + U, r.Bottom - 3 * U, r.Width - 2 * U, 2 * U);
                 if (b.Enabled) Pix.Box(g, Pix.Mix(face, Color.White, 0.6), r.X + 2 * U, r.Y + U, r.Width - 4 * U, U);
-                int tw = Pix.TextW(b.Text, btnF), ax = 7 * U, tx = r.X + (r.Width - tw - (b.Id == "back" || b.Id == "next" ? ax : 0)) / 2, cy = r.Y + (r.Height - 2 * U) / 2;
+                Font bf = r.Height < Sc(40) ? subF : btnF;
+                int tw = Pix.TextW(b.Text, bf), ax = 7 * U, tx = r.X + (r.Width - tw - (b.Id == "back" || b.Id == "next" ? ax : 0)) / 2, cy = r.Y + (r.Height - 2 * U) / 2;
                 Color tc = b.Enabled ? Pix.TextC : Pix.Dim;
                 if (b.Id == "back") { Arrow(g, tx + U, cy, -1, tc); tx += ax; }
-                TextRenderer.DrawText(g, b.Text, btnF, new Rectangle(tx, r.Y, tw + 4, r.Height - 2 * U), tc, Pix.LeftMid);
-                if (b.Id == "next" && step < 2) Arrow(g, tx + tw + 2 * U, cy, 1, tc);
+                TextRenderer.DrawText(g, b.Text, bf, new Rectangle(tx, r.Y, tw + 4, r.Height - 2 * U), tc, Pix.LeftMid);
+                if (b.Id == "next" && step < 1) Arrow(g, tx + tw + 2 * U, cy, 1, tc);
                 return;
             }
-            // 卡片：底下一層影子；選到的是金色粗框、右上角綠色勾勾
-            Color edge = b.On ? Pix.C(0xC08A2C) : Pix.C(0x8A6A4A);
-            Color fill = b.On ? Pix.C(0xFFEDB8) : (hot ? Pix.C(0xFFF6DE) : Pix.C(0xFFFDF7));
+            // 卡片：底下一層影子；選到的是金色粗框、右上角綠色勾勾；「做一隻自己的」是暖黃色的主打卡
+            bool hero = b.Id == "make";
+            Color edge = b.On || hero ? Pix.C(0xC08A2C) : Pix.C(0x8A6A4A);
+            Color fill = hero ? (hot ? Pix.C(0xFFE9A8) : Pix.C(0xFFF0C4)) : (b.On ? Pix.C(0xFFEDB8) : (hot ? Pix.C(0xFFF6DE) : Pix.C(0xFFFDF7)));
             Pix.Round(g, Pix.C(0xE6D3B0), r.X + 2 * U, r.Y + 2 * U, r.Width, r.Height, U);
             Pix.Round(g, edge, r.X, r.Y, r.Width, r.Height, U);
-            int ins = b.On ? 2 * U : U;
-            if (b.On) Pix.Box(g, edge, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U);
+            int ins = b.On || hero ? 2 * U : U;
+            if (b.On || hero) Pix.Box(g, edge, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U);
             Pix.Box(g, fill, r.X + ins, r.Y + ins, r.Width - 2 * ins, r.Height - 2 * ins);
-            if (hot && !b.On) Pix.Box(g, Pix.C(0xF6C453), r.X + ins, r.Bottom - ins - U, r.Width - 2 * ins, U);
+            if (hot && !b.On && !hero) Pix.Box(g, Pix.C(0xF6C453), r.X + ins, r.Bottom - ins - U, r.Width - 2 * ins, U);
             if (b.Kind == 1) DrawPetCard(g, b);
-            else if (b.Id == "student" || b.Id == "work") DrawIconCard(g, b, b.Id == "student" ? STUDENT : WORK);
+            else if (hero) DrawMakeCard(g, b);
             else if (b.Id.StartsWith("lu:")) DrawShelfCard(g, b, b.Id.Substring(3));
             else DrawModeCard(g, b);
             if (b.On)
@@ -10656,21 +10675,16 @@ namespace DeskPals
             }
         }
 
-        Dictionary<char, Color> IconPal()
-        {
-            Dictionary<char, Color> p = new Dictionary<char, Color>();
-            p['k'] = Pix.Ink; p['d'] = Pix.C(0x3D4A6B); p['D'] = Pix.C(0x2C3550); p['Y'] = Pix.C(0xF2C14E);
-            p['w'] = Pix.C(0xFFFDF7); p['l'] = Pix.C(0xA9B8D0); p['b'] = Pix.C(0xA0643A); p['B'] = Pix.C(0xC8844E); p['s'] = Pix.C(0x7E4A28);
-            return p;
-        }
-
-        void DrawIconCard(Graphics g, Btn b, string[] art)
+        void DrawMakeCard(Graphics g, Btn b)
         {
             Rectangle r = b.R;
-            int c = Math.Max(3, Sc(6)), aw = art[0].Length * c;
-            Pix.Art(g, art, IconPal(), r.X + (r.Width - aw) / 2, r.Y + Sc(26), c);
-            TextRenderer.DrawText(g, b.Text, bigF, new Rectangle(r.X, r.Y + Sc(140), r.Width, Sc(32)), Pix.TextC, Pix.Mid);
-            TextRenderer.DrawText(g, b.Sub, subF, new Rectangle(r.X, r.Y + Sc(174), r.Width, Sc(22)), Pix.C(0x9A6338), Pix.Mid);
+            Dictionary<char, Color> pal = new Dictionary<char, Color>();
+            pal['k'] = Pix.Ink; pal['w'] = Pix.C(0xFFFDF7); pal['b'] = Pix.C(0xBFE3F2); pal['p'] = Pix.C(0xF27A90);
+            int c = Math.Max(3, Sc(5)), aw = MAKE[0].Length * c, ah = MAKE.Length * c, ix = r.X + Sc(22);
+            Pix.Art(g, MAKE, pal, ix, r.Y + (r.Height - ah) / 2, c);
+            int tx = ix + aw + Sc(18);
+            TextRenderer.DrawText(g, b.Text, bigF, new Rectangle(tx, r.Y + Sc(18), r.Right - tx - Sc(12), Sc(30)), Pix.TextC, Pix.LeftMid);
+            TextRenderer.DrawText(g, b.Sub, subF, new Rectangle(tx, r.Y + Sc(52), r.Right - tx - Sc(16), Sc(40)), Pix.C(0x9A6338), TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
         }
 
         void DrawShelfCard(Graphics g, Btn b, string id)
@@ -10680,12 +10694,16 @@ namespace DeskPals
             int textY = r.Y + Sc(12);
             if (shelfPics.TryGetValue(id, out pic))
             {
-                int avail = r.Height - Sc(72), ph = Math.Min(pic.Height, avail), pw = pic.Width * ph / pic.Height;
-                g.DrawImage(pic, r.X + (r.Width - pw) / 2, r.Y + Sc(12), pw, ph);
-                textY = r.Y + Sc(16) + ph;
+                int avail = r.Height - Sc(64), ph = Math.Min(pic.Height, avail), pw = pic.Width * ph / pic.Height;
+                if (pw > r.Width - Sc(16)) { pw = r.Width - Sc(16); ph = pic.Height * pw / pic.Width; }
+                InterpolationMode im = g.InterpolationMode;
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.DrawImage(pic, r.X + (r.Width - pw) / 2, r.Y + Sc(10), pw, ph);
+                g.InterpolationMode = im;
+                textY = r.Y + Sc(14) + ph;
             }
-            TextRenderer.DrawText(g, b.Text, bigF, new Rectangle(r.X, textY, r.Width, Sc(30)), Pix.TextC, Pix.Mid);
-            TextRenderer.DrawText(g, b.Sub, subF, new Rectangle(r.X + Sc(6), textY + Sc(30), r.Width - Sc(12), Sc(20)), Pix.C(0x9A6338), Pix.Mid);
+            TextRenderer.DrawText(g, b.Text, bigF, new Rectangle(r.X, textY, r.Width, Sc(28)), Pix.TextC, Pix.Mid);
+            TextRenderer.DrawText(g, b.Sub, subF, new Rectangle(r.X + Sc(6), textY + Sc(28), r.Width - Sc(12), Sc(20)), Pix.C(0x9A6338), Pix.Mid | TextFormatFlags.EndEllipsis);
         }
 
         void DrawModeCard(Graphics g, Btn b)
@@ -10714,7 +10732,7 @@ namespace DeskPals
             }
             int tx = ix + iconW + Sc(8);
             TextRenderer.DrawText(g, b.Text, bigF, new Rectangle(tx, r.Y + r.Height / 2 - Sc(30), r.Right - tx - Sc(8), Sc(30)), Pix.TextC, Pix.LeftMid);
-            TextRenderer.DrawText(g, b.Sub, subF, new Rectangle(tx, r.Y + r.Height / 2 + Sc(2), r.Right - tx - Sc(8), Sc(22)), Pix.C(0x9A6338), Pix.LeftMid);
+            TextRenderer.DrawText(g, b.Sub, subF, new Rectangle(tx, r.Y + r.Height / 2 + Sc(2), r.Right - tx - Sc(8), Sc(40)), Pix.C(0x9A6338), TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
         }
 
         void DrawPetCard(Graphics g, Btn b)
@@ -10725,9 +10743,10 @@ namespace DeskPals
             if (petPics.TryGetValue(lu + ":" + b.Id.Substring(4), out pic))
             {
                 int avail = r.Height - nameH - Sc(8), ph = Math.Min(pic.Height, avail), pw = pic.Width * ph / pic.Height;
+                if (pw > r.Width - Sc(8)) { pw = r.Width - Sc(8); ph = pic.Height * pw / pic.Width; }
                 g.DrawImage(pic, r.X + (r.Width - pw) / 2, r.Y + Sc(6) + (avail - ph), pw, ph);
             }
-            TextRenderer.DrawText(g, b.Text, btnF, new Rectangle(r.X, r.Bottom - nameH - Sc(4), r.Width, nameH), Pix.TextC, Pix.Mid);
+            TextRenderer.DrawText(g, b.Text, btnF, new Rectangle(r.X, r.Bottom - nameH - Sc(4), r.Width, nameH), Pix.TextC, Pix.Mid | TextFormatFlags.EndEllipsis);
         }
     }
 }
