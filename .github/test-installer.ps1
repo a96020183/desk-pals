@@ -15,6 +15,18 @@ $programs = [Environment]::GetFolderPath("Programs")
 $lnkName = "公仔櫃 Desk Pals.lnk"
 $pipe = "desk-pals-" + ($env:USERNAME -replace '[^A-Za-z0-9_.-]', '_')
 $sh = New-Object -ComObject WScript.Shell
+# WScript.Shell can't save/load a shortcut whose path has characters outside the ANSI code page (the runner is cp1252):
+# go through an ASCII temp name
+function New-Lnk([string]$path, [string]$target, [string]$arguments) {
+    $tmp = Join-Path $env:RUNNER_TEMP "tmp-shortcut.lnk"
+    $l = $sh.CreateShortcut($tmp); $l.TargetPath = $target; $l.Arguments = $arguments; $l.Save()
+    Move-Item -LiteralPath $tmp $path -Force
+}
+function Lnk-Target([string]$path) {
+    $tmp = Join-Path $env:RUNNER_TEMP "tmp-read.lnk"
+    Copy-Item -LiteralPath $path $tmp -Force
+    return $sh.CreateShortcut($tmp).TargetPath
+}
 function Check([bool]$ok, [string]$what) { if ($ok) { Write-Host "PASS  $what" } else { throw "FAIL  $what" } }
 function Install([string]$log) {
     $p = Start-Process $Setup -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /TASKS=autostart,desktopicon /DIR=`"$dir`" /LOG=`"$log`"" -PassThru -Wait
@@ -24,10 +36,7 @@ function Install([string]$log) {
 # 1. the extension's copy
 New-Item -ItemType Directory -Force $data | Out-Null
 Copy-Item extension\desktop\DeskPals*.cs, extension\desktop\desk-pals.ps1 $data
-$l = $sh.CreateShortcut((Join-Path $startup $lnkName))
-$l.TargetPath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-$l.Arguments = "-NoProfile -WindowStyle Hidden -File `"$data\desk-pals.ps1`" -PipeName $pipe"
-$l.Save()
+New-Lnk (Join-Path $startup $lnkName) "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" "-NoProfile -WindowStyle Hidden -File `"$data\desk-pals.ps1`" -PipeName $pipe"
 $ps = Start-Process powershell.exe -ArgumentList "-NoProfile -File `"$data\desk-pals.ps1`" -PipeName $pipe -Pet po" -PassThru
 node .github/ping.js $pipe
 Check ($LASTEXITCODE -eq 0) "extension's PowerShell copy is running on $pipe"
@@ -39,7 +48,7 @@ Check $ps.HasExited "installer closed the extension's running copy (--quit)"
 $exe = Join-Path $dir "DeskPals.exe"
 Check (Test-Path $exe) "DeskPals.exe installed"
 Check ((Test-Path "$dir\claude-hook.js") -and (Test-Path "$data\claude-hook.js")) "claude-hook.js in the app folder and in %LOCALAPPDATA%\DeskPals"
-$t = $sh.CreateShortcut((Join-Path $startup $lnkName)).TargetPath
+$t = Lnk-Target (Join-Path $startup $lnkName)
 Check ($t -eq $exe) "Startup shortcut now points at DeskPals.exe ($t)"
 Check (Test-Path (Join-Path $programs "公仔櫃 Desk Pals.lnk")) "Start menu shortcut"
 Check (Test-Path (Join-Path ([Environment]::GetFolderPath("Desktop")) "公仔櫃 Desk Pals.lnk")) "desktop shortcut (task ticked)"
