@@ -2,7 +2,7 @@
 	"name": "desk-pals",
 	"displayName": "公仔櫃 Desk Pals",
 	"description": "右下角一個公仔櫃（或一顆蛋），把你家的貓狗（或任何照片）變成桌面公仔；也有現成的經典一櫃、天線寶寶一櫃、皮克敏一櫃。選一隻出來，他就在整個螢幕陪你：散步、抱抱、敲螢幕、存檔比讚、Claude／Codex 卡住提醒你；平日下班後催你下班。",
-	"version": "0.7.0",
+	"version": "0.8.0",
 	"publisher": "local",
 	"engines": {
 		"vscode": "^1.70.0"

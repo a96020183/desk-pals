@@ -8,31 +8,41 @@
 #   MAC_SIGN_IDENTITY="Developer ID Application: 你的名字 (TEAMID)"   → 用 hardened runtime 簽 .app 和 DMG
 #   再加 APPLE_ID、APPLE_TEAM_ID、APPLE_APP_PASSWORD（App 專用密碼）     → 送 Apple 公證（notarize）＋ staple
 # 其他：MAC_BUNDLE_ID（預設 io.github.a96020183.deskpals）、MAC_MIN_MACOS（預設 13.0：程式用到 macOS 13 的 API）
+# VARIANT=public（預設；公開下載、上架用：只有續命小隊＋自己做的公仔，tools/variant.py 產生並掃過同人字眼）
+#        personal（全部角色，含同人；自己用，不要公開）→ dist/DeskPals-<版號>-personal.dmg
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 OUT="${1:-$ROOT/dist}"
-BUILD="$ROOT/build/mac"
 PY="${PYTHON:-python3}"
 VERSION="$("$PY" -c 'import json,sys; print(json.load(open("extension/package.json", encoding="utf-8"))["version"])')"
+VARIANT="${VARIANT:-public}"
+case "$VARIANT" in public) SUFFIX="" ;; personal) SUFFIX="-personal" ;; *) echo "VARIANT must be public or personal" >&2; exit 2 ;; esac
+BUILD="$ROOT/build/mac$SUFFIX"
 BUNDLE_ID="${MAC_BUNDLE_ID:-io.github.a96020183.deskpals}"
 MIN_MACOS="${MAC_MIN_MACOS:-13.0}"
 APP_NAME="Desk Pals"
 APP="$BUILD/$APP_NAME.app"
-DMG="$OUT/DeskPals-$VERSION.dmg"
-echo "Desk Pals $VERSION ($BUNDLE_ID, macOS $MIN_MACOS+)"
+DMG="$OUT/DeskPals-$VERSION$SUFFIX.dmg"
+echo "Desk Pals $VERSION $VARIANT ($BUNDLE_ID, macOS $MIN_MACOS+)"
 
 rm -rf "$BUILD" && mkdir -p "$BUILD" "$OUT"
 
 # ---------- 原始碼、圖示 ----------
-"$PY" mac/assemble.py
+if [ "$VARIANT" = personal ]; then
+  "$PY" mac/assemble.py
+  SRC="$ROOT/extension/desktop"
+else
+  "$PY" -I tools/variant.py public   # build/public/extension（公開版原始碼），有同人字眼就失敗
+  SRC="$ROOT/build/public/extension/desktop"
+fi
 "$PY" -I packaging/icons/make_icons.py "$ROOT/build/icons"
 iconutil -c icns "$ROOT/build/icons/AppIcon.iconset" -o "$BUILD/AppIcon.icns"
 
 # ---------- universal binary ----------
 for arch in arm64 x86_64; do
   echo "swiftc ${arch} ..."
-  xcrun swiftc -O -target "$arch-apple-macos$MIN_MACOS" extension/desktop/DeskPals.swift -o "$BUILD/DeskPals-$arch"
+  xcrun swiftc -O -target "$arch-apple-macos$MIN_MACOS" "$SRC/DeskPals.swift" -o "$BUILD/DeskPals-$arch"
 done
 lipo -create -output "$BUILD/DeskPals" "$BUILD/DeskPals-arm64" "$BUILD/DeskPals-x86_64"
 lipo -info "$BUILD/DeskPals"
@@ -41,11 +51,12 @@ lipo -info "$BUILD/DeskPals"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BUILD/DeskPals" "$APP/Contents/MacOS/DeskPals"
 cp "$BUILD/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
-cp extension/desktop/claude-hook.js extension/desktop/ci-watch.js "$APP/Contents/Resources/"
+cp "$SRC/claude-hook.js" "$SRC/ci-watch.js" "$APP/Contents/Resources/"
 sed -e "s/__VERSION__/$VERSION/g" -e "s/__BUILD__/$VERSION/g" -e "s/__BUNDLE_ID__/$BUNDLE_ID/g" -e "s/__MIN_MACOS__/$MIN_MACOS/g" \
   packaging/mac/Info.plist > "$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
+if [ "$VARIANT" = public ]; then "$PY" -I tools/variant.py guard "$APP"; fi   # 執行檔、資源裡不能有同人字眼
 
 # ---------- 簽章 ----------
 NOTARIZE=0

@@ -513,7 +513,8 @@ namespace DeskPals
         public CuMeta Meta;
         public CuSprite Spr;
         public const string Mine = "mine";
-        public static readonly string[] Guests = { "boba", "coffee", "onigiri", "sticky", "spidey", "po", "stitch", "hangyodon", "tinky", "dipsy", "laalaa" };   // 可以來我的櫃作客的內建公仔
+        public static readonly string[] Guests = { "boba", "coffee", "onigiri", "sticky", "spidey", "po", "stitch", "hangyodon", "tinky", "dipsy", "laalaa" };   // 可以來我的櫃作客的內建公仔   //@fan
+        // <public> public static readonly string[] Guests = { "boba", "coffee", "onigiri", "sticky" };
 
         public static void CuReset() { all = null; }
         public static Pal GetBuiltin(string id) { if (all == null) return null; foreach (Pal p in all) if (p.Id == id && !p.Cu) return p; return null; }
@@ -1522,7 +1523,7 @@ namespace DeskPals
         public void CuReload(string pet)
         {
             CuStore.Reset(false);
-            if (lineup == Pal.Mine && !Pal.HasCustom()) { SwitchLineup(Pal.Classic, ""); return; }
+            if (lineup == Pal.Mine && !Pal.HasCustom()) { SwitchLineup(Pal.Fallback, ""); return; }
             if (lineup != Pal.Mine) return;
             // 跟 SwitchLineup 一樣，只是同一櫃也要重建（公仔的資料換了）
             AbortScene();

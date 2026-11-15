@@ -216,7 +216,7 @@ extension World {
 
     // 畫每一格：可愛的小桌面背景＋公仔照劇本動
     func ShareFrames(_ cast: List<Pal>, _ W0: Int, _ H0: Int, _ fps: Int, _ n: Int, _ caption: inout String!) -> List<[Int]> {
-        let pw = World(S, Pal.Classic)
+        let pw = World(S, Pal.Fallback)
         let pets = List<Pet>()
         var seed = 11
         for p in cast { pets.Add(Pet(pw, p, S, seed)); seed += 1 }

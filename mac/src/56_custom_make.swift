@@ -212,7 +212,7 @@ class CuMaker: Form {
         if m.Id == "" { m.Id = "cudraft" }
         if m.Name == "" { m.Name = "小公仔" }
         draft = Pal.MakeCu(m, spr)
-        if pvw == nil { pvw = World(w.S, Pal.Classic) }
+        if pvw == nil { pvw = World(w.S, Pal.Fallback) }
         pv = Pet(pvw, draft, w.S, 7)
     }
 

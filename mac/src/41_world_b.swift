@@ -408,7 +408,8 @@ extension World {
 
     func AbortScene() {
         scene = nil
-        for p in cast { p.InScene = false; p.ResetSceneProps() }
+        for p in cast { p.InScene = false; p.ResetSceneProps() }   //@fan
+        // <public> for p in cast { p.InScene = false }
         ClearProps()
         cast.Clear()
     }
@@ -443,7 +444,8 @@ extension World {
         if outs.Count < 2 { return }
         let free = List<Pet>()
         for p in outs { if p.Free() { free.Add(p) } }
-        if free.Count >= 3 && groupCd <= 0 && rnd.NextDouble() < (TubbyLineup && free.Count >= 4 ? 0.04 : 0.02) { groupCd = 600; if TubbyLineup { TubbyGroup(free.Count) } else if PikLineup { PikGroup(free.Count) } else if OrigLineup { OrigGroup(free.Count) } else if rnd.NextDouble() < 0.6 { GroupPhoto() } else { GroupHug() }; return }
+        if free.Count >= 3 && groupCd <= 0 && rnd.NextDouble() < (TubbyLineup && free.Count >= 4 ? 0.04 : 0.02) { groupCd = 600; if TubbyLineup { TubbyGroup(free.Count) } else if PikLineup { PikGroup(free.Count) } else if OrigLineup { OrigGroup(free.Count) } else if rnd.NextDouble() < 0.6 { GroupPhoto() } else { GroupHug() }; return }   //@fan
+        // <public> if free.Count >= 3 && groupCd <= 0 && rnd.NextDouble() < 0.02 { groupCd = 600; if OrigLineup { OrigGroup(free.Count) } else if rnd.NextDouble() < 0.6 { GroupPhoto() } else { GroupHug() }; return }
         var i = 0
         while i < free.Count {
             var j = i + 1
@@ -471,8 +473,9 @@ extension World {
     func PlayScene(_ key: String) {
         var ids = key.components(separatedBy: "-")
         if ids.count == 1 && (key == "photo" || key == "group") { GroupPhoto(); return }
-        if ids.count == 1 && PikLineup { PikScene(key); return }
+        if ids.count == 1 && PikLineup { PikScene(key); return }   //@fan
         if ids.count == 1 && OrigLineup { OrigScene(key); return }
+        // <fan>
         if ids.count == 1 {
             switch key {
             case "bighug": SceneBigHug(); return
@@ -484,6 +487,8 @@ extension World {
             }
             return
         }
+        // </fan>
+        // <public> if ids.count == 1 { return }
         if ids.count != 2 { return }
         ids.sort { $0.utf16.lexicographicallyPrecedes($1.utf16) }
         guard let a = Get(ids[0]), let b = Get(ids[1]) else { return }
@@ -493,7 +498,8 @@ extension World {
         pairCd[k2] = Now + 180 + rnd.NextDouble() * 120
         let d0: Double = a.Out && b.Out && a.state != "exit" && b.state != "exit" ? 0 : 1.6
         // 離太遠：先湊到一起再演
-        if TubbyLineup || PikLineup || OrigLineup { Later(d0) { [self] in GatherPair(k2, a, b, 0) }; return }
+        if TubbyLineup || PikLineup || OrigLineup { Later(d0) { [self] in GatherPair(k2, a, b, 0) }; return }   //@fan
+        // <public> if OrigLineup { Later(d0) { [self] in GatherPair(k2, a, b, 0) }; return }
         Later(d0) { [self] in
             if !Pets.Contains(a) || !Pets.Contains(b) { return }   // 中間換櫃了
             AbortScene()
@@ -524,6 +530,7 @@ extension World {
         // mac: C# 傳 null 進去會在 Begin 丟例外被 Later 吞掉；這裡少一隻就不演
         func g(_ id: String) -> Pet? { return Get(id) }
         switch key {
+        // <fan>
         case "hangyodon-spidey": if let x = g("spidey"), let y = g("hangyodon") { SceneHeroes(x, y) }
         case "po-spidey": if let x = g("spidey"), let y = g("po") { SceneSling(x, y) }
         case "spidey-stitch": if let x = g("spidey"), let y = g("stitch") { SceneClimbRace(x, y) }
@@ -537,92 +544,13 @@ extension World {
         case "po-tinky": if let x = g("po"), let y = g("tinky") { SceneScooterRide(x, y) }
         case "dipsy-po": if let x = g("po"), let y = g("dipsy") { SceneHatBaseball(x, y) }
         case "laalaa-po": if let x = g("laalaa"), let y = g("po") { SceneBallFetch(x, y) }
-        default: if PikLineup { PikPairScene(key) } else if OrigLineup { OrigPairScene(key) } else if a.P.Cu || b.P.Cu { CuPairScene(key, a, b) }
+        // </fan>
+        default: if PikLineup { PikPairScene(key) } else if OrigLineup { OrigPairScene(key) } else if a.P.Cu || b.P.Cu { CuPairScene(key, a, b) }   //@fan
+        // <public> default: if OrigLineup { OrigPairScene(key) } else if a.P.Cu || b.P.Cu { CuPairScene(key, a, b) }
         }
     }
 
     func Face(_ a: Pet, _ b: Pet) { a.FaceTo(b); b.FaceTo(a) }
-
-    // Spidey × 人魚漢頓：想當英雄的漢頓、鼓勵他的 Spidey
-    func SceneHeroes(_ s: Pet, _ h: Pet) {
-        Begin(s, h)
-        At(0) { [self] in Face(s, h); s.ScenePose("idle", 13); h.ScenePose("idle", 13); h.Say("你、你是真的英雄耶！", 2) }
-        At(2.1) { h.ScenePose("cape", 1.8); h.Say("我也想當英雄…可是我只有一件披風", 2.6) }
-        At(4.9) { s.ScenePose("hop", 0); s.Say("英雄不是看披風的", 2.2) }
-        At(7.2) { s.Say("你每天逗大家笑，已經是英雄了", 2.6) }
-        At(9.9) { h.Say("真、真的嗎？嗚嗚…", 1.8); h.Mark(4) }
-        At(11.6) { if s.Cx < h.Cx { s.dir = 1; h.dir = -1 } else { s.dir = -1; h.dir = 1 }; s.ScenePose("hero", 2.6); h.ScenePose("cape", 2.6); s.Say("英雄合體！", 2.4); h.Say("英雄合體！（好帥！）", 2.4) }
-        At(14.4) { }
-    }
-
-    // Spidey × 小波：用絲把小波（連車）甩上去
-    func SceneSling(_ s: Pet, _ po: Pet) {
-        Begin(s, po)
-        At(0) { [self] in Face(s, po); s.ScenePose("idle", 8); po.ScenePose("idle", 8); s.Say("小波，要不要飛高高？", 2) }
-        At(2.1) { po.ScenePose("wave", 1.2); po.Say("要要要！Eh-oh!", 1.6) }
-        At(3.5) { [self] in
-            s.SlingAt(po)
-            var best: Plat! = nil
-            for p in Plats { if Double(p.Top) < po.Foot - 80 * k && Double(p.Top) > po.Foot - 600 * k && Math.Abs(Double(p.Left + p.Right) / 2.0 - po.Cx) < 700 * k && p.Right - p.Left > po.SW * 2 { best = p; break } }
-            if best != nil { po.JumpTo(Math.Max(Double(best.Left + po.SW), Math.Min(Double(best.Right - po.SW), po.Cx)), Double(best.Top)) }
-            else { po.Jump(0, -820 * k) }
-            po.Say("咻～～～", 1.4)
-        }
-        At(5.6) { po.Say("再來一次！再來一次！", 2) }
-        At(7.8) { s.Say("……下次再說 😅", 1.8) }
-        At(9.5) { }
-    }
-
-    // Spidey × 史迪仔：比賽爬牆
-    func SceneClimbRace(_ s: Pet, _ st: Pet) {
-        Begin(s, st)
-        At(0) { [self] in Face(s, st); s.ScenePose("idle", 6); st.ScenePose("grin", 1.6); st.Say("ih! 史迪仔也會爬牆！", 1.8) }
-        At(1.9) { s.Say("喔？比賽啊！預備…", 1.6) }
-        At(3.4) { s.InScene = false; st.InScene = false; s.Act("climb"); st.Signature(); s.Say("開始！", 1) }
-        At(9) { [self] in if rnd.NextDouble() < 0.5 { st.Say("史迪仔贏了！嘻嘻嘻", 2) } else { s.Say("Spidey 贏了！Thwip!", 2) } }
-        At(9.2) { }
-    }
-
-    // 史迪仔 × 小波：偷騎滑板車
-    func SceneScooterThief(_ st: Pet, _ po: Pet) {
-        Begin(st, po)
-        At(0) { [self] in Face(st, po); po.ScenePose("idle", 10); st.ScenePose("grin", 1.2); st.Say("嘻嘻嘻…", 1.2) }
-        At(1.3) { [self] in
-            po.LoseScooter(true); st.RidingStolen = true
-            let away: Double = st.Cx > po.Cx ? 1 : -1
-            st.RaceTo(st.Cx + away * 260 * k)
-            st.Say("ih-ih-ih! 滑板車！", 1.6)
-        }
-        At(1.8) { po.Say("我的滑板車！", 2); po.WalkTo(st.Cx, 3) }
-        At(4.6) { st.ScenePose("idle", 6); st.FaceTo(po); st.Say("Ohana！一家人不會丟下任何人！", 2.6); st.RidingStolen = false; po.LoseScooter(false) }
-        At(5.2) { po.WalkTo(st.Cx + (po.Cx < st.Cx ? -1 : 1) * Double(st.SW) * 0.9, 1.5) }
-        At(7.4) { [self] in Face(st, po); st.ScenePose("hug", 2.4); po.ScenePose("hug", 2.4); po.Say("大抱抱！", 2.2) }
-        At(10) { }
-    }
-
-    // 史迪仔 × 人魚漢頓：「我們都是藍色的，是兄弟吧？」
-    func SceneBlueBrothers(_ st: Pet, _ h: Pet) {
-        Begin(st, h)
-        At(0) { [self] in Face(st, h); st.ScenePose("idle", 10); h.ScenePose("idle", 10); h.Say("我們都是藍色的，是兄弟吧？", 2.4) }
-        At(2.5) { st.Say("ih?（歪頭）", 1.2); st.Mark(2) }
-        At(3.8) { st.WalkTo(h.Cx + (st.Cx < h.Cx ? -1 : 1) * Double(h.SW) * 0.8, 1.0) }
-        At(5.0) { [self] in Face(st, h); st.ScenePose("lick", 1.4); st.Say("（舔）", 1.2); h.Mark(4) }
-        At(6.5) { h.Say("嘻嘻…好癢！這是兄弟的打招呼嗎？", 2.4) }
-        At(9.0) { st.ScenePose("hug", 2.4); h.ScenePose("hug", 2.4); st.Say("Ohana！", 2.2); h.Say("Ohana…我有家人了 ♥", 2.4) }
-        At(11.6) { }
-    }
-
-    // 小波 × 人魚漢頓：笑話讓小波笑了，漢頓超開心
-    func SceneJoke(_ po: Pet, _ h: Pet) {
-        Begin(po, h)
-        At(0) { [self] in Face(po, h); po.ScenePose("idle", 11); h.ScenePose("idle", 11); h.Say("小波，要聽笑話嗎？", 1.8) }
-        At(1.9) { po.ScenePose("wave", 1); po.Say("要！Eh-oh!", 1.4) }
-        At(3.4) { h.Say("為什麼魚不會打網球？…因為怕碰到網子！", 3) }
-        At(6.6) { po.ScenePose("hop", 0); po.Say("嘻嘻嘻！再來一次！再來一次！", 2.2) }
-        At(8.9) { h.ScenePose("cape", 2); h.Say("她笑了！有人笑了！我、我好開心！", 2.6); for _ in 0..<4 { h.Mark(5) } }
-        At(11.6) { [self] in Face(po, h); po.ScenePose("hug", 2.2); h.ScenePose("hug", 2.2); po.Say("大抱抱！", 2) }
-        At(14) { }
-    }
 
     // 三隻以上：大合照（排一排、閃光、笑一個）
     func GroupPhoto() {
@@ -631,7 +559,8 @@ extension World {
         if outs.Count < 2 { AllOut(); Later(2.5) { [self] in GroupPhoto() }; return }
         let l: Pet = Lead()
         Begin(outs.ToArray())
-        let gap: Double = TubbyLineup ? 1.9 : 1.6   // 天線寶寶比較寬（帽子、袋子、球）
+        let gap: Double = TubbyLineup ? 1.9 : 1.6   // 天線寶寶比較寬（帽子、袋子、球）   //@fan
+        // <public> let gap: Double = 1.6
         let foot = l.Foot
         var left = l.Cx - Double(outs.Count - 1) * Double(l.SW) * gap / 2
         var right = left + Double(outs.Count - 1) * Double(l.SW) * gap
@@ -645,18 +574,20 @@ extension World {
             let tx: Double = outs.Count == 1 ? L0 : L0 + (R0 - L0) * Double(i) / Double(outs.Count - 1)
             At(0.4 + Double(i) * 0.35) { [self] in
                 if Math.Abs(p.Foot - foot) < 3 && p.supH == l.supH && Math.Abs(tx - p.Cx) < 600 * k { p.WalkTo(tx, 10) }
-                else if p.P.Id == "hangyodon" { p.StartSwim(tx, foot, false) }
+                else if p.P.Id == "hangyodon" { p.StartSwim(tx, foot, false) }   //@fan
                 else { p.JumpTo(tx, foot) }
             }
         }
         At(5.2) {
             for p in outs {
                 p.dir = p.Cx < (L0 + R0) / 2 ? 1 : -1
-                if p.P.Id == "hangyodon" { p.ScenePose("cape", 3) } else if p.P.Id == "stitch" { p.ScenePose("grin", 3) } else if p.P.Id == "dipsy" { p.ScenePose("hattip", 3) } else { p.ScenePose("photo", 3) }
+                if p.P.Id == "hangyodon" { p.ScenePose("cape", 3) } else if p.P.Id == "stitch" { p.ScenePose("grin", 3) } else if p.P.Id == "dipsy" { p.ScenePose("hattip", 3) } else { p.ScenePose("photo", 3) }   //@fan
+                // <public> p.ScenePose("photo", 3)
             }
             l.Say("笑一個～ 3、2、1！", 1.6)
         }
         At(6.6) { [self] in Flash(Rectangle.FromLTRB(CInt(L0 - 120 * k), CInt(foot - 200 * k), CInt(R0 + 120 * k), CInt(foot + 20 * k))) }
+        // <fan>
         if TubbyLineup {
             // 天線寶寶一櫃：一隻一隻講（站很近，同時講泡泡會疊在一起）
             var d = 7.4
@@ -669,13 +600,16 @@ extension World {
             At(d + 0.4) { }
             return
         }
+        // </fan>
         At(7.4) {
             for p in outs {
                 switch p.P.Id! {
+                // <fan>
                 case "po": p.Say("再拍一次！", 1.8)
                 case "stitch": p.Say("Ohana！", 1.8)
                 case "hangyodon": p.Say("我有被拍進去嗎？嘴唇太大了嗎？", 1.8)
                 case "pkred", "pkyellow", "pkblue": p.Say("噗咿！", 1.8)
+                // </fan>
                 default: p.Say(p.P.Cu ? p.L("x_photo") : "帥！", 1.8)
                 }
             }
@@ -704,8 +638,8 @@ extension World {
 
     // 早上第一次：一隻一隻從櫃子跳出來點名
     func StartRollCall(_ ids: List<String>) {
-        if TubbyLineup { TubbyRollCall(ids); return }
-        if PikLineup { PikRollCall(ids); return }
+        if TubbyLineup { TubbyRollCall(ids); return }   //@fan
+        if PikLineup { PikRollCall(ids); return }   //@fan
         if OrigLineup { OrigRollCall(ids); return }
         var d = 0.4
         for id in ids {
@@ -719,23 +653,25 @@ extension World {
 
     // 下班了：輪流催你回家，然後一隻一隻回櫃子（人魚漢頓先在泡泡裡睡著）
     func NightRitual() {
-        if TubbyLineup { SceneByeBye(true); return }
-        if PikLineup { PikNight(true); return }
+        if TubbyLineup { SceneByeBye(true); return }   //@fan
+        if PikLineup { PikNight(true); return }   //@fan
         if OrigLineup { OrigNight(true); return }
         let outs = OutPets()
+        // <fan>
         // C# List.Sort（不穩定）；這裡穩定排序：人魚漢頓排第一
         let sorted = outs.ToArray().enumerated().sorted { a, b in
             let ka = a.element.P.Id == "hangyodon" ? 0 : 1, kb = b.element.P.Id == "hangyodon" ? 0 : 1
             return ka != kb ? ka < kb : a.offset < b.offset
         }.map { $0.element }
         outs.Clear(); for p in sorted { outs.Add(p) }
+        // </fan>
         Begin(outs.ToArray())
         for p in outs { if p.Grounded() { p.ScenePose("idle", 60) } }
         var d = 0.2
         for p in outs { let pp = p; At(d) { pp.Say(pp.L("nag"), 2.6) }; d += 2.8 }
         for p in outs {
             let pp = p
-            if pp.P.Id == "hangyodon" { At(d) { pp.InScene = false; pp.Act("sleep"); pp.InScene = true; pp.Say("我先在泡泡裡睡了…你也不要一個人待太晚喔", 2.6) }; d += 2.8 }
+            if pp.P.Id == "hangyodon" { At(d) { pp.InScene = false; pp.Act("sleep"); pp.InScene = true; pp.Say("我先在泡泡裡睡了…你也不要一個人待太晚喔", 2.6) }; d += 2.8 }   //@fan
             At(d) { pp.Say(pp.L("goodnight"), 2.4) }
             At(d + 1.2) { pp.InScene = false; if pp.Out { pp.StowToShelf(false) } }
             d += 2.6
@@ -796,9 +732,6 @@ extension World {
     }
     static let BASEBALL_ART = [".33.", "3433", "3343", ".33."]
     static let TOAST_ART = [".2222.", "211112", "2k11k2", "211112", "21kk12", ".2222."]
-    // 吸吸：原創的圓圓掃地小機器人（前面一根短短的吸管鼻子），兩格輪流＝輪子在轉
-    static let BOT_A = ["....kkkkkk......", "..kkvvvvvvkk....", ".kvvWvvvvvvvk...", ".kvkWvvkWvvvkkkk", "kvvkkvvkkvvvkvVk", "kvvvvvvvvvvvkkkk", "kVVVVVVVVVVVk...", ".kkkkkkkkkkkk...", "..kOk....kOk...."]
-    static let BOT_B = ["....kkkkkk......", "..kkvvvvvvkk....", ".kvvWvvvvvvvk...", ".kvkWvvkWvvvk...", "kvvkkvvkkvvvkkkk", "kvvvvvvvvvvvkvVk", "kVVVVVVVVVVVkkkk", ".kkkkkkkkkkkk...", "...kOk..kOk....."]
 
     func NewProp(_ a: [String], _ a2: [String]?, _ owner: Pal, _ ps: Int, _ x: Double, _ y: Double, _ spin: Bool) -> Prop {
         let p = Prop()
@@ -882,311 +815,6 @@ extension World {
         return [left, right, foot]
     }
 
-    // 照節目的順序：丁丁、迪西、拉拉、小波
-    func ShowOrder(_ l: List<Pet>) -> List<Pet> {
-        let o = List<Pet>()
-        for id in Pal.LineupIds(Pal.Teletubbies) { for p in l { if p.P.Id == id { o.Add(p) } } }
-        for p in l { if !o.Contains(p) { o.Add(p) } }
-        return o
-    }
-
-    func TubbyGroup(_ n: Int) {
-        let r = rnd.NextDouble()
-        if n >= 4 {
-            if r < 0.30 { SceneBigHug() } else if r < 0.50 { SceneSing() } else if r < 0.70 { SceneToast() } else if r < 0.85 { SceneFall() } else { GroupPhoto() }
-        } else {
-            if r < 0.25 { SceneSing() } else if r < 0.50 { SceneToast() } else if r < 0.70 { SceneFall() } else if r < 0.90 { GroupPhoto() } else { SceneBigHug() }
-        }
-    }
-
-    // ---------- 丁丁 × 迪西：帽子借我戴 ----------
-    func SceneHatSwap(_ ti: Pet, _ di: Pet) {
-        Begin(ti, di)
-        At(0) { [self] in Face(ti, di); ti.ScenePose("idle", 30); di.ScenePose("hattip", 1.8); ti.Say("迪西，你的帽子好好看喔…", 2.2) }
-        At(2.3) { ti.Say("可以借丁丁戴一下嗎？", 2); ti.AddHeart() }
-        At(4.4) { di.ScenePose("idle", 30); di.Say("不行。這是我的帽子。", 2) }
-        At(6.5) { ti.ScenePose("hug", 1.8); ti.Say("拜託～一下下就好", 1.8) }
-        At(8.5) { [self] in
-            di.Say("……好啦，一下下喔。", 1.8)
-            di.LendHat(true)
-            Toss(Pal.Get("dipsy").Art["HAT"], Pal.Get("dipsy"), di.HatPoint(), ti.HatPoint(), 0.7, 70 * k, true, 0) { ti.WearHat = true; ti.Burst(6) }
-        }
-        At(9.6) { ti.ScenePose("dance", 3); ti.Say("我是迪西！嘿～嘿～", 2.4) }
-        At(10.4) { di.Say("（頭頂涼涼的）", 1.8); di.Mark(2) }
-        At(12.7) { [self] in
-            ti.ScenePose("plop", 1.8); ti.Say("哎喲！", 1.4)
-            ti.WearHat = false
-            Toss(Pal.Get("dipsy").Art["HAT"], Pal.Get("dipsy"), ti.HatPoint(), di.HatPoint(), 0.75, 90 * k, true, 0) { di.LendHat(false) }
-        }
-        At(14.2) { di.ScenePose("hattip", 2); di.Say("還是我戴最帥。", 2) }
-        At(16.4) { [self] in Face(ti, di); ti.ScenePose("hug", 2.4); di.ScenePose("hug", 2.4); ti.Say("大抱抱！", 2.2); di.Say("…大抱抱。", 2.2) }
-        At(19) { }
-    }
-
-    // ---------- 丁丁 × 拉拉：球滾進魔法袋 ----------
-    func SceneBallBag(_ ti: Pet, _ la: Pet) {
-        Begin(ti, la)
-        let ball: [String] = la.P.Art["BALL"]
-        At(0) { [self] in Face(ti, la); ti.ScenePose("idle", 30); la.ScenePose("juggle", 2.6); la.Say("丁丁看！拉拉的球～啦啦啦", 2.4) }
-        At(2.8) { [self] in
-            la.ScenePose("kick", 0.5); la.Say("踢～！", 1); la.LoseBall(true)
-            ti.ScenePose("bag:", 3.4)
-            Toss(ball, la.P, la.FootPoint(), ti.BagPoint(), 0.8, 90 * k, false, 0) { ti.Say("喔？（咕嘟）", 1.2); ti.Mark(2) }
-        }
-        At(5.0) { la.ScenePose("idle", 30); la.Say("咦？我的球呢？", 1.8); la.Mark(2) }
-        At(7.0) { ti.ScenePose("bag:toast", 2.4); ti.Say("丁丁找找看…", 1.2) }
-        At(8.2) { ti.Say("是吐司！", 1.6) }
-        At(9.8) { la.Say("不是這個啦～", 1.8) }
-        At(11.6) { ti.ScenePose("bag:ball", 2.2); ti.Say("再找找…", 1.2) }
-        At(12.8) { ti.Say("找到了！", 1.4) }
-        At(13.85) { [self] in
-            var a = ti.BagPoint(); a.Y -= Double(6 * S)
-            Toss(ball, la.P, a, la.HandPoint(), 0.7, 70 * k, false, 0) { la.LoseBall(false); la.ScenePose("twirl", 1.6); la.Say("再來一次！再來一次！", 2) }
-        }
-        At(16.6) { [self] in Face(ti, la); ti.ScenePose("hug", 2.4); la.ScenePose("hug", 2.4); ti.Say("大抱抱！", 2.2); la.Say("大抱抱！", 2.2) }
-        At(19.2) { }
-    }
-
-    // ---------- 迪西 × 拉拉：跳舞比賽，最後一起唱 ----------
-    func SceneDanceOff(_ di: Pet, _ la: Pet) {
-        Begin(di, la)
-        At(0) { [self] in Face(di, la); di.ScenePose("idle", 30); la.ScenePose("idle", 30); di.Say("拉拉，來比跳舞。", 2) }
-        At(2.2) { di.ScenePose("dance", 2.6); di.Say("嘿～嘿～（帽子跟著晃）", 2.4) }
-        At(5.0) { di.ScenePose("idle", 30); la.ScenePose("twirl", 2.2); la.Say("換我！啦啦啦～", 2.2) }
-        At(7.5) { la.ScenePose("idle", 30); di.ScenePose("hattoss", 1.6); di.Say("帽子戲法！", 1.6) }
-        At(9.4) { la.ScenePose("juggle", 2.7); la.Say("球球戲法！1、2、3～", 2.4) }
-        At(12.3) { di.ScenePose("dance", 3); la.ScenePose("dance", 3); la.Say("一起跳！啦啦啦～♪", 2.6); di.Say("嘿～♪", 1.6); di.Mark(0); la.Mark(0) }
-        At(15.5) { [self] in Face(di, la); di.ScenePose("wave", 1.8); la.ScenePose("wave", 1.8); di.Say("Eh-oh.", 1.6); la.Say("Eh-oh!", 1.6) }
-        At(17.6) { }
-    }
-
-    // ---------- 小波 × 丁丁：借騎滑板車，太大了跌坐 ----------
-    func SceneScooterRide(_ po: Pet, _ ti: Pet) {
-        Begin(po, ti)
-        At(0) { [self] in Face(po, ti); po.ScenePose("idle", 30); ti.ScenePose("idle", 30); ti.Say("小波，丁丁可以騎你的滑板車嗎？", 2.4) }
-        At(2.5) { po.ScenePose("wave", 1.2); po.Say("好啊！Eh-oh!", 1.6) }
-        At(4.0) { [self] in
-            po.LendScooter(true); ti.RidingPo = true
-            let away: Double = ti.Cx > po.Cx ? 1 : -1
-            let wa = WA(ti.Cx, ti.Foot - 4)
-            ti.RaceTo(World.Mid(ti.Cx + away * 200 * k, Double(wa.Left + ti.SW), Double(wa.Right - ti.SW)))
-            ti.Say("嘟嘟～丁丁騎車車！", 1.8)
-        }
-        At(6.4) { ti.Say("哎…哎…好晃…", 1.4); ti.Mark(4) }
-        At(7.8) { ti.RidingPo = false; po.LendScooter(false); ti.ScenePose("plop", 1.8); ti.Say("哎喲！", 1.4) }
-        At(9.2) { po.ScenePose("hop", 0); po.Say("再來一次！再來一次！", 2) }
-        At(11.4) { ti.Say("…丁丁太大了啦，嘻嘻", 2) }
-        At(13.2) { po.WalkTo(ti.Cx + (po.Cx < ti.Cx ? -1 : 1) * Double(ti.SW) * 0.9, 1.5) }
-        At(15.2) { [self] in Face(po, ti); po.ScenePose("hug", 2.4); ti.ScenePose("hug", 2.4); po.Say("大抱抱！", 2.2); ti.Say("大抱抱！", 2.2) }
-        At(17.8) { }
-    }
-
-    // ---------- 小波 × 迪西：棒球用帽子頂、用帽子接 ----------
-    func SceneHatBaseball(_ po: Pet, _ di: Pet) {
-        Begin(po, di)
-        At(0) { [self] in Face(po, di); po.ScenePose("idle", 30); di.ScenePose("idle", 30); po.Say("迪西，接球！", 1.6) }
-        At(1.6) { po.ScenePose("bat", 0) }
-        At(1.85) { [self] in
-            var top = di.HatPoint(); top.Y -= Double(4 * S)
-            Toss(World.BASEBALL_ART, po.P, po.HandPoint(), top, 0.7, 60 * k, false, 0) { [self] in
-                di.ScenePose("header", 0.6); di.Say("帽子頂！", 1.2)
-                var t2 = di.HatPoint(); t2.Y -= Double(4 * S)
-                Toss(World.BASEBALL_ART, po.P, t2, po.HandPoint(), 0.8, 80 * k, false, 0) { po.ScenePose("catch", 0.7); po.Say("好球！", 1.4) }
-            }
-        }
-        At(5.4) { po.Say("這次全壘打！", 1.4) }
-        At(6.6) { po.ScenePose("bat", 0); di.ScenePose("hatwave", 3.2) }
-        At(6.85) { [self] in
-            let hx: Double = di.Cx + Double(di.dir * 5 * S)
-            let hy: Double = di.Foot - Double(di.SH) + Double((di.P.BodyTop - 5) * S)
-            let hand = PointF(hx, hy)
-            Toss(World.BASEBALL_ART, po.P, po.HandPoint(), hand, 1.1, 170 * k, false, 0) { di.Say("（用帽子接住）酷。", 2); di.Burst(6) }
-        }
-        At(10.4) { po.ScenePose("hop", 0); po.Say("再來一次！再來一次！", 2) }
-        At(12.6) { di.ScenePose("hattip", 1.8); di.Say("好啦，明天再來一次。", 2) }
-        At(14.8) { [self] in Face(po, di); po.ScenePose("wave", 1.8); di.ScenePose("wave", 1.8); po.Say("Eh-oh!", 1.6); di.Say("Eh-oh.", 1.6) }
-        At(16.8) { }
-    }
-
-    // ---------- 拉拉 × 小波：踢球、小波騎車去撿 ----------
-    func SceneBallFetch(_ la: Pet, _ po: Pet) {
-        Begin(la, po)
-        let ball: [String] = la.P.Art["BALL"]
-        // C# 的 tx／lying 是被 lambda 抓住的區域變數（共用）：用一個小盒子裝
-        final class Box { var tx: Double = 0; var lying: Prop? = nil }
-        let bx = Box()
-        bx.tx = po.Cx
-        At(0) { [self] in Face(la, po); la.ScenePose("idle", 30); po.ScenePose("idle", 30); la.Say("小波！我們來踢球！", 2) }
-        At(2.0) { po.ScenePose("wave", 1.0); po.Say("好！Eh-oh!", 1.4) }
-        At(3.4) { [self] in
-            la.ScenePose("kick", 0.5); la.Say("踢～！", 1); la.LoseBall(true)
-            let wa = WA(la.Cx, la.Foot - 4)
-            let side: Double = po.Cx >= la.Cx ? 1 : -1
-            bx.tx = World.Mid(po.Cx + side * 220 * k, Double(wa.Left + po.SW), Double(wa.Right - po.SW))
-            bx.lying = Toss(ball, la.P, la.FootPoint(), PointF(bx.tx, la.Foot - 3.5 * Double(S)), 1.0, 130 * k, false, 30, nil)
-        }
-        At(3.9) { po.RaceTo(bx.tx); po.Say("我去撿！嘟嘟～", 1.6) }
-        At(6.4) { [self] in RemoveProp(bx.lying); po.FaceTo(la); po.Say("找到了！", 1.4) }
-        At(7.2) { [self] in Toss(ball, la.P, po.HandPoint(), la.HandPoint(), 0.9, 110 * k, false, 0) { la.LoseBall(false); la.ScenePose("twirl", 1.6); la.Say("再來一次！", 1.6); po.Say("再來一次！", 1.6) } }
-        At(9.8) { po.WalkTo(la.Cx + (po.Cx < la.Cx ? -1 : 1) * Double(la.SW) * 1.0, 1.5) }
-        At(12.0) { [self] in Face(la, po); la.ScenePose("hug", 2.4); po.ScenePose("hug", 2.4); la.Say("大抱抱！", 2.2); po.Say("大抱抱！", 2.2) }
-        At(14.6) { }
-    }
-
-    // ---------- 大家：大抱抱 ----------
-    func SceneBigHug() {
-        let outs = OutPets()
-        if outs.Count < 2 { AllOut(); Later(2.5) { [self] in SceneBigHug() }; return }
-        let l: Pet = Lead()
-        Begin(outs.ToArray())
-        let lr = LineUp(ShowOrder(outs), l, 1.05)
-        let all4 = outs.Count >= 4
-        At(0) { l.Say(all4 ? "大家都到齊了！" : "大家過來～", 1.8) }
-        At(4.8) {
-            for p in outs { p.dir = p.Cx < (lr[0] + lr[1]) / 2 ? 1 : -1; p.ScenePose("hug", 3.4); p.Burst(5) }
-            l.Say(all4 ? "四個一起，大～抱抱！" : "大抱抱！", 2.6)
-        }
-        At(8.6) { for p in outs { p.ScenePose("wave", 1.6) }; l.Say("Eh-oh! ♥", 1.6) }
-        At(10.4) { }
-    }
-
-    static func SingLine(_ p: Pet) -> String {
-        switch p.P.Id! {
-        case "tinky": return "啦～啦～（丁丁跳舞）"
-        case "dipsy": return "嘿～嘿～（打拍子）"
-        case "laalaa": return "啦啦啦～♪"
-        case "po": return "啦啦！再來一次！"
-        default: break
-        }
-        return "♪～"
-    }
-
-    // ---------- 大家：拉拉起頭，一隻一隻加入唱歌跳舞 ----------
-    func SceneSing() {
-        let outs = OutPets()
-        if outs.Count < 2 { AllOut(); Later(2.5) { [self] in SceneSing() }; return }
-        let la = Get("laalaa")
-        let starter: Pet = la != nil && la!.Out && outs.Contains(la!) ? la! : Lead()
-        Begin(outs.ToArray())
-        LineUp(ShowOrder(outs), Lead(), 1.8)
-        At(0) { starter.Say("大家過來～我們來唱歌！", 2) }
-        At(4.6) { for p in outs { p.FaceTo(starter); p.ScenePose("idle", 30) }; starter.ScenePose("sing", 30); starter.Say("啦啦啦～大家一起唱！♪", 2.4) }
-        var d = 7.2
-        for p in ShowOrder(outs) {
-            if p === starter { continue }
-            let pp = p
-            At(d) { pp.ScenePose(pp.P.Id == "po" ? "spin" : "dance", 30); pp.Say(World.SingLine(pp), 2); pp.Mark(0) }
-            d += 1.9
-        }
-        At(d + 0.4) { for p in outs { p.ScenePose(p.P.Id == "laalaa" ? "twirl" : "dance", 2.6); p.Mark(0); p.Mark(0) }; starter.Say("啦啦啦～大家一起～♪", 2.4) }
-        At(d + 3.2) { for p in outs { p.ScenePose("wave", 1.6) }; starter.Say("再來一次！", 1.6) }
-        At(d + 5.0) { }
-    }
-
-    // ---------- 大家：一、二、三，一起跌倒「哎喲！」 ----------
-    func SceneFall() {
-        let outs = OutPets()
-        if outs.Count < 2 { AllOut(); Later(2.5) { [self] in SceneFall() }; return }
-        let l: Pet = Lead()
-        Begin(outs.ToArray())
-        LineUp(ShowOrder(outs), l, 1.6)
-        At(0) { l.Say("大家排好～", 1.6) }
-        At(4.6) { for p in outs { p.ScenePose("idle", 30) }; l.Say("大家一起…一、二、三！", 2) }
-        At(6.6) { for p in outs { p.ScenePose("hop", 0) } }
-        At(7.3) { for p in outs { p.ScenePose("plop", 2.2); p.Mark(4) }; l.Say("哎喲！", 1.4) }
-        At(9.5) { for p in outs { p.ScenePose("idle", 30) }; l.Say("嘻嘻嘻～大家都跌倒了", 1.8) }
-        At(11.4) { l.Say("再來一次！", 1.6); for p in outs { p.ScenePose("hop", 0) } }
-        At(12.8) { }
-    }
-
-    // ---------- 大家：吐司時間（吐司彈出來，屑屑掉滿地，吸吸來打掃）----------
-    func SceneToast() {
-        let outs = OutPets()
-        if outs.Count < 2 { AllOut(); Later(2.5) { [self] in SceneToast() }; return }
-        let l: Pet = Lead()
-        Begin(outs.ToArray())
-        let order = ShowOrder(outs)
-        let lr = LineUp(order, l, 1.75)
-        let cx = (lr[0] + lr[1]) / 2, foot = lr[2]
-        At(0) { l.Say("吐司時間！🍞", 1.8) }
-        At(4.2) { for p in outs { p.FaceTo(l); p.ScenePose("idle", 30) }; l.Say("吐司！吐司！吐司！", 2) }
-        var d = 4.6
-        for p in order {
-            let pp = p
-            At(d) { [self] in
-                Toss(World.TOAST_ART, pp.P, PointF(cx, foot - 2 * Double(S)), pp.HandPoint(), 0.75, 170 * k, true, 0) { pp.HoldToast = true; pp.Say("吐司！", 0.65) }
-            }
-            d += 0.7
-        }
-        At(d + 0.8) { l.Say("好好吃～屑屑掉滿地了", 2) }
-        At(d + 3.0) { order[order.Count - 1].Say("糟糕…要打掃了！", 1.8) }
-        At(d + 3.6) { [self] in StartBot(cx, foot) }
-        At(d + 4.6) { order[0].Say("吸吸來了！", 1.6); for p in outs { p.Mark(1) } }
-        At(d + 6.8) { for p in outs { p.HoldToast = false; p.ClearCrumbs() }; l.Say("吸～吸～好乾淨！", 2) }
-        At(d + 9.4) { for p in outs { p.ScenePose("wave", 1.6) }; l.Say("吸吸，謝謝你！Eh-oh!", 2) }
-        At(d + 11.6) { }
-    }
-
-    // 吸吸：從比較近的螢幕邊滾進來，在大家腳邊來回吸，再滾出去
-    func StartBot(_ cx: Double, _ foot: Double) {
-        if Hidden { return }
-        let wa = WA(cx, foot - 4)
-        let ps = Math.Max(2, S * 3 / 4)
-        let fromLeft = cx - Double(wa.Left) < Double(wa.Right) - cx
-        let sx: Double = fromLeft ? Double(wa.Left - 8 * ps) : Double(wa.Right + 8 * ps)
-        let ex: Double = fromLeft ? Double(wa.Right + 10 * ps) : Double(wa.Left - 10 * ps)
-        let by: Double = foot - 4.5 * Double(ps) - Double(Math.Max(1, ps / 3))
-        let owner = Pal.Get("tinky")!
-        let b = NewProp(World.BOT_A, World.BOT_B, owner, ps, sx, by, false)
-        let sweep = 90 * k, side: Double = fromLeft ? 1 : -1
-        let t1 = Math.Min(3.0, Math.Abs(cx - sx) / (260 * k) + 0.6)
-        b.Go(cx - side * sweep, by, t1, 0, nil)
-         .Go(cx + side * sweep, by, 1.4, 0, nil)
-         .Go(cx - side * sweep * 0.5, by, 1.0, 0, nil)
-         .Go(cx + side * sweep * 0.3, by, 0.7, 0, nil)
-         .Go(ex, by, Math.Min(3.0, Math.Abs(ex - cx) / (260 * k) + 0.6), 0, nil)
-        b.Hold = 0
-    }
-
-    // ---------- 早上點名：丁丁！迪西！拉拉！小波！天線寶寶，Eh-oh! ----------
-    func TubbyRollCall(_ ids: List<String>) {
-        let order = List<Pet>()
-        for id in Pal.LineupIds(lineup) { if ids.Contains(id) && Get(id) != nil { order.Add(Get(id)!) } }
-        var d = 0.4
-        for p in order {
-            let pp = p
-            Later(d) { [self] in if !pp.Out { BringOut(pp, false) } }
-            Later(d + 0.7) { pp.Say(pp.P.Name + "！", 1.8) }
-            d += 1.5
-        }
-        Later(d + 0.8) { [self] in
-            for p in order { if p.Out && p.Grounded() { p.ScenePose("wave", 1.8); p.Say("Eh-oh!", 2) } }
-            if order.Count > 0 { Lead().Say("天線寶寶，Eh-oh! ☀", 2.6) }
-        }
-    }
-
-    // ---------- 天線寶寶說再見：一隻一隻揮手回櫃子；最後從櫃子裡再說一次再見 ----------
-    func SceneByeBye(_ night: Bool) {
-        let outs = ShowOrder(OutPets())
-        if outs.Count == 0 { let l0: Pet = Lead(); l0.Say("天線寶寶說再見！再見～", 3); return }
-        let lead: Pet = Lead()
-        Begin(outs.ToArray())
-        for p in outs { if p.Grounded() { p.ScenePose("idle", 60) } }
-        var d = 0.2
-        if night { for p in outs { let pp = p; At(d) { pp.Say(pp.L("nag"), 2.6) }; d += 2.8 } }
-        At(d) { lead.Say("天線寶寶，說再見的時間到了～", 2.6) }
-        d += 2.8
-        for p in outs {
-            let pp = p
-            At(d) { pp.ScenePose("wave", 2.2); pp.Say(pp.P.Name + "說再見！👋", 2.2) }
-            At(d + 1.7) { pp.InScene = false; if pp.Out { pp.StowToShelf(false) } }
-            d += 2.6
-        }
-        let last = outs[outs.Count - 1]
-        At(d + 0.4) { last.Say("天線寶寶說再見！再見～", 3) }
-        At(d + 3.8) { [self] in let po: Pet = Get("po") ?? last; po.Say("……再見～（偷偷揮手）", 2.2) }
-        At(d + 6.2) { }
-    }
 }
 
 // ================= 離屏測試模式（DESKPALS_OFFSCREEN=1）=================
@@ -1227,7 +855,7 @@ extension World {
         if ballF != nil && ballF.VVisible { ballF.PaintTo(g) }
         if fx != nil && fx.VVisible { fx.PaintTo(g) }
         for p in Pets { if p.Bub != nil && p.Bub.VVisible { p.Bub.PaintTo(g) } }
-        if flowerBub != nil && flowerBub.VVisible { flowerBub.PaintTo(g) }
+        if flowerBub != nil && flowerBub.VVisible { flowerBub.PaintTo(g) }   //@fan
         if flash != nil && flash.VVisible { flash.PaintTo(g) }
         if setupForm != nil && !setupForm.IsDisposed && setupForm.VVisible { setupForm.PaintTo(g) }
         StudySnap(g)

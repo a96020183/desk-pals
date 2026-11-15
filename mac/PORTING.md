@@ -33,6 +33,7 @@ mac/
     55_custom_image.swift DeskPals.CustomImage.cs（CuCut／CuImg：解碼、去背、像素化）
     56_custom_make.swift  DeskPals.CustomMake.cs（CuMaker 做公仔視窗、拖放、開檔／存檔、`custom …` 測試指令）
     57_share.swift      DeskPals.Share.cs（分享短片 GIF89a 編碼器、`.deskpal` 匯出匯入）
+    58_fan.swift        DeskPals.Fan.cs（經典一櫃、天線寶寶一櫃的 Pal 資料、專屬動作、串場；個人版才有）
     03_shim_custom_a.swift / 04_shim_custom_b.swift  做公仔用到的 shim（Matrix、ColorMatrix 像素處理、拖放、NSOpenPanel／NSSavePanel）
 ```
 (Line numbers above are from the first port and drift as the C# grows — find your range by the section comments.)
@@ -208,3 +209,11 @@ The table below is the porting map that was used (C# file → Mac approach). CI 
 
 Hooks in DeskPals.cs are one-liners (`P.Cu ? … : …`, `if (P.Cu) { CuXxx(); return; }`), next to the existing `P.Pik` hooks — port them in the same places.
 `SetupForm` changed: two steps (選公仔 with the "把你家的貓狗變成桌面公仔" hero card + 匯入, 怎麼擺 with 只要一隻 first); the old 你是？(student/work) step and `World.Student` are gone; first run with no `mode.txt` defaults to 只要一隻.
+
+## 公開版（`python3 mac/assemble.py --public`）
+
+公開版（上架、公開下載）不帶粉絲作品：`50_pikmin.swift`、`58_fan.swift` 整個檔案不組進去，其他檔案裡跟 C# 一樣的標記照 `tools/variant.py`
+的規則處理（`// <fan>`…`// </fan>` 整段拿掉、行尾 `//@fan` 那行拿掉、`// <public> …` 換上）。C# 那邊加了標記的地方，Swift 對應的地方也要標；
+Swift 沒有 C# 的 `else` 單獨一行的寫法問題，但拿掉 `if` 之後剩下的 `{ … }` 會變成 closure，要寫成 `do { … }`。
+輸出 `build/public/extension/desktop/DeskPals.swift`（不進 repo）；CI 會編譯它並跑離屏測試。
+

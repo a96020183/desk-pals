@@ -1226,6 +1226,7 @@ namespace DeskPals
         static string ExamPrefix(string id)
         {
             string cu = CuStudy(id, "x_exam_prefix", null, null, null); if (cu != null) return cu;   // 自己做的公仔（DeskPals.Custom.cs）
+            // <fan>
             switch (id)
             {
                 case "spidey": return "蜘蛛感應：";
@@ -1235,12 +1236,15 @@ namespace DeskPals
                 case "dipsy": return "嘿，";
                 case "laalaa": return "啦啦～";
             }
-            return id.StartsWith("pk") ? "皮克敏報告：" : "";
+            // </fan>
+            return id.StartsWith("pk") ? "皮克敏報告：" : "";   //@fan
+            // <public> return "";
         }
 
         static string ExamTail(string id)
         {
             string cu = CuStudy(id, "x_exam_tail", null, null, null); if (cu != null) return cu;
+            // <fan>
             switch (id)
             {
                 case "po": return "小波陪你讀書！";
@@ -1250,7 +1254,9 @@ namespace DeskPals
                 case "dipsy": return "讀一點，很酷。";
                 case "laalaa": return "邊讀邊唱～啦啦";
             }
-            return id.StartsWith("pk") ? "皮克敏幫你搬課本！" : "今天讀一點？";
+            // </fan>
+            return id.StartsWith("pk") ? "皮克敏幫你搬課本！" : "今天讀一點？";   //@fan
+            // <public> return "今天讀一點？";
         }
 
         // ================= 熬夜提醒（預設 01:00 起；02:00、03:00 再講；06:00 結束；離開電腦 15 分鐘就當你睡了）=================
@@ -1298,6 +1304,7 @@ namespace DeskPals
             string[] a;
             switch (id)
             {
+                // <fan>
                 case "spidey": a = new string[] { "已經 " + hm + " 了…蜘蛛也要睡覺的，今天先到這裡？🌙", hm + " 了。熬夜的英雄明天會變殭屍，存檔去睡吧", hm + "！！蜘蛛感應：你真的該睡了 😴 剩下的明天再做" }; break;
                 case "po": a = new string[] { "嗚…" + hm + " 了，小波好睏…你也去睡覺覺好不好 🌙", hm + " 了！太陽寶寶都睡好久了，關電腦吧～", hm + " 了…小波撐不住了，一起去睡嘛 😴" }; break;
                 case "stitch": a = new string[] { hm + " 了…史迪仔想睡了，你也睡 🌙", hm + "！ih! 睡覺！明天再玩！", hm + "！！再不睡史迪仔要拔電源線了喔 😴" }; break;
@@ -1305,9 +1312,11 @@ namespace DeskPals
                 case "tinky": a = new string[] { hm + " 了…丁丁抱著袋袋想睡覺覺 🌙", hm + " 了！天線寶寶說：該睡覺囉～", hm + " 了…丁丁跌坐在枕頭上了，你也去睡 😴" }; break;
                 case "dipsy": a = new string[] { hm + "。很晚了，帽子拉低，該睡了 🌙", hm + "。熬夜不酷，睡覺比較酷。", hm + "。真的，去睡。😴" }; break;
                 case "laalaa": a = new string[] { hm + " 了…拉拉唱搖籃曲給你聽～啦…啦… 🌙", hm + " 了！球球都睡了，你也睡吧～", hm + " 了…啦…（打哈欠）一起去睡嘛 😴" }; break;
+                // </fan>
                 default:
-                    if (id.StartsWith("pk")) a = new string[] { hm + " 了…皮克敏都回洋蔥睡了 🌙", hm + " 了，夜晚很危險，快回基地睡覺！", hm + " 了！！再不睡天就亮了 😴" };
-                    else a = new string[] { "已經 " + hm + " 了，今天先到這裡好嗎？早點休息 🌙", hm + " 了，明天會很累喔，存檔去睡吧", hm + " 了！真的該睡了 😴" };
+                    if (id.StartsWith("pk")) a = new string[] { hm + " 了…皮克敏都回洋蔥睡了 🌙", hm + " 了，夜晚很危險，快回基地睡覺！", hm + " 了！！再不睡天就亮了 😴" };   //@fan
+                    else a = new string[] { "已經 " + hm + " 了，今天先到這裡好嗎？早點休息 🌙", hm + " 了，明天會很累喔，存檔去睡吧", hm + " 了！真的該睡了 😴" };   //@fan
+                    // <public> a = new string[] { "已經 " + hm + " 了，今天先到這裡好嗎？早點休息 🌙", hm + " 了，明天會很累喔，存檔去睡吧", hm + " 了！真的該睡了 😴" };
                     break;
             }
             return a[Math.Max(0, Math.Min(2, lv))];
@@ -1335,6 +1344,7 @@ namespace DeskPals
             string[] a;
             switch (id)
             {
+                // <fan>
                 case "po": a = new string[] { "🎒 小波提醒你上課：", "🎒 上課囉！Eh-oh!", "📚 要考試了，小波幫你加油：", "📚 考試！小波陪你：", "等一下有事喔：", "時間到囉：", "📝 小波提醒你寫作業：", "📝 嗚～快截止了：" }; break;
                 case "stitch": a = new string[] { "🎒 ih! 要上課：", "🎒 上課！快去！", "📚 要考試！ih-ih!", "📚 考試！史迪仔幫你集氣：", "等等有事！", "開始了！", "📝 ih! 作業：", "📝 ih-ih-ih! 快截止：" }; break;
                 case "hangyodon": a = new string[] { "🎒 英雄提醒：要上課了", "🎒 上課時間到了：", "📚 英雄報告：要考試了", "📚 考試開始，你就是英雄：", "等一下有行程喔：", "行程開始了：", "📝 英雄提醒你：", "📝 交給我這個英雄…快截止了：" }; break;
@@ -1342,6 +1352,7 @@ namespace DeskPals
                 case "dipsy": a = new string[] { "🎒 要上課了：", "🎒 上課了，走吧：", "📚 要考試了，冷靜：", "📚 考試開始，酷：", "等等有事：", "開始了：", "📝 作業：", "📝 快截止了，帽子扶好：" }; break;
                 case "laalaa": a = new string[] { "🎒 拉拉提醒你上課：", "🎒 上課囉！啦～", "📚 要考試了，拉拉幫你加油：", "📚 考試！啦啦加油：", "等一下有事喔：", "時間到囉：", "📝 拉拉提醒你寫作業：", "📝 啦！快截止了：" }; break;
                 case "spidey": a = new string[] { "🎒 要上課囉：", "🎒 上課時間！", "📚 蜘蛛感應！要考試了：", "📚 考試開始！", "等一下有行程：", "行程開始了：", "📝 作業提醒：", "📝 蜘蛛感應！快截止了：" }; break;
+                // </fan>
                 default: a = new string[] { "🎒 要上課囉：", "🎒 上課時間！", "📚 要考試了：", "📚 考試開始！", "等一下有行程：", "行程開始了：", "📝 作業提醒：", "📝 快截止了：" }; break;
             }
             return a[i];
@@ -1355,6 +1366,7 @@ namespace DeskPals
             string[] a;
             switch (id)
             {
+                // <fan>
                 case "spidey": a = new string[] { "🎓 " + n + " 還有 " + h + "開放選課！先登入、志願序排好", "🎓 " + n + " 再 30 分鐘開放，選課頁先開好、課號抄好", "🎓 " + n + " 剩 10 分鐘！蜘蛛感應全開", "🎓 準備！手指放在加選按鈕上", "🎓 開放了！！快加選！Thwip!" }; break;
                 case "po": a = new string[] { "🎓 " + n + " 還有 " + h + "開放選課！先登入、志願排好喔", "🎓 " + n + " 再 30 分鐘！課號先抄好，小波陪你等", "🎓 " + n + " 剩 10 分鐘！好緊張～", "🎓 準備！深呼吸～", "🎓 開放了！！衝衝衝！" }; break;
                 case "stitch": a = new string[] { "🎓 " + n + " 還有 " + h + "開放選課！先登入！ih!", "🎓 " + n + " 30 分鐘！課號抄好，史迪仔幫你顧著", "🎓 " + n + " 10 分鐘！ih-ih-ih!", "🎓 準備！史迪仔也準備好了", "🎓 開放了！！衝啊！" }; break;
@@ -1362,9 +1374,11 @@ namespace DeskPals
                 case "tinky": a = new string[] { "🎓 " + n + " 還有 " + h + "開放選課！先登入喔", "🎓 " + n + " 再 30 分鐘！丁丁陪你等", "🎓 " + n + " 剩 10 分鐘！魔法袋準備好了", "🎓 準備！深呼吸～", "🎓 開放了！！衝衝衝！" }; break;
                 case "dipsy": a = new string[] { "🎓 " + n + " 還有 " + h + "開放選課，先登入", "🎓 " + n + " 30 分鐘後開放，課號抄好", "🎓 " + n + " 剩 10 分鐘，帽子戴好", "🎓 準備。冷靜，酷。", "🎓 開放了！！嘿！" }; break;
                 case "laalaa": a = new string[] { "🎓 " + n + " 還有 " + h + "開放選課！先登入喔", "🎓 " + n + " 再 30 分鐘！拉拉唱歌陪你等", "🎓 " + n + " 剩 10 分鐘！好緊張～", "🎓 準備！啦…啦…", "🎓 開放了！！衝啊～啦！" }; break;
+                // </fan>
                 default:
-                    if (id.StartsWith("pk")) a = new string[] { "🎓 " + n + " 還有 " + h + "開放選課！先登入、志願排好", "🎓 " + n + " 再 30 分鐘，皮克敏排好隊了", "🎓 " + n + " 剩 10 分鐘！全員集合！", "🎓 準備！吹哨子準備～", "🎓 開放了！！全員衝鋒！" };
-                    else a = new string[] { "🎓 " + n + " 還有 " + h + "開放選課！先登入、志願序排好", "🎓 " + n + " 再 30 分鐘開放，選課頁先開好", "🎓 " + n + " 剩 10 分鐘！", "🎓 準備！手指放在加選按鈕上", "🎓 開放了！！快加選！" };
+                    if (id.StartsWith("pk")) a = new string[] { "🎓 " + n + " 還有 " + h + "開放選課！先登入、志願排好", "🎓 " + n + " 再 30 分鐘，皮克敏排好隊了", "🎓 " + n + " 剩 10 分鐘！全員集合！", "🎓 準備！吹哨子準備～", "🎓 開放了！！全員衝鋒！" };   //@fan
+                    else a = new string[] { "🎓 " + n + " 還有 " + h + "開放選課！先登入、志願序排好", "🎓 " + n + " 再 30 分鐘開放，選課頁先開好", "🎓 " + n + " 剩 10 分鐘！", "🎓 準備！手指放在加選按鈕上", "🎓 開放了！！快加選！" };   //@fan
+                    // <public> a = new string[] { "🎓 " + n + " 還有 " + h + "開放選課！先登入、志願序排好", "🎓 " + n + " 再 30 分鐘開放，選課頁先開好", "🎓 " + n + " 剩 10 分鐘！", "🎓 準備！手指放在加選按鈕上", "🎓 開放了！！快加選！" };
                     break;
             }
             return a[Math.Max(0, Math.Min(4, stage))];

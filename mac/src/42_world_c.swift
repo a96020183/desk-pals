@@ -108,33 +108,39 @@ extension World {
     }
 
     static func Flavor(_ id: String, _ kind: String, _ night: Bool) -> String {
-        let pk = PikFlavor(id, kind) ?? OrigFlavor(id, kind); if pk != nil { return pk! }
+        let pk = PikFlavor(id, kind) ?? OrigFlavor(id, kind); if pk != nil { return pk! }   //@fan
+        // <public> let pk = OrigFlavor(id, kind); if pk != nil { return pk! }
         let cu = CuFlavor(id, kind, night); if cu != nil { return cu! }
         let sd = StudyFlavor(id, kind); if sd != nil { return sd! }
         let extra = FlavorExtra(id, kind)
         if extra != nil { return extra! }
         if night && kind == "worklog" {
             switch id {
+            // <fan>
             case "po": return "日誌好了…太陽寶寶下山了，回家吧："
             case "stitch": return "日誌好了…Ohana 在家等你："
             case "hangyodon": return "日誌好了…大家都回家了，你也回家吧："
             case "tinky": return "日誌好了…太陽寶寶下山了，丁丁說再見："
             case "dipsy": return "日誌好了…帽子戴好，回家吧："
             case "laalaa": return "日誌好了…啦…該回家囉："
+            // </fan>
             default: return "日誌好了。然後下班："
             }
         }
         let keys: [String] = ["ci-run", "ci-ok", "ci-fail", "cmd-ok", "cmd-fail", "meeting", "meeting-now", "jira", "worklog"]
-        let sp: [String] = ["Thwip～CI 跑起來了：", "CI 過了！帥！", "蜘蛛感應！CI 掛了：", "指令跑完了：", "嗯？指令失敗了：", "等等要開會喔：", "會議開始了！快去：", "有新的 Jira：", "今天的工作日誌好了："]
+        let sp: [String] = ["Thwip～CI 跑起來了：", "CI 過了！帥！", "蜘蛛感應！CI 掛了：", "指令跑完了：", "嗯？指令失敗了：", "等等要開會喔：", "會議開始了！快去：", "有新的 Jira：", "今天的工作日誌好了："]   //@fan
+        // <public> let sp: [String] = ["CI 跑起來了：", "CI 過了！帥！", "CI 掛了：", "指令跑完了：", "嗯？指令失敗了：", "等等要開會喔：", "會議開始了！快去：", "有新的 Jira：", "今天的工作日誌好了："]
+        // <fan>
         let po: [String] = ["嘟嘟～CI 出發：", "全壘打！", "嗚…CI 摔倒了：", "好棒棒，跑完了：", "咦？沒成功：", "等一下要開會會喔：", "要開會了！快快：", "有新任務喔：", "今天的日誌寫好了～"]
         let st: [String] = ["ih! CI 在跑：", "CI 過了！嘻嘻嘻", "ih-ih-ih! CI 壞掉了：", "跑完了！", "失敗！史迪仔去咬它：", "等等開會！", "開會！快去！", "新的 Jira！", "日誌好了，Aloha："]
         let hg: [String] = ["英雄報告：CI 出發了", "英雄報告：", "交給我這個英雄…CI 失敗了：", "英雄報告：指令跑完", "嗚，指令失敗了：", "等一下有會議喔：", "會議開始了！快去吧：", "有新的 Jira 喔：", "今天的日誌好了，辛苦了："]
         let ti: [String] = ["丁丁的魔法袋：CI 出發囉：", "CI 過了！丁丁跳舞～", "哎喲！CI 跌倒了：", "跑完了，好棒棒：", "哎喲，指令失敗了：", "等一下要開會喔：", "開會了！丁丁陪你去：", "魔法袋裡有新的 Jira：", "今天的日誌寫好了～"]
         let di: [String] = ["CI 跑起來了，酷：", "CI 過了。酷。", "CI 掛了…帽子先扶好：", "跑完了，嘿～", "指令失敗了，別慌：", "等等要開會：", "開會了，走吧：", "新的 Jira：", "日誌好了："]
         let la: [String] = ["啦啦～CI 出發：", "CI 過了！啦啦啦～", "哎呀，CI 摔倒了：", "跑完了！啦～", "咦？指令沒成功：", "等一下要開會喔：", "開會了！快快快：", "有新的 Jira 喔：", "今天的日誌好了～啦啦："]
+        // </fan>
         let i = keys.firstIndex(of: kind) ?? -1
         if i < 0 { return "" }
-        switch id { case "po": return po[i]; case "stitch": return st[i]; case "hangyodon": return hg[i]; case "tinky": return ti[i]; case "dipsy": return di[i]; case "laalaa": return la[i]; default: break }
+        switch id { case "po": return po[i]; case "stitch": return st[i]; case "hangyodon": return hg[i]; case "tinky": return ti[i]; case "dipsy": return di[i]; case "laalaa": return la[i]; default: break }   //@fan
         return sp[i]
     }
 
@@ -218,12 +224,14 @@ extension World {
             let l: Pet = Lead()
             var line: String
             switch l.P.Id {
+            // <fan>
             case "po": line = "噓～小波安靜陪你 🤫"
             case "stitch": line = "噓…史迪仔乖乖的"
             case "hangyodon": line = "好，我安靜待著…有事再叫我"
             case "tinky": line = "噓～丁丁抱著袋袋安靜陪你 🤫"
             case "dipsy": line = "噓。帽子拉低，安靜。"
             case "laalaa": line = "噓～拉拉小小聲 🤫"
+            // </fan>
             default: line = l.P.Cu ? l.L("x_quiet_on") : "好，我安靜待著。"
             }
             l.Say(line, 2.2)
@@ -239,12 +247,14 @@ extension World {
         let l: Pet = Lead()
         var line: String
         switch l.P.Id {
+        // <fan>
         case "po": line = "安靜時間結束～Eh-oh!"
         case "stitch": line = "安靜結束！ih-ih!（小聲）"
         case "hangyodon": line = "安靜時間結束了…我好想講笑話"
         case "tinky": line = "安靜時間結束～Eh-oh!"
         case "dipsy": line = "安靜結束。嘿～"
         case "laalaa": line = "安靜時間結束～啦啦啦！"
+        // </fan>
         default: line = l.P.Cu ? l.L("x_quiet_off") : "安靜時間結束～"
         }
         if heldQuiet.Count == 0 { l.Say(line, 2.4); return }
@@ -312,12 +322,14 @@ extension World {
         let n = BumpTomato()
         var end: String
         switch l.P.Id {
+        // <fan>
         case "po": end = "專注結束！休息 5 分鐘 ☕ 好棒棒！"
         case "stitch": end = "專注結束！休息 5 分鐘 ☕ 嘻嘻嘻，史迪仔有乖乖"
         case "hangyodon": end = "專注結束！休息 5 分鐘 ☕ 你才是真正的英雄"
         case "tinky": end = "專注結束！休息 5 分鐘 ☕ 丁丁跳舞給你看"
         case "dipsy": end = "專注結束。休息 5 分鐘 ☕ 你很酷"
         case "laalaa": end = "專注結束！休息 5 分鐘 ☕ 啦啦啦～好棒棒"
+        // </fan>
         default: end = l.P.Cu ? l.L("x_focus_end") : "專注結束！休息 5 分鐘 ☕ 你超強的"
         }
         l.Knock((ExamNear() ? end.Replace("專注結束", "讀書結束") : end) + "　今天第 " + String(n) + " 顆 🍅", "high")
@@ -405,19 +417,23 @@ extension Pet {
 extension World {
     // ---------- 共用：每個角色的開場白 ----------
     static func FlavorExtra(_ id: String, _ kind: String) -> String! {
-        let pk = PikFlavor(id, kind) ?? OrigFlavor(id, kind); if pk != nil { return pk! }
+        let pk = PikFlavor(id, kind) ?? OrigFlavor(id, kind); if pk != nil { return pk! }   //@fan
+        // <public> let pk = OrigFlavor(id, kind); if pk != nil { return pk! }
         let cu = CuFlavor(id, kind, false); if cu != nil { return cu! }
         let keys: [String] = ["remind", "pc-cpu", "pc-ram", "pc-disk", "net-down", "net-up", "vpn", "download"]
-        let sp: [String] = ["⏰ 提醒你：", "蜘蛛感應！電腦好燙：", "蜘蛛感應！記憶體快滿了：", "硬碟快滿了：", "網路斷了！", "網路回來了 👍", "連不到公司網路（VPN 斷了？）", "下載好了："]
+        let sp: [String] = ["⏰ 提醒你：", "蜘蛛感應！電腦好燙：", "蜘蛛感應！記憶體快滿了：", "硬碟快滿了：", "網路斷了！", "網路回來了 👍", "連不到公司網路（VPN 斷了？）", "下載好了："]   //@fan
+        // <public> let sp: [String] = ["⏰ 提醒你：", "電腦好燙：", "記憶體快滿了：", "硬碟快滿了：", "網路斷了！", "網路回來了 👍", "連不到公司網路（VPN 斷了？）", "下載好了："]
+        // <fan>
         let po: [String] = ["⏰ 小波提醒你：", "電腦好忙好熱喔：", "記憶體要滿滿了：", "硬碟快塞滿了：", "網路斷掉了！嗚…", "網路回來了！Eh-oh!", "連不到公司網路耶（VPN 斷了？）", "下載好了！"]
         let st: [String] = ["⏰ ih! 提醒你：", "ih-ih! 電腦在冒煙：", "記憶體快爆了：", "硬碟要滿了：", "網路斷了！史迪仔去咬線！", "網路回來了！嘻嘻嘻", "公司網路連不到（VPN 斷了？）", "下載好了！ih!"]
         let hg: [String] = ["⏰ 英雄提醒你：", "電腦好像很累了：", "記憶體快滿了喔：", "硬碟快滿了：", "網路斷了…交給我這個英雄！", "網路回來了～太好了", "連不到公司網路（VPN 斷了嗎？）", "下載好了喔："]
         let ti: [String] = ["⏰ 丁丁提醒你：", "電腦好燙…丁丁幫你扇扇：", "記憶體要滿了，跟魔法袋一樣：", "硬碟快塞滿了：", "網路斷了！哎喲…", "網路回來了！Eh-oh!", "連不到公司網路耶（VPN 斷了？）", "下載好了！放進魔法袋～"]
         let di: [String] = ["⏰ 迪西提醒你：", "電腦很燙，酷不起來：", "記憶體快滿了：", "硬碟快滿了：", "網路斷了，冷靜：", "網路回來了，酷。", "連不到公司網路（VPN 斷了？）", "下載好了，嘿："]
         let la: [String] = ["⏰ 拉拉提醒你：", "電腦好熱喔：", "記憶體快滿滿了：", "硬碟快塞滿了：", "網路斷掉了！嗚…", "網路回來了！啦啦啦～", "連不到公司網路耶（VPN 斷了？）", "下載好了！啦～"]
+        // </fan>
         let i = keys.firstIndex(of: kind) ?? -1
         if i < 0 { return nil }
-        switch id { case "po": return po[i]; case "stitch": return st[i]; case "hangyodon": return hg[i]; case "tinky": return ti[i]; case "dipsy": return di[i]; case "laalaa": return la[i]; default: break }
+        switch id { case "po": return po[i]; case "stitch": return st[i]; case "hangyodon": return hg[i]; case "tinky": return ti[i]; case "dipsy": return di[i]; case "laalaa": return la[i]; default: break }   //@fan
         return sp[i]
     }
 
@@ -812,12 +828,14 @@ extension World {
         if parts.Count == 0 { l.Say("今天很安靜呢～今天辛苦了 ♥", 4); return }
         var intro: String
         switch l.P.Id {
+        // <fan>
         case "po": intro = "Eh-oh! 今天的我們："
         case "stitch": intro = "Aloha～今天的 Ohana 紀錄："
         case "hangyodon": intro = "英雄報告：今天的我們"
         case "tinky": intro = "Eh-oh! 丁丁的魔法袋裝了今天的我們："
         case "dipsy": intro = "嘿，今天的我們："
         case "laalaa": intro = "啦啦～今天的我們："
+        // </fan>
         default: intro = l.P.Cu ? l.L("x_wrap") : "今天的我們："
         }
         if outs.Count >= 2 && !quietOn {
@@ -957,16 +975,20 @@ extension World {
     static func TicketLine(_ id: String, _ stage: Int, _ t: Ticket) -> String {
         if t.Kind == "course" { return CourseLine(id, stage, t) }   // 搶課：52_study.swift
         let h = String(t.Lead / 60) + " 小時", n: String = t.Name
-        let pk = PikTicket(id, stage, n, h) ?? OrigTicket(id, stage, n, h); if pk != nil { return pk! }
+        let pk = PikTicket(id, stage, n, h) ?? OrigTicket(id, stage, n, h); if pk != nil { return pk! }   //@fan
+        // <public> let pk = OrigTicket(id, stage, n, h); if pk != nil { return pk! }
         let cu = CuTicket(id, stage, n, h); if cu != nil { return cu! }
-        let sp: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款", "🎫 " + n + " 再 30 分鐘開賣，網頁先開好", "🎫 " + n + " 剩 10 分鐘！蜘蛛感應全開", "🎫 準備！手指放在按鈕上", "🎫 開搶！！Thwip!"]
+        let sp: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款", "🎫 " + n + " 再 30 分鐘開賣，網頁先開好", "🎫 " + n + " 剩 10 分鐘！蜘蛛感應全開", "🎫 準備！手指放在按鈕上", "🎫 開搶！！Thwip!"]   //@fan
+        // <public> let sp: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款", "🎫 " + n + " 再 30 分鐘開賣，網頁先開好", "🎫 " + n + " 剩 10 分鐘！", "🎫 準備！手指放在按鈕上", "🎫 開搶！！"]
+        // <fan>
         let po: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款喔", "🎫 " + n + " 再 30 分鐘！小波陪你等", "🎫 " + n + " 剩 10 分鐘！好緊張～", "🎫 準備！深呼吸～", "🎫 開搶！！衝衝衝！"]
         let st: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款！ih!", "🎫 " + n + " 30 分鐘！史迪仔幫你顧著", "🎫 " + n + " 10 分鐘！ih-ih-ih!", "🎫 準備！史迪仔也準備好了", "🎫 開搶！！衝啊！"]
         let hg: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款", "🎫 " + n + " 30 分鐘後開賣，英雄陪你等", "🎫 " + n + " 剩 10 分鐘！英雄出動準備", "🎫 準備！這次一定搶到！", "🎫 開搶！！祝你搶到！"]
         let ti: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款喔", "🎫 " + n + " 再 30 分鐘！丁丁陪你等", "🎫 " + n + " 剩 10 分鐘！魔法袋準備好了", "🎫 準備！深呼吸～", "🎫 開搶！！衝衝衝！"]
         let di: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款", "🎫 " + n + " 30 分鐘後開賣，網頁先開好", "🎫 " + n + " 剩 10 分鐘！帽子戴好", "🎫 準備。冷靜，酷。", "🎫 開搶！！嘿！"]
         let la: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款喔", "🎫 " + n + " 再 30 分鐘！拉拉唱歌陪你等", "🎫 " + n + " 剩 10 分鐘！好緊張～", "🎫 準備！啦…啦…", "🎫 開搶！！衝啊～啦！"]
-        switch id { case "po": return po[stage]; case "stitch": return st[stage]; case "hangyodon": return hg[stage]; case "tinky": return ti[stage]; case "dipsy": return di[stage]; case "laalaa": return la[stage]; default: break }
+        // </fan>
+        switch id { case "po": return po[stage]; case "stitch": return st[stage]; case "hangyodon": return hg[stage]; case "tinky": return ti[stage]; case "dipsy": return di[stage]; case "laalaa": return la[stage]; default: break }   //@fan
         return sp[stage]
     }
 
@@ -1264,9 +1286,10 @@ extension Pet {
     static let PLATE: [String] = ["..1....", "kWWWWWk", ".kkkkk."]
 
     func LunchLine(_ phase: String) -> String {
-        if P.Pik { return PikLunchLine(phase) }
+        if P.Pik { return PikLunchLine(phase) }   //@fan
         if P.Orig { return OrigLunchLine(phase) }
         if P.Cu { return CuLunchLine(phase) }
+        // <fan>
         switch P.Id {
         case "po":
             if phase == "start" { return "嘟嘟糊！午餐時間！🔔" }
@@ -1304,6 +1327,8 @@ extension Pet {
         if phase == "nap" { return "吃飽了…蜘蛛也要午睡 zZ" }
         if phase == "end" { return "回來工作！能力越強，吃得越多 🕸" }
         return Pick(["嗯～起司拉好長", "Pizza time! 🍕", "Thwip! 接到掉下來的臘腸了"])
+        // </fan>
+        // <public> return "午餐時間！🔔"
     }
 
     func LunchStart() {
@@ -1337,10 +1362,11 @@ extension Pet {
         if state == "sleep" { DrawAt(g, Pet.PLATE, 12, 13, bx, by, ps, fx, false, true); return }
         if !HoldingFood() || state == "glass" || state == "hug" { return }
         let bite = Step2(2.5) ? 1 : 0   // 一口一口：手上的食物上下動
-        if P.Pik { DrawPikLunch(g, f, bx, by, ps, fx, bite); return }
+        if P.Pik { DrawPikLunch(g, f, bx, by, ps, fx, bite); return }   //@fan
         if P.Orig { DrawOrigLunch(g, f, bx, by, ps, fx, bite); return }
         if P.Cu { CuLunch(g, f, bx, by, ps, fx, bite); return }
         switch P.Id {
+        // <fan>
         case "po":
             DrawAt(g, Pet.CUSTARD, 9, Double(8 + bite + f.AccDy), bx, by, ps, fx, false, true)
             // 嘟嘟糊沾在臉上
@@ -1360,6 +1386,7 @@ extension Pet {
         case "laalaa":
             DrawAt(g, Pet.TOAST, -1.5, Double(P.BodyTop + 1 + bite + f.AccDy), bx, by, ps, fx, false, true)
             DrawAt(g, A("DUDU_CUP"), 11, Double(P.BodyTop + 2 + f.AccDy), bx, by, ps, fx, false, true)
+            // </fan>
         default:
             DrawAt(g, Pet.PIZZA, 10, Double(7 + bite), bx, by, ps, fx, false, true)
         }
@@ -1368,15 +1395,18 @@ extension Pet {
     // 櫃子裡的公仔也拿著午餐
     func DrawLunchShelf(_ g: Graphics, _ bx: Int, _ by: Int, _ ps: Int, _ flip: Bool) {
         if !w.Lunch { return }
-        if P.Pik || P.Orig { return }   // 皮克敏、續命小隊在自己的櫃子畫法裡拿午餐
+        if P.Pik || P.Orig { return }   // 皮克敏、續命小隊在自己的櫃子畫法裡拿午餐   //@fan
+        // <public> if P.Orig { return }
         var food: [String]; var col: Double, row: Double
         switch P.Id {
+        // <fan>
         case "po": food = Pet.CUSTARD; col = 9; row = 8
         case "stitch": food = Pet.SANDWICH; col = 3; row = 6
         case "hangyodon": food = Pet.MILKTEA; col = 10.5; row = 8
         case "tinky": food = Pet.TOAST; col = 10.5; row = Double(P.BodyTop + 1)
         case "dipsy": food = A("DUDU"); col = 9; row = Double(P.BodyTop)
         case "laalaa": food = Pet.TOAST; col = -1.5; row = Double(P.BodyTop + 1)
+        // </fan>
         default: food = Pet.PIZZA; col = 10; row = 7
         }
         DrawAt(g, food, col, row, bx, by, ps, flip, false, true)
@@ -1403,17 +1433,19 @@ extension Pet {
 
     // 在櫃子裡要佔幾列高（腳到最高點：天線、耳朵、帽子、滑板車墊高、晃動）
     func ShelfRows() -> Int {
-        if P.Pik { return PikShelfRows() }
+        if P.Pik { return PikShelfRows() }   //@fan
         if P.Orig { return OrigShelfRows() }
         if P.Cu { return CuShelfRows() }
         let hat = (w.SeasonNow == "xmas" || Level() >= 3) ? 4 : 0
         switch P.Id {
+        // <fan>
         case "po": return 16 + P.TopRows + 1                             // 扶著停在旁邊的滑板車
         case "stitch": return 16 + Math.Max(P.TopRows, hat > 0 ? 3 : 0) + 1
         case "hangyodon": return 16 + (hat > 0 ? 2 : 0) + 1
         case "tinky": return 16 + P.TopRows + 1                           // 天線從帽子穿出來，不會更高
         case "dipsy": return 16 + P.TopRows + 2                           // 高帽子＋偶爾抬一下
         case "laalaa": return 16 + Math.Max(P.TopRows, hat > 0 ? 7 : 0) + 1
+        // </fan>
         default: break
         }
         return 16 + hat + 1
@@ -1423,6 +1455,7 @@ extension Pet {
 
     func Reload() { xp = 0; lastPatDay = ""; patsToday = 0; patsDate = ""; LoadBond() }
 
+    // <fan>
     // 開發用預覽：每個角色各種姿勢排成一張圖
     static func PreviewSheet(_ path: String, _ night: Bool) {
         let w = World(6)
@@ -1503,6 +1536,7 @@ extension Pet {
             b.Save(path, ImageFormat.Png)
         }
     }
+    // </fan>
 
     // 開發用：櫃子畫成圖
     static func PreviewShelf(_ path: String, _ night: Bool) {
@@ -1516,7 +1550,8 @@ extension World {
     func PreviewShelfTo(_ path: String) {
         shelf = ShelfForm(self, S)
         shelf.Place(Rectangle(0, 0, 400, 400))
-        let favs: [String] = ["spidey", "po", "stitch", "hangyodon", "po"]
+        let favs: [String] = ["spidey", "po", "stitch", "hangyodon", "po"]   //@fan
+        // <public> let favs: [String] = ["boba", "coffee", "onigiri", "sticky", "boba"]
         let W0 = shelf.Area.Width + 16, H0 = shelf.Area.Height + 16
         do {
             let b = Bitmap(W0 * favs.count, H0)

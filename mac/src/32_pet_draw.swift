@@ -113,9 +113,10 @@ extension Pet
 
     func Frame() -> Fr
     {
-        if P.Pik { return FramePik() }
+        if P.Pik { return FramePik() }   //@fan
         if P.Orig { return FrameOrig() }
         if P.Cu { return FrameCu() }
+        // <fan>
         switch P.Id
         {
             case "po": return FramePo()
@@ -125,114 +126,8 @@ extension Pet
             default: break
         }
         return FrameSpidey()
-    }
-
-    // ---- Spidey（照舊）----
-    func FrameSpidey() -> Fr
-    {
-        let sleep = state == "sleep", hug = state == "hug"
-        var armsUp = state == "glass" || state == "kick" || (state == "dance" && Math.Floor(anim * 4) % 2 == 0) || state == "swing" || state == "air" || state == "fling" || state == "climb" || state == "drag" || state == "shoot" || state == "zip"
-        armsUp = armsUp || state == "webcatch" || state == "sling" || state == "pose" || state == "stowfly" || (state == "hang" && hangPhase == 0) || (state == "idle" && Bt > 0)
-        let step = ((state == "walk" || state == "climb" || state == "goto") && Step2(6))
-            || ((state == "seek" || state == "fetch" || state == "hide") && Step2(11))
-            || (state == "drag" && Step2(12))
-            || (state == "dance" && Math.Floor(anim * 4) % 2 == 1)
-        let face: String? = sleep ? "SLEEPY" : (hug ? "HAPPY" : (state == "dizzy" ? "DIZZY" : nil))
-        var rows: [String] = HeadRows(face)
-        rows += A(hug ? "ARMS_HUG" : (armsUp ? "ARMS_UP" : "BODY"))
-        rows += A(step ? "LEGS_B" : "LEGS_A")
-        if Night && !hug
-        {
-            if Pet.PixAt(rows[10], 5) == 107 && Pet.PixAt(rows[10], 6) == 107 { rows[10] = Pet.SetPix(Pet.SetPix(rows[10], 5, 119), 6, 119) }   // k → w
-        }
-        if !hug && Level() >= 5
-        {
-            if Pet.PixAt(rows[10], 5) != 114 && Pet.PixAt(rows[10], 6) != 114 { rows[10] = Pet.SetPix(Pet.SetPix(rows[10], 5, 89), 6, 89) }   // != r → Y
-        }
-        let f = F(rows)
-        f.Fy = state == "hang" && hangPhase == 1
-        return f
-    }
-
-    // ---- 小波 ----
-    func FramePo() -> Fr
-    {
-        if state == "plop" { let pf = F(Pal.Stack(HeadRows(sT < 0.55 ? "DIZZY" : "HAPPY"), A("ARMS_UP"), A("LEGS_SIT"))); pf.Tummy = true; return pf }
-        let hug = state == "hug", sleep = state == "sleep"
-        let yawn = Night && state == "idle" && (anim % 6) < 1.4
-        let face: String? = sleep || yawn ? "SLEEPY" : (hug || state == "spin" || (state == "pose" && poseKind == "homerun") ? "HAPPY" : (state == "dizzy" ? "DIZZY" : (state == "glass" ? "SQUISH" : nil)))
-        var armsUp = state == "glass" || state == "catch" || state == "drag" || (state == "air" && !OnScooter()) || (state == "wave" && Step2(4)) || (state == "dance" && Step2(4))
-        armsUp = armsUp || (state == "pose" && poseKind != "homerun") || state == "kick" || state == "throw" && t > 0.15
-        let body = A(hug ? "ARMS_HUG" : (armsUp ? "ARMS_UP" : "BODY"))
-        let f: Fr
-        if OnScooter() { f = F(Pal.Stack(HeadRows(face), body, A("LEGS_RIDE"))); f.Top = -4; f.AccDy = -4 }
-        else if sleep { f = F(Pal.Stack(HeadRows(face), body, A("LEGS_SIT"))) }
-        else
-        {
-            let step = (state == "walk" || state == "seek" || state == "fetch" || state == "hide" || state == "goto") && Step2(10) || (state == "dance" && Step2(4))
-            f = F(Pal.Stack(HeadRows(face), body, A(step ? "LEGS_B" : "LEGS_A")))
-        }
-        f.Tummy = !hug
-        if rolling { f.Rot = CInt(Math.Floor(anim * 14)) % 4; f.Acc = false; f.Tummy = false }
-        return f
-    }
-
-    // ---- 史迪仔 ----
-    func FrameStitch() -> Fr
-    {
-        let hug = state == "hug"
-        if RidingStolen
-        {
-            // 偷騎小波的滑板車：站在車上
-            let rs = F(Pal.Stack(HeadRows("HAPPY"), A("ARMS_UP"), A("LEGS_A"))); rs.Top = -4; rs.AccDy = -4; return rs
-        }
-        if rolling || state == "curl"
-        {
-            let b = F(A("BALL")); b.Rot = CInt(Math.Floor(anim * 12)) % 4; b.Acc = false; return b
-        }
-        if state == "sleep"
-        {
-            let b = F(A("BALL_SLEEP")); b.Acc = false; return b
-        }
-        let crawl = state == "walk" || state == "seek" || state == "fetch" || state == "hide" || state == "goto" || (state == "chomp" && w.OutCount() > 1) || state == "ceil"
-        let face: String? = hug ? "HAPPY" : (state == "dizzy" ? "DIZZY" : nil)
-        var head = HeadRows(face)
-        if crawl
-        {
-            let c = F(Pal.Stack(head, A(Step2(state == "ceil" ? 8 : 12) ? "CRAWL_B" : "CRAWL_A")))
-            c.AccDy = 5
-            if state == "ceil" { c.Fy = true; c.Acc = false }
-            return c
-        }
-        // 耳朵：發呆時偶爾抖一抖；晚上垂下來
-        if Night && (state == "idle" || state == "hug") { let ed = A("EARS_DOWN"); for i in 0..<ed.count { head[i] = ed[i] } }
-        else if (state == "idle" || state == "pose") && (anim % 2.2) < 0.5 && Step2(8) { let eu = A("EARS_UP"); for i in 0..<eu.count { head[i] = eu[i] } }
-        var armsUp = state == "wall" || state == "catch" || state == "drag" || state == "air" || state == "nudge" || state == "throw"
-        armsUp = armsUp || (state == "elvis" && Step2(5)) || (state == "dance" && Step2(4)) || (state == "pose" && poseKind == "photo") || state == "kick"
-        let lick = state == "glass" || (state == "pose" && poseKind == "lick"), grin = state == "chomp" || (state == "pose" && poseKind == "grin")
-        if lick { ReplaceFace(&head, "LICKF") } else if grin { ReplaceFace(&head, "GRIN") }
-        let bodyName = hug || (Night && state == "idle") ? "ARMS_HUG" : (lick ? "LICK" : (armsUp ? "ARMS_UP" : "BODY"))
-        let step = (state == "wall" && Step2(8)) || (state == "elvis" && Step2(6)) || (state == "dance" && Step2(4))
-        return F(Pal.Stack(head, A(bodyName), A(step ? "LEGS_B" : "LEGS_A")))
-    }
-
-    // ---- 人魚漢頓 ----
-    func FrameHangyodon() -> Fr
-    {
-        let hug = state == "hug", sit = state == "sleep"
-        let silly = state == "pose" && poseKind == "silly"
-        let sleepy = state == "sleep" || (Night && state == "idle" && (anim % 5) < 1.5)
-        let face: String? = sleepy ? "SLEEPY" : (hug || (state == "pose" && poseKind == "hero") ? "HAPPY" : (state == "dizzy" || tripT > 0 ? "DIZZY" : (silly ? "SILLY" : nil)))
-        let head = HeadRows(face)
-        var armsUp = state == "air" || state == "fling" || state == "drag" || state == "header" || state == "capetrip" || state == "swim"
-        armsUp = armsUp || (state == "dance" && Step2(3)) || (state == "pose" && poseKind != "silly") || state == "kick"
-        let bodyName = hug ? "ARMS_HUG" : (silly || state == "glass" ? "POUT" : (armsUp ? "ARMS_UP" : "BODY"))
-        let moving = state == "walk" || state == "seek" || state == "fetch" || state == "hide" || state == "goto"
-        let legs = sit ? "LEGS_SIT" : (moving && Step2(4) ? "LEGS_B" : "LEGS_A")
-        let f = F(Pal.Stack(head, A(bodyName), A(legs)))
-        if tripT > 0 { f.Rot = dir > 0 ? 1 : 3; f.Acc = false }   // 跌個狗吃屎
-        if rolling { f.Rot = CInt(Math.Floor(anim * 10)) % 4; f.Acc = false }
-        return f
+        // </fan>
+        // <public> return F(Pal.Stack(HeadRows(nil), A("BODY"), A("LEGS_A")))
     }
 
     // 把只往右延伸的圖左邊補空白，讓 12 格的身體留在框的中間
@@ -329,12 +224,14 @@ extension Pet
         let lv = Level()
         if lv >= 2 { DrawAt(g, Pet.SCARF, P.HatCol, P.ScarfRow + dy, bx0, by0, ps, fx, false, false) }
         if lv >= 4 && normalFace && !P.NoGlasses { DrawAt(g, Pet.GLASSES, P.HatCol, P.GlassRow + dy, bx0, by0, ps, fx, false, false) }
-        if lv >= 5 && !Is("spidey") { DrawAt(g, Pet.BADGE, P.BadgeCol, P.BadgeRow + dy, bx0, by0, ps, fx, false, false) }
+        if lv >= 5 && !Is("spidey") { DrawAt(g, Pet.BADGE, P.BadgeCol, P.BadgeRow + dy, bx0, by0, ps, fx, false, false) }   //@fan
+        // <public> if lv >= 5 { DrawAt(g, Pet.BADGE, P.BadgeCol, P.BadgeRow + dy, bx0, by0, ps, fx, false, false) }
         var hat: [String]? = w.SeasonNow == "xmas" ? Pet.SANTA : (lv >= 6 ? Pet.CROWN : (lv >= 3 ? Pet.BEANIE : nil))
-        if HatOnHead() || WearHat || P.Pik { hat = nil }      // 迪西：自己的帽子不換（借戴迪西帽子時也一樣）
+        if HatOnHead() || WearHat || P.Pik { hat = nil }      // 迪西：自己的帽子不換（借戴迪西帽子時也一樣）   //@fan
         if let hat = hat
         {
             DrawAt(g, hat, P.HatCol, P.HatRow + dy - hat.count, bx0, by0, ps, fx, false, true)
+            // <fan>
             if P.KeepAntenna && P.AntThrough
             {
                 // 丁丁：天線從帽子中間穿出來（照原位置重畫，不墊高，櫃子格子才放得下）
@@ -355,6 +252,7 @@ extension Pet
                     DrawAt(g, ant, Double(12 - ant[0].utf8.count) / 2.0, P.HatRow + dy - hat.count - ant.count + 1, bx0, by0, ps, fx, false, true)
                 }
             }
+            // </fan>
         }
         if w.SeasonNow == "cny" { DrawAt(g, Pet.ENVELOPE, 11, P.SideRow + dy, bx0, by0, ps, fx, false, true) }
         if w.SeasonNow == "birthday" { DrawAt(g, Pet.CAKE, 11, P.SideRow - 1 + dy, bx0, by0, ps, fx, false, true) }
@@ -422,6 +320,7 @@ extension Pet
     // 小波的滑板車、人魚漢頓的搖椅、隱形船…（畫在身體後面的）
     func DrawBehind(_ g: Graphics, _ f: Fr, _ bx: Int, _ by: Int, _ ps: Int, _ fx: Bool)
     {
+        // <fan>
         if Is("po") && !scooterLost
         {
             if OnScooter() && !rolling { DrawAt(g, A("SCOOTER"), -1, 7, bx, by, ps, fx, false, true) }
@@ -442,6 +341,7 @@ extension Pet
         if Is("hangyodon") && state == "sleep" { DrawSleepBubble(g, bx, by, ps, false) }
         if P.Tubby { DrawTubbyBehind(g, f, bx, by, ps, fx) }
         if P.Pik { DrawPikBehind(g, f, bx, by, ps, fx) }
+        // </fan>
         if P.Orig { DrawOrigBehind(g, f, bx, by, ps, fx) }
     }
 
@@ -487,6 +387,7 @@ extension Pet
     // 球棒、手套、烏克麗麗、嘴裡的球（畫在身體前面的）
     func DrawFront(_ g: Graphics, _ f: Fr, _ bx: Int, _ by: Int, _ ps: Int, _ fx: Bool)
     {
+        // <fan>
         if Is("po")
         {
             if state == "bat"
@@ -514,8 +415,9 @@ extension Pet
         if Is("spidey") && w.Holder === self { DrawAt(g, w.BallKind == "baseball" ? Pet.BALLART : Pet.TBALL, 9, 4, bx, by, ps, fx, false, true) }
         if P.Tubby { DrawTubbyFront(g, f, bx, by, ps, fx) }
         if P.Pik { DrawPikFront(g, f, bx, by, ps, fx) }
+        // </fan>
         if P.Orig { DrawOrigFront(g, f, bx, by, ps, fx) }
-        if HoldToast && f.Rot == 0 && !f.Fy { DrawAt(g, Pet.TOAST, Is("po") ? 9.5 : 10.5, P.BodyTop + 1 + f.AccDy, bx, by, ps, fx, false, true) }
+        if HoldToast && f.Rot == 0 && !f.Fy { DrawAt(g, Pet.TOAST, Is("po") ? 9.5 : 10.5, P.BodyTop + 1 + f.AccDy, bx, by, ps, fx, false, true) }   //@fan
     }
 
     // ================= 一格一格畫到 layered window =================
@@ -524,7 +426,8 @@ extension Pet
         l = Math.Min(l, px); r = Math.Max(r, px); tp = Math.Min(tp, py); b = Math.Max(b, py)
     }
     func SilkVisible() -> Bool { return state == "swing" || state == "hang" || state == "zip" || state == "shoot" || state == "webcatch" || state == "sling" }
-    func Bob() -> Double { if P.Cu { return 0 }; if P.Pik { return PikBob() }; if P.Orig { return OrigBob() }; if P.Tubby { return TubbyBob() }; return state == "dance" || state == "elvis" ? Math.Abs(Math.Sin(anim * 8)) * 6 * k : (Is("hangyodon") && state == "walk" ? (Step2(4) ? k : 0) : 0) }
+    func Bob() -> Double { if P.Cu { return 0 }; if P.Pik { return PikBob() }; if P.Orig { return OrigBob() }; if P.Tubby { return TubbyBob() }; return state == "dance" || state == "elvis" ? Math.Abs(Math.Sin(anim * 8)) * 6 * k : (Is("hangyodon") && state == "walk" ? (Step2(4) ? k : 0) : 0) }   //@fan
+    // <public> func Bob() -> Double { if P.Cu { return 0 }; if P.Orig { return OrigBob() }; return state == "dance" || state == "elvis" ? Math.Abs(Math.Sin(anim * 8)) * 6 * k : 0 }
 
     func Render()
     {
@@ -540,7 +443,8 @@ extension Pet
         for sp in sparks { Grow(&l, &tp, &r, &b, sp[0], sp[1]) }
         for f in flakes { Grow(&l, &tp, &r, &b, f[0], f[1]) }
         if w.Lead() === self && w.TicketCountdown() != nil { tp = Math.Min(tp, y - Double((P.TopRows + 16) * S)); l = Math.Min(l, Cx - 60 * k); r = Math.Max(r, Cx + 60 * k) }
-        if P.Tubby || WearHat || HoldToast || P.Pik || P.Orig { tp = Math.Min(tp, y - Double((P.TopRows + (state == "juggle" || state == "hattoss" || state == "bagdig" ? 16 : 9)) * S)) }
+        if P.Tubby || WearHat || HoldToast || P.Pik || P.Orig { tp = Math.Min(tp, y - Double((P.TopRows + (state == "juggle" || state == "hattoss" || state == "bagdig" ? 16 : 9)) * S)) }   //@fan
+        // <public> if P.Orig { tp = Math.Min(tp, y - Double((P.TopRows + (state == "juggle" || state == "hattoss" || state == "bagdig" ? 16 : 9)) * S)) }
         let pad = 6 + CInt(5 * k)
         let nb = Rectangle.FromLTRB(CInt(Math.Floor(l)) - pad, CInt(Math.Floor(tp)) - pad, CInt(Math.Ceiling(r)) + pad, CInt(Math.Ceiling(b)) + pad)
         if frameBmp == nil || frameBmp.Width != nb.Width || frameBmp.Height != nb.Height
@@ -573,7 +477,7 @@ extension Pet
             var a = y + dSH - dSH * sc - Double(P.TopRows) * dS * sc
             a -= (state == "sleep" ? 30 * k : 0)
             a -= (hearts.Count > 0 ? 24 * k : 0)
-            a -= ((Is("po") && OnScooter()) || RidingPo ? 4 * dS : 0)
+            a -= ((Is("po") && OnScooter()) || RidingPo ? 4 * dS : 0)   //@fan
             above = a
             if w.Lead() === self && w.TicketCountdown() != nil { above -= 11 * dS }   // 讓出搶票倒數徽章的位置
         }
@@ -656,6 +560,7 @@ extension Pet
                 g.FillEllipse(fog, sbx + 3 * sps, sby + 7 * sps + fo, 6 * sps, 3 * sps)
                 g.FillEllipse(fog, sbx + 2 * sps, sby + 9 * sps + fo, 8 * sps, 3 * sps)
             }
+            // <fan>
             if Is("stitch") && gt > 0.8
             {
                 let wet = SolidBrush(Color.FromArgb(55, 190, 225, 255))
@@ -667,6 +572,7 @@ extension Pet
                 let lip = SolidBrush(Color.FromArgb(70, 245, 140, 170))   // 嘴唇印在玻璃上
                 g.FillEllipse(lip, Double(sbx) + 1.5 * dsps, Double(sby) + 7.2 * dsps, 9 * dsps, 2.6 * dsps)
             }
+            // </fan>
         }
 
         // Codex／Claude 狀態小圖示（小波在肚子上，其他人在頭旁邊）
@@ -771,12 +677,14 @@ extension Pet
             let normalFace = state != "sleep" && state != "hug" && state != "dizzy"
             DrawAccessories(g, sbx, sby, sps, fx, f.AccDy, normalFace)
         }
+        // <fan>
         if f.Tummy && f.Rot == 0
         {
             let u = Math.Max(1, sps / 2)
             let scx = sbx + 6 * sps, scy = sby + CInt((P.TummyRow + Double(f.AccDy)) * Double(sps))
             DrawStatusIcon(g, TummyStatus(), scx, scy, u, true)
         }
+        // </fan>
         if extras { DrawFront(g, f, sbx, sby, sps, fx); DrawLunch(g, f, sbx, sby, sps, fx) }
     }
 }
@@ -789,7 +697,7 @@ final class ShelfForm: OverlayForm
     let U: Int, TU: Int           // 小格、高格的像素大小
     let k: Double
     var Hot = false, Over = false, Night = false
-    var Tubby = false                   // 天線寶寶一櫃：格子裡是藍天綠山丘，大格有太陽寶寶
+    var Tubby = false                   // 天線寶寶一櫃：格子裡是藍天綠山丘，大格有太陽寶寶   //@fan
     //@@BODY ShelfForm
     var hover = -1
     var bmp: Bitmap! = nil, bg: Bitmap! = nil
@@ -1043,8 +951,8 @@ final class ShelfForm: OverlayForm
             if Night { panel = Mix(panel, C(0x2A2238), 0.55) }
             let inner = RectangleF(Double(c.X), Double(c.Y), Double(c.Width), Double(c.Height - plateH))
             g.FillRectangle(LinearGradientBrush(inner, Mix(panel, Color.White, 0.35), Mix(panel, C(0x6B4A30), 0.25), 90.0), inner)
-            if Tubby { DrawHills(g, inner, i == 0) }
-            if Pik { DrawSoil(g, inner, i == 0) }
+            if Tubby { DrawHills(g, inner, i == 0) }   //@fan
+            if Pik { DrawSoil(g, inner, i == 0) }   //@fan
             if Orig { DrawGridPaper(g, inner, i == 0) }
             // 頂上的展示燈
             do
@@ -1062,14 +970,16 @@ final class ShelfForm: OverlayForm
             // 內側陰影（凹進去的感覺）
             g.FillRectangle(LinearGradientBrush(RectangleF(inner.X, inner.Y, inner.Width, 3 * dU + 1), Color.FromArgb(90, 40, 20, 5), Color.FromArgb(0, 40, 20, 5), 90.0), inner.X, inner.Y, inner.Width, 3 * dU)
             g.FillRectangle(LinearGradientBrush(RectangleF(inner.X, inner.Y, 2 * dU + 1, inner.Height), Color.FromArgb(70, 40, 20, 5), Color.FromArgb(0, 40, 20, 5), 0.0), inner.X, inner.Y, 2 * dU, inner.Height)
-            if i == 0 && Pik { DrawFlowerBed(g, c) }
-            else if i == 0 { DrawPedestal(g, c, panel) }
+            if i == 0 && Pik { DrawFlowerBed(g, c) }   //@fan
+            else if i == 0 { DrawPedestal(g, c, panel) }   //@fan
+            // <public> if i == 0 { DrawPedestal(g, c, panel) }
             // 層板（公仔站的地方）＋名牌那條
             let board = RectangleF(Double(c.X - U), Double(c.Bottom - plateH), Double(c.Width + 2 * U), dplateH)
             g.FillRectangle(LinearGradientBrush(board, w3, w1, 90.0), board)
             g.DrawLine(Pen(Color.FromArgb(Night ? 60 : 110, 255, 235, 205), Math.Max(1.0, dU * 0.4)), board.X, board.Y + 0.5, board.Right, board.Y + 0.5)
             // 名牌
-            let name = pet == nil ? (i == 0 && Pik ? "★ 休息花" : "？") : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)
+            let name = pet == nil ? (i == 0 && Pik ? "★ 休息花" : "？") : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)   //@fan
+            // <public> let name = pet == nil ? "？" : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)
             do
             {
                 let f = Font("Microsoft JhengHei UI", Math.Max(9.0, 6.6 * k), FontStyle.Bold, GraphicsUnit.Pixel)
@@ -1094,6 +1004,7 @@ final class ShelfForm: OverlayForm
     }
 
 
+    // <fan>
     // ---- 天線寶寶一櫃的格子：藍天、綠色小山丘、小花；大格有太陽寶寶（晚上下山）----
     func HillTop(_ inner: RectangleF, _ tall: Bool) -> Double { return inner.Bottom - inner.Height * (tall ? 0.30 : 0.27) }
     func DrawHills(_ g: Graphics, _ inner: RectangleF, _ tall: Bool)
@@ -1162,6 +1073,7 @@ final class ShelfForm: OverlayForm
         g.FillEllipse(pk, cx - fr * 0.78, y0 + fr * 0.1, fr * 0.3, fr * 0.2); g.FillEllipse(pk, cx + fr * 0.48, y0 + fr * 0.1, fr * 0.3, fr * 0.2)
         g.Restore(st)
     }
+    // </fan>
 
     // 高格：最愛站的小圓台＋背板上淡淡的大星星
     func DrawPedestal(_ g: Graphics, _ c: Rectangle, _ panel: Color)
@@ -1177,9 +1089,10 @@ final class ShelfForm: OverlayForm
             let a = -Math.PI / 2 + Double(i) * Math.PI / 5, rr = i % 2 == 0 ? sr : sr * 0.45
             star.append(PointF(cx + Math.Cos(a) * rr, sy + Math.Sin(a) * rr))
         }
-        if Tubby { DrawSunBaby(g, c, cx, sy, sr) }
-        else
-        { g.FillPolygon(SolidBrush(Night ? Color.FromArgb(40, 255, 220, 150) : Color.FromArgb(70, 255, 236, 180)), star) }
+        if Tubby { DrawSunBaby(g, c, cx, sy, sr) }   //@fan
+        else   //@fan
+        { g.FillPolygon(SolidBrush(Night ? Color.FromArgb(40, 255, 220, 150) : Color.FromArgb(70, 255, 236, 180)), star) }   //@fan
+        // <public> do { g.FillPolygon(SolidBrush(Night ? Color.FromArgb(40, 255, 220, 150) : Color.FromArgb(70, 255, 236, 180)), star) }
         // 圓台
         let m1 = Night ? C(0x8A7A70) : C(0xFFF6E8), m2 = Night ? C(0x4E443F) : C(0xD9C7AE)
         let bodyR = RectangleF(cx - pw / 2, top, pw, ph - dU * 0.5)
@@ -1340,7 +1253,8 @@ final class ShelfForm: OverlayForm
 
     func Cabinet(_ who: [Pet?], _ outNow: [Bool], _ t: Double) -> Bitmap
     {
-        var key = "\(Night)|\(Tubby)|\(Pik)|\(Orig)|\(Area.Width)x\(Area.Height)"
+        var key = "\(Night)|\(Tubby)|\(Pik)|\(Orig)|\(Area.Width)x\(Area.Height)"   //@fan
+        // <public> var key = "\(Night)|\(Orig)|\(Area.Width)x\(Area.Height)"
         for i in 0..<4 { key += "|" + (who[i] == nil ? "-" : who[i]!.P.Id) }
         if key != bgKey || bg == nil { bgKey = key; BuildBg(who, outNow) }
         if bmp == nil || bmp.Width != bg.Width || bmp.Height != bg.Height { if bmp != nil { bmp.Dispose() }; bmp = Bitmap(bg.Width, bg.Height) }
@@ -1357,8 +1271,9 @@ final class ShelfForm: OverlayForm
             let ps = FitPs(i, pet)
             let fx = c.X + c.Width / 2, fy = c.Bottom - plateH - U - (i == 0 ? PedH() : 0)
             g.SetClip(Rectangle(c.X, c.Y, c.Width, c.Height - plateH))
-            if pet == nil && i == 0 && Pik { DrawRestFlower(g, c, t) }
-            else if pet == nil { DrawUnknown(g, fx, fy, ps) }
+            if pet == nil && i == 0 && Pik { DrawRestFlower(g, c, t) }   //@fan
+            else if pet == nil { DrawUnknown(g, fx, fy, ps) }   //@fan
+            // <public> if pet == nil { DrawUnknown(g, fx, fy, ps) }
             else if outNow[i] { pet!.DrawGhost(g, fx, fy, ps, Night); DrawAway(g, c, ps) }
             else { pet!.DrawOnShelf(g, fx, fy, ps, c, t) }
             g.ResetClip()
@@ -1494,6 +1409,7 @@ extension Pet
         if P.Cu { DrawCuShelf(g, fx, fy, ps, cell, tt) } else {
         switch P.Id
         {
+            // <fan>
             case "spidey":
                 // 從格子頂端垂一條絲倒吊著晃；偶爾跳下來擺個噴絲姿勢
                 let dangle = (tt % 11) < 8
@@ -1563,6 +1479,7 @@ extension Pet
                 DrawTubbyShelf(g, head, fx, bx, by, ps, flip, tt, blink)
             case "pkred", "pkyellow", "pkblue":
                 DrawPikShelf(g, fx, bx, by, ps, flip, tt, blink, cell)
+                // </fan>
             case "boba", "coffee", "onigiri", "sticky":
                 DrawOrigShelf(g, fx, bx, by, ps, flip, tt, blink, cell)
             default:
@@ -1572,7 +1489,8 @@ extension Pet
         }
         }
         // 午餐時間：櫃子裡的公仔也拿著午餐
-        if w.Lunch && !P.Cu && !(Is("spidey") && (tt % 11) < 8) { DrawLunchShelf(g, bx, by, ps, flip) }
+        if w.Lunch && !P.Cu && !(Is("spidey") && (tt % 11) < 8) { DrawLunchShelf(g, bx, by, ps, flip) }   //@fan
+        // <public> if w.Lunch && !P.Cu { DrawLunchShelf(g, bx, by, ps, flip) }
         // 剛回櫃子：一圈小星星
         if ShelfFx < 1
         {

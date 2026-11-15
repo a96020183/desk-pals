@@ -15,8 +15,8 @@ final class World: Form {
 
     let pipeName: String
     var defaultPet: String = ""
-    var lineup: String = Pal.Classic                  // 現在是哪一櫃
-    var TubbyLineup: Bool { return lineup == Pal.Teletubbies }
+    var lineup: String = Pal.Fallback                  // 現在是哪一櫃
+    var TubbyLineup: Bool { return lineup == Pal.Teletubbies }   //@fan
     let S: Int
     let k: Double
     let rnd = Random()
@@ -104,7 +104,8 @@ final class World: Form {
     init(_ S: Int, _ lineupId: String) {
         pipeName = ""; self.S = S; k = Double(S) / 3.0
         super.init()
-        lineup = Pal.NormLineup(lineupId); defaultPet = "po"
+        lineup = Pal.NormLineup(lineupId); defaultPet = "po"   //@fan
+        // <public> lineup = Pal.NormLineup(lineupId); defaultPet = "boba"
         var seed = 1
         for p in Pal.Lineup(lineup) { Pets.Add(Pet(self, p, S, seed)); seed += 1 }
     }
@@ -112,9 +113,10 @@ final class World: Form {
     init(_ S: Int) {
         pipeName = ""; self.S = S; k = Double(S) / 3.0
         super.init()
-        defaultPet = "spidey"
+        defaultPet = "spidey"   //@fan
+        // <public> defaultPet = "boba"
         var seed = 1
-        for p in Pal.Lineup(Pal.Classic) { Pets.Add(Pet(self, p, S, seed)); seed += 1 }
+        for p in Pal.Lineup(Pal.Fallback) { Pets.Add(Pet(self, p, S, seed)); seed += 1 }
     }
 
     override func SetVisibleCore(_ value: Bool) { super.SetVisibleCore(false) }
@@ -128,12 +130,13 @@ extension World {
     func DefaultPetFor(_ pet: String) -> String {
         for id in Pal.LineupIds(lineup) { if id == pet { return pet } }
         if lineup == Pal.Mine { let mi = Pal.MineIds(); if mi.count > 0 { return mi[0] } }
-        return lineup == Pal.Teletubbies ? "po" : (lineup == Pal.Pikmin ? "pkred" : (lineup == Pal.Original ? "boba" : "spidey"))
+        return lineup == Pal.Teletubbies ? "po" : (lineup == Pal.Pikmin ? "pkred" : (lineup == Pal.Original ? "boba" : "spidey"))   //@fan
+        // <public> return "boba"
     }
 
     // 每一櫃各自記：誰在外面、最近一隻、最愛（經典一櫃沿用原本的檔名）
     func LF(_ name: String) -> String {
-        if lineup == Pal.Classic { return name }
+        if lineup == Pal.Classic { return name }   //@fan
         let ext = (name as NSString).pathExtension
         let stem = (name as NSString).deletingPathExtension
         return stem + "-" + lineup + (ext.isEmpty ? "" : "." + ext)
@@ -175,7 +178,8 @@ extension World {
             delay += 0.5
         }
         active = Get(ids.Count > 0 ? ids[ids.Count - 1] : defaultPet) ?? Get(defaultPet)
-        if ids.Count == 0 && active != nil { active.Say(OrigLineup ? "續命小隊，報到！🥤" : (TubbyLineup ? "Eh-oh! 天線寶寶一櫃 ☀" : (CuLineup ? "我的櫃！大家都在 🧸" : "經典一櫃回來囉！")), 2.4) }
+        if ids.Count == 0 && active != nil { active.Say(OrigLineup ? "續命小隊，報到！🥤" : (TubbyLineup ? "Eh-oh! 天線寶寶一櫃 ☀" : (CuLineup ? "我的櫃！大家都在 🧸" : "經典一櫃回來囉！")), 2.4) }   //@fan
+        // <public> if ids.Count == 0 && active != nil { active.Say(CuLineup ? "我的櫃！大家都在 🧸" : "續命小隊，報到！🥤", 2.4) }
         Broadcast()
         lock(clients) { for c in clients { World.Send(c, "lineup " + lineup + "\n") } }   // 在桌面換櫃（小屋、設定）：VS Code 跟著改設定
         App.Log("lineup " + lineup)
@@ -279,6 +283,7 @@ extension World {
     }
 
     func Migrate() {
+        // <fan>
         // 舊的 Spidey 桌面版好感度搬過來（只複製，不動原檔）
         // mac: 舊的 mac 版 SpideyDesktop.swift 存在 ~/Library/Application Support/SpideyDesktop（bond.txt「xp 日期」、pats.txt「日期 次數」，格式一樣）
         let old = NSHomeDirectory() + "/Library/Application Support/SpideyDesktop"
@@ -290,6 +295,7 @@ extension World {
                 if (try? fm.copyItem(atPath: src, toPath: dst)) != nil { App.Log("migrated " + map[i][0]) }
             }
         }
+        // </fan>
         for p in Pets { p.Reload() }
     }
 
@@ -329,7 +335,7 @@ extension World {
 
     // ---------- 櫃子的格子：最愛（釘選 > 用最久）在高格，其他照順序 ----------
     func FavId() -> String {
-        if PikLineup { return "" }   // 皮克敏一櫃：大格固定是休息花
+        if PikLineup { return "" }   // 皮克敏一櫃：大格固定是休息花   //@fan
         if Get(favPin) != nil { return favPin }
         if let lf = Pal.LineupFav(lineup) as String?, Get(lf) != nil { return lf }                 // 天線寶寶一櫃：大格是小波
         var best: String = Pets[0].P.Id; var bv: Double = -1
@@ -386,7 +392,8 @@ extension World {
         for i in 0..<4 { o[i] = c[i] != nil && c[i]!.Out }
         var hot = false, over = false
         for p in Pets { if p.Out && p.Dragging { hot = true; if InShelf(p.Cx, p.y + Double(p.SH) / 2.0) { over = true } } }
-        shelf.Hot = hot; shelf.Over = over; shelf.Night = Night; shelf.Tubby = TubbyLineup; shelf.Pik = PikLineup; shelf.Orig = OrigLineup; shelf.Lunch = Lunch; shelf.Attention = EggAttention()
+        shelf.Hot = hot; shelf.Over = over; shelf.Night = Night; shelf.Tubby = TubbyLineup; shelf.Pik = PikLineup; shelf.Orig = OrigLineup; shelf.Lunch = Lunch; shelf.Attention = EggAttention()   //@fan
+        // <public> shelf.Hot = hot; shelf.Over = over; shelf.Night = Night; shelf.Orig = OrigLineup; shelf.Lunch = Lunch; shelf.Attention = EggAttention()
         shelf.Render(c, o, Now)
         if !W.Shown(shelf) { shelf.Show(); Zorder() }
     }
@@ -420,7 +427,8 @@ extension World {
 
     func ShelfClick(_ cell: Int) {
         let p0 = CellPets()[cell]
-        guard let p = p0 else { if cell == 0 && PikLineup { FlowerClicked() }; return }
+        guard let p = p0 else { if cell == 0 && PikLineup { FlowerClicked() }; return }   //@fan
+        // <public> guard let p = p0 else { return }
         if p.Out { if p.state != "stowfly" && p.state != "enter" && p.state != "exit" { p.StowToShelf(true) } }
         else { BringOut(p, true) }
     }
@@ -444,7 +452,7 @@ extension World {
     }
 
     func SetFav(_ p: Pet) {
-        if PikLineup { p.Say("大格種的是休息花，花不能搬喔 🌸", 2.2); return }
+        if PikLineup { p.Say("大格種的是休息花，花不能搬喔 🌸", 2.2); return }   //@fan
         favPin = favPin == p.P.Id ? "" : p.P.Id
         World.WriteText(LF("fav.txt"), favPin)
         p.Say(favPin == "" ? "好～不當最愛也沒關係" : "我是最愛！★ 謝謝你 ♥", 2)
@@ -516,7 +524,7 @@ extension World {
         }
         UpdateBall(dt)
         StepProps(dt)
-        PikTick(dt)
+        PikTick(dt)   //@fan
         OrigTick(dt)
         if fx != nil { fx.Step(dt) }
         StepScene(dt)
@@ -540,7 +548,7 @@ extension World {
         for pr in props { W.KeepOnTop(pr.F) }
         if fx != nil && fx.Active { W.KeepOnTop(fx) }
         for p in Pets { if p.Bub != nil { W.KeepOnTop(p.Bub) } }
-        W.KeepOnTop(flowerBub)
+        W.KeepOnTop(flowerBub)   //@fan
     }
 
     // ================= 掃描視窗 =================
@@ -557,7 +565,7 @@ extension World {
         if fx != nil && fx.IsHandleCreated { own.Add(fx.Handle) }
         if flash != nil && flash.IsHandleCreated { own.Add(flash.Handle) }
         for pr in props { if pr.F.IsHandleCreated { own.Add(pr.F.Handle) } }
-        if flowerBub != nil && flowerBub.IsHandleCreated { own.Add(flowerBub.Handle) }
+        if flowerBub != nil && flowerBub.IsHandleCreated { own.Add(flowerBub.Handle) }   //@fan
 
         let nw = List<WinInfo>()
         let nc = Dict<IntPtr, WinInfo>()
@@ -758,7 +766,7 @@ extension World {
             if shelf != nil { shelf.Hide() }
             if ballF != nil { ballF.Hide() }
             for pr in props { pr.F.Hide() }
-            if flowerBub != nil { flowerBub.Hide() }
+            if flowerBub != nil { flowerBub.Hide() }   //@fan
             if fx != nil && fx.Active { fx.Stop() }
         }
         else { RenderShelf() }
@@ -798,7 +806,7 @@ extension World {
         }
         else if sysIdle && idle < 2 {
             sysIdle = false
-            if PikLineup { PikRested() }       // 休息花：休息回來才恢復
+            if PikLineup { PikRested() }       // 休息花：休息回來才恢復   //@fan
             sessionStart = now
             let l = Lead()
             for p in Pets { if p === l { p.SystemIdle(false) } else { p.WakeIfSleep() } }
@@ -806,7 +814,8 @@ extension World {
         if !sysIdle && now - sessionStart >= restMin * 60 {
             sessionStart = now
             if HoldIfQuiet("rest", "該起來動一動了") { return }
-            if PikLineup { PikWiltAlarm() } else { Lead().Rest(restMin) }
+            if PikLineup { PikWiltAlarm() } else { Lead().Rest(restMin) }   //@fan
+            // <public> Lead().Rest(restMin)
         }
     }
 
@@ -868,8 +877,9 @@ extension World {
     func StartBall(_ nearPet: Bool) {
         let outs = OutPets()
         if outs.Count == 0 { Lead().Say("先放一隻出來陪你玩球～", 1.8); return }
-        let po = Get("po")
-        BallKind = po != nil && po!.Out ? "baseball" : Lead().P.BallKind
+        let po = Get("po")   //@fan
+        BallKind = po != nil && po!.Out ? "baseball" : Lead().P.BallKind   //@fan
+        // <public> BallKind = Lead().P.BallKind
         if ballF == nil { ballF = BallForm(Math.Max(2, S * 3 / 4)); ballF.Kicked = { self.BallClicked() } }
         ballF.Kind = BallKind
         let c = Cursor.Position
@@ -912,10 +922,12 @@ extension World {
 
     func Umpire(_ call: String) {
         if OutCount() < 2 || umpCd > 0 { return }
+        // <fan>
         let mm = Get("hangyodon") ?? Get("dipsy")   // 天線寶寶一櫃：迪西扶帽子當裁判
         if mm == nil || !mm!.Out || Holder === mm! { return }
         umpCd = 1.5
         mm!.Call(call)
+        // </fan>
     }
 
     func UpdateBall(_ dt: Double) {
@@ -968,7 +980,9 @@ extension World {
     // ================= 右鍵選單 =================
     func FillMenu(_ p: Pet, _ m: ContextMenuStrip) {
         m.Items.Clear()
-        var items: [[String]]! = p.P.Pik ? PikMenuItems(p) : (p.P.Orig ? OrigMenuItems(p) : (p.P.Cu ? p.CuMenuItems() : nil))
+        var items: [[String]]! = p.P.Pik ? PikMenuItems(p) : (p.P.Orig ? OrigMenuItems(p) : (p.P.Cu ? p.CuMenuItems() : nil))   //@fan
+        // <public> var items: [[String]]! = p.P.Orig ? OrigMenuItems(p) : (p.P.Cu ? p.CuMenuItems() : nil)
+        // <fan>
         if items == nil { switch p.P.Id {
         case "po":
             items = [["大抱抱 ♥", "hug"], ["打招呼 Eh-oh!", "hi"], ["敲敲螢幕", "knock"], ["騎車兜風", "ride"],
@@ -992,6 +1006,8 @@ extension World {
             items = [["抱抱 ♥", "hug"], ["打招呼", "hi"], ["敲敲螢幕", "knock"], ["噴絲擺盪", "swing"],
                      ["倒吊", "hang"], ["跳到別的視窗上", "jump"], ["去爬牆", "climb"], ["睡覺", "sleep"], ["丟球給他 ⚾", "ball"]]
         } }
+        // </fan>
+        // <public> if items == nil { items = [["抱抱 ♥", "hug"], ["打招呼", "hi"], ["敲敲螢幕", "knock"], ["睡覺", "sleep"], ["丟球給他 ⚾", "ball"]] }
         m.Items.Add(ToolStripLabel("一起玩"))
         for it in items! {
             let a = it[1]
@@ -1006,6 +1022,7 @@ extension World {
         m.Items.Add("公仔小屋（開關、設定）…", nil, { self.HouseMenu() })
         m.Items.Add(ToolStripSeparator())
         m.Items.Add(ToolStripLabel(Single ? "我的公仔" : "公仔們"))
+        // <fan>
         if TubbyLineup && !Single {
             let grp = ToolStripMenuItem("天線寶寶一起…")
             let gs: [[String]] = [["大抱抱 ♥", "bighug"], ["啦啦啦一起唱", "sing"], ["一起跌倒（哎喲！）", "fall"],
@@ -1013,7 +1030,8 @@ extension World {
             for gi in gs { let key = gi[1]; grp.DropDownItems.Add(gi[0], nil, { self.PlayScene(key) }) }
             m.Items.Add(grp)
         }
-        if PikLineup { AddPikMenu(m) }
+        // </fan>
+        if PikLineup { AddPikMenu(m) }   //@fan
         if OrigLineup && !Single { AddOrigMenu(m) }
         if !Single {
             let sw = ToolStripMenuItem("換角色")
@@ -1139,7 +1157,7 @@ extension World {
             m.Items.Add(p.P.Name + " 的好感度 ♥", nil, { p.ShowBond() })
             m.Items.Add(ToolStripSeparator())
         }
-        if PikLineup { m.Items.Add("休息花：還能撐多久？🌸", nil, { self.FlowerClicked() }) }
+        if PikLineup { m.Items.Add("休息花：還能撐多久？🌸", nil, { self.FlowerClicked() }) }   //@fan
         m.Items.Add(shelf.Collapsed ? "打開公仔櫃" : "收合成蛋 🥚", nil, { self.ToggleEgg(!self.shelf.Collapsed) })
         m.Items.Add("全部放出來", nil, { self.AllOut() })
         m.Items.Add("全部回櫃子", nil, { self.AllHome() })
@@ -1276,7 +1294,8 @@ extension World {
             var n = 0, prev = 0
             if p.count >= 3 { n = Int(p[1]) ?? 0; prev = Int(p[2]) ?? 0 }
             if n <= prev && n != 0 { break }
-            for x in outs { x.OnErrors(n, prev, x.P.Id == "po" || x.P.Id == "laalaa" ? Nearest(x) : nil) }
+            for x in outs { x.OnErrors(n, prev, x.P.Id == "po" || x.P.Id == "laalaa" ? Nearest(x) : nil) }   //@fan
+            // <public> for x in outs { x.OnErrors(n, prev, nil) }
             if outs.Count == 0 { l.OnErrors(n, prev, nil) }
         case "config":
             if p.count >= 3, let rm = Double(p[1]), let im = Double(p[2]) { restMin = Math.Max(1.0, rm); idleMin = Math.Max(1.0, im) }
@@ -1287,7 +1306,8 @@ extension World {
             if HoldIfQuiet("tag", "上版成功" + (p.count >= 3 && p[2] == "prod" ? "（正式機）" : "")) { break }
             let env = p.count >= 3 ? p[2] : ""
             var fired = false
-            for x in outs { x.Celebrate(env, !fired && (x.P.Id == "spidey" || x.P.Id == "po" || x === l)); if x.P.Id == "spidey" || x.P.Id == "po" { fired = true } }
+            for x in outs { x.Celebrate(env, !fired && (x.P.Id == "spidey" || x.P.Id == "po" || x === l)); if x.P.Id == "spidey" || x.P.Id == "po" { fired = true } }   //@fan
+            // <public> for x in outs { x.Celebrate(env, !fired && x === l) }
             if !fired && outs.Count > 0 { Fireworks(WA(l.Cx, l.y), 8, -1) }
             if outs.Count == 0 { l.Celebrate(env, true) }
         case "birthday": birthday = p.count >= 2 ? p[1].trimmingCharacters(in: .whitespacesAndNewlines) : ""; SeasonNow = Season()
@@ -1370,8 +1390,8 @@ extension World {
         case "lunchend": forceLunch = 0; LunchTick(true); return
         case "fav": SetFav(target ?? l); return
         case "scene": PlayScene(arg); return
-        case "flower": PikFlowerAct(arg); return
-        case "whistle": Whistle(); return
+        case "flower": PikFlowerAct(arg); return   //@fan
+        case "whistle": Whistle(); return   //@fan
         case "photo": GroupPhoto(); return
         case "rollcall":
             let ids = List<String>(); for x in OutPets() { ids.Add(x.P.Id) }; if ids.Count == 0 { for x in Pets { ids.Add(x.P.Id) } }; StartRollCall(ids); return

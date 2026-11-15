@@ -231,7 +231,7 @@ namespace DeskPals
         // 畫每一格：可愛的小桌面背景＋公仔照劇本動
         List<int[]> ShareFrames(List<Pal> cast, int W0, int H0, int fps, int n, out string caption)
         {
-            World pw = new World(S, Pal.Classic);
+            World pw = new World(S, Pal.Fallback);
             List<Pet> pets = new List<Pet>();
             int seed = 11;
             foreach (Pal p in cast) pets.Add(new Pet(pw, p, S, seed++));

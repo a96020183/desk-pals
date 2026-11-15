@@ -163,7 +163,8 @@ extension World {
     // 設定視窗用：這一櫃的櫃子縮圖（預覽用的 World 才叫這個，不開視窗）
     func SetupShelfPic() -> Bitmap {
         shelf = ShelfForm(self, S)
-        shelf.Tubby = TubbyLineup; shelf.Pik = PikLineup; shelf.Orig = OrigLineup
+        shelf.Tubby = TubbyLineup; shelf.Pik = PikLineup; shelf.Orig = OrigLineup   //@fan
+        // <public> shelf.Orig = OrigLineup
         shelf.Night = false
         shelf.Place(Rectangle(0, 0, 2000, 2000))
         let b = shelf.Snapshot(CellPets(), [false, false, false, false], 1.0)
@@ -697,7 +698,7 @@ class SetupForm: Form {
     static func Members(_ id: String) -> String {
         var names: [String] = []
         for x in Pal.LineupIds(id) { let p: Pal! = Pal.Get(x); if p != nil { names.append(p.Name) } }
-        if Pal.NormLineup(id) == Pal.Pikmin { names.append("休息花") }
+        if Pal.NormLineup(id) == Pal.Pikmin { names.append("休息花") }   //@fan
         return names.joined(separator: "・")
     }
     func CanNext() -> Bool { return step == 0 ? lu != "" : (mode == "shelf" || InLineup(pet)) }
@@ -731,7 +732,8 @@ class SetupForm: Form {
             EnsurePics(lu)
             let cw = Sc(240), ch = Sc(116), gap = Sc(24), x0 = (W0 - 2 * cw - gap) / 2
             Add("mode:single", "只要一隻", "沒有櫃子，他住在右下角的蛋裡", Rectangle(x0, top, cw, ch), 0, mode == "single")
-            Add("mode:shelf", lu == Pal.Pikmin ? "整櫃（三隻＋花）" : "整櫃", lu == Pal.Pikmin ? "三隻皮克敏和休息花住在櫃子裡" : "大家住在公仔櫃裡，點格子叫他們出來", Rectangle(x0 + cw + gap, top, cw, ch), 0, mode == "shelf")
+            Add("mode:shelf", lu == Pal.Pikmin ? "整櫃（三隻＋花）" : "整櫃", lu == Pal.Pikmin ? "三隻皮克敏和休息花住在櫃子裡" : "大家住在公仔櫃裡，點格子叫他們出來", Rectangle(x0 + cw + gap, top, cw, ch), 0, mode == "shelf")   //@fan
+            // <public> Add("mode:shelf", "整櫃", "大家住在公仔櫃裡，點格子叫他們出來", Rectangle(x0 + cw + gap, top, cw, ch), 0, mode == "shelf")
             if mode == "single" {
                 let ids = Pal.LineupIds(lu)
                 let pw = Sc(100), pg = Sc(14), px0 = (W0 - ids.count * pw - (ids.count - 1) * pg) / 2, py = top + ch + Sc(34)

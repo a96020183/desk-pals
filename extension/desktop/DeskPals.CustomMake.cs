@@ -221,7 +221,7 @@ namespace DeskPals
             if (m.Id == "") m.Id = "cudraft";
             if (m.Name == "") m.Name = "小公仔";
             draft = Pal.MakeCu(m, spr);
-            if (pvw == null) pvw = new World(w.S, Pal.Classic);
+            if (pvw == null) pvw = new World(w.S, Pal.Fallback);
             pv = new Pet(pvw, draft, w.S, 7);
         }
 
