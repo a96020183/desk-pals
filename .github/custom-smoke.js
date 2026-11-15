@@ -59,11 +59,11 @@ s.on("connect", async () => {
 	send("act all"); await sleep(4000);
 	await snap("shot-custom");
 	buf = ""; send("custom list");
-	for (let i = 0; i < 60 && !/\npals |^pals /.test(buf); i++) await sleep(100);
-	const m = /pals (\[.*\])/.exec(buf);
-	const pals = m ? JSON.parse(m[1]) : [];
+	for (let i = 0; i < 60 && !/(^|\n)pals .*\n/.test(buf); i++) await sleep(100);
+	const lines = buf.split("\n").filter((l) => l.startsWith("pals "));
+	const pals = lines.length ? (JSON.parse(lines[lines.length - 1].slice(5)).pals || []) : [];   // pals {"pals":[…],"mine":[…]}
 	console.log("PALS " + JSON.stringify(pals.map((p) => [p.id, p.name])));
-	if (pals.length === 0) { console.log("FAIL no custom pal"); process.exit(1); }
+	if (pals.length === 0) { console.log("FAIL no custom pal"); send("quit"); await sleep(1500); process.exit(1); }
 	const id = pals[0].id;
 	send(`custom icon ${id} 6 ${out}/custom-icon.png`); await sleep(800);
 	send(`custom export ${id} ${out}/custom.deskpal`); await sleep(1500);
