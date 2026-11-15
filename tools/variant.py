@@ -66,7 +66,10 @@ def fan_hits(text):
 BIN_TERMS = ["Spidey", "spidey", "Stitch", "stitch", "Hangyodon", "hangyodon", "Tinky", "tinky", "Dipsy", "dipsy", "LaaLaa", "laalaa",
              "Teletubb", "Tubby", "tubby", "Pikmin", "pikmin", "pkred", "pkyellow", "pkblue", "Thwip", "Eh-oh", "Ohana", "Aloha",
              "FramePo", "PoBall", "小波", "史迪", "漢頓", "丁丁", "迪西", "天線寶寶", "太陽寶寶", "皮克敏", "蜘蛛", "噗咿", "休息花"]
-BIN_ALLOW = ["SpideyDesktop", "spidey.sock", "spidey-pet", "SPIDEY_FORCE_DARK", "spidey-desktop.log", "spidey-desktop.sh"]
+BIN_ALLOW = ["SpideyDesktop", "spidey.sock", "spidey-pet", "SPIDEY_FORCE_DARK", "spidey-desktop.log", "spidey-desktop.sh",
+             # Swift 把 15 個位元組以內的字串（"/spidey.sock"）直接塞進 x86_64 指令的 8 位元組常數，切成 "/spidey." + "sock"，
+             # 完整的放行名稱就對不上了：只放行後面緊接 . 或 - 的寫法（角色 id 本身是 "spidey" 後面接 0，照樣抓得到；原始碼另外有嚴格的掃描）
+             "spidey.", "spidey-"]
 
 
 def bin_hits(data):
