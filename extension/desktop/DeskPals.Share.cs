@@ -241,7 +241,7 @@ namespace DeskPals
             foreach (Pet p in pets) if (p.P.Cu) { caption = p.ShareLine("x_share"); break; }
             if (string.IsNullOrEmpty(caption)) caption = "我的桌面公仔在螢幕上陪我上班 ✨ #我的桌面公仔 #DeskPals";
             string hi = NoEmoji(heroPet.ShareLine("hi"));
-            int ps = cast.Count == 1 ? 13 : (cast.Count == 2 ? 11 : 8);
+            int ps = cast.Count == 1 ? 13 : (cast.Count == 2 ? 11 : (cast.Count == 3 ? 9 : 7));
             List<int[]> frames = new List<int[]>();
             using (Bitmap bg = ShareBackground(W0, H0, hero))
             using (Bitmap fr = new Bitmap(W0, H0, PixelFormat.Format32bppArgb))

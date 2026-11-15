@@ -513,7 +513,7 @@ namespace DeskPals
         public CuMeta Meta;
         public CuSprite Spr;
         public const string Mine = "mine";
-        public static readonly string[] Guests = { "spidey", "po", "stitch", "hangyodon", "tinky", "dipsy", "laalaa" };   // 可以來我的櫃作客的內建公仔
+        public static readonly string[] Guests = { "boba", "coffee", "onigiri", "sticky", "spidey", "po", "stitch", "hangyodon", "tinky", "dipsy", "laalaa" };   // 可以來我的櫃作客的內建公仔
 
         public static void CuReset() { all = null; }
         public static Pal GetBuiltin(string id) { if (all == null) return null; foreach (Pal p in all) if (p.Id == id && !p.Cu) return p; return null; }
