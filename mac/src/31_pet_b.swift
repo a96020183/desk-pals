@@ -28,6 +28,7 @@ extension Pet {
     func StepSpecial(_ dt: Double, _ wa: Rectangle) -> Bool {
         if HoldToast && rnd.NextDouble() < dt * 2.5 && notes.Count < 10 { notes.Add(Arr<Double>([R(-8, 8) * k, 0, 7])) }   // 吐司屑屑
         if P.Tubby && TubbyStep(dt) { return true }
+        if P.Pik && PikStep(dt) { return true }
         switch state {
         case "plop":
             sT += dt
@@ -81,6 +82,7 @@ extension Pet {
 
     // 走到視窗邊緣：0＝照預設跳下去、1＝回頭、2＝換狀態了
     func EdgeOfWindow(_ right: Bool) -> Int {
+        if P.Pik { return PikEdge(right) }
         switch P.Id {
         case "spidey":
             if !goClimb && rnd.NextDouble() < 0.55 { dir = -dir; if rnd.NextDouble() < 0.3 { SpinWeb(supH, right) }; return 1 }
@@ -142,6 +144,7 @@ extension Pet {
 
     // 落地時的特別反應：true＝處理掉了
     func Landed(_ wasRolling: Bool, _ landVx: Double) -> Bool {
+        if P.Pik && PikLanded(wasRolling) { return true }
         if Is("stitch") && wasRolling { vx = landVx * 0.8; if Math.Abs(vx) < 60 * k { vx = Double(dir) * 120 * k }; SetState("curl", R(0.8, 1.4)); return true }
         if Is("po") && wasRolling && state != "spin" { SetState("dizzy", 0.8); Say(Pick(["轉圈圈～", "再來一次！"]), 1.2); return true }
         if Is("po") && state == "spin" { SetState("spin", 0.4); return true }
@@ -152,6 +155,7 @@ extension Pet {
 
     func LandAction() {
         let a = afterLand; afterLand = ""
+        if P.Pik && PikLand(a) { return }
         switch a {
         case "wave": SetState("wave", 1.8); Say("Eh-oh!", 1.6)
         case "sniff": poseKind = "grin"; SetState("pose", 1.6); Mark(2); Say(Pick(["（聞聞）ih?", "嘻嘻，這個好玩", "ih-ih! 史迪仔的！"]), 1.6)
@@ -176,6 +180,7 @@ extension Pet {
             return
         }
         if w.OutCount() > 1 && rnd.NextDouble() < 0.12 && VisitFriend() { return }
+        if P.Pik { PikDecide(r, wa); return }
         let lateOk: () -> Bool = { self.lateCd <= 0 && self.LateLine() != nil }
         switch P.Id {
         case "spidey":
@@ -292,6 +297,7 @@ extension Pet {
     // 右鍵選單的招牌動作
     func Signature() {
         if !Out { return }
+        if P.Pik { PikSignature(); return }
         switch P.Id {
         case "spidey": if !ShootTo("swing") { Say("這裡太低了，甩不起來", 1.6) }
         case "po": if !JumpToPlatform() { Jump(Double(dir) * 200 * k, -520 * k); Say("咻～～", 1) } else { Say("咻～～再來一次！", 1.4) }
@@ -324,6 +330,7 @@ extension Pet {
     }
 
     func ActSpecial(_ a: String) {
+        if P.Pik && PikAct(a) { return }
         switch a {
         case "swing": if Is("spidey") { if !ShootTo("swing") { Say("這裡太低了，甩不起來", 1.6) } } else { Signature() }
         case "hang": if Is("spidey") { if !ShootTo("hang") { Say("上面沒地方黏", 1.6) } }
