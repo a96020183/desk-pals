@@ -3,46 +3,41 @@ on: [push, workflow_dispatch]
 jobs:
   mac:
     runs-on: macos-15
-    defaults:
-      run:
-        working-directory: extension/desktop
     steps:
       - uses: actions/checkout@v4
-      - name: Compile (same command as spidey-desktop.sh)
+      - name: DeskPals.swift is up to date with mac/src
+        run: |
+          python3 mac/assemble.py
+          git diff --exit-code extension/desktop/DeskPals.swift
+      - name: Compile (same command as desk-pals.sh)
+        working-directory: extension/desktop
         run: |
           set -o pipefail
-          xcrun swiftc -O SpideyDesktop.swift -o SpideyDesktop 2>&1 | tee build.log
+          xcrun swiftc -O DeskPals.swift -o DeskPals 2>&1 | tee build.log
       - name: Shell syntax
-        run: bash -n spidey-desktop.sh
-      - name: Smoke run (start, talk over the socket, screenshot, quit)
+        run: bash -n extension/desktop/desk-pals.sh
+      - name: Smoke run (offscreen, all pets, snapshot, quit)
         run: |
-          mkdir -p "$HOME/Library/Application Support/SpideyDesktop"
-          SOCK="$HOME/Library/Application Support/SpideyDesktop/spidey.sock"
-          ./SpideyDesktop "$SOCK" > run.log 2>&1 &
+          export DESKPALS_OFFSCREEN=1
+          export DESKPALS_DATA_DIR="$RUNNER_TEMP/dp-data"
+          SOCK="$RUNNER_TEMP/dp.sock"
+          extension/desktop/DeskPals "$SOCK" po classic > run.log 2>&1 &
           PID=$!
           sleep 8
           kill -0 $PID || { echo "died at startup"; cat run.log; exit 1; }
-          node -e '
-            const net=require("net");const s=net.connect(process.argv[1]);s.setEncoding("utf8");
-            s.on("data",d=>process.stdout.write("REPLY "+d));
-            s.on("error",e=>{console.log("SOCKET ERR",e.message);process.exit(1)});
-            const msgs=["hello","where","act hug","act ball","tag 1.0.0 prod","act nest","claude wait x","act bond","where"];
-            let i=0;const t=setInterval(()=>{if(i<msgs.length)s.write(msgs[i++]+"\n");else{clearInterval(t);setTimeout(()=>s.end(),800)}},700);
-          ' "$SOCK"
-          sleep 2
-          screencapture -x shot.png || echo "screencapture failed"
-          kill -0 $PID || { echo "died during smoke run"; cat run.log; exit 1; }
-          node -e 'const s=require("net").connect(process.argv[1],()=>{s.write("quit\n");setTimeout(()=>process.exit(0),500)})' "$SOCK"
-          sleep 2
+          SMOKE_ENDPOINT="$SOCK" node .github/smoke.js
+          sleep 3
+          cat "$HOME/Library/Logs/desk-pals.log" || true
           if kill -0 $PID 2>/dev/null; then echo "did not quit"; kill $PID; exit 1; fi
+          test -f shot.png || { echo "no snapshot"; exit 1; }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: mac-result
           path: |
             extension/desktop/build.log
-            extension/desktop/run.log
-            extension/desktop/shot.png
+            run.log
+            shot*.png
 
   windows:
     runs-on: windows-latest
@@ -75,5 +70,4 @@ jobs:
           name: desk-pals-vsix
           path: |
             dist/*.vsix
-            shot.png
-            shot-teletubbies.png
+            shot*.png

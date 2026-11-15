@@ -8,3 +8,4 @@ art/
 /extension.vsixmanifest
 /[[]Content_Types].xml
 dist/
+**/desktop/DeskPals
