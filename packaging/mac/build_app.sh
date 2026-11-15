@@ -31,7 +31,7 @@ iconutil -c icns "$ROOT/build/icons/AppIcon.iconset" -o "$BUILD/AppIcon.icns"
 
 # ---------- universal binary ----------
 for arch in arm64 x86_64; do
-  echo "swiftc $arch…"
+  echo "swiftc ${arch} ..."
   xcrun swiftc -O -target "$arch-apple-macos$MIN_MACOS" extension/desktop/DeskPals.swift -o "$BUILD/DeskPals-$arch"
 done
 lipo -create -output "$BUILD/DeskPals" "$BUILD/DeskPals-arm64" "$BUILD/DeskPals-x86_64"
