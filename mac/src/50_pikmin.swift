@@ -981,9 +981,9 @@ extension World {
         if carryProp == nil { return }
         if !props.Contains(carryProp) || carriers == nil { carryProp = nil; return }
         let live = List<Pet>()
-        for p in carriers { if p.Out && p.PikCarrying { live.Add(p) } }
+        for p in carriers! { if p.Out && p.PikCarrying { live.Add(p) } }
         var headY = Double.greatestFiniteMagnitude
-        for p in carriers { if p.Out { headY = Math.Min(headY, p.Foot - Double(p.SH) + Double((p.P.HeadTop - 1) * p.S)) } }
+        for p in carriers! { if p.Out { headY = Math.Min(headY, p.Foot - Double(p.SH) + Double((p.P.HeadTop - 1) * p.S)) } }
         if live.Count > 0 {
             carryLift = Math.Min(1.0, carryLift + dt * 1.2)
             var ready = true
@@ -1012,7 +1012,7 @@ extension World {
             cp.Hold = 0
             cp.Go(Double(c0.X) + Double(c0.Width) / 2.0, Double(c0.Y) + Double(c0.Height) / 2.0, 0.7, 60 * k, { [self] in if shelf.Collapsed { shelf.Gulp() } })
         }
-        if carriers != nil { for p in carriers { p.PikCarrying = false } }
+        if carriers != nil { for p in carriers! { p.PikCarrying = false } }
         carriers = nil
     }
 
