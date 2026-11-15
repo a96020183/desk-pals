@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 公仔櫃 Desk Pals.app 的 Info.plist。packaging/mac/build_app.sh 會換掉 __VERSION__、__BUILD__、__BUNDLE_ID__。
+     Bundle ID：之後到 Apple Developer 註冊 App ID 時用同一個（GitHub 變數 MAC_BUNDLE_ID 可以改；改了之後使用者要重新允許權限）。 -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key><string>zh_TW</string>
+  <key>CFBundleExecutable</key><string>DeskPals</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>CFBundleIdentifier</key><string>__BUNDLE_ID__</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleName</key><string>Desk Pals</string>
+  <key>CFBundleDisplayName</key><string>公仔櫃 Desk Pals</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>__VERSION__</string>
+  <key>CFBundleVersion</key><string>__BUILD__</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.entertainment</string>
+  <key>LSMinimumSystemVersion</key><string>__MIN_MACOS__</string>
+  <!-- 沒有 Dock 圖示、沒有選單列：公仔櫃本身就是介面 -->
+  <key>LSUIElement</key><true/>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
+  <key>NSHumanReadableCopyright</key><string>Desk Pals</string>
+</dict>
+</plist>
