@@ -174,6 +174,8 @@ jobs:
           Start-Sleep -Seconds 3
           if (Test-Path "$env:TEMP\desk-pals.log") { Get-Content "$env:TEMP\desk-pals.log" }
           if (-not (Test-Path shot.png)) { throw "no snapshot" }
+          New-Item -ItemType Directory -Force ps1-shots | Out-Null
+          Move-Item shot*.png ps1-shots
       - name: Build vsix
         run: python build_vsix.py
 
@@ -208,8 +210,7 @@ jobs:
           tzutil /s "Taipei Standard Time"   # test/desktop-study.js fixtures are written in Taipei time
           $env:DESKPALS_OFFSCREEN = "1"
           $env:DESKPALS_DATA_DIR = "$env:RUNNER_TEMP\dp-exe"
-          New-Item -ItemType Directory -Force ps1-shots, exe-shots | Out-Null
-          Move-Item shot*.png ps1-shots -ErrorAction SilentlyContinue   # 上面 desk-pals.ps1 那份的截圖
+          New-Item -ItemType Directory -Force exe-shots | Out-Null
           $a = Start-Process dist\DeskPals.exe -ArgumentList "--pipe desk-pals-ci --pet po" -PassThru
           Start-Sleep -Seconds 5
           node .github/smoke.js

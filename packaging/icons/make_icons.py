@@ -332,7 +332,7 @@ def main(out):
         bmp(figure_icon(n, pad=0.04), os.path.join(out, "inno", f"small-{pct}.bmp"))
     # README／PUBLISHING 用的預覽
     save(shelf_image(328, 604, 8), out, "png", "installer-art.png")
-    print("icons →", out)
+    print("icons ->", out)
 
 
 if __name__ == "__main__":

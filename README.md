@@ -98,16 +98,51 @@
 
 ## 安裝
 
-一個 `.vsix` 同時支援 Windows 和 Mac，在 VS Code 安裝。第一次會跳出設定視窗：做一隻自己的公仔，或選一櫃現成的；預設是「只要一隻」（他住在右下角的蛋裡），想要整個公仔櫃也可以選「整櫃」。
+三種裝法，挑一種就好（同一台電腦兩種都裝也沒關係，見最下面）。三種都是同一個桌面公仔櫃；第一次打開會跳出設定視窗：做一隻自己的公仔，或選一櫃現成的；預設是「只要一隻」（他住在右下角的蛋裡），想要整個公仔櫃也可以選「整櫃」。
 
-- **Windows**（完整公仔櫃＋做自己的公仔）：見 [Windows安裝說明.md](Windows安裝說明.md)
-- **Mac**（完整公仔櫃；續命小隊還在移植中，做自己的公仔、分享短片目前也先在 Windows 版）：見 [Mac安裝說明.md](Mac安裝說明.md)
+| | Windows 安裝程式 | Mac App（DMG） | VS Code 擴充套件 |
+|---|---|---|---|
+| 檔案 | `DeskPals-Setup-<版號>.exe` | `DeskPals-<版號>.dmg` | `desk-pals-<版號>.vsix` |
+| 要先有 | Windows 10／11（不用 VS Code） | macOS 11 以後，Apple 晶片、Intel 都可以（不用 VS Code、不用 Xcode） | VS Code（Mac 還要 Xcode Command Line Tools） |
+| 桌面公仔櫃、各櫃公仔、串門子、午餐、下班時間 | ✓ | ✓ | ✓ |
+| 做自己的公仔、分享短片、`.deskpal` 匯出匯入 | ✓ | 移植中 | Windows ✓／Mac 移植中 |
+| 讀書小幫手（學校行事曆、作業、考試、熬夜、搶課） | ✓ | 移植中 | Windows ✓／Mac 移植中 |
+| 提醒我、搶票、專注、安靜、Claude Code／Codex 卡住提醒 | ✓ | ✓ | ✓ |
+| 只有 VS Code 才有：存檔比讚、錯誤數、打字速度、終端機長指令、推 tag 盯 CI、開會提醒（工作行事曆）、Jira／GitLab 待辦、天氣、工作日誌、側邊欄公仔 | | | ✓ |
+| 開機自動出現 | ✓（安裝時可取消） | ✓ | ✓ |
 
-`.vsix` 從 [Actions](../../actions) 最新一次成功的建置下載（Artifacts 裡的 `desk-pals-vsix`），或自己打包：
+檔案從 [Releases](../../releases) 下載（還沒發版之前：[Actions](../../actions) 最新一次成功的建置 → Artifacts 的 `desk-pals-windows`／`desk-pals-mac`）。
 
-```
-python build_vsix.py
-```
+### Windows：安裝程式
+
+1. 雙擊 `DeskPals-Setup-<版號>.exe`。
+2. 這一版還沒有程式碼簽章，Windows 會跳出藍色的「Windows 已保護您的電腦」：按 **「其他資訊」→「仍要執行」**。（瀏覽器下載時說「不常下載」的話：Edge 按「⋯」→「保留」→「顯示更多」→「仍要保留」；Chrome 按「保留」。）
+3. 照畫面按「下一步」：要不要「開機時自動出現在桌面」（預設要）、要不要桌面捷徑 →「安裝」→ 勾「現在就打開公仔櫃」→「完成」。
+
+不用系統管理員權限，裝在 `%LOCALAPPDATA%\Programs\DeskPals`（只給你這個帳號）。之後從「開始」功能表打開「公仔櫃 Desk Pals」；已經開著的話，再點一次它會出來打招呼（躲起來的會現身）。升級：直接執行新版的安裝程式，會先請舊的收工再換新。解除安裝：「設定 → 應用程式 → 公仔櫃 Desk Pals → 解除安裝」，會問要不要一併刪掉你的設定和紀錄（預設保留）。
+
+### Mac：DMG
+
+1. 雙擊 `DeskPals-<版號>.dmg`，把「Desk Pals」拖到旁邊的「Applications（應用程式）」。
+2. 到「應用程式」打開 Desk Pals。這一版還沒有 Apple 的公證，第一次會被擋，照下面做一次：
+   - **macOS 15（Sequoia）以後**：看到「無法打開」按「完成」→ 打開「**系統設定 → 隱私權與安全性**」，往下捲到「安全性」，在「已阻擋 "Desk Pals"…」旁邊按「**仍要打開**」→ 輸入密碼 → 再按「仍要打開」。
+   - **macOS 14 以前**：在「應用程式」裡對 Desk Pals **按右鍵（或 Control＋點一下）→「打開」**→ 再按一次「打開」。
+3. 公仔櫃出現在螢幕右下角；之後開機會自動出現（要關：「系統設定 → 一般 → 登入項目」）。沒有 Dock 圖示，點公仔、蛋或櫃子按右鍵就是選單。
+
+直接在 DMG 或「下載項目」裡打開的話，它會提醒你先拖進「應用程式」（不然開機不會自動出現）。
+
+### VS Code 擴充套件
+
+1. VS Code →「延伸模組」→ 右上角「⋯」→「從 VSIX 安裝…」→ 選 `desk-pals-<版號>.vsix`。
+2. 重新開啟 VS Code。第一次會在背景編譯桌面版（30 秒到 1 分鐘），之後開機會自動出現，不用開 VS Code。
+
+細節：[Windows安裝說明.md](Windows安裝說明.md)、[Mac安裝說明.md](Mac安裝說明.md)。自己打包：`python build_vsix.py`。
+
+### 兩種都裝
+
+裝了 Windows 安裝程式（或 Microsoft Store 版）／Mac App 之後，VS Code 擴充套件就**不再自己編一份、也不建自己的開機啟動**，只負責連上獨立版（沒開的話叫它起來），VS Code 才有的功能照常送過去。兩邊用同一個資料夾（Windows `%LOCALAPPDATA%\DeskPals`、Mac `~/Library/Application Support/DeskPals`），設定、紀錄、自己做的公仔都是同一份。先用擴充套件、後來才裝獨立版也沒問題：安裝時會請擴充套件那份收工、把開機啟動換成獨立版。解除安裝獨立版之後，擴充套件會回到原本的做法。
+
+自己打包獨立版：Windows `powershell -File packaging\windows\build.ps1`（需要免費的 Inno Setup 6、Windows SDK、Python + Pillow），Mac `packaging/mac/build_app.sh`。上架、簽章見 [PUBLISHING.md](PUBLISHING.md)。
 
 ## 結構
 
@@ -127,5 +162,9 @@ python build_vsix.py
 | `mac/` | Mac 版原始碼與移植規範（`PORTING.md`） |
 | `extension/desktop/claude-hook.js`、`ci-watch.js` | Claude Code hooks、推 tag 後盯 CI |
 | `build_vsix.py` | 打包成 `.vsix` |
+| `packaging/windows/` | Windows 獨立版：`DeskPals.Main.cs`（exe 進入點）、`build.ps1`（exe → 安裝程式 → MSIX）、`DeskPals.iss`（Inno Setup）、`msix/AppxManifest.xml`（Microsoft Store） |
+| `packaging/mac/` | Mac 獨立版：`build_app.sh`（universal `.app` → DMG，可選簽章＋公證）、`Info.plist`；開場邏輯在 `mac/src/95_standalone.swift` |
+| `packaging/icons/make_icons.py` | 從續命小隊的像素圖畫出所有圖示（`.ico`、`.icns`、Store 磚、安裝程式圖） |
+| `PUBLISHING.md` | 簽章、上架（Microsoft Store、Steam、Apple 公證）要做的事 |
 
-每次推送都會在雲端的 Windows 和 Mac 上各編譯、試跑一次（都用不顯示畫面的離屏模式）。
+每次推送都會在雲端的 Windows 和 Mac 上各編譯、試跑一次（都用不顯示畫面的離屏模式），也會打包獨立版並實際安裝、升級、解除安裝測一次；推 `v<版號>` 的 tag 會自動建 GitHub Release，附上安裝程式、DMG、vsix、MSIX。
