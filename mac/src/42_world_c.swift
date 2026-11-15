@@ -109,6 +109,7 @@ extension World {
 
     static func Flavor(_ id: String, _ kind: String, _ night: Bool) -> String {
         let pk = PikFlavor(id, kind) ?? OrigFlavor(id, kind); if pk != nil { return pk! }
+        let cu = CuFlavor(id, kind, night); if cu != nil { return cu! }
         let sd = StudyFlavor(id, kind); if sd != nil { return sd! }
         let extra = FlavorExtra(id, kind)
         if extra != nil { return extra! }
@@ -223,7 +224,7 @@ extension World {
             case "tinky": line = "噓～丁丁抱著袋袋安靜陪你 🤫"
             case "dipsy": line = "噓。帽子拉低，安靜。"
             case "laalaa": line = "噓～拉拉小小聲 🤫"
-            default: line = "好，我安靜待著。"
+            default: line = l.P.Cu ? l.L("x_quiet_on") : "好，我安靜待著。"
             }
             l.Say(line, 2.2)
         }
@@ -244,7 +245,7 @@ extension World {
         case "tinky": line = "安靜時間結束～Eh-oh!"
         case "dipsy": line = "安靜結束。嘿～"
         case "laalaa": line = "安靜時間結束～啦啦啦！"
-        default: line = "安靜時間結束～"
+        default: line = l.P.Cu ? l.L("x_quiet_off") : "安靜時間結束～"
         }
         if heldQuiet.Count == 0 { l.Say(line, 2.4); return }
         // 一次說完：最新一則有網址就可以點
@@ -317,7 +318,7 @@ extension World {
         case "tinky": end = "專注結束！休息 5 分鐘 ☕ 丁丁跳舞給你看"
         case "dipsy": end = "專注結束。休息 5 分鐘 ☕ 你很酷"
         case "laalaa": end = "專注結束！休息 5 分鐘 ☕ 啦啦啦～好棒棒"
-        default: end = "專注結束！休息 5 分鐘 ☕ 你超強的"
+        default: end = l.P.Cu ? l.L("x_focus_end") : "專注結束！休息 5 分鐘 ☕ 你超強的"
         }
         l.Knock((ExamNear() ? end.Replace("專注結束", "讀書結束") : end) + "　今天第 " + String(n) + " 顆 🍅", "high")
         for p in OutPets() { if p !== l { p.React() } }
@@ -405,6 +406,7 @@ extension World {
     // ---------- 共用：每個角色的開場白 ----------
     static func FlavorExtra(_ id: String, _ kind: String) -> String! {
         let pk = PikFlavor(id, kind) ?? OrigFlavor(id, kind); if pk != nil { return pk! }
+        let cu = CuFlavor(id, kind, false); if cu != nil { return cu! }
         let keys: [String] = ["remind", "pc-cpu", "pc-ram", "pc-disk", "net-down", "net-up", "vpn", "download"]
         let sp: [String] = ["⏰ 提醒你：", "蜘蛛感應！電腦好燙：", "蜘蛛感應！記憶體快滿了：", "硬碟快滿了：", "網路斷了！", "網路回來了 👍", "連不到公司網路（VPN 斷了？）", "下載好了："]
         let po: [String] = ["⏰ 小波提醒你：", "電腦好忙好熱喔：", "記憶體要滿滿了：", "硬碟快塞滿了：", "網路斷掉了！嗚…", "網路回來了！Eh-oh!", "連不到公司網路耶（VPN 斷了？）", "下載好了！"]
@@ -816,7 +818,7 @@ extension World {
         case "tinky": intro = "Eh-oh! 丁丁的魔法袋裝了今天的我們："
         case "dipsy": intro = "嘿，今天的我們："
         case "laalaa": intro = "啦啦～今天的我們："
-        default: intro = "今天的我們："
+        default: intro = l.P.Cu ? l.L("x_wrap") : "今天的我們："
         }
         if outs.Count >= 2 && !quietOn {
             // 大家輪流講一句
@@ -956,6 +958,7 @@ extension World {
         if t.Kind == "course" { return CourseLine(id, stage, t) }   // 搶課：52_study.swift
         let h = String(t.Lead / 60) + " 小時", n: String = t.Name
         let pk = PikTicket(id, stage, n, h) ?? OrigTicket(id, stage, n, h); if pk != nil { return pk! }
+        let cu = CuTicket(id, stage, n, h); if cu != nil { return cu! }
         let sp: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款", "🎫 " + n + " 再 30 分鐘開賣，網頁先開好", "🎫 " + n + " 剩 10 分鐘！蜘蛛感應全開", "🎫 準備！手指放在按鈕上", "🎫 開搶！！Thwip!"]
         let po: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款喔", "🎫 " + n + " 再 30 分鐘！小波陪你等", "🎫 " + n + " 剩 10 分鐘！好緊張～", "🎫 準備！深呼吸～", "🎫 開搶！！衝衝衝！"]
         let st: [String] = ["🎫 " + n + " 還有 " + h + "開賣！先登入、綁好付款！ih!", "🎫 " + n + " 30 分鐘！史迪仔幫你顧著", "🎫 " + n + " 10 分鐘！ih-ih-ih!", "🎫 準備！史迪仔也準備好了", "🎫 開搶！！衝啊！"]
@@ -1263,6 +1266,7 @@ extension Pet {
     func LunchLine(_ phase: String) -> String {
         if P.Pik { return PikLunchLine(phase) }
         if P.Orig { return OrigLunchLine(phase) }
+        if P.Cu { return CuLunchLine(phase) }
         switch P.Id {
         case "po":
             if phase == "start" { return "嘟嘟糊！午餐時間！🔔" }
@@ -1335,6 +1339,7 @@ extension Pet {
         let bite = Step2(2.5) ? 1 : 0   // 一口一口：手上的食物上下動
         if P.Pik { DrawPikLunch(g, f, bx, by, ps, fx, bite); return }
         if P.Orig { DrawOrigLunch(g, f, bx, by, ps, fx, bite); return }
+        if P.Cu { CuLunch(g, f, bx, by, ps, fx, bite); return }
         switch P.Id {
         case "po":
             DrawAt(g, Pet.CUSTARD, 9, Double(8 + bite + f.AccDy), bx, by, ps, fx, false, true)
@@ -1381,6 +1386,7 @@ extension Pet {
 extension Pet {
     // 外出中的格子：淡淡的剪影，櫃子還是他的位置
     func DrawGhost(_ g: Graphics, _ fx: Int, _ fy: Int, _ ps: Int, _ night: Bool) {
+        if P.Cu { CuGhost(g, fx, fy, ps, night); return }
         let rows: [String] = Pal.Stack(A("HEAD"), A("BODY"), A("LEGS_A"))
         let bx = fx - rows[0].Length * ps / 2, by = fy - rows.count * ps
         let c: Color = P.Accent
@@ -1399,6 +1405,7 @@ extension Pet {
     func ShelfRows() -> Int {
         if P.Pik { return PikShelfRows() }
         if P.Orig { return OrigShelfRows() }
+        if P.Cu { return CuShelfRows() }
         let hat = (w.SeasonNow == "xmas" || Level() >= 3) ? 4 : 0
         switch P.Id {
         case "po": return 16 + P.TopRows + 1                             // 扶著停在旁邊的滑板車

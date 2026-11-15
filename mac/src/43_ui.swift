@@ -5,8 +5,7 @@ import AppKit
 // ================= 公仔小屋（蛋的右鍵）：娛樂功能開關、重新設定；只要一隻；第一次設定 =================
 //@@IN World
     let feats = Dict<String, Bool>()
-    // ---- 你是？（profile.txt：student｜work）、擺法（mode.txt：shelf｜single <id>）----
-    var Student = false                           // 大學生（之後會有大學生的內容；現在先記著）
+    // ---- 設定過了沒（profile.txt）、擺法（mode.txt：shelf｜single <id>）----
     var Single = false                            // 只要一隻：沒有櫃子，那隻的家是蛋，其他隻不出來
     var singleId = ""
     // ---- 設定視窗 ----
@@ -55,8 +54,8 @@ extension World {
     }
 
     func LoadMode() {
-        Student = World.ReadText("profile.txt") == "student"
-        let m = World.ReadText("mode.txt")
+        var m = World.ReadText("mode.txt")
+        if m == "" && !File.Exists(World.FilePath("profile.txt")) { m = "single" }   // 第一次（還沒設定）：預設只要一隻
         Single = m.StartsWith("single")
         singleId = Single && m.Length > 6 ? m.Substring(6).Trim() : ""
     }
@@ -95,7 +94,7 @@ extension World {
         m.Items.Add(Single ? "叫" + Get(SinglePet()).P.Name + "出來" : "全部出來", nil, { self.AllOut() })
         m.Items.Add(Single ? "回蛋裡" : "全部回家", nil, { self.AllHome() })
         let sw = ToolStripMenuItem("換一櫃")
-        for lu in Pal.Lineups {
+        for lu in Pal.LineupsNow() {
             let l2 = lu
             let li = ToolStripMenuItem(Pal.LineupName(lu), nil, { self.SwitchLineup(l2, self.Single ? self.singleId : "") })
             li.Checked = lu == lineup
@@ -105,6 +104,7 @@ extension World {
         m.Items.Add("重新設定…", nil, { self.ShowSetup(false) })
         m.Items.Add("讀書小幫手設定（學校行事曆、熬夜）…", nil, { self.ShowStudySettings() })
         m.Items.Add("躲起來（⌃⌥S）", nil, { self.ToggleHide() })
+        CuHouseMenu(m)   // 自己做的公仔、分享短片（53_custom.swift）
         m.Items.Add(ToolStripSeparator())
         m.Items.Add("收工（關掉 Desk Pals）", nil, { self.QuitAll() })
         ShowMenu(m, "公仔小屋", true, at)
@@ -125,7 +125,7 @@ extension World {
 
     func ShowSetup(_ first: Bool) {
         if setupForm == nil || setupForm.IsDisposed {
-            setupForm = SetupForm(self, first, World.ReadText("profile.txt"), lineup, Single, Single ? SinglePet() : "")
+            setupForm = SetupForm(self, first, lineup, Single || first, Single ? SinglePet() : "")
         }
         let wa: Rectangle = App.Offscreen ? screens[0].WorkingArea : Screen.FromPoint(Cursor.Position).WorkingArea
         setupForm.Location = Point(wa.Left + (wa.Width - setupForm.Width) / 2, wa.Top + Math.Max(0, (wa.Height - setupForm.Height) / 2))
@@ -137,15 +137,14 @@ extension World {
     }
 
     // 設定好了：馬上套用（不用重開）
-    func ApplySetup(_ prof: String, _ lu0: String, _ single: Bool, _ pet: String, _ first: Bool) {
-        World.WriteText("profile.txt", prof == "student" ? "student" : "work")
-        Student = prof == "student"
+    func ApplySetup(_ lu0: String, _ single: Bool, _ pet: String, _ first: Bool) {
+        World.WriteText("profile.txt", "done")
         let lu = Pal.NormLineup(lu0)
         let wasSingle = Single
         Single = single
         singleId = single ? pet : ""
         World.WriteText("mode.txt", single ? "single " + pet : "shelf")
-        App.Log("setup profile=" + prof + " lineup=" + lu + " mode=" + (single ? "single " + pet : "shelf"))
+        App.Log("setup lineup=" + lu + " mode=" + (single ? "single " + pet : "shelf"))
         if single {
             if !shelf.Collapsed { shelf.Collapsed = true; World.WriteText("shelf-state.txt", "egg") }
             if lu != lineup { SwitchLineup(lu, pet) }
@@ -627,7 +626,7 @@ class SetupForm: Form {
     let d: Double
     let U: Int
     var step = 0
-    var prof: String, lu: String, mode: String, pet: String
+    var lu: String, mode: String, pet: String
     let btns = List<Btn>()
     var hoverId = ""
     var titleF: FontT! = nil, qF: FontT! = nil, bigF: FontT! = nil, subF: FontT! = nil, btnF: FontT! = nil
@@ -635,45 +634,27 @@ class SetupForm: Form {
     let petPics = Dict<String, Bitmap>()
     var VVisible = false
 
-    static let STUDENT: [String] = [
-        "......kkkk......",
-        "....kkddddkk....",
-        "..kkddddddddkk..",
-        "kkddddddddddddkk",
-        "..kkddddddddkkY.",
-        "....kkddddkk..Y.",
-        "....kDDDDDDk..Y.",
-        "....kDDDDDDk.YYY",
-        "....kkkkkkkk.YYY",
-        "................",
-        "kkkkkkk..kkkkkkk",
-        "kwwwwwwkkwwwwwwk",
-        "kwlllwwkkwlllwwk",
-        "kwwwwwwkkwwwwwwk",
-        "kwllwwwkkwllwwwk",
+    // 「做一隻自己的公仔」那張卡的小圖：相框裡一個貓掌
+    static let MAKE: [String] = [
+        "kkkkkkkkkkkkkkkk",
+        "kwwwwwwwwwwwwwwk",
+        "kwbbbbbbbbbbbbwk",
+        "kwbbkkbbbbkkbbwk",
+        "kwbkppkbbkppkbwk",
+        "kwbkppkbbkppkbwk",
+        "kwbbkkbkkbkkbbwk",
+        "kwbbbbkppkbbbbwk",
+        "kwbbbkppppkbbbwk",
+        "kwbbkppppppkbbwk",
+        "kwbbkppppppkbbwk",
+        "kwbbbkkkkkkbbbwk",
+        "kwbbbbbbbbbbbbwk",
+        "kwwwwwwwwwwwwwwk",
         "kkkkkkkkkkkkkkkk"]
-    static let WORK: [String] = [
-        "................",
-        ".....kkkkkk.....",
-        "....kk....kk....",
-        "....k......k....",
-        ".kkkkkkkkkkkkkk.",
-        "kBBBBBBBBBBBBBBk",
-        "kbbbbbbbbbbbbbbk",
-        "kbbbbbbYYbbbbbbk",
-        "kkkkkkkYYkkkkkkk",
-        "kbbbbbbbbbbbbbbk",
-        "kbbbbbbbbbbbbbbk",
-        "kbbbbbbbbbbbbbbk",
-        "kbbbbbbbbbbbbbbk",
-        "kssssssssssssssk",
-        ".kkkkkkkkkkkkkk.",
-        "................"]
 
-    init(_ w: World, _ first: Bool, _ prof: String, _ lu: String, _ single: Bool, _ pet: String?) {
+    init(_ w: World, _ first: Bool, _ lu: String, _ single: Bool, _ pet: String?) {
         self.w = w; self.first = first
-        self.prof = prof == "student" || prof == "work" ? prof : ""
-        self.lu = Pal.NormLineup(lu)
+        self.lu = first ? Pal.Original : Pal.NormLineup(lu)   // 第一次：先選好續命小隊（上面還有「做一隻自己的」）
         mode = single ? "single" : "shelf"
         self.pet = pet ?? ""
         d = Double(w.S) / 4.0
@@ -691,7 +672,7 @@ class SetupForm: Form {
         bigF = FontT("Microsoft JhengHei UI", 13, FontStyle.Bold)
         subF = FontT("Microsoft JhengHei UI", 9, FontStyle.Bold)
         btnF = FontT("Microsoft JhengHei UI", 11, FontStyle.Bold)
-        ClientSize = SizeT(Sc(580), Sc(520))
+        ClientSize = SizeT(Sc(620), Sc(560))
         KeyPreview = true
         KeyDown = { [unowned self] (e: KeyEventArgs) in if e.KeyCode == Keys.Escape { self.Close() } }
         LayoutBtns()
@@ -715,11 +696,11 @@ class SetupForm: Form {
     func InLineup(_ id: String) -> Bool { for x in Pal.LineupIds(lu) { if x == id { return true } }; return false }
     static func Members(_ id: String) -> String {
         var names: [String] = []
-        for x in Pal.LineupIds(id) { names.append(Pal.Get(x).Name) }
+        for x in Pal.LineupIds(id) { let p: Pal! = Pal.Get(x); if p != nil { names.append(p.Name) } }
         if Pal.NormLineup(id) == Pal.Pikmin { names.append("休息花") }
         return names.joined(separator: "・")
     }
-    func CanNext() -> Bool { return step == 0 ? prof != "" : (step == 1 || mode == "shelf" || InLineup(pet)) }
+    func CanNext() -> Bool { return step == 0 ? lu != "" : (mode == "shelf" || InLineup(pet)) }
 
     @discardableResult func Add(_ id: String, _ text: String, _ sub: String, _ r: Rectangle, _ kind: Int, _ on: Bool) -> Btn {
         let b = Btn()
@@ -733,42 +714,44 @@ class SetupForm: Form {
         btns.Clear()
         let W0 = ClientSize.Width, H0 = ClientSize.Height, top = Sc(154), bottom = H0 - Sc(72)
         if step == 0 {
-            let cw = Sc(220), ch = Sc(230), gap = Sc(28), x0 = (W0 - 2 * cw - gap) / 2
-            Add("student", "大學生", "上課・報告・期末考", Rectangle(x0, top, cw, ch), 0, prof == "student")
-            Add("work", "上班族", "上班・開會・準時下班", Rectangle(x0 + cw + gap, top, cw, ch), 0, prof == "work")
-        }
-        else if step == 1 {
-            let n = Pal.Lineups.count, gap = Sc(24), cw = Math.Min(Sc(240), (W0 - Sc(48) - (n - 1) * gap) / n), ch = bottom - top - Sc(8)
+            // 主打：用自己的照片做一隻；下面是現成的幾櫃
+            let hero = Rectangle(Sc(30), top, W0 - Sc(60), Sc(108))
+            Add("make", "把你家的貓狗（或任何照片）變成桌面公仔", "選一張照片 → 去背 → 取名字、選個性，一分鐘做好。照片只存在你的電腦裡。", hero, 0, false)
+            Add("import", "匯入朋友的公仔…", "", Rectangle(W0 - Sc(30) - Sc(190), hero.Bottom + Sc(10), Sc(190), Sc(32)), 2, false)
+            let lus = Pal.LineupsNow()
+            let n = lus.count, gap = Sc(16), ly = hero.Bottom + Sc(52), cw = (W0 - Sc(60) - (n - 1) * gap) / n, ch = bottom - ly - Sc(6)
             let x0 = (W0 - n * cw - (n - 1) * gap) / 2
             for i in 0..<n {
-                let id = Pal.Lineups[i]
+                let id = lus[i]
                 EnsurePics(id)
-                Add("lu:" + id, Pal.LineupName(id), SetupForm.Members(id), Rectangle(x0 + i * (cw + gap), top, cw, ch), 0, lu == id)
+                Add("lu:" + id, Pal.LineupName(id), SetupForm.Members(id), Rectangle(x0 + i * (cw + gap), ly, cw, ch), 0, lu == id)
             }
         }
         else {
             EnsurePics(lu)
-            let cw = Sc(230), ch = Sc(116), gap = Sc(24), x0 = (W0 - 2 * cw - gap) / 2
-            Add("mode:shelf", lu == Pal.Pikmin ? "整櫃（三隻）" : "整櫃（四隻）", lu == Pal.Pikmin ? "三隻＋一朵休息花" : "四隻住在公仔櫃裡", Rectangle(x0, top, cw, ch), 0, mode == "shelf")
-            Add("mode:single", "只要一隻", "沒有櫃子，他住在蛋裡", Rectangle(x0 + cw + gap, top, cw, ch), 0, mode == "single")
+            let cw = Sc(240), ch = Sc(116), gap = Sc(24), x0 = (W0 - 2 * cw - gap) / 2
+            Add("mode:single", "只要一隻", "沒有櫃子，他住在右下角的蛋裡", Rectangle(x0, top, cw, ch), 0, mode == "single")
+            Add("mode:shelf", lu == Pal.Pikmin ? "整櫃（三隻＋花）" : "整櫃", lu == Pal.Pikmin ? "三隻皮克敏和休息花住在櫃子裡" : "大家住在公仔櫃裡，點格子叫他們出來", Rectangle(x0 + cw + gap, top, cw, ch), 0, mode == "shelf")
             if mode == "single" {
                 let ids = Pal.LineupIds(lu)
                 let pw = Sc(100), pg = Sc(14), px0 = (W0 - ids.count * pw - (ids.count - 1) * pg) / 2, py = top + ch + Sc(34)
                 for i in 0..<ids.count {
-                    Add("pet:" + ids[i], Pal.Get(ids[i]).Name, "", Rectangle(px0 + i * (pw + pg), py, pw, Math.Min(Sc(118), bottom - py - Sc(4))), 1, pet == ids[i])
+                    let pp: Pal! = Pal.Get(ids[i])
+                    if pp == nil { continue }
+                    Add("pet:" + ids[i], pp.Name, "", Rectangle(px0 + i * (pw + pg), py, pw, Math.Min(Sc(130), bottom - py - Sc(4))), 1, pet == ids[i])
                 }
             }
         }
         let by = H0 - Sc(64), bh = Sc(44)
         if step > 0 { Add("back", "上一步", "", Rectangle(Sc(30), by, Sc(130), bh), 2, false) }
         else if first { Add("skip", "以後再說", "", Rectangle(Sc(30), by, Sc(130), bh), 2, false) }
-        let nx = Add("next", step < 2 ? "下一步" : "完成！", "", Rectangle(W0 - Sc(30) - Sc(160), by, Sc(160), bh), 3, false)
+        let nx = Add("next", step < 1 ? "下一步" : "完成！", "", Rectangle(W0 - Sc(30) - Sc(160), by, Sc(160), bh), 3, false)
         nx.Enabled = CanNext()
     }
 
     // 每一櫃：櫃子縮圖、每一隻的小照片（用預覽用的 World 畫，不開視窗）
     func EnsurePics(_ id: String) {
-        if shelfPics.ContainsKey(id) { return }
+        if id == "" || shelfPics.ContainsKey(id) { return }
         let pv = World(Math.Max(3, CInt(Math.Round(3 * d))), id)
         shelfPics[id] = pv.SetupShelfPic()
         for p in pv.Pets { petPics[id + ":" + p.P.Id] = p.IconPic() }
@@ -781,13 +764,14 @@ class SetupForm: Form {
     func Press(_ id: String) {
         let b = Find(id)
         if b != nil && !b!.Enabled { return }
-        if id == "student" || id == "work" { prof = id }
-        else if id.StartsWith("lu:") { lu = Pal.NormLineup(id.Substring(3)); if !InLineup(pet) { pet = "" } }
+        if id == "make" { let f = first; Close(); w.CuOpenMaker(nil, f); return }
+        if id == "import" { let f = first; Close(); w.CuImportDialog(f); return }
+        if id.StartsWith("lu:") { lu = Pal.NormLineup(id.Substring(3)); if !InLineup(pet) { let ids = Pal.LineupIds(lu); pet = ids.count > 0 ? ids[0] : "" } }
         else if id == "mode:shelf" { mode = "shelf" }
         else if id == "mode:single" { mode = "single"; if !InLineup(pet) { pet = Pal.LineupIds(lu)[0] } }
         else if id.StartsWith("pet:") { pet = id.Substring(4); mode = "single" }
         else if id == "back" { if step > 0 { step -= 1 } }
-        else if id == "next" { if step < 2 { step += 1 } else { w.ApplySetup(prof, lu, mode == "single", pet, first); Close(); return } }
+        else if id == "next" { if step < 1 { step += 1 } else { w.ApplySetup(lu, mode == "single", pet, first); Close(); return } }
         else if id == "skip" || id == "close" { Close(); return }
         else { return }
         LayoutBtns()
@@ -823,22 +807,26 @@ class SetupForm: Form {
         Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.X - 9 * U, pr.Y + plh / 2 - 2 * U, U)
         Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.Right + 4 * U, pr.Y + plh / 2 - 2 * U, U)
         Steps(g, W0, Sc(68))
-        let q = step == 0 ? "你是？" : (step == 1 ? "選一櫃公仔" : "怎麼擺？")
-        let hint = step == 0 ? "公仔們會照你的生活陪你（之後在小屋可以改）" : (step == 1 ? "每一櫃都很可愛，之後隨時能換" : (mode == "single" ? "選一隻，他會住在右下角的蛋裡" : "公仔櫃放在右下角，點格子就叫他們出來"))
+        let q = step == 0 ? "選你的公仔" : "怎麼擺？"
+        let hint = step == 0 ? "用自己的照片做一隻，或選一櫃現成的（之後在小屋都能換、能再做）" : (mode == "single" ? "選一隻，他會住在右下角的蛋裡" : "公仔櫃放在右下角，點格子就叫他們出來")
         TextRenderer.DrawText(g, q, qF, Rectangle(0, Sc(100), W0, Sc(30)), Pix.TextC, Pix.Mid)
         TextRenderer.DrawText(g, hint, subF, Rectangle(0, Sc(130), W0, Sc(18)), Pix.C(0x9A6338), Pix.Mid)
-        if step == 2 && mode == "single" {
+        if step == 0 {
+            let im = Find("import")
+            if im != nil { TextRenderer.DrawText(g, "或選一櫃現成的：", btnF, Rectangle(Sc(32), im!.R.Y, Sc(300), im!.R.Height), Pix.TextC, Pix.LeftMid) }
+        }
+        if step == 1 && mode == "single" {
             let first2 = Find("mode:shelf")
             if first2 != nil { TextRenderer.DrawText(g, "選哪一隻？", btnF, Rectangle(0, first2!.R.Bottom + Sc(6), W0, Sc(26)), Pix.TextC, Pix.Mid) }
         }
         for b in btns { DrawBtn(g, b) }
     }
 
-    // 上面的三個步驟：現在這步黃色、做完的綠色打勾
+    // 上面的兩個步驟：現在這步黃色、做完的綠色打勾
     func Steps(_ g: Graphics, _ W0: Int, _ y: Int) {
-        let names: [String] = ["你是？", "選一櫃", "怎麼擺"]
-        let pw = Sc(112), ph = Sc(26), gap = Sc(18), x0 = (W0 - 3 * pw - 2 * gap) / 2
-        for i in 0..<3 {
+        let names: [String] = ["選公仔", "怎麼擺"]
+        let n = names.count, pw = Sc(112), ph = Sc(26), gap = Sc(18), x0 = (W0 - n * pw - (n - 1) * gap) / 2
+        for i in 0..<n {
             let x = x0 + i * (pw + gap)
             if i > 0 { var sx = x - gap + U; while sx + U <= x - U { Pix.Box(g, Pix.C(0xD8BF94), sx, y + ph / 2 - U / 2, U, U); sx += 2 * U } }
             Pix.Round(g, i == step ? Pix.C(0x8A5A2A) : Pix.C(0xC9B08A), x, y, pw, ph, U)
@@ -862,26 +850,28 @@ class SetupForm: Form {
             Pix.Box(g, face, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U)
             Pix.Box(g, shade, r.X + U, r.Bottom - 3 * U, r.Width - 2 * U, 2 * U)
             if b.Enabled { Pix.Box(g, Pix.Mix(face, Color.White, 0.6), r.X + 2 * U, r.Y + U, r.Width - 4 * U, U) }
-            let tw = Pix.TextW(b.Text, btnF), ax = 7 * U
+            let bf: FontT! = r.Height < Sc(40) ? subF : btnF
+            let tw = Pix.TextW(b.Text, bf), ax = 7 * U
             var tx = r.X + (r.Width - tw - (b.Id == "back" || b.Id == "next" ? ax : 0)) / 2
             let cy = r.Y + (r.Height - 2 * U) / 2
             let tc = b.Enabled ? Pix.TextC : Pix.Dim
             if b.Id == "back" { Arrow(g, tx + U, cy, -1, tc); tx += ax }
-            TextRenderer.DrawText(g, b.Text, btnF, Rectangle(tx, r.Y, tw + 4, r.Height - 2 * U), tc, Pix.LeftMid)
-            if b.Id == "next" && step < 2 { Arrow(g, tx + tw + 2 * U, cy, 1, tc) }
+            TextRenderer.DrawText(g, b.Text, bf, Rectangle(tx, r.Y, tw + 4, r.Height - 2 * U), tc, Pix.LeftMid)
+            if b.Id == "next" && step < 1 { Arrow(g, tx + tw + 2 * U, cy, 1, tc) }
             return
         }
-        // 卡片：底下一層影子；選到的是金色粗框、右上角綠色勾勾
-        let edge = b.On ? Pix.C(0xC08A2C) : Pix.C(0x8A6A4A)
-        let fill = b.On ? Pix.C(0xFFEDB8) : (hot ? Pix.C(0xFFF6DE) : Pix.C(0xFFFDF7))
+        // 卡片：底下一層影子；選到的是金色粗框、右上角綠色勾勾；「做一隻自己的」是暖黃色的主打卡
+        let hero = b.Id == "make"
+        let edge = b.On || hero ? Pix.C(0xC08A2C) : Pix.C(0x8A6A4A)
+        let fill = hero ? (hot ? Pix.C(0xFFE9A8) : Pix.C(0xFFF0C4)) : (b.On ? Pix.C(0xFFEDB8) : (hot ? Pix.C(0xFFF6DE) : Pix.C(0xFFFDF7)))
         Pix.Round(g, Pix.C(0xE6D3B0), r.X + 2 * U, r.Y + 2 * U, r.Width, r.Height, U)
         Pix.Round(g, edge, r.X, r.Y, r.Width, r.Height, U)
-        let ins = b.On ? 2 * U : U
-        if b.On { Pix.Box(g, edge, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U) }
+        let ins = b.On || hero ? 2 * U : U
+        if b.On || hero { Pix.Box(g, edge, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U) }
         Pix.Box(g, fill, r.X + ins, r.Y + ins, r.Width - 2 * ins, r.Height - 2 * ins)
-        if hot && !b.On { Pix.Box(g, Pix.C(0xF6C453), r.X + ins, r.Bottom - ins - U, r.Width - 2 * ins, U) }
+        if hot && !b.On && !hero { Pix.Box(g, Pix.C(0xF6C453), r.X + ins, r.Bottom - ins - U, r.Width - 2 * ins, U) }
         if b.Kind == 1 { DrawPetCard(g, b) }
-        else if b.Id == "student" || b.Id == "work" { DrawIconCard(g, b, b.Id == "student" ? SetupForm.STUDENT : SetupForm.WORK) }
+        else if hero { DrawMakeCard(g, b) }
         else if b.Id.StartsWith("lu:") { DrawShelfCard(g, b, b.Id.Substring(3)) }
         else { DrawModeCard(g, b) }
         if b.On {
@@ -899,19 +889,15 @@ class SetupForm: Form {
         }
     }
 
-    func IconPal() -> Dict<Character, Color> {
-        let p = Dict<Character, Color>()
-        p["k"] = Pix.Ink; p["d"] = Pix.C(0x3D4A6B); p["D"] = Pix.C(0x2C3550); p["Y"] = Pix.C(0xF2C14E)
-        p["w"] = Pix.C(0xFFFDF7); p["l"] = Pix.C(0xA9B8D0); p["b"] = Pix.C(0xA0643A); p["B"] = Pix.C(0xC8844E); p["s"] = Pix.C(0x7E4A28)
-        return p
-    }
-
-    func DrawIconCard(_ g: Graphics, _ b: Btn, _ art: [String]) {
+    func DrawMakeCard(_ g: Graphics, _ b: Btn) {
         let r = b.R
-        let c = Math.Max(3, Sc(6)), aw = art[0].count * c
-        Pix.Art(g, art, IconPal(), r.X + (r.Width - aw) / 2, r.Y + Sc(26), c)
-        TextRenderer.DrawText(g, b.Text, bigF, Rectangle(r.X, r.Y + Sc(140), r.Width, Sc(32)), Pix.TextC, Pix.Mid)
-        TextRenderer.DrawText(g, b.Sub, subF, Rectangle(r.X, r.Y + Sc(174), r.Width, Sc(22)), Pix.C(0x9A6338), Pix.Mid)
+        let pal = Dict<Character, Color>()
+        pal["k"] = Pix.Ink; pal["w"] = Pix.C(0xFFFDF7); pal["b"] = Pix.C(0xBFE3F2); pal["p"] = Pix.C(0xF27A90)
+        let c = Math.Max(3, Sc(5)), aw = SetupForm.MAKE[0].count * c, ah = SetupForm.MAKE.count * c, ix = r.X + Sc(22)
+        Pix.Art(g, SetupForm.MAKE, pal, ix, r.Y + (r.Height - ah) / 2, c)
+        let tx = ix + aw + Sc(18)
+        TextRenderer.DrawText(g, b.Text, bigF, Rectangle(tx, r.Y + Sc(18), r.Right - tx - Sc(12), Sc(30)), Pix.TextC, Pix.LeftMid)
+        TextRenderer.DrawText(g, b.Sub, subF, Rectangle(tx, r.Y + Sc(52), r.Right - tx - Sc(16), Sc(40)), Pix.C(0x9A6338), [TextFormatFlags.Left, TextFormatFlags.Top, TextFormatFlags.WordBreak, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix])
     }
 
     func DrawShelfCard(_ g: Graphics, _ b: Btn, _ id: String) {
@@ -919,9 +905,14 @@ class SetupForm: Form {
         var pic: Bitmap! = nil
         var textY = r.Y + Sc(12)
         if shelfPics.TryGetValue(id, &pic) {
-            let avail = r.Height - Sc(72), ph = Math.Min(pic.Height, avail), pw = pic.Width * ph / pic.Height
-            g.DrawImage(pic, r.X + (r.Width - pw) / 2, r.Y + Sc(12), pw, ph)
-            textY = r.Y + Sc(16) + ph
+            let avail = r.Height - Sc(86)
+            var ph = Math.Min(pic.Height, avail), pw = pic.Width * ph / pic.Height
+            if pw > r.Width - Sc(16) { pw = r.Width - Sc(16); ph = pic.Height * pw / pic.Width }
+            let im = g.InterpolationMode
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic
+            g.DrawImage(pic, r.X + (r.Width - pw) / 2, r.Y + Sc(10), pw, ph)
+            g.InterpolationMode = im
+            textY = r.Y + Sc(14) + ph
         }
         TextRenderer.DrawText(g, b.Text, bigF, Rectangle(r.X, textY, r.Width, Sc(30)), Pix.TextC, Pix.Mid)
         TextRenderer.DrawText(g, b.Sub, subF, Rectangle(r.X + Sc(6), textY + Sc(28), r.Width - Sc(12), Sc(38)), Pix.C(0x9A6338), [TextFormatFlags.HorizontalCenter, TextFormatFlags.Top, TextFormatFlags.WordBreak, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix])   // 四櫃並排時名單換行，不要被切掉
@@ -949,7 +940,7 @@ class SetupForm: Form {
         }
         let tx = ix + iconW + Sc(8)
         TextRenderer.DrawText(g, b.Text, bigF, Rectangle(tx, r.Y + r.Height / 2 - Sc(30), r.Right - tx - Sc(8), Sc(30)), Pix.TextC, Pix.LeftMid)
-        TextRenderer.DrawText(g, b.Sub, subF, Rectangle(tx, r.Y + r.Height / 2 + Sc(2), r.Right - tx - Sc(8), Sc(22)), Pix.C(0x9A6338), Pix.LeftMid)
+        TextRenderer.DrawText(g, b.Sub, subF, Rectangle(tx, r.Y + r.Height / 2 + Sc(2), r.Right - tx - Sc(8), Sc(40)), Pix.C(0x9A6338), [TextFormatFlags.Left, TextFormatFlags.Top, TextFormatFlags.WordBreak, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix])
     }
 
     func DrawPetCard(_ g: Graphics, _ b: Btn) {
@@ -957,9 +948,11 @@ class SetupForm: Form {
         var pic: Bitmap! = nil
         let nameH = Sc(24)
         if petPics.TryGetValue(lu + ":" + b.Id.Substring(4), &pic) {
-            let avail = r.Height - nameH - Sc(8), ph = Math.Min(pic.Height, avail), pw = pic.Width * ph / pic.Height
+            let avail = r.Height - nameH - Sc(8)
+            var ph = Math.Min(pic.Height, avail), pw = pic.Width * ph / pic.Height
+            if pw > r.Width - Sc(8) { pw = r.Width - Sc(8); ph = pic.Height * pw / pic.Width }
             g.DrawImage(pic, r.X + (r.Width - pw) / 2, r.Y + Sc(6) + (avail - ph), pw, ph)
         }
-        TextRenderer.DrawText(g, b.Text, btnF, Rectangle(r.X, r.Bottom - nameH - Sc(4), r.Width, nameH), Pix.TextC, Pix.Mid)
+        TextRenderer.DrawText(g, b.Text, btnF, Rectangle(r.X, r.Bottom - nameH - Sc(4), r.Width, nameH), Pix.TextC, Pix.Mid.union(TextFormatFlags.EndEllipsis))
     }
 }

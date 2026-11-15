@@ -2,6 +2,7 @@
 //   本機的範例 ICS（test/fixtures，照 Canvas／Moodle／Classroom／Google 真實格式寫）＋假時鐘 → 分類、上課提醒、自動安靜、
 //   作業死線、考試倒數、熬夜提醒、搶課、設定（含 VS Code 優先）。不連網路。
 // 用法：先用離屏模式啟動桌面版（pipe 名稱自訂），再 node test/desktop-study.js <pipe> [截圖資料夾]
+//   Mac：<pipe> 換成 unix socket 的路徑（桌面版的 argv[1]）
 // 時區：範例的時間用台北時間寫，要在 UTC+8 的電腦上跑。
 const net = require("net");
 const path = require("path");
@@ -15,7 +16,8 @@ const MOODLE = "https://moodle.example.edu.tw/calendar/export_execute.php?userid
 const CLASSROOM = "https://calendar.google.com/calendar/ical/c_classroom8f3e2a1b%40group.calendar.google.com/private-0123456789abcdef/basic.ics";
 const GOOGLE = "https://calendar.google.com/calendar/ical/student%40example.com/private-0123456789abcdef/basic.ics";
 
-const s = net.connect("\\\\.\\pipe\\" + pipe);
+// Windows：pipe 名稱；Mac：unix socket 的路徑（含 / 就當成路徑，見 .github/workflows/build.yml）
+const s = net.connect(pipe.includes("/") ? pipe : "\\\\.\\pipe\\" + pipe);
 s.setEncoding("utf8");
 let buf = "";
 s.on("data", (d) => { buf += d; });

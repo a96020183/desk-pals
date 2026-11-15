@@ -115,6 +115,7 @@ extension Pet
     {
         if P.Pik { return FramePik() }
         if P.Orig { return FrameOrig() }
+        if P.Cu { return FrameCu() }
         switch P.Id
         {
             case "po": return FramePo()
@@ -523,7 +524,7 @@ extension Pet
         l = Math.Min(l, px); r = Math.Max(r, px); tp = Math.Min(tp, py); b = Math.Max(b, py)
     }
     func SilkVisible() -> Bool { return state == "swing" || state == "hang" || state == "zip" || state == "shoot" || state == "webcatch" || state == "sling" }
-    func Bob() -> Double { if P.Pik { return PikBob() }; if P.Orig { return OrigBob() }; if P.Tubby { return TubbyBob() }; return state == "dance" || state == "elvis" ? Math.Abs(Math.Sin(anim * 8)) * 6 * k : (Is("hangyodon") && state == "walk" ? (Step2(4) ? k : 0) : 0) }
+    func Bob() -> Double { if P.Cu { return 0 }; if P.Pik { return PikBob() }; if P.Orig { return OrigBob() }; if P.Tubby { return TubbyBob() }; return state == "dance" || state == "elvis" ? Math.Abs(Math.Sin(anim * 8)) * 6 * k : (Is("hangyodon") && state == "walk" ? (Step2(4) ? k : 0) : 0) }
 
     func Render()
     {
@@ -752,6 +753,7 @@ extension Pet
     // 畫一隻（身體＋前後道具＋配件＋肚子螢幕）；櫃子裡也用這個
     func DrawFigure(_ g: Graphics, _ f: Fr, _ sbx: Int, _ sby: Int, _ sps: Int, _ fx: Bool, _ extras: Bool)
     {
+        if P.Cu { DrawFigureCu(g, f, sbx, sby, sps, fx, extras); return }   // 自己做的公仔（53_custom.swift）
         // 圖一律貼齊 16 格框的底（比較高的角色往上長），Top 再額外上下移
         var rows = f.Rows
         var top = f.Top + 16 - rows.count
@@ -1489,6 +1491,7 @@ extension Pet
         let flip = (Math.Floor(tt / 9) % 2) == 1
         let dps = Double(ps)
         var head = A("HEAD")
+        if P.Cu { DrawCuShelf(g, fx, fy, ps, cell, tt) } else {
         switch P.Id
         {
             case "spidey":
@@ -1567,8 +1570,9 @@ extension Pet
                 do { let rows = Pal.Stack(head, A("BODY"), A("LEGS_A")); DrawPix(g, rows, bx - (rows[0].utf8.count - 12) / 2 * ps, by + (16 - rows.count) * ps, ps, flip, false, true) }
                 DrawAccessories(g, bx, by, ps, flip, 0, true)
         }
+        }
         // 午餐時間：櫃子裡的公仔也拿著午餐
-        if w.Lunch && !(Is("spidey") && (tt % 11) < 8) { DrawLunchShelf(g, bx, by, ps, flip) }
+        if w.Lunch && !P.Cu && !(Is("spidey") && (tt % 11) < 8) { DrawLunchShelf(g, bx, by, ps, flip) }
         // 剛回櫃子：一圈小星星
         if ShelfFx < 1
         {

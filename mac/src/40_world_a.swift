@@ -127,6 +127,7 @@ final class World: Form {
 extension World {
     func DefaultPetFor(_ pet: String) -> String {
         for id in Pal.LineupIds(lineup) { if id == pet { return pet } }
+        if lineup == Pal.Mine { let mi = Pal.MineIds(); if mi.count > 0 { return mi[0] } }
         return lineup == Pal.Teletubbies ? "po" : (lineup == Pal.Pikmin ? "pkred" : (lineup == Pal.Original ? "boba" : "spidey"))
     }
 
@@ -174,7 +175,7 @@ extension World {
             delay += 0.5
         }
         active = Get(ids.Count > 0 ? ids[ids.Count - 1] : defaultPet) ?? Get(defaultPet)
-        if ids.Count == 0 && active != nil { active.Say(OrigLineup ? "續命小隊，報到！🥤" : (TubbyLineup ? "Eh-oh! 天線寶寶一櫃 ☀" : "經典一櫃回來囉！"), 2.4) }
+        if ids.Count == 0 && active != nil { active.Say(OrigLineup ? "續命小隊，報到！🥤" : (TubbyLineup ? "Eh-oh! 天線寶寶一櫃 ☀" : (CuLineup ? "我的櫃！大家都在 🧸" : "經典一櫃回來囉！")), 2.4) }
         Broadcast()
         lock(clients) { for c in clients { World.Send(c, "lineup " + lineup + "\n") } }   // 在桌面換櫃（小屋、設定）：VS Code 跟著改設定
         App.Log("lineup " + lineup)
@@ -234,7 +235,7 @@ extension World {
         timer.Interval = 30
         timer.Tick = { self.Tick() }
         timer.Start()
-        if !FileManager.default.fileExists(atPath: World.FilePath("profile.txt")) { Later(1.2) { self.ShowSetup(true) } }   // 第一次：設定視窗（你是？選一櫃、擺法）
+        if !FileManager.default.fileExists(atPath: World.FilePath("profile.txt")) { Later(1.2) { self.ShowSetup(true) } }   // 第一次：設定視窗（做一隻自己的或選一櫃、擺法）
         App.Log("started pipe=" + pipeName + " lineup=" + lineup + " out=" + outIds.ToArray().joined(separator: ",") + " data=" + World.DataDir)
     }
 
@@ -606,6 +607,7 @@ extension World {
                 if s[1] - s[0] >= SW { let p = Plat(); p.H = wi.H; p.Top = wi.T; p.Left = s[0]; p.Right = s[1]; p.WinLeft = wi.L; np.Add(p) }
             }
         }
+        CuFakeWins(nw, nc, np)   // 測試用的假視窗（只有離屏隔離模式）
         Wins = nw; Cands = nc; Plats = np
         if shareFound != sharing {
             sharing = shareFound
@@ -966,7 +968,7 @@ extension World {
     // ================= 右鍵選單 =================
     func FillMenu(_ p: Pet, _ m: ContextMenuStrip) {
         m.Items.Clear()
-        var items: [[String]]! = p.P.Pik ? PikMenuItems(p) : (p.P.Orig ? OrigMenuItems(p) : nil)
+        var items: [[String]]! = p.P.Pik ? PikMenuItems(p) : (p.P.Orig ? OrigMenuItems(p) : (p.P.Cu ? p.CuMenuItems() : nil))
         if items == nil { switch p.P.Id {
         case "po":
             items = [["大抱抱 ♥", "hug"], ["打招呼 Eh-oh!", "hi"], ["敲敲螢幕", "knock"], ["騎車兜風", "ride"],
@@ -996,6 +998,7 @@ extension World {
             m.Items.Add(it[0], nil, { if a == "ball" { self.StartBall() } else { p.Act(a) } })
         }
         m.Items.Add(p.P.Name + " 的好感度 ♥", nil, { p.ShowBond() })
+        CuPetMenu(p, m)
         m.Items.Add(ToolStripSeparator())
         let help = ToolStripMenuItem("小幫手（專注、安靜、提醒）")
         AddHelpers(help.DropDownItems)
@@ -1263,7 +1266,8 @@ extension World {
         let l: Pet = Lead()
         let outs = OutPets()
         switch p[0] {
-        case "hello": if active != nil { World.Send(c, "active " + active.P.Id + "\n") }; World.Send(c, "lineup " + lineup + "\n")   // 櫃子以桌面版為準（第一次設定在桌面做）
+        case "hello": CuHello(c); if active != nil { World.Send(c, "active " + active.P.Id + "\n") }; World.Send(c, "lineup " + lineup + "\n")   // 櫃子以桌面版為準（第一次設定在桌面做）
+        case "custom": CuMsg(c, line)   // 自己做的公仔（53_custom.swift／56_custom_make.swift）
         case "save":
             Count("saves")
             for x in outs { x.OnSave(x === l) }

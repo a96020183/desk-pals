@@ -7,9 +7,9 @@ s.setEncoding("utf8");
 s.on("data", (d) => process.stdout.write("REPLY " + d));
 s.on("error", (e) => { console.log("PIPE ERR", e.message); process.exit(1); });
 const msgs = [
-	// 第一次打開：桌面版自己的設定視窗（你是？→ 選一櫃 → 怎麼擺）
+	// 第一次打開：桌面版自己的設定視窗（選公仔 → 怎麼擺）
 	"hello", "wait", "snap " + out + "/shot-setup.png",
-	"act setup work", "act setup next", "act setup next", "act setup mode:single", "snap " + out + "/shot-setup-mode.png",
+	"act setup lu:classic", "act setup next", "act setup mode:single", "snap " + out + "/shot-setup-mode.png",
 	"act setup mode:shelf", "act setup next", "wait",
 	"act all", "where",
 	"notify ci-ok https://example.com CI test",
@@ -27,7 +27,7 @@ const msgs = [
 // SMOKE_PIKMIN=1（只有 Mac 的 job 另外跑一次，DESKPALS_ISOLATED=1）：皮克敏一櫃（個人用，不放進文件）
 // 設定視窗 → 全部出來 → 休息花 → 一起搬顆粒 → 右鍵選單 → 花枯了 → 休息回來喝花蜜
 const pikmin = [
-	"hello", "wait", "act setup work", "act setup next", "act setup next", "snap " + out + "/shot-pikmin-setup.png",
+	"hello", "wait", "act setup lu:pikmin", "act setup next", "snap " + out + "/shot-pikmin-setup.png",
 	"act setup mode:shelf", "act setup next", "wait",
 	"act all", "wait", "wait", "wait", "act flower 30", "act flower click", "wait", "snap " + out + "/shot-pikmin-flower.png",
 	"act scene carry", "wait", "wait", "wait", "wait", "wait", "wait", "snap " + out + "/shot-pikmin.png", "where",
@@ -35,7 +35,19 @@ const pikmin = [
 	"act flower 60", "act flower wilt", "wait", "wait", "wait", "wait", "snap " + out + "/shot-pikmin-wilt.png",
 	"act flower rest", "wait", "wait", "wait", "wait", "wait", "wait", "snap " + out + "/shot-pikmin-nectar.png", "where",
 ];
+// SMOKE_ORIGINAL=1（Mac 的 job）：全新安裝（沒傳櫃子）→ 預設續命小隊；整櫃、點餐、拿鐵拉花、右鍵選單、午餐、天黑、打烊
+const W = (n) => Array(n).fill("wait");
+const original = [
+	"hello", "wait", "snap " + out + "/shot-original-setup.png",
+	"act setup next", "act setup mode:shelf", "act setup next", "wait",
+	"act all", ...W(3), "act scene order", ...W(8), "snap " + out + "/shot-original.png", "where",
+	"act scene boba-coffee", ...W(6), "snap " + out + "/shot-original-latte.png",
+	"act menu boba", "act menuhover 3", "snap " + out + "/shot-original-menu.png", "act menuclose",
+	"act lunch", ...W(2), "snap " + out + "/shot-original-lunch.png", "act lunchend", "wait",
+	"act dark", "wait", "snap " + out + "/shot-original-night.png", "act scene byebye", ...W(6), "where",
+];
 if (process.env.SMOKE_PIKMIN === "1") msgs.splice(0, msgs.length, ...pikmin);
+if (process.env.SMOKE_ORIGINAL === "1") msgs.splice(0, msgs.length, ...original);
 let i = 0;
 const t = setInterval(() => {
 	if (i < msgs.length) {

@@ -30,6 +30,7 @@ extension Pet {
         if P.Tubby && TubbyStep(dt) { return true }
         if P.Pik && PikStep(dt) { return true }
         if P.Orig && OrigStep(dt) { return true }
+        if P.Cu && CuStep(dt) { return true }
         switch state {
         case "plop":
             sT += dt
@@ -85,6 +86,7 @@ extension Pet {
     func EdgeOfWindow(_ right: Bool) -> Int {
         if P.Pik { return PikEdge(right) }
         if P.Orig { return OrigEdge(right) }
+        if P.Cu { return CuEdge(right) }
         switch P.Id {
         case "spidey":
             if !goClimb && rnd.NextDouble() < 0.55 { dir = -dir; if rnd.NextDouble() < 0.3 { SpinWeb(supH, right) }; return 1 }
@@ -160,6 +162,7 @@ extension Pet {
         let a = afterLand; afterLand = ""
         if P.Pik && PikLand(a) { return }
         if P.Orig && OrigLand(a) { return }
+        if P.Cu && CuLand(a) { return }
         switch a {
         case "wave": SetState("wave", 1.8); Say("Eh-oh!", 1.6)
         case "sniff": poseKind = "grin"; SetState("pose", 1.6); Mark(2); Say(Pick(["（聞聞）ih?", "嘻嘻，這個好玩", "ih-ih! 史迪仔的！"]), 1.6)
@@ -186,6 +189,7 @@ extension Pet {
         if w.OutCount() > 1 && rnd.NextDouble() < 0.12 && VisitFriend() { return }
         if P.Pik { PikDecide(r, wa); return }
         if P.Orig { OrigDecide(r, wa); return }
+        if P.Cu { CuDecide(r, wa); return }
         let lateOk: () -> Bool = { self.lateCd <= 0 && self.LateLine() != nil }
         switch P.Id {
         case "spidey":
@@ -304,6 +308,7 @@ extension Pet {
         if !Out { return }
         if P.Pik { PikSignature(); return }
         if P.Orig { OrigSignature(); return }
+        if P.Cu { CuSignature(); return }
         switch P.Id {
         case "spidey": if !ShootTo("swing") { Say("這裡太低了，甩不起來", 1.6) }
         case "po": if !JumpToPlatform() { Jump(Double(dir) * 200 * k, -520 * k); Say("咻～～", 1) } else { Say("咻～～再來一次！", 1.4) }
@@ -338,6 +343,7 @@ extension Pet {
     func ActSpecial(_ a: String) {
         if P.Pik && PikAct(a) { return }
         if P.Orig && OrigAct(a) { return }
+        if P.Cu && CuAct(a) { return }
         switch a {
         case "swing": if Is("spidey") { if !ShootTo("swing") { Say("這裡太低了，甩不起來", 1.6) } } else { Signature() }
         case "hang": if Is("spidey") { if !ShootTo("hang") { Say("上面沒地方黏", 1.6) } }
@@ -371,7 +377,7 @@ extension Pet {
         switch P.Id {
         case "spidey": if !ZipToWindow(win, L("newwin")) { Say("有新視窗！👀", 1.5) }
         default:
-            let after: String = Is("po") || Is("tinky") ? "wave" : (Is("hangyodon") ? "bubbles" : (Is("dipsy") ? "hattip" : (Is("laalaa") ? "twirl" : "sniff")))
+            let after: String = Is("po") || Is("tinky") ? "wave" : (Is("hangyodon") ? "bubbles" : (Is("dipsy") ? "hattip" : (Is("laalaa") ? "twirl" : (P.Cu ? "" : "sniff"))))
             if !GoToWindow(win, L("newwin"), after) { Say(L("newwin"), 1.5) }
         }
     }

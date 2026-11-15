@@ -44,15 +44,69 @@ jobs:
           tail -n 80 "$HOME/Library/Logs/desk-pals.log" || true
           if kill -0 $PID 2>/dev/null; then echo "did not quit"; kill $PID; exit 1; fi
           test -f shot-pikmin.png || { echo "no snapshot"; exit 1; }
+      - name: Smoke run, fresh install → 續命小隊 (original lineup default)
+        run: |
+          export DESKPALS_OFFSCREEN=1 DESKPALS_ISOLATED=1
+          export DESKPALS_DATA_DIR="$RUNNER_TEMP/dp-data-orig"
+          SOCK="$RUNNER_TEMP/dp-orig.sock"
+          extension/desktop/DeskPals "$SOCK" "" "" > run-original.log 2>&1 &
+          PID=$!
+          sleep 8
+          kill -0 $PID || { echo "died at startup"; cat run-original.log; exit 1; }
+          echo "lineup.txt: $(cat "$DESKPALS_DATA_DIR/lineup.txt" 2>/dev/null)"
+          test "$(cat "$DESKPALS_DATA_DIR/lineup.txt" 2>/dev/null)" = "original" || { echo "fresh install did not start in original"; exit 1; }
+          SMOKE_ENDPOINT="$SOCK" SMOKE_ORIGINAL=1 node .github/smoke.js
+          sleep 3
+          tail -n 80 "$HOME/Library/Logs/desk-pals.log" || true
+          if kill -0 $PID 2>/dev/null; then echo "did not quit"; kill $PID; exit 1; fi
+          test -f shot-original.png || { echo "no snapshot"; exit 1; }
+      - name: Study helper desktop test (ICS fixtures, fake clock, TZ=Asia/Taipei)
+        run: |
+          export TZ=Asia/Taipei DESKPALS_OFFSCREEN=1 DESKPALS_ISOLATED=1
+          export DESKPALS_DATA_DIR="$RUNNER_TEMP/dp-data-study"
+          mkdir -p "$DESKPALS_DATA_DIR"
+          printf done > "$DESKPALS_DATA_DIR/profile.txt"; printf shelf > "$DESKPALS_DATA_DIR/mode.txt"
+          SOCK="$RUNNER_TEMP/dp-study.sock"
+          extension/desktop/DeskPals "$SOCK" spidey classic > run-study.log 2>&1 &
+          PID=$!
+          sleep 8
+          kill -0 $PID || { echo "died at startup"; cat run-study.log; exit 1; }
+          set +e
+          node test/desktop-study.js "$SOCK" "$GITHUB_WORKSPACE/shots-study"
+          RC=$?
+          set -e
+          grep -E "school|deadline|exam|latenight|study" "$HOME/Library/Logs/desk-pals.log" | tail -n 60 || true
+          kill -0 $PID 2>/dev/null || { echo "app died during the test"; cat run-study.log; exit 1; }
+          kill $PID || true
+          exit $RC
+      - name: Custom pal flow (generated test image → maker → share GIF, .deskpal)
+        run: |
+          export DESKPALS_OFFSCREEN=1 DESKPALS_ISOLATED=1
+          export DESKPALS_DATA_DIR="$RUNNER_TEMP/dp-data-custom"
+          SOCK="$RUNNER_TEMP/dp-custom.sock"
+          extension/desktop/DeskPals "$SOCK" "" "" > run-custom.log 2>&1 &
+          PID=$!
+          sleep 8
+          kill -0 $PID || { echo "died at startup"; cat run-custom.log; exit 1; }
+          set +e
+          node .github/custom-smoke.js "$SOCK" "$GITHUB_WORKSPACE/custom-out"
+          RC=$?
+          set -e
+          grep -E "custom|share" "$HOME/Library/Logs/desk-pals.log" | tail -n 60 || true
+          if kill -0 $PID 2>/dev/null; then echo "did not quit"; kill $PID; RC=1; fi
+          exit $RC
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: mac-result
           path: |
             extension/desktop/build.log
-            run.log
-            run-pikmin.log
+            run*.log
             shot*.png
+            shots-study/*.png
+            custom-out/*.png
+            custom-out/*.deskpal
+            custom-out/share/*
 
   windows:
     runs-on: windows-latest

@@ -537,7 +537,7 @@ extension World {
         case "po-tinky": if let x = g("po"), let y = g("tinky") { SceneScooterRide(x, y) }
         case "dipsy-po": if let x = g("po"), let y = g("dipsy") { SceneHatBaseball(x, y) }
         case "laalaa-po": if let x = g("laalaa"), let y = g("po") { SceneBallFetch(x, y) }
-        default: if PikLineup { PikPairScene(key) } else if OrigLineup { OrigPairScene(key) }
+        default: if PikLineup { PikPairScene(key) } else if OrigLineup { OrigPairScene(key) } else if a.P.Cu || b.P.Cu { CuPairScene(key, a, b) }
         }
     }
 
@@ -676,7 +676,7 @@ extension World {
                 case "stitch": p.Say("Ohana！", 1.8)
                 case "hangyodon": p.Say("我有被拍進去嗎？嘴唇太大了嗎？", 1.8)
                 case "pkred", "pkyellow", "pkblue": p.Say("噗咿！", 1.8)
-                default: p.Say("帥！", 1.8)
+                default: p.Say(p.P.Cu ? p.L("x_photo") : "帥！", 1.8)
                 }
             }
         }
@@ -1231,6 +1231,7 @@ extension World {
         if flash != nil && flash.VVisible { flash.PaintTo(g) }
         if setupForm != nil && !setupForm.IsDisposed && setupForm.VVisible { setupForm.PaintTo(g) }
         StudySnap(g)
+        CuSnap(g)
         if pmenu != nil && pmenu.VVisible { pmenu.PaintTo(g) }
         // 游標位置（只畫一個小十字，方便看）
         let c = World.CursorPos()

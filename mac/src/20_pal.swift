@@ -41,6 +41,7 @@ final class Pal
             for x in [Spidey(), Po(), Stitch(), Hangyodon(), Tinky(), Dipsy(), LaaLaa()] { l.Add(x) }
             l.AddRange(PikminPals())
             l.AddRange(OrigPals())
+            l.AddRange(CuPals())
             all = l
         }
         return all
@@ -53,24 +54,25 @@ final class Pal
 
     // ---- 兩櫃：經典（Spidey、小波、史迪仔、人魚漢頓）／天線寶寶（丁丁、迪西、拉拉、小波；大格是小波）----
     static let Classic = "classic", Teletubbies = "teletubbies"
-    static func NormLineup(_ s: String!) -> String { let t = s == nil ? "" : s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); return t == Teletubbies || t == Pikmin || t == Original ? t : Classic }
+    static func NormLineup(_ s: String!) -> String { let t = s == nil ? "" : s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); return t == Teletubbies || t == Pikmin || t == Original || (t == Mine && HasCustom()) ? t : Classic }
     static func LineupIds(_ lineup: String!) -> [String]
     {
         if NormLineup(lineup) == Pikmin { return PikminIds }   // 皮克敏一櫃：大格是休息花（50_pikmin.swift）
         if NormLineup(lineup) == Original { return OriginalIds }   // 續命小隊（51_original.swift）
+        if NormLineup(lineup) == Mine { return MineIds() }                       // 我的櫃：自己做的公仔（53_custom.swift）
         return NormLineup(lineup) == Teletubbies ? ["tinky", "dipsy", "laalaa", "po"] : ["spidey", "po", "stitch", "hangyodon"]
     }
     static func Lineup(_ lineup: String!) -> List<Pal>
     {
         let l = List<Pal>()
-        for id in LineupIds(lineup) { l.Add(Get(id)) }
+        for id in LineupIds(lineup) { if Get(id) != nil { l.Add(Get(id)) } }
         return l
     }
     // 這一櫃預設放在大格的（經典一櫃照用最久的那隻）
     static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Teletubbies ? "po" : (NormLineup(lineup) == Original ? "boba" : nil) }
     // 設定視窗、小屋「換一櫃」列出來的櫃子（之後新增一櫃：這裡加一個 id、LineupIds／LineupName 加一行）
     static let Lineups: [String] = [Original, Classic, Teletubbies, Pikmin]
-    static func LineupName(_ lineup: String) -> String { let n = NormLineup(lineup); return n == Original ? OriginalName : (n == Teletubbies ? "天線寶寶一櫃" : (n == Pikmin ? "皮克敏一櫃" : "經典一櫃")) }
+    static func LineupName(_ lineup: String) -> String { let n = NormLineup(lineup); return n == Original ? OriginalName : (n == Teletubbies ? "天線寶寶一櫃" : (n == Pikmin ? "皮克敏一櫃" : (n == Mine ? "我的櫃" : "經典一櫃"))) }
 
     func Shared()
     {
