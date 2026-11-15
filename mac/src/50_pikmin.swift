@@ -756,7 +756,7 @@ extension ShelfForm {
     var lastFlowerSent = -1
     var flowerSendT: Double = 0
     var lastLunchSeen = ""
-    var flowerBubSize = Size(0, 0)
+    var flowerBubSize = SizeT(0, 0)   // mac: World 是 Form（有 Size 屬性），型別用 SizeT
     let nectarDrops = List<World.Prop>()
     let nectarFor = Dict<ObjectIdentifier, Pet>()   // mac: Prop 不是 Hashable，用物件身分當 key（同 C# 的參考相等）
     var carryProp: World.Prop! = nil; var carriers: List<Pet>! = nil
