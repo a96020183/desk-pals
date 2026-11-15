@@ -31,10 +31,20 @@ const LINEUPS = {
 	teletubbies: { name: "天線寶寶一櫃", desc: "丁丁、迪西、拉拉、小波（大格是小波）", ids: ["tinky", "dipsy", "laalaa", "po"] },
 	pikmin: { name: "皮克敏一櫃", desc: "紅、黃、藍皮克敏（大格是休息花）", ids: ["pkred", "pkyellow", "pkblue"] },
 };
+// 自己做的公仔（桌面版用 pals 告訴我們有誰）：狀態列圖示、名字、側邊欄小圖；有的話多一櫃「我的櫃」
+let customPals = [];
+function applyCustomPals(list, mine) {
+	for (const id of Object.keys(CHARS)) if (CHARS[id].custom) delete CHARS[id];
+	customPals = Array.isArray(list) ? list.filter((p) => p && /^cu[a-z0-9]{2,12}$/.test(p.id)) : [];
+	for (const p of customPals) CHARS[p.id] = { emoji: p.emoji || "🧸", name: String(p.name || "小公仔").slice(0, 10), lineup: "mine", custom: true, img: p.img || "", lines: p.lines || {} };
+	const ids = (Array.isArray(mine) ? mine : []).filter((id) => CHARS[id]);
+	if (customPals.length && ids.length) LINEUPS.mine = { name: "我的櫃", desc: ids.map((id) => CHARS[id].name).join("、"), ids };
+	else delete LINEUPS.mine;
+}
 const lineupSetting = () => { const v = vscode.workspace.getConfiguration("deskPals").get("lineup", "original"); return LINEUPS[v] ? v : "classic"; };
 // 使用者真的設過「哪一櫃」嗎？沒設過＝讓桌面版自己決定（照它上次的；全新安裝才是續命小隊），舊使用者不會因為預設值改了被換櫃
 const lineupExplicit = () => { const i = vscode.workspace.getConfiguration("deskPals").inspect("lineup"); return !!i && (i.globalValue !== undefined || i.workspaceValue !== undefined || i.workspaceFolderValue !== undefined); };
-const lineupDefaultPet = (lu) => (lu === "teletubbies" ? "po" : (lu === "pikmin" ? "pkred" : (lu === "original" ? "boba" : "spidey")));
+const lineupDefaultPet = (lu) => (lu === "mine" && LINEUPS.mine ? LINEUPS.mine.ids[0] : lu === "teletubbies" ? "po" : (lu === "pikmin" ? "pkred" : (lu === "original" ? "boba" : "spidey")));
 const inLineup = (id, lu) => !!CHARS[id] && (CHARS[id].lineup === "both" || CHARS[id].lineup === lu);
 let current = "spidey";
 let flowerPct = null;   // 皮克敏一櫃：休息花（0 開好開滿 → 100 枯了）
@@ -43,6 +53,8 @@ const E = () => (CHARS[current] || CHARS.spidey).emoji;
 const N = () => (CHARS[current] || CHARS.spidey).name;
 
 function activate(context) {
+	const savedPals = context.globalState.get("customPals");
+	if (savedPals) applyCustomPals(savedPals.pals, savedPals.mine);
 	current = context.globalState.get("activeChar") || vscode.workspace.getConfiguration("deskPals").get("character", "spidey");
 	// ---- 狀態列上一直都在的小蜘蛛 ----
 	const bar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 1000);
@@ -70,6 +82,12 @@ function activate(context) {
 		if (!LINEUPS[lu] || lu === lineupSetting()) return;
 		desktop.skipLineup = lu;
 		vscode.workspace.getConfiguration("deskPals").update("lineup", lu, vscode.ConfigurationTarget.Global);
+	};
+	// 桌面版說自己做的公仔有誰（新做、改、刪、匯入）→ 記起來、側邊欄更新
+	desktop.onPals = (d) => {
+		applyCustomPals(d.pals, d.mine);
+		context.globalState.update("customPals", { pals: customPals.map((p) => ({ id: p.id, name: p.name, emoji: p.emoji, img: p.img, lines: p.lines })), mine: d.mine || [] });
+		if (CHARS[current] && CHARS[current].custom) provider.post({ type: "character", id: current });
 	};
 	// 桌面版換角色 → 狀態列、側邊欄跟著換
 	desktop.onActive = (id) => {
@@ -205,6 +223,8 @@ function activate(context) {
 		vscode.commands.registerCommand("deskPals.bond", () => desktop.send("act bond")),
 		vscode.commands.registerCommand("deskPals.pick", () => pickCharacter(context, desktop, provider, false)),
 		vscode.commands.registerCommand("deskPals.lineup", () => pickLineup(desktop)),
+		vscode.commands.registerCommand("deskPals.make", () => { if (desktop.connected()) desktop.send("custom new"); else { desktop.start(true); desktop.sendLater("custom new"); } }),
+		vscode.commands.registerCommand("deskPals.share", () => { if (desktop.connected()) desktop.send("custom share"); else vscode.window.showInformationMessage("先打開整個螢幕版（公仔櫃：放他到整個螢幕），才能拍分享短片。"); }),
 		vscode.commands.registerCommand("deskPals.all", () => desktop.send("act all")),
 		vscode.commands.registerCommand("deskPals.home", () => desktop.send("act home")),
 		vscode.commands.registerCommand("deskPals.focus", () => desktop.send(`act focus ${Math.max(1, vscode.workspace.getConfiguration("deskPals").get("focusMinutes", 25))}`)),
@@ -253,7 +273,7 @@ async function pickCharacter(context, desktop, provider, first) {
 	if (first) context.globalState.update("picked", true);
 	if (!pick || !pick.id) return;
 	const cfg = vscode.workspace.getConfiguration("deskPals");
-	await cfg.update("character", pick.id, vscode.ConfigurationTarget.Global);
+	if (!CHARS[pick.id].custom) await cfg.update("character", pick.id, vscode.ConfigurationTarget.Global);   // 自己做的公仔不寫進設定（設定只認內建的）
 	if (pick.lineup !== now) {
 		// 換櫃＋指定這隻出來：一行告訴桌面版（設定改變的通知就不要再送一次）
 		desktop.skipLineup = pick.lineup;
@@ -268,7 +288,7 @@ async function pickCharacter(context, desktop, provider, first) {
 async function pickLineup(desktop) {
 	const now = lineupSetting();
 	const items = Object.keys(LINEUPS).map((lu) => ({
-		label: `${lu === "classic" ? "🕷" : (lu === "pikmin" ? "🌸" : (lu === "original" ? "🥤" : "☀"))} ${LINEUPS[lu].name}`,
+		label: `${lu === "classic" ? "🕷" : (lu === "pikmin" ? "🌸" : (lu === "original" ? "🥤" : (lu === "mine" ? "🧸" : "☀")))} ${LINEUPS[lu].name}`,
 		description: LINEUPS[lu].desc,
 		detail: lu === now ? "現在是這一櫃" : undefined,
 		lineup: lu,
@@ -328,6 +348,7 @@ class Desktop {
 		this.onFocus = () => {};
 		this.onQuiet = () => {};
 		this.onFlower = () => {};
+		this.onPals = () => {};
 		// macOS 的 socket 放固定位置（開機由 launchd 啟動時 TMPDIR 不一定相同）
 		this.endpoint = process.platform === "win32" ? "\\\\.\\pipe\\" + this.name : path.join(this.home, "spidey.sock");
 	}
@@ -359,7 +380,7 @@ class Desktop {
 		if (!this.connected()) { this.sendLater(line); return; }
 		this.lineupAck = null;
 		this.send(line);
-		if (lu === "classic" || this.restartedOnce) return;
+		if (lu === "classic" || lu === "mine" || this.restartedOnce) return;
 		setTimeout(() => {
 			if (this.connected() && this.lineupAck !== lu && !this.restartedOnce) {
 				this.restartedOnce = true; this.restarting = true;
@@ -409,6 +430,8 @@ class Desktop {
 				if (lu) { this.lineupAck = lu[1]; this.onLineup(lu[1]); }
 				const m = /^active (\w+)$/.exec(line);
 				if (m) this.onActive(m[1]);
+				const pl = /^pals (\{.*\})$/.exec(line);
+				if (pl) { try { this.onPals(JSON.parse(pl[1])); } catch (e) { console.error("deskpals pals", e); } }
 				const fl = /^flower (\d+)$/.exec(line);
 				if (fl) this.onFlower(+fl[1]);
 				const f = /^focus (on|off)(?: (\d+))?$/.exec(line);
@@ -444,8 +467,9 @@ class Desktop {
 	install() {
 		const src = path.join(this.context.extensionPath, "desktop");
 		fs.mkdirSync(this.home, { recursive: true });
+		// Windows：DeskPals.cs 和所有 DeskPals.*.cs（皮克敏、自己做的公仔、分享短片…）都要帶過去
 		const files = this.win
-			? ["DeskPals.cs", "DeskPals.Pikmin.cs", "DeskPals.Original.cs", "DeskPals.Study.cs", "desk-pals.ps1", "claude-hook.js", "ci-watch.js"]
+			? fs.readdirSync(src).filter((f) => /^DeskPals(\.[A-Za-z]+)?\.cs$/.test(f)).concat(["desk-pals.ps1", "claude-hook.js", "ci-watch.js"])
 			: ["DeskPals.swift", this.sh, "claude-hook.js", "ci-watch.js"];
 		const copy = (f, dir) => {
 			const from = path.join(src, f), to = path.join(dir, f);
@@ -518,7 +542,7 @@ class Desktop {
 				// detached 的 powershell 沒有主控台會直接結束；改由短命的 powershell 用 Start-Process 叫一支獨立的起來
 				const lu = lineupSetting();
 				const pet = vscode.workspace.getConfiguration("deskPals").get("character", "spidey");
-				const args = `-NoProfile -WindowStyle Hidden -File "${path.join(this.home, this.ps1)}" -PipeName ${this.name} -Pet ${inLineup(pet, lu) ? pet : lineupDefaultPet(lu)}${lineupExplicit() ? " -Lineup " + lu : ""}`;
+				const args = `-NoProfile -WindowStyle Hidden -File "${path.join(this.home, this.ps1)}" -PipeName ${this.name} -Pet ${inLineup(pet, lu) && /^\w+$/.test(pet) ? pet : lineupDefaultPet(lu)}${lineupExplicit() ? " -Lineup " + lu : ""}`;
 				p = cp.spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList $env:SPIDEY_ARGS"],
 					{ stdio: "ignore", windowsHide: true, env: Object.assign({}, process.env, { SPIDEY_ARGS: args }) });
 			} else {
@@ -572,7 +596,9 @@ class PetView {
 		return !!(this.view && this.view.visible);
 	}
 	post(msg) {
-		if (this.view) this.view.webview.postMessage(msg);
+		if (!this.view) return;
+		if (msg.type === "character" && CHARS[msg.id] && CHARS[msg.id].custom) this.view.webview.postMessage(customMsg(msg.id));
+		this.view.webview.postMessage(msg);
 	}
 	resolveWebviewView(view) {
 		this.view = view;
@@ -589,6 +615,17 @@ class PetView {
 			if (this.view === view) this.view = undefined;
 		});
 	}
+}
+
+// 側邊欄要畫自己做的公仔：桌面版存好的小圖（icon.png）轉成 data URL，連同幾句台詞一起送過去
+function customMsg(id) {
+	const c = CHARS[id];
+	let img = "";
+	try {
+		if (c.img && /icon\.png$/.test(c.img) && fs.statSync(c.img).size < 2 * 1024 * 1024) img = "data:image/png;base64," + fs.readFileSync(c.img).toString("base64");
+	} catch (e) {}
+	const restMin = Math.max(1, vscode.workspace.getConfiguration("deskPals").get("restMinutes", 50));
+	return { type: "custom", id, name: c.name, img, lines: c.lines || {}, restMin };
 }
 
 function deactivate() {}
