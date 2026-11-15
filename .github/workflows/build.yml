@@ -15,7 +15,9 @@ jobs:
           set -o pipefail
           xcrun swiftc -O DeskPals.swift -o DeskPals 2>&1 | tee build.log
       - name: Shell syntax
-        run: bash -n extension/desktop/desk-pals.sh
+        run: |
+          bash -n extension/desktop/desk-pals.sh
+          bash -n packaging/mac/build_app.sh
       - name: Smoke run (offscreen, all pets, snapshot, quit)
         run: |
           export DESKPALS_OFFSCREEN=1
@@ -44,15 +46,110 @@ jobs:
           tail -n 80 "$HOME/Library/Logs/desk-pals.log" || true
           if kill -0 $PID 2>/dev/null; then echo "did not quit"; kill $PID; exit 1; fi
           test -f shot-pikmin.png || { echo "no snapshot"; exit 1; }
+
+      # ---------- standalone Desk Pals.app / DMG ----------
+      - name: Developer ID certificate (only if the secrets exist)
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERT_P12_BASE64" ]; then echo "no Developer ID secret: ad-hoc signed build"; exit 0; fi
+          KC="$RUNNER_TEMP/signing.keychain-db"; KP="$(uuidgen)"
+          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KP" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$KP" "$KC"
+          security import "$RUNNER_TEMP/cert.p12" -P "$MACOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KC"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KP" "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          ID="$(security find-identity -v -p codesigning "$KC" | grep 'Developer ID Application' | head -1 | sed -E 's/.*"(.*)"/\1/')"
+          [ -n "$ID" ] || { echo "no 'Developer ID Application' identity in the .p12"; exit 1; }
+          echo "MAC_SIGN_IDENTITY=$ID" >> "$GITHUB_ENV"
+          rm -f "$RUNNER_TEMP/cert.p12"
+      - name: Build Desk Pals.app + DMG
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          MAC_BUNDLE_ID: ${{ vars.MAC_BUNDLE_ID }}
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install --quiet pillow
+          [ -n "$MAC_BUNDLE_ID" ] || unset MAC_BUNDLE_ID
+          PYTHON="$RUNNER_TEMP/venv/bin/python" packaging/mac/build_app.sh dist
+      - name: Check the DMG and smoke-test the bundled universal binary
+        run: |
+          set -e
+          DMG="$(ls dist/DeskPals-*.dmg)"
+          MNT="$RUNNER_TEMP/dmg"
+          hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DMG"
+          ls -la "$MNT"
+          test -L "$MNT/Applications"
+          codesign --verify --strict --verbose=2 "$MNT/Desk Pals.app"
+          rm -rf "$RUNNER_TEMP/apps" && mkdir -p "$RUNNER_TEMP/apps" && cp -R "$MNT/Desk Pals.app" "$RUNNER_TEMP/apps/"
+          hdiutil detach "$MNT"
+          APP="$RUNNER_TEMP/apps/Desk Pals.app"
+          BIN="$APP/Contents/MacOS/DeskPals"
+          lipo -archs "$BIN" | grep -q arm64 && lipo -archs "$BIN" | grep -q x86_64
+          plutil -p "$APP/Contents/Info.plist"
+          # offscreen: same smoke as above, with the bundled binary
+          export DESKPALS_OFFSCREEN=1 DESKPALS_DATA_DIR="$RUNNER_TEMP/dp-data-app"
+          SOCK="$RUNNER_TEMP/dp-app.sock"
+          "$BIN" "$SOCK" boba original > run-app.log 2>&1 &
+          PID=$!
+          sleep 8
+          kill -0 $PID || { echo "died at startup"; cat run-app.log; exit 1; }
+          mkdir -p app-shots && (cd app-shots && GITHUB_WORKSPACE="$PWD" SMOKE_ENDPOINT="$SOCK" node ../.github/smoke.js)
+          sleep 3
+          if kill -0 $PID 2>/dev/null; then echo "did not quit"; kill $PID; exit 1; fi
+          test -f app-shots/shot.png
+      - name: Standalone app takes over from the extension (marker, LaunchAgent, single instance)
+        run: |
+          set -e
+          APP="$RUNNER_TEMP/apps/Desk Pals.app"
+          BIN="$APP/Contents/MacOS/DeskPals"
+          HOME_DIR="$HOME/Library/Application Support/SpideyDesktop"
+          SOCK="$HOME_DIR/spidey.sock"
+          PLIST="$HOME/Library/LaunchAgents/local.spidey-pet.plist"
+          mkdir -p "$HOME/Library/LaunchAgents" "$HOME_DIR"
+          # what the VS Code extension leaves behind: LaunchAgent → desk-pals.sh, its own compiled copy running on the same socket
+          printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>Label</key><string>local.spidey-pet</string><key>ProgramArguments</key><array><string>/bin/bash</string><string>%s/desk-pals.sh</string></array></dict></plist>\n' "$HOME_DIR" > "$PLIST"
+          DESKPALS_OFFSCREEN=1 DESKPALS_DATA_DIR="$RUNNER_TEMP/dp-ext" extension/desktop/DeskPals "$SOCK" boba original > run-ext.log 2>&1 &
+          EXT=$!
+          node .github/ping.js "$SOCK"
+          # open the .app (not offscreen: this is the real first launch path; the runner has no user to bother)
+          DESKPALS_DATA_DIR="$RUNNER_TEMP/dp-std" "$BIN" > run-std.log 2>&1 &
+          STD=$!
+          sleep 10
+          if kill -0 $EXT 2>/dev/null; then echo "extension copy was not replaced"; exit 1; fi
+          kill -0 $STD || { echo "app died"; cat run-std.log; tail -40 "$HOME/Library/Logs/desk-pals.log"; exit 1; }
+          cat "$HOME_DIR/standalone.json"; echo
+          grep -q '"kind":"app"' "$HOME_DIR/standalone.json"
+          cat "$PLIST"
+          grep -q "$BIN" "$PLIST"
+          ! grep -q desk-pals.sh "$PLIST"
+          cmp "$HOME_DIR/claude-hook.js" extension/desktop/claude-hook.js
+          node .github/ping.js "$SOCK"
+          # second launch: says hi to the running one and exits
+          "$BIN"; echo "second launch exit $?"
+          kill -0 $STD
+          node .github/ping.js "$SOCK" quit
+          sleep 3
+          if kill -0 $STD 2>/dev/null; then echo "did not quit"; kill $STD; exit 1; fi
+          rm -f "$PLIST" "$HOME_DIR/standalone.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: mac-result
           path: |
             extension/desktop/build.log
-            run.log
-            run-pikmin.log
+            run*.log
             shot*.png
+            app-shots/*.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desk-pals-mac
+          path: dist/*.dmg
 
   windows:
     runs-on: windows-latest
@@ -77,12 +174,121 @@ jobs:
           Start-Sleep -Seconds 3
           if (Test-Path "$env:TEMP\desk-pals.log") { Get-Content "$env:TEMP\desk-pals.log" }
           if (-not (Test-Path shot.png)) { throw "no snapshot" }
+          New-Item -ItemType Directory -Force ps1-shots | Out-Null
+          Move-Item shot*.png ps1-shots
       - name: Build vsix
         run: python build_vsix.py
+
+      # ---------- standalone DeskPals.exe / installer / MSIX ----------
+      - name: Tools (Pillow, Inno Setup)
+        shell: powershell
+        run: |
+          python -m pip install --quiet pillow
+          choco install innosetup -y --no-progress | Out-Null
+          Get-ChildItem "${env:ProgramFiles(x86)}\Inno Setup*\ISCC.exe", "$env:ProgramFiles\Inno Setup*\ISCC.exe" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+      - name: Build DeskPals.exe, installer, MSIX
+        shell: powershell
+        env:
+          WINDOWS_SIGN_PFX_BASE64: ${{ secrets.WINDOWS_SIGN_PFX_BASE64 }}
+          WINDOWS_SIGN_PASSWORD: ${{ secrets.WINDOWS_SIGN_PASSWORD }}
+          MSIX_IDENTITY_NAME: ${{ vars.MSIX_IDENTITY_NAME }}
+          MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
+          MSIX_PUBLISHER_DISPLAY_NAME: ${{ vars.MSIX_PUBLISHER_DISPLAY_NAME }}
+        run: |
+          if ($env:WINDOWS_SIGN_PFX_BASE64) {
+            $pfx = Join-Path $env:RUNNER_TEMP "sign.pfx"
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_SIGN_PFX_BASE64))
+            $env:DESKPALS_SIGN_PFX = $pfx; $env:DESKPALS_SIGN_PASSWORD = $env:WINDOWS_SIGN_PASSWORD
+          } else { "no code-signing secret: unsigned build" }
+          powershell -NoProfile -ExecutionPolicy Bypass -File packaging\windows\build.ps1 -Strict
+          if ($LASTEXITCODE -ne 0) { throw "build.ps1 failed" }
+          if ($pfx) { Remove-Item $pfx }
+          Get-ChildItem dist | Format-Table Name, Length
+      - name: Smoke-test DeskPals.exe (offscreen) + study tools + share GIF
+        shell: powershell
+        run: |
+          tzutil /s "Taipei Standard Time"   # test/desktop-study.js fixtures are written in Taipei time
+          $env:DESKPALS_OFFSCREEN = "1"
+          $env:DESKPALS_DATA_DIR = "$env:RUNNER_TEMP\dp-exe"
+          New-Item -ItemType Directory -Force exe-shots | Out-Null
+          $a = Start-Process dist\DeskPals.exe -ArgumentList "--pipe desk-pals-ci --pet po" -PassThru
+          Start-Sleep -Seconds 5
+          node .github/smoke.js
+          Start-Sleep -Seconds 3
+          if (-not (Test-Path shot.png)) { throw "no snapshot" }
+          if (-not $a.HasExited) { throw "exe did not quit" }
+          Move-Item shot*.png exe-shots
+          $env:DESKPALS_ISOLATED = "1"
+          $b = Start-Process dist\DeskPals.exe -ArgumentList "--pipe desk-pals-studytest" -PassThru
+          node .github/ping.js desk-pals-studytest
+          node .github/share-check.js desk-pals-studytest $env:DESKPALS_DATA_DIR
+          if ($LASTEXITCODE -ne 0) { throw "share GIF failed" }
+          node test/desktop-study.js desk-pals-studytest exe-shots
+          if ($LASTEXITCODE -ne 0) { throw "desktop-study failed" }
+          Start-Process dist\DeskPals.exe -ArgumentList "--pipe desk-pals-studytest --quit" -Wait
+          if (-not $b.HasExited) { throw "--quit did not close it" }
+          $log = Get-Content "$env:TEMP\desk-pals.log" -Encoding UTF8
+          $log | Select-Object -Last 30
+          if (-not ($log | Select-String "exe .* STA")) { throw "exe main thread is not STA (clipboard would fail)" }
+      - name: Installer end-to-end (install over the extension's copy, upgrade, uninstall)
+        shell: powershell
+        run: |
+          $setup = (Get-ChildItem dist\DeskPals-Setup-*.exe).FullName
+          powershell -NoProfile -ExecutionPolicy Bypass -File .github\test-installer.ps1 -Setup $setup
+          if ($LASTEXITCODE -ne 0) { throw "installer test failed" }
+      - name: MSIX installs and runs (test-signed copy; best effort)
+        continue-on-error: true
+        shell: powershell
+        run: |
+          $msix = (Get-ChildItem dist\DeskPals-*.msix).FullName
+          powershell -NoProfile -ExecutionPolicy Bypass -File .github\test-msix.ps1 -Msix $msix
+          if ($LASTEXITCODE -ne 0) { throw "msix test failed" }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: desk-pals-vsix
+          name: windows-result
           path: |
+            ps1-shots/*.png
+            exe-shots/*.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desk-pals-windows
+          path: |
+            dist/DeskPals-Setup-*.exe
+            dist/DeskPals-*.msix
             dist/*.vsix
-            shot*.png
+
+  # 只有推 v* tag 才會跑：建 GitHub Release，附上安裝程式、MSIX、DMG、vsix
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [mac, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          pattern: desk-pals-*
+          merge-multiple: true
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          VER="$(python3 -c 'import json; print(json.load(open("extension/package.json"))["version"])')"
+          if [ "$TAG" != "v$VER" ]; then echo "tag $TAG does not match extension/package.json version $VER"; exit 1; fi
+          ls -la out
+          cat > notes.md <<EOF
+          ## 公仔櫃 Desk Pals $VER
+
+          | 檔案 | 給誰 |
+          |---|---|
+          | \`DeskPals-Setup-$VER.exe\` | Windows 10／11（不用 VS Code）。還沒簽章：SmartScreen 擋下來時按「其他資訊」→「仍要執行」 |
+          | \`DeskPals-$VER.dmg\` | macOS 13（Ventura）以後（Apple 晶片、Intel 都可以）。還沒公證：第一次打開請看 DMG 裡的說明 |
+          | \`desk-pals-$VER.vsix\` | VS Code 擴充套件（含 VS Code 才有的功能） |
+          | \`DeskPals-$VER.msix\` | 給 Microsoft Store 上架用（未簽章，不能直接安裝） |
+
+          EOF
+          gh release create "$TAG" out/* --title "公仔櫃 Desk Pals $VER" --notes-file notes.md --generate-notes

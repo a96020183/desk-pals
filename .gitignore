@@ -9,3 +9,5 @@ art/
 /[[]Content_Types].xml
 dist/
 **/desktop/DeskPals
+build/
+__pycache__/

@@ -208,7 +208,9 @@ function activate(context) {
 		}),
 		vscode.commands.registerCommand("deskPals.desktopOff", async () => {
 			const pick = await vscode.window.showWarningMessage(
-				"要收工嗎？桌面上的公仔和公仔櫃會離開，也不會再開機自動出現（之後可用「公仔櫃：放他到整個螢幕」叫回來）。",
+				desktop.standalone()
+					? `要收工嗎？桌面上的公仔和公仔櫃會離開（之後可用「公仔櫃：放他到整個螢幕」叫回來）。獨立版自己的開機自動啟動不受影響，要關請到${process.platform === "darwin" ? "「系統設定 → 一般 → 登入項目」" : " Windows「設定 → 應用程式 → 啟動」"}。`
+					: "要收工嗎？桌面上的公仔和公仔櫃會離開，也不會再開機自動出現（之後可用「公仔櫃：放他到整個螢幕」叫回來）。",
 				{ modal: true },
 				"收工"
 			);
@@ -354,12 +356,37 @@ class Desktop {
 	}
 	connected() { return !!this.sock; }
 
+	// 有裝獨立版（Windows 安裝程式／Microsoft Store、Mac 的 Desk Pals.app）嗎？有的話它寫了 standalone.json：
+	// 這邊就不再自己編一份、不建開機啟動，只負責連上它（沒開就叫它起來）。檔案在、程式不在了（被刪掉）＝當作沒裝。
+	standalone() {
+		try {
+			const j = JSON.parse(fs.readFileSync(path.join(this.home, "standalone.json"), "utf8").replace(/^\uFEFF/, ""));
+			const target = this.win ? j.exe : j.app;
+			if (!target) return null;
+			try { fs.lstatSync(target); } catch (e) { if (e.code === "ENOENT" || e.code === "ENOTDIR") return null; }   // Store 版的 WindowsApps 捷徑 stat 會報別的錯：算在
+			return j;
+		} catch (e) { return null; }
+	}
+
+	// 桌面那邊收工了（使用者按的、或獨立版安裝／升級時先關掉舊的）：之後獨立版又開起來就自動接回去（不會自己去開它）
+	watch() {
+		clearTimeout(this.watchTimer);
+		this.watchTimer = setTimeout(() => {
+			if (this.userStopped || this.want || this.sock) return;
+			if (!this.standalone()) { this.watch(); return; }
+			const s = net.connect(this.endpoint);
+			s.on("connect", () => { s.destroy(); if (!this.userStopped && !this.sock) { this.want = true; this.spawns = 3; this.connect(10, true); } });
+			s.on("error", () => this.watch());
+		}, 10000);
+	}
+
 	start(userAsked) {
 		if (!this.supported) {
 			if (userAsked) vscode.window.showInformationMessage("公仔櫃桌面版目前支援 Windows 和 macOS。");
 			return;
 		}
 		try { this.install(); } catch (e) { console.error("deskpals install", e); }
+		this.userStopped = false;
 		this.want = true;
 		this.spawns = 0;
 		this.connect(60, false);
@@ -368,7 +395,9 @@ class Desktop {
 
 	stop() {
 		this.want = false;
+		this.userStopped = true;
 		this.send("quit");
+		if (this.standalone()) return;   // 獨立版的開機啟動是它自己的（安裝程式／Store／App），不動
 		try { this.uninstallAutostart(); } catch (e) { console.error("deskpals uninstall", e); }
 	}
 
@@ -446,6 +475,7 @@ class Desktop {
 			if (ok) {
 				if (this.sock === s) this.sock = null;
 				if (this.want) setTimeout(() => this.connect(60, false), 1500);
+				else this.watch();
 				return;
 			}
 			if (!spawned) {
@@ -468,7 +498,9 @@ class Desktop {
 		const src = path.join(this.context.extensionPath, "desktop");
 		fs.mkdirSync(this.home, { recursive: true });
 		// Windows：DeskPals.cs 和所有 DeskPals.*.cs（皮克敏、自己做的公仔、分享短片…）都要帶過去
-		const files = this.win
+		const sa = this.standalone();
+		const files = sa ? ["claude-hook.js", "ci-watch.js"]   // 獨立版：只放 hooks／CI 用的小腳本，桌面版本體和開機啟動都交給它
+			: this.win
 			? fs.readdirSync(src).filter((f) => /^DeskPals(\.[A-Za-z]+)?\.cs$/.test(f)).concat(["desk-pals.ps1", "claude-hook.js", "ci-watch.js"])
 			: ["DeskPals.swift", this.sh, "claude-hook.js", "ci-watch.js"];
 		const copy = (f, dir) => {
@@ -479,6 +511,7 @@ class Desktop {
 			if (!same) fs.writeFileSync(to, a);
 		};
 		for (const f of files) copy(f, this.home);
+		if (sa) return;
 		if (this.win && this.migratedFromSpidey) this.migrateFromSpidey(copy);
 		if (process.platform === "darwin") {
 			fs.chmodSync(path.join(this.home, this.sh), 0o755);
@@ -538,7 +571,16 @@ class Desktop {
 	spawn() {
 		try {
 			let p;
-			if (process.platform === "win32") {
+			const sa = this.standalone();
+			if (sa) {
+				// 獨立版：直接叫它（Mac 用 open，讓它以自己的 App 身分跑，權限不算在 VS Code 頭上）
+				const lu = lineupSetting();
+				const pet = vscode.workspace.getConfiguration("deskPals").get("character", "spidey");
+				const pp = inLineup(pet, lu) && /^\w+$/.test(pet) ? pet : lineupDefaultPet(lu);
+				p = this.win
+					? cp.spawn(sa.exe, ["--pipe", this.name, "--pet", pp].concat(lineupExplicit() ? ["--lineup", lu] : []), { detached: true, stdio: "ignore", windowsHide: true })
+					: cp.spawn("/usr/bin/open", ["-a", sa.app, "--args", this.endpoint, pp, lineupExplicit() ? lu : ""], { detached: true, stdio: "ignore" });
+			} else if (process.platform === "win32") {
 				// detached 的 powershell 沒有主控台會直接結束；改由短命的 powershell 用 Start-Process 叫一支獨立的起來
 				const lu = lineupSetting();
 				const pet = vscode.workspace.getConfiguration("deskPals").get("character", "spidey");
@@ -584,7 +626,7 @@ class Desktop {
 		} catch (e) {}
 	}
 
-	dispose() { if (this.sock) this.sock.end(); }
+	dispose() { clearTimeout(this.watchTimer); if (this.sock) this.sock.end(); }
 }
 
 class PetView {

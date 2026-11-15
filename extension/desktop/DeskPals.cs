@@ -6874,6 +6874,7 @@ namespace DeskPals
                 case "shelf": if (l.Out) l.StowToShelf(true); return;
                 case "ball": StartBall(arg == "here"); return;
                 case "hide": ToggleHide(); return;
+                case "show": if (userHidden) ToggleHide(); else l.Act("hi"); return;   // 獨立版又被打開一次（開始功能表／Dock）：躲起來的就出來，不然打個招呼
                 case "fireworks": foreach (Pet x in OutPets()) x.Celebrate("dev", x == l); if (OutCount() == 0) l.Celebrate("dev", true); return;
                 case "dark": case "night": forceNight = 1; nightChecked = -1; CheckNight(); return;
                 case "light": case "day": forceNight = 0; nightChecked = -1; CheckNight(); return;
