@@ -847,6 +847,7 @@ extension World {
             g.FillRectangle(title, r.X, r.Y, r.Width, Math.Min(r.Height, 30))
             g.DrawRectangle(edge, r.X, r.Y, r.Width - 1, r.Height - 1)
         }
+        MisSnapWins(g)   // 搗蛋：測試用的假視窗、正在被推走的假視窗
         // 由下到上：櫃子 → 蜘蛛網 → 公仔 → 球 → 煙火 → 泡泡 → 閃光
         if shelf != nil && shelf.VVisible && shelf.VBmp != nil { g.DrawImageUnscaled(shelf.VBmp, shelf.VPos) }
         for f in webs { if f.VVisible { f.PaintTo(g) } }
@@ -864,6 +865,7 @@ extension World {
         // 游標位置（只畫一個小十字，方便看）
         let c = World.CursorPos()
         let cp = Pen(Color.FromArgb(200, 255, 255, 0), 2); g.DrawLine(cp, c.X - 6, c.Y, c.X + 6, c.Y); g.DrawLine(cp, c.X, c.Y - 6, c.X, c.Y + 6)
+        MisSnapCursor(g)   // 搗蛋測試用的假游標（白色箭頭）
         g.ResetTransform()
         _ = try? FileManager.default.createDirectory(atPath: Path.GetDirectoryName(path), withIntermediateDirectories: true)
         b.Save(path, ImageFormat.Png)

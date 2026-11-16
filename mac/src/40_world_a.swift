@@ -196,6 +196,7 @@ extension World {
         LegacyTakeOver()   //@fan
         LoadState()
         LoadFeatures()
+        MisStart()   // 搗蛋（59_mischief.swift）
         LoadMode()
         SeasonNow = Season()
         Night = NightNow()
@@ -514,6 +515,7 @@ extension World {
         ReminderTick()
         TicketTick()
         StudyTick()          // 讀書小幫手（52_study.swift）：學校行事曆、作業死線、考試倒數、熬夜
+        MisTick(dt)          // 搗蛋（59_mischief.swift）：搶游標、下班清場、購物警察、打字太兇
         DownloadTick(dt)
         ExpireNotice()
         MenuWatch()
@@ -1361,7 +1363,7 @@ extension World {
                 }
             }
         case "quit": QuitAll()
-        default: StudyMsg(c, p, line)   // course／exam／study-…（52_study.swift）
+        default: if !MisMsg(c, p, line) { StudyMsg(c, p, line) }   // mischief-…（59_mischief.swift）；course／exam／study-…（52_study.swift）
         }
     }
 
@@ -1425,12 +1427,14 @@ extension World {
         case "menuclose": if pmenu != nil { pmenu.CloseMenu() }; return
         case "setup": if arg == "" { ShowSetup(false) } else if setupForm != nil && !setupForm.IsDisposed { setupForm.Press(arg) }; return
         case "feature": do { let q = arg.components(separatedBy: "="); if q.count == 2 { SetFeat(q[0], q[1] == "1") } }; return
+        case "mischief": MisAct(arg); return   // 搗蛋：act mischief cursor|clear|shop|typing|restore|stop（59_mischief.swift）
         default: break
         }
         if target != nil && arg != "" { target!.Act(a) } else { l.Act(a) }
     }
 
     func QuitAll() {
+        MisQuit()   // 推走的視窗先全部叫回來、不再數按鍵（59_mischief.swift）
         closing = true
         SaveUsage(); SaveOut()
         lock(clients) { for c in clients { World.Send(c, "bye\n") } }

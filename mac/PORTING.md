@@ -34,6 +34,7 @@ mac/
     56_custom_make.swift  DeskPals.CustomMake.cs（CuMaker 做公仔視窗、拖放、開檔／存檔、`custom …` 測試指令）
     57_share.swift      DeskPals.Share.cs（分享短片 GIF89a 編碼器、`.deskpal` 匯出匯入）
     58_fan.swift        DeskPals.Fan.cs（經典一櫃、天線寶寶一櫃的 Pal 資料、專屬動作、串場；個人版才有）
+    59_mischief.swift   DeskPals.Mischief.cs（搗蛋：搶游標、下班清場、購物警察、打字太兇；MisSys／MisFake）
     03_shim_custom_a.swift / 04_shim_custom_b.swift  做公仔用到的 shim（Matrix、ColorMatrix 像素處理、拖放、NSOpenPanel／NSSavePanel）
 ```
 (Line numbers above are from the first port and drift as the C# grows — find your range by the section comments.)
@@ -209,6 +210,24 @@ The table below is the porting map that was used (C# file → Mac approach). CI 
 
 Hooks in DeskPals.cs are one-liners (`P.Cu ? … : …`, `if (P.Cu) { CuXxx(); return; }`), next to the existing `P.Pik` hooks — port them in the same places.
 `SetupForm` changed: two steps (選公仔 with the "把你家的貓狗變成桌面公仔" hero card + 匯入, 怎麼擺 with 只要一隻 first); the old 你是？(student/work) step and `World.Student` are gone; first run with no `mode.txt` defaults to 只要一隻.
+
+## 搗蛋 — ported (`mac/src/59_mischief.swift`)
+
+Same names and rules as `DeskPals.Mischief.cs`. Everything that touches the real machine goes through `MisSys`; offscreen mode
+(`DESKPALS_OFFSCREEN=1`) always uses `MisFake` (records calls, fake cursor／windows／key counter／clock), unless `DESKPALS_MISCHIEF_REAL=1`.
+CI drives it with `test/desktop-mischief.js` (same script on both platforms). Hooks in the core parts are one-liners (grep `Mis`):
+`Pet.Step` → `MisStep`, `Watch`／`Free` → `MisBusy`, `PaintPet` → `MisDraw`, `TickInner` → `MisTick`, `OnMsg` default → `MisMsg`,
+`Act` → `"mischief"`, `Start` → `MisStart`, `QuitAll` → `MisQuit`, `NoticeClicked` → `MisClicked`, `Feat`／`SaveFeatures`／`SetFeat` →
+`MisFeatureList`／`MisDefaultOff`／`MisFeatChanged`, `HouseMenu` → `MisHouseMenu`, `Snap` → `MisSnapWins`／`MisSnapCursor`.
+Mac differences (all marked `// mac:`):
+- Cursor: `SetCursorPos` → `CGWarpMouseCursorPosition` (posts no events) + `CGAssociateMouseAndMouseCursorPosition(1)`.
+  "Did the user move": `GetLastInputInfo` → `CGEventSource.secondsSinceLastEventType` turned into a ms timestamp (compared with ±40 ms, same as C#).
+- 下班清場: minimize → hide the whole app (`NSRunningApplication.hide`, one window per app, up to 3), restore → `unhide` (+ `activate` for the front one).
+  No window capture (needs Screen Recording; `CGWindowListCreateImage` is obsoleted): the fake window is always the drawn cartoon window.
+- 打字太兇: low-level keyboard hook → `CGEventSource.counterForEventType(.combinedSessionState, .keyUp)` (a count only). Input Monitoring
+  is requested (`IOHIDRequestAccess`) only when the user turns the switch on in the 小屋 menu — never at startup, never from VS Code pushes.
+- `MisWin.Pid` (mac only) — the app to hide／unhide.
+- Long `+`／`?:` string chains are split (`MisFlags()`) so the Swift type checker doesn't time out.
 
 ## 公開版（`python3 mac/assemble.py --public`）
 

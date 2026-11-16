@@ -143,6 +143,10 @@
 			{
 				"command": "deskPals.quietOff",
 				"title": "公仔櫃：結束安靜"
+			},
+			{
+				"command": "deskPals.mischiefRestore",
+				"title": "公仔櫃：把下班清場推走的視窗叫回來"
 			}
 		],
 		"configuration": {
@@ -312,6 +316,33 @@
 					"type": "string",
 					"default": "",
 					"description": "公司內部主機（例如公司 GitLab 的網域）：網路正常但連不到它時，公仔會提醒你「連不到公司網路（VPN 斷了？）」"
+				},
+				"deskPals.mischief.grabCursor": {
+					"type": "boolean",
+					"default": false,
+					"description": "搗蛋／搶游標：滑鼠鍵盤都沒動一陣子，公仔跑來把游標「叼走」拖著跑一小段。你一動滑鼠或鍵盤就立刻放手；全螢幕、簡報、遊戲、分享螢幕、按著滑鼠鍵時不會開始。預設關（要玩的人自己開）。設了這裡就以 VS Code 為準，沒設用桌面公仔小屋「搗蛋」裡的開關。"
+				},
+				"deskPals.mischief.grabMinutes": {
+					"type": "number",
+					"default": 3,
+					"minimum": 1,
+					"maximum": 60,
+					"description": "搗蛋／搶游標：滑鼠鍵盤都沒動幾分鐘才來搶"
+				},
+				"deskPals.mischief.clearAtOffWork": {
+					"type": "boolean",
+					"default": true,
+					"description": "搗蛋／下班清場：平日下班時間（18:00 後，跟「下班時間」同一套）公仔把前面幾個視窗推出螢幕，一天一次。只是把視窗縮小（Mac：隱藏那個 App），不會關掉任何東西；點公仔或指令「公仔櫃：把下班清場推走的視窗叫回來」一鍵全部叫回來。"
+				},
+				"deskPals.mischief.shoppingPolice": {
+					"type": "boolean",
+					"default": true,
+					"description": "搗蛋／購物警察：前景視窗是購物網站（蝦皮、momo、PChome、露天、淘寶、Amazon、樂天、博客來、Yahoo 購物中心…）時，公仔抱著錢包大哭。哭過 20 分鐘內不會再哭。只看視窗標題，不記錄你逛了什麼。"
+				},
+				"deskPals.mischief.typingTooHard": {
+					"type": "boolean",
+					"default": true,
+					"description": "搗蛋／打字太兇：連續好幾秒打字很快，公仔會被震飛再爬回來。只數「每秒按了幾下」，不記錄按了哪些鍵、不存任何內容。Mac 要「輸入監控」權限（在桌面公仔小屋自己打開這個開關時才會問）。"
 				}
 			}
 		}

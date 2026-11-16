@@ -762,7 +762,7 @@ namespace DeskPals
         bool Night { get { return w.Night; } }
         public bool Grounded() { return state == "walk" || state == "idle" || state == "sleep" || state == "hug" || state == "seek" || state == "dizzy" || state == "fetch" || state == "dance" || state == "kick" || state == "wave" || state == "pose" || state == "bat" || state == "catch" || state == "header" || state == "capetrip" || state == "elvis" || state == "chomp" || state == "think" || state == "hide" || state == "nudge" || state == "spin" || state == "goto"
             || state == "plop" || state == "twirl" || state == "hattoss" || state == "juggle" || state == "bagdig" || state == "pik" || state == "orig" || state == "cu"; }
-        public bool Free() { return Out && !InScene && !dragging && Grounded() && state != "sleep" && state != "hug" && !(Bt > 0 && bubblePri > 0); }
+        public bool Free() { return Out && !InScene && !dragging && Grounded() && state != "sleep" && state != "hug" && !(Bt > 0 && bubblePri > 0) && !MisBusy; }
         void SetState(string s, double dur) { state = s; t = dur; }
         public void Say(string s, double sec) { Say(s, sec, false); }
         bool muteChat;
@@ -963,7 +963,7 @@ namespace DeskPals
         {
             if (stuckLine != null) { stuckRepeat -= dt; if (stuckRepeat <= 0) { Say(stuckLine, 6, true); stuckLine = null; } }
             seekCd -= dt; hoverCd -= dt; lateCd -= dt; saveXpCd -= dt;
-            if (!Grounded() || state == "hug" || sleepMode || state == "sleep" || InScene || Quiet) return;
+            if (!Grounded() || state == "hug" || sleepMode || state == "sleep" || InScene || Quiet || MisBusy) return;   // MisBusy：搗蛋中（DeskPals.Mischief.cs）
             Point c = Cursor.Position;
             double cx = Cx, still = w.CursorStill;
             bool onMe = c.X >= x && c.X <= x + SW && c.Y >= y && c.Y <= y + SH;
@@ -1009,6 +1009,7 @@ namespace DeskPals
                 f[1] += 38 * k * dt; f[0] += (f[2] + Math.Sin(f[3] * 3) * 10 * k) * dt; f[3] += dt;
                 if (f[3] > 2.2) flakes.RemoveAt(i);
             }
+            if (MisStep(dt)) return;   // 搗蛋中（DeskPals.Mischief.cs）
             FollowFast();
             Rectangle wa = w.WA(Cx, y + SH / 2.0);
             if (StepSpecial(dt, wa)) return;   // 角色專屬狀態
@@ -2867,6 +2868,7 @@ namespace DeskPals
             }
 
             DrawTicketBadge(g, ox, oy);
+            MisDraw(g, ox, oy);   // 搗蛋的道具、眼淚（DeskPals.Mischief.cs）
             int fps = Math.Max(1, S / 3);
             foreach (double[] fl in flakes) DrawPix(g, FLAKE, (int)fl[0] - ox - fps, (int)fl[1] - oy - fps, fps, false, false, false);
 
@@ -3968,6 +3970,7 @@ namespace DeskPals
             LegacyTakeOver();   //@fan
             LoadState();
             LoadFeatures();
+            MisStart();   // 搗蛋（DeskPals.Mischief.cs）
             LoadMode();
             SeasonNow = Season();
             Night = NightNow();
@@ -4280,6 +4283,7 @@ namespace DeskPals
                 ReminderTick();
                 TicketTick();
                 StudyTick();          // 讀書小幫手（DeskPals.Study.cs）：學校行事曆、作業死線、考試倒數、熬夜
+                MisTick(dt);          // 搗蛋（DeskPals.Mischief.cs）：搶游標、下班清場、購物警察、打字太兇
                 DownloadTick(dt);
                 ExpireNotice();
                 MenuWatch();
@@ -5175,7 +5179,7 @@ namespace DeskPals
                     }
                     break;
                 case "quit": QuitAll(); break;
-                default: StudyMsg(c, p, line); break;   // course／exam／study-…（DeskPals.Study.cs）
+                default: if (!MisMsg(c, p, line)) StudyMsg(c, p, line); break;   // mischief-…（DeskPals.Mischief.cs）；course／exam／study-…（DeskPals.Study.cs）
             }
         }
 
@@ -5236,12 +5240,14 @@ namespace DeskPals
                 case "menuclose": if (pmenu != null) pmenu.CloseMenu(); return;
                 case "setup": if (arg == "") ShowSetup(false); else if (setupForm != null && !setupForm.IsDisposed) setupForm.Press(arg); return;
                 case "feature": { string[] q = arg.Split('='); if (q.Length == 2) SetFeat(q[0], q[1] == "1"); } return;
+                case "mischief": MisAct(arg); return;   // 搗蛋：act mischief cursor|clear|shop|typing|restore|stop（DeskPals.Mischief.cs）
             }
             if (target != null && arg != "") target.Act(a); else l.Act(a);
         }
 
         void QuitAll()
         {
+            MisQuit();   // 推走的視窗先全部叫回來、拿掉按鍵計數（DeskPals.Mischief.cs）
             closing = true;
             SaveUsage(); SaveOut();
             lock (clients) foreach (Client c in clients) Send(c, "bye\n");
@@ -6094,6 +6100,7 @@ namespace DeskPals
                         g.FillRectangle(title, r.X, r.Y, r.Width, Math.Min(r.Height, 30));
                         g.DrawRectangle(edge, r.X, r.Y, r.Width - 1, r.Height - 1);
                     }
+                MisSnapWins(g);   // 搗蛋：測試用的假視窗、正在被推走的假視窗
                 // 由下到上：櫃子 → 蜘蛛網 → 公仔 → 球 → 煙火 → 泡泡 → 閃光
                 if (shelf != null && shelf.VVisible && shelf.VBmp != null) g.DrawImageUnscaled(shelf.VBmp, shelf.VPos);
                 foreach (CobwebForm f in webs) if (f.VVisible) f.PaintTo(g);
@@ -6111,6 +6118,7 @@ namespace DeskPals
                 // 游標位置（只畫一個小十字，方便看）
                 Point c = Cursor.Position;
                 using (Pen cp = new Pen(Color.FromArgb(200, 255, 255, 0), 2)) { g.DrawLine(cp, c.X - 6, c.Y, c.X + 6, c.Y); g.DrawLine(cp, c.X, c.Y - 6, c.X, c.Y + 6); }
+                MisSnapCursor(g);   // 搗蛋測試用的假游標（白色箭頭）
                 g.ResetTransform();
                 try { Directory.CreateDirectory(Path.GetDirectoryName(path)); } catch { }
                 b.Save(path, ImageFormat.Png);
@@ -6286,6 +6294,7 @@ namespace DeskPals
             if (n.NextRound) { StartFocus(focusMin); return true; }
             if (ReminderClicked(p, n)) return true;
             if (StudyClicked(p, n)) return true;   // 作業：打開／交了
+            if (MisClicked(p, n)) return true;     // 下班清場：把視窗叫回來
             if (n.Url != null)
             {
                 try { Process.Start(new ProcessStartInfo(n.Url) { UseShellExecute = true }); p.Say("好～幫你打開了 👍", 1.4); }
@@ -7746,7 +7755,7 @@ namespace DeskPals
             new string[] { "fireworks", "煙火" },
             new string[] { "chatter", "閒聊泡泡（自己閒晃時講話）" } };
         readonly Dictionary<string, bool> feats = new Dictionary<string, bool>();
-        public bool Feat(string key) { bool on; return !feats.TryGetValue(key, out on) || on; }
+        public bool Feat(string key) { bool on; return feats.TryGetValue(key, out on) ? on : !MisDefaultOff(key); }   // 搶游標預設關（DeskPals.Mischief.cs）
 
         void LoadFeatures()
         {
@@ -7762,6 +7771,7 @@ namespace DeskPals
         {
             StringBuilder sb = new StringBuilder();
             foreach (string[] f in FeatureList) sb.Append(f[0] + "=" + (Feat(f[0]) ? "1" : "0") + "\n");
+            foreach (string[] f in MisFeatureList) sb.Append(f[0] + "=" + (Feat(f[0]) ? "1" : "0") + "\n");   // 搗蛋的開關
             WriteText("features.txt", sb.ToString());
         }
 
@@ -7773,8 +7783,10 @@ namespace DeskPals
             if (key == "night" || key == "season") { nightChecked = -1; CheckNight(); }   // 馬上換樣子（黑化、節日帽子）
             if (key == "lunch") LunchTick(true);
             if (key == "scenes" && !on) AbortScene();
+            MisFeatChanged(key, on, true);
             string name = key;
             foreach (string[] f in FeatureList) if (f[0] == key) name = f[1];
+            foreach (string[] f in MisFeatureList) if (f[0] == key) name = f[1];
             int cut = name.IndexOf('（');
             if (cut > 0) name = name.Substring(0, cut);
             Lead().Say(on ? "好～「" + name + "」打開囉" : "好～「" + name + "」先關掉", 1.8);
@@ -7819,6 +7831,7 @@ namespace DeskPals
                 mi.Click += delegate { SetFeat(key, !Feat(key)); mi.Checked = Feat(key); };
                 m.Items.Add(mi);
             }
+            MisHouseMenu(m);  // 搗蛋的開關、把推走的視窗叫回來（DeskPals.Mischief.cs）
             m.Items.Add(new ToolStripSeparator());
             ToolStripMenuItem help = new ToolStripMenuItem("小幫手（專注、安靜、提醒）");
             AddHelpers(help.DropDownItems);

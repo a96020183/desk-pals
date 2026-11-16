@@ -31,6 +31,29 @@ function setup(context, desktop) {
 	subs.push(vscode.commands.registerCommand("deskPals.remind", () => remindMe(desktop)));
 	subs.push(vscode.commands.registerCommand("deskPals.ticket", () => ticketMe(desktop)));
 	studySetup(context, desktop);
+	mischiefSetup(context, desktop);
+}
+
+// ---------------- 搗蛋（桌面版的四個惡作劇：搶游標、下班清場、購物警察、打字太兇）----------------
+// 你在 VS Code 設過的（使用者／工作區設定有值）才推給桌面版，推了就以 VS Code 為準；沒設過的用桌面版公仔小屋「搗蛋」裡的開關。
+const MISCHIEF_KEYS = [["mischief.grabCursor", "grab"], ["mischief.clearAtOffWork", "clear"], ["mischief.shoppingPolice", "shop"], ["mischief.typingTooHard", "typing"]];
+function mischiefSetLines(get, isSet) {
+	const lines = [];
+	for (const [k, key] of MISCHIEF_KEYS) if (isSet(k)) lines.push(`mischief-set ${key} ${get(k, key !== "grab") ? 1 : 0}`);
+	if (isSet("mischief.grabMinutes")) lines.push(`mischief-set grabmin ${Math.max(1, Math.min(60, Math.round(Number(get("mischief.grabMinutes", 3))) || 3))}`);
+	return lines;
+}
+
+function mischiefSetup(context, desktop) {
+	const sync = () => {
+		const c = cfg();
+		const isSet = (k) => { const i = c.inspect(k); return !!i && (i.globalValue !== undefined || i.workspaceValue !== undefined || i.workspaceFolderValue !== undefined); };
+		for (const line of mischiefSetLines((k, d) => c.get(k, d), isSet)) desktop.send(line);
+	};
+	const prevCfg = desktop.onConfig;
+	desktop.onConfig = () => { if (prevCfg) prevCfg(); sync(); };   // 每次連上桌面版都推一次
+	context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => { if (e.affectsConfiguration("deskPals.mischief")) sync(); }));
+	context.subscriptions.push(vscode.commands.registerCommand("deskPals.mischiefRestore", () => desktop.send("act mischief restore")));
 }
 
 // ---------------- 終端機：長指令跑完、推 tag 盯 CI ----------------
@@ -790,4 +813,4 @@ async function schoolSetupCmd() {
 	vscode.window.showInformationMessage(`🎒 加好了（共 ${now.length} 個學校行事曆）。上課前會提醒你，作業截止前 3 天、1 天、3 小時、1 小時也會叫你。`);
 }
 
-module.exports = { setup, parseIcs, occurrences, parseWhen, parseTicketTime, rainText, rainFromWttr, rainFromMetno, schoolUrls, hhmmOk, studySetLines };
+module.exports = { setup, parseIcs, occurrences, parseWhen, parseTicketTime, rainText, rainFromWttr, rainFromMetno, schoolUrls, hhmmOk, studySetLines, mischiefSetLines };

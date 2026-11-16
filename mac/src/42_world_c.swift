@@ -174,6 +174,7 @@ extension World {
         if n.NextRound { StartFocus(focusMin); return true }
         if ReminderClicked(p, n) { return true }
         if StudyClicked(p, n) { return true }   // 作業：打開／交了
+        if MisClicked(p, n) { return true }     // 下班清場：把視窗叫回來
         if n.Url != nil {
             if World.OpenUrl(n.Url) { p.Say("好～幫你打開了 👍", 1.4) }
             else { App.Log("open url: failed " + n.Url); p.Say("打不開耶…", 1.4) }

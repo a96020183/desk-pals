@@ -583,6 +583,7 @@ extension Pet
         }
 
         DrawTicketBadge(g, ox, oy)
+        MisDraw(g, ox, oy)   // 搗蛋的道具、眼淚（59_mischief.swift）
         let fps = Math.Max(1, S / 3)
         for fl in flakes { DrawPix(g, Pet.FLAKE, CInt(fl[0]) - ox - fps, CInt(fl[1]) - oy - fps, fps, false, false, false) }
 

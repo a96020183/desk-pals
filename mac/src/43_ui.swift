@@ -23,7 +23,7 @@ extension World {
         ["season", "節日造型"],
         ["fireworks", "煙火"],
         ["chatter", "閒聊泡泡（自己閒晃時講話）"]]
-    func Feat(_ key: String) -> Bool { var on = false; return !feats.TryGetValue(key, &on) || on }
+    func Feat(_ key: String) -> Bool { var on = false; return feats.TryGetValue(key, &on) ? on : !World.MisDefaultOff(key) }   // 搶游標預設關（59_mischief.swift）
 
     func LoadFeatures() {
         feats.Clear()
@@ -36,6 +36,7 @@ extension World {
     func SaveFeatures() {
         let sb = StringBuilder()
         for f in World.FeatureList { sb.Append(f[0] + "=" + (Feat(f[0]) ? "1" : "0") + "\n") }
+        for f in World.MisFeatureList { sb.Append(f[0] + "=" + (Feat(f[0]) ? "1" : "0") + "\n") }   // 搗蛋的開關
         World.WriteText("features.txt", sb.ToString())
     }
 
@@ -46,8 +47,10 @@ extension World {
         if key == "night" || key == "season" { nightChecked = -1; CheckNight() }   // 馬上換樣子（黑化、節日帽子）
         if key == "lunch" { LunchTick(true) }
         if key == "scenes" && !on { AbortScene() }
+        MisFeatChanged(key, on, true)
         var name = key
         for f in World.FeatureList { if f[0] == key { name = f[1] } }
+        for f in World.MisFeatureList { if f[0] == key { name = f[1] } }
         let cut = name.IndexOf("（")
         if cut > 0 { name = name.Substring(0, cut) }
         Lead().Say(on ? "好～「" + name + "」打開囉" : "好～「" + name + "」先關掉", 1.8)
@@ -84,6 +87,7 @@ extension World {
             mi.Click = { [unowned mi] in self.SetFeat(key, !self.Feat(key)); mi.Checked = self.Feat(key) }
             m.Items.Add(mi)
         }
+        MisHouseMenu(m)  // 搗蛋的開關、把推走的視窗叫回來（59_mischief.swift）
         m.Items.Add(ToolStripSeparator())
         let help = ToolStripMenuItem("小幫手（專注、安靜、提醒）")
         AddHelpers(help.DropDownItems)

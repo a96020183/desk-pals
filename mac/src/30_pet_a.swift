@@ -99,7 +99,7 @@ extension Pet {
             return false
         }
     }
-    func Free() -> Bool { return Out && !InScene && !dragging && Grounded() && state != "sleep" && state != "hug" && !(Bt > 0 && bubblePri > 0) }
+    func Free() -> Bool { return Out && !InScene && !dragging && Grounded() && state != "sleep" && state != "hug" && !(Bt > 0 && bubblePri > 0) && !MisBusy }
     func SetState(_ s: String, _ dur: Double) { state = s; t = dur }
     func Say(_ s: String?, _ sec: Double) { Say(s, sec, false) }
     func Say(_ s: String?, _ sec: Double, _ alert: Bool) { if string.IsNullOrEmpty(s) || muteChat { return }; bubble = s!; Bt = sec; bubbleAlert = alert; bubbleHint = nil; bubblePri = 0 }
@@ -281,7 +281,7 @@ extension Pet {
     func Watch(_ dt: Double) {
         if stuckLine != nil { stuckRepeat -= dt; if stuckRepeat <= 0 { Say(stuckLine, 6, true); stuckLine = nil } }
         seekCd -= dt; hoverCd -= dt; lateCd -= dt; saveXpCd -= dt
-        if !Grounded() || state == "hug" || sleepMode || state == "sleep" || InScene || Quiet { return }
+        if !Grounded() || state == "hug" || sleepMode || state == "sleep" || InScene || Quiet || MisBusy { return }   // MisBusy：搗蛋中（59_mischief.swift）
         let c = Cursor.Position
         let cx = Cx, still = w.CursorStill
         let cX = Double(c.X), cY = Double(c.Y)
@@ -335,6 +335,7 @@ extension Pet {
             if f[3] > 2.2 { flakes.RemoveAt(i) }
             i -= 1
         }
+        if MisStep(dt) { return }   // 搗蛋中（59_mischief.swift）
         FollowFast()
         let wa = w.WA(Cx, y + Double(SH) / 2.0)
         if StepSpecial(dt, wa) { return }   // 角色專屬狀態

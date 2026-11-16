@@ -99,6 +99,27 @@
 
 私密網址等於帳號密碼，不要貼給別人；公仔櫃只用它讀你的行事曆。
 
+## 搗蛋 😈
+
+四個惡作劇，會讓你想錄螢幕分享的那種。開關在桌面公仔小屋（右鍵蛋或櫃子）→「搗蛋（惡作劇開關）」，或 VS Code 設定 `deskPals.mischief.*`（設了就以 VS Code 為準）。
+
+| 玩法 | 什麼時候 | 會怎樣 | 預設 |
+|---|---|---|---|
+| 搶游標 | 滑鼠鍵盤都沒動 3 分鐘（可以改 1／3／5／10 分） | 公仔撲過來把游標叼走、拖著跑一小段放下：「你的游標我先保管」 | **關**（要玩自己開） |
+| 下班清場 | 平日 18:00 後（跟「下班時間」同一套），你在電腦前，一天一次 | 公仔把前面幾個視窗推出螢幕：「下班了，視窗都回家了」，點公仔全部叫回來 | 開 |
+| 購物警察 | 前景是購物網站（蝦皮、momo、PChome、露天、淘寶、Amazon、樂天、博客來、Yahoo 購物中心…） | 抱著錢包大哭：「這個月已經買第三次了欸」，20 分鐘內不再哭 | 開 |
+| 打字太兇 | 連續 4 秒、平均每秒按 9 下以上 | 被震飛出去、暈一下、再爬回來 | 開 |
+
+**隱私與安全**
+
+- **打字太兇只數「每秒按了幾下」**：Windows 只把「放開按鍵」的次數加一，Mac 讀系統的按鍵計數器；不看按了哪個鍵、不記錄、不存任何內容，也不送到任何地方。關掉開關就不再數；全螢幕（遊戲）時也不數。
+- **不會關閉任何東西**：下班清場只是把視窗縮小（Mac：隱藏那個 App），點公仔、點泡泡、小屋選單「把推走的視窗叫回來」或 VS Code 指令「公仔櫃：把下班清場推走的視窗叫回來」一鍵全部回來；收工（關掉 Desk Pals）前也會先全部叫回來。推走時看到的假視窗是那一刻的樣子，只放在記憶體裡、演完就丟（Mac 不擷取畫面，畫成卡通視窗）。
+- **搶游標你一動就放手**：滑鼠一動、按任何鍵都算，公仔做「被抓到了」的反應；全螢幕程式、簡報、遊戲、分享螢幕、按著滑鼠鍵、躲起來（Ctrl+Alt+S）、安靜／專注時都不會開始，整段最多 6 秒多。
+- 購物警察只看前景視窗的標題，不記錄你逛了什麼（只記這個月哭了幾次）。
+- Mac：購物警察要「螢幕錄影」權限才看得到視窗標題（沒有就不會哭）；打字太兇可能要「輸入監控」權限，只在你自己從小屋打開開關時問一次，沒給就安靜地不觸發。
+
+錄宣傳片、測試：pipe 送 `act mischief cursor|clear|shop|typing` 可以直接演一次（`act mischief restore` 叫回視窗）。
+
 ## 安裝
 
 三種裝法，挑一種就好（同一台電腦兩種都裝也沒關係，見最下面）。三種都是同一個桌面公仔櫃；第一次打開會跳出設定視窗：做一隻自己的公仔，或選一櫃現成的；預設是「只要一隻」（他住在右下角的蛋裡），想要整個公仔櫃也可以選「整櫃」。
@@ -159,7 +180,8 @@
 | `extension/desktop/DeskPals.Fan.cs` | 經典一櫃、天線寶寶一櫃（粉絲作品，只在個人版） |
 | `extension/desktop/DeskPals.Pikmin.cs` | 皮克敏一櫃（休息花；粉絲作品，只在個人版） |
 | `extension/desktop/DeskPals.Study.cs` | Windows 桌面版的讀書小幫手：抓學校行事曆（ICS）、分類上課／作業、搶課、考試倒數、熬夜提醒、讀書小幫手設定視窗 |
-| `test/` | `node --test test/study.test.js`（VS Code 這邊）；`test/desktop-study.js`（桌面版離屏測試，範例 ICS 在 `test/fixtures`） |
+| `extension/desktop/DeskPals.Mischief.cs` | 搗蛋：搶游標、下班清場、購物警察、打字太兇（會動到真實電腦的事都在 `MisSys`，離屏測試換成假的 `MisFake`） |
+| `test/` | `node --test test/study.test.js test/mischief.test.js`（VS Code 這邊）；`test/desktop-study.js`、`test/desktop-mischief.js`（桌面版離屏測試，範例 ICS 在 `test/fixtures`） |
 | `extension/desktop/DeskPals.Custom*.cs` | 自己做的公仔：去背與像素化（`CustomImage`）、做公仔視窗（`CustomMake`）、六種個性的台詞（`CustomLines`）、畫法與動作、我的櫃（`Custom`） |
 | `extension/desktop/DeskPals.Share.cs` | 分享短片（自己寫的 GIF 編碼器）、`.deskpal` 匯出／匯入 |
 | `extension/desktop/DeskPals.swift` | Mac 桌面版（DeskPals.cs 的 Swift 移植，由 `desk-pals.sh` 編譯執行；由 `mac/src/*.swift` 經 `python3 mac/assemble.py` 產生，別直接改） |
