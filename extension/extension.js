@@ -1,5 +1,5 @@
 // 公仔櫃 Desk Pals：右下角一個公仔櫃，選一隻出來在整個螢幕陪你
-// 幾櫃：續命小隊（原創：半糖／醒醒／糰糰／貼貼，新安裝的預設）、經典、天線寶寶、皮克敏
+// 幾櫃：續命小隊（原創：躲躲／沒電／刺刺，新安裝的預設）、經典、天線寶寶、皮克敏
 // Windows：多角色桌面版（DeskPals.cs）；macOS：同一套的 Swift 移植（DeskPals.swift）
 const vscode = require("vscode");
 const fs = require("fs");
@@ -22,13 +22,30 @@ const CHARS = {
 	pkyellow: { emoji: "⚡", name: "黃皮克敏", lineup: "pikmin" },
 	pkblue: { emoji: "💧", name: "藍皮克敏", lineup: "pikmin" },
 	// </fan>
-	boba: { emoji: "🥤", name: "半糖", lineup: "original" },
-	coffee: { emoji: "☕", name: "醒醒", lineup: "original" },
-	onigiri: { emoji: "🍙", name: "糰糰", lineup: "original" },
-	sticky: { emoji: "📝", name: "貼貼", lineup: "original" },
+	duoduo: { emoji: "📦", name: "躲躲", lineup: "original", squad: true },
+	meidian: { emoji: "🔋", name: "沒電", lineup: "original", squad: true },
+	cici: { emoji: "🌵", name: "刺刺", lineup: "original", squad: true },
+};
+// 舊的像素版續命小隊（半糖、醒醒、糰糰、貼貼）→ 新三隻（設定裡存的舊 id 照這個換；桌面版也同一套）
+const OLD_IDS = { boba: "duoduo", coffee: "meidian", onigiri: "cici", sticky: "duoduo" };
+const charSetting = (def) => { const v = vscode.workspace.getConfiguration("deskPals").get("character", def); return OLD_IDS[v] || v; };
+// 側邊欄畫續命小隊用的幾句台詞（桌面版的完整台詞在 DeskPals.Original.cs）
+const SQUAD_LINES = {
+	duoduo: { save: ["存好了…（小聲）", "存起來了，跟我躲在箱子裡一樣安全"], save_d: ["存了，晚安（關箱子）"], pats: ["！！（整個縮進去）", "……再一下", "被摸了…紙箱都暖起來了"], pats_d: ["摸完我就要關箱子了"],
+		tickle: ["嘻嘻嘻不要戳箱子", "（箱子在抖）"], hi: ["嗨…我是躲躲，平常住在箱子裡"], hi_d: ["嗨…天黑了，箱子要關了"], errors: ["有 {n} 個錯誤…我先躲一下"], errors_d: ["{n} 個錯誤…明天再說好不好"],
+		errors_ok: ["錯誤不見了！我也可以出來了"], errors_ok_d: ["修好了…可以下班了"], rest: ["{n} 分鐘了…起來走走？我幫你看著位子（躲好）"], rest_d: ["{n} 分鐘了…回家吧"],
+		wake: ["……（偷看）你回來了"], wake_d: ["……還沒下班嗎"], sleep: ["我先躲進去睡…"], night_on: ["天黑了…箱子要關門囉"], night_off: ["早…早安（打開箱子）☀"], x_sig: ["我不在我不在我不在"] },
+	meidian: { save: ["存好了…省了一點電", "存檔完成…可以待機了嗎"], save_d: ["存好了，關機吧"], pats: ["被摸了…充了 1%", "嗯…這個是無線充電嗎", "你也很累吧"], pats_d: ["摸完就關機喔"],
+		tickle: ["別戳！電會漏出來", "哈哈…這樣很耗電欸"], hi: ["嗨…我是沒電。很累，但還在"], hi_d: ["嗨…我快關機了"], errors: ["{n} 個錯誤…我電量掉了 {n}%（不是）"], errors_d: ["{n} 個錯誤…明天充飽電再修"],
+		errors_ok: ["錯誤清光了！…好，我可以待機了"], errors_ok_d: ["修好了…關機吧"], rest: ["{n} 分鐘了…我們都沒電了，起來動一動"], rest_d: ["{n} 分鐘…下班充電吧"],
+		wake: ["開機中……（轉圈圈）"], wake_d: ["……還要工作嗎"], sleep: ["待機中…"], night_on: ["下班時間…我要關機了"], night_off: ["早安…充電充到一半就被叫醒 ☀"], x_sig: ["插上了……嗯……這就是天堂"] },
+	cici: { save: ["存好了。不用謝", "存了啦，看什麼"], save_d: ["存好了，快回家"], pats: ["摸、摸什麼摸…（花苞抖）", "再一下下而已喔", "我沒有很開心，是花苞自己動的"], pats_d: ["摸完就回家"],
+		tickle: ["不准搔我癢！", "再戳我就炸毛了！"], hi: ["我是刺刺。不用跟我好（小聲：你好）"], hi_d: ["嗨…這麼晚了"], errors: ["{n} 個錯誤？…又不是我寫的"], errors_d: ["{n} 個錯誤…明天再修，回家"],
+		errors_ok: ["修好了。…還算可以啦"], errors_ok_d: ["修好了…快回家"], rest: ["{n} 分鐘了，起來動。不是我關心你，是椅子很累"], rest_d: ["{n} 分鐘了…回家。現在。"],
+		wake: ["我沒睡。只是閉目養神"], wake_d: ["…還不下班？"], sleep: ["我閉目養神一下"], night_on: ["下班了。…回家路上小心（小聲）"], night_off: ["早。…今天也要好好的 ☀"], x_sig: ["這、這是花粉過敏！"] },
 };
 const LINEUPS = {
-	original: { name: "續命小隊", desc: "半糖、醒醒、糰糰、貼貼（原創角色，大格是半糖）", ids: ["boba", "coffee", "onigiri", "sticky"] },
+	original: { name: "續命小隊", desc: "躲躲、沒電、刺刺（原創角色，大格是躲躲）", ids: ["duoduo", "meidian", "cici"] },
 	// <fan>
 	classic: { name: "經典一櫃", desc: "Spidey、小波、史迪仔、人魚漢頓", ids: ["spidey", "po", "stitch", "hangyodon"] },
 	teletubbies: { name: "天線寶寶一櫃", desc: "丁丁、迪西、拉拉、小波（大格是小波）", ids: ["tinky", "dipsy", "laalaa", "po"] },
@@ -49,24 +66,25 @@ const lineupSetting = () => { const v = vscode.workspace.getConfiguration("deskP
 // <public> const lineupSetting = () => { const v = vscode.workspace.getConfiguration("deskPals").get("lineup", "original"); return LINEUPS[v] ? v : "original"; };
 // 使用者真的設過「哪一櫃」嗎？沒設過＝讓桌面版自己決定（照它上次的；全新安裝才是續命小隊），舊使用者不會因為預設值改了被換櫃
 const lineupExplicit = () => { const i = vscode.workspace.getConfiguration("deskPals").inspect("lineup"); return !!i && (i.globalValue !== undefined || i.workspaceValue !== undefined || i.workspaceFolderValue !== undefined); };
-const lineupDefaultPet = (lu) => (lu === "mine" && LINEUPS.mine ? LINEUPS.mine.ids[0] : lu === "teletubbies" ? "po" : (lu === "pikmin" ? "pkred" : (lu === "original" ? "boba" : "spidey")));   //@fan
-// <public> const lineupDefaultPet = (lu) => (lu === "mine" && LINEUPS.mine ? LINEUPS.mine.ids[0] : "boba");
+const lineupDefaultPet = (lu) => (lu === "mine" && LINEUPS.mine ? LINEUPS.mine.ids[0] : lu === "teletubbies" ? "po" : (lu === "pikmin" ? "pkred" : (lu === "original" ? "duoduo" : "spidey")));   //@fan
+// <public> const lineupDefaultPet = (lu) => (lu === "mine" && LINEUPS.mine ? LINEUPS.mine.ids[0] : "duoduo");
 const inLineup = (id, lu) => !!CHARS[id] && (CHARS[id].lineup === "both" || CHARS[id].lineup === lu);
 let current = "spidey";   //@fan
-// <public> let current = "boba";
+// <public> let current = "duoduo";
 let flowerPct = null;   // 皮克敏一櫃：休息花（0 開好開滿 → 100 枯了）
 const flowerMark = () => (flowerPct === null || !CHARS[current] || CHARS[current].lineup !== "pikmin" ? "" : (flowerPct >= 100 ? "🥀" : (flowerPct >= 60 ? "🌼" : "🌸")));   //@fan
 // <public> const flowerMark = () => "";
 const E = () => (CHARS[current] || CHARS.spidey).emoji;   //@fan
-// <public> const E = () => (CHARS[current] || CHARS.boba).emoji;
+// <public> const E = () => (CHARS[current] || CHARS.duoduo).emoji;
 const N = () => (CHARS[current] || CHARS.spidey).name;   //@fan
-// <public> const N = () => (CHARS[current] || CHARS.boba).name;
+// <public> const N = () => (CHARS[current] || CHARS.duoduo).name;
 
 function activate(context) {
 	const savedPals = context.globalState.get("customPals");
 	if (savedPals) applyCustomPals(savedPals.pals, savedPals.mine);
-	current = context.globalState.get("activeChar") || vscode.workspace.getConfiguration("deskPals").get("character", "spidey");   //@fan
-	// <public> current = context.globalState.get("activeChar") || vscode.workspace.getConfiguration("deskPals").get("character", "boba");
+	current = context.globalState.get("activeChar") || charSetting("spidey");   //@fan
+	// <public> current = context.globalState.get("activeChar") || charSetting("duoduo");
+	if (OLD_IDS[current]) current = OLD_IDS[current];   // 舊的像素版續命小隊
 	// ---- 狀態列上一直都在的小蜘蛛 ----
 	const bar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 1000);
 	bar.command = "deskPals.show";
@@ -583,8 +601,8 @@ class Desktop {
 			if (sa) {
 				// 獨立版：直接叫它（Mac 用 open，讓它以自己的 App 身分跑，權限不算在 VS Code 頭上）
 				const lu = lineupSetting();
-				const pet = vscode.workspace.getConfiguration("deskPals").get("character", "spidey");   //@fan
-				// <public> const pet = vscode.workspace.getConfiguration("deskPals").get("character", "boba");
+				const pet = charSetting("spidey");   //@fan
+				// <public> const pet = charSetting("duoduo");
 				const pp = inLineup(pet, lu) && /^\w+$/.test(pet) ? pet : lineupDefaultPet(lu);
 				p = this.win
 					? cp.spawn(sa.exe, ["--pipe", this.name, "--pet", pp].concat(lineupExplicit() ? ["--lineup", lu] : []), { detached: true, stdio: "ignore", windowsHide: true })
@@ -592,15 +610,15 @@ class Desktop {
 			} else if (process.platform === "win32") {
 				// detached 的 powershell 沒有主控台會直接結束；改由短命的 powershell 用 Start-Process 叫一支獨立的起來
 				const lu = lineupSetting();
-				const pet = vscode.workspace.getConfiguration("deskPals").get("character", "spidey");   //@fan
-				// <public> const pet = vscode.workspace.getConfiguration("deskPals").get("character", "boba");
+				const pet = charSetting("spidey");   //@fan
+				// <public> const pet = charSetting("duoduo");
 				const args = `-NoProfile -WindowStyle Hidden -File "${path.join(this.home, this.ps1)}" -PipeName ${this.name} -Pet ${inLineup(pet, lu) && /^\w+$/.test(pet) ? pet : lineupDefaultPet(lu)}${lineupExplicit() ? " -Lineup " + lu : ""}`;
 				p = cp.spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList $env:DESKPALS_ARGS"],
 					{ stdio: "ignore", windowsHide: true, env: Object.assign({}, process.env, { DESKPALS_ARGS: args }) });
 			} else {
 				const lu = lineupSetting();
-				const pet = vscode.workspace.getConfiguration("deskPals").get("character", "spidey");   //@fan
-				// <public> const pet = vscode.workspace.getConfiguration("deskPals").get("character", "boba");
+				const pet = charSetting("spidey");   //@fan
+				// <public> const pet = charSetting("duoduo");
 				p = cp.spawn("/bin/bash", [path.join(this.home, this.sh), this.name, inLineup(pet, lu) ? pet : lineupDefaultPet(lu), lineupExplicit() ? lu : ""], { detached: true, stdio: "ignore" });
 			}
 			p.on("error", () => {});
@@ -624,6 +642,7 @@ class PetView {
 	post(msg) {
 		if (!this.view) return;
 		if (msg.type === "character" && CHARS[msg.id] && CHARS[msg.id].custom) this.view.webview.postMessage(customMsg(msg.id));
+		if (msg.type === "character" && CHARS[msg.id] && CHARS[msg.id].squad) this.view.webview.postMessage(squadMsg(this.context, msg.id));
 		this.view.webview.postMessage(msg);
 	}
 	resolveWebviewView(view) {
@@ -652,6 +671,14 @@ function customMsg(id) {
 	} catch (e) {}
 	const restMin = Math.max(1, vscode.workspace.getConfiguration("deskPals").get("restMinutes", 50));
 	return { type: "custom", id, name: c.name, img, lines: c.lines || {}, restMin };
+}
+
+// 側邊欄畫續命小隊：桌面版同一套圖（desktop/pals/squad/<id>/icon.png）轉成 data URL＋幾句台詞
+function squadMsg(context, id) {
+	let img = "";
+	try { img = "data:image/png;base64," + fs.readFileSync(path.join(context.extensionPath, "desktop", "pals", "squad", id, "icon.png")).toString("base64"); } catch (e) {}
+	const restMin = Math.max(1, vscode.workspace.getConfiguration("deskPals").get("restMinutes", 50));
+	return { type: "custom", id, name: CHARS[id].name, img, lines: SQUAD_LINES[id] || {}, restMin };
 }
 
 function deactivate() {}

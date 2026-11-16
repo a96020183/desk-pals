@@ -120,6 +120,12 @@ using System.Reflection;
         "/r:System.Windows.Forms.dll", "/r:System.Drawing.dll", "/r:System.Web.Extensions.dll",
         (Join-Path $Build "DeskPals.all.cs"), (Join-Path $PSScriptRoot "DeskPals.Main.cs"), (Join-Path $Build "AssemblyInfo.g.cs")
     )
+    # 續命小隊的圖（pals\squad\…）放進 exe 的資源（名字＝pals/squad/<id>/<1x|2x>/<動作>.png）：exe、安裝程式、MSIX 都不用另外帶檔案
+    $pals = Join-Path $desk "pals"
+    foreach ($f in (Get-ChildItem -Path $pals -Recurse -File | Where-Object { $_.Extension -eq ".png" -or $_.Name -eq "squad.txt" })) {
+        $rel = "pals/" + $f.FullName.Substring($pals.Length + 1).Replace("\", "/")
+        $cscArgs += "/resource:$($f.FullName),$rel"
+    }
     & $csc @cscArgs
     if ($LASTEXITCODE -ne 0) { throw "csc failed" }
     Guard @($Exe, (Join-Path $Build "DeskPals.all.cs"))

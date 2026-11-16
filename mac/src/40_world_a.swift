@@ -86,6 +86,7 @@ final class World: Form {
 
     init(_ pipeName: String, _ pet: String, _ lineupArg: String) {
         self.pipeName = pipeName
+        World.OrigMigrate()   // 舊的像素續命小隊的資料轉給新三隻（只做一次，51_original.swift）
         // 哪一櫃：有傳就用（並記住），沒傳（開機捷徑）就照上次的
         lineup = Pal.NormLineup(lineupArg.isEmpty ? World.StartLineup() : lineupArg)   // 全新安裝：續命小隊（51_original.swift）
         if !lineupArg.isEmpty { World.WriteText("lineup.txt", lineup) }
@@ -105,7 +106,7 @@ final class World: Form {
         pipeName = ""; self.S = S; k = Double(S) / 3.0
         super.init()
         lineup = Pal.NormLineup(lineupId); defaultPet = "po"   //@fan
-        // <public> lineup = Pal.NormLineup(lineupId); defaultPet = "boba"
+        // <public> lineup = Pal.NormLineup(lineupId); defaultPet = "duoduo"
         var seed = 1
         for p in Pal.Lineup(lineup) { Pets.Add(Pet(self, p, S, seed)); seed += 1 }
     }
@@ -114,7 +115,7 @@ final class World: Form {
         pipeName = ""; self.S = S; k = Double(S) / 3.0
         super.init()
         defaultPet = "spidey"   //@fan
-        // <public> defaultPet = "boba"
+        // <public> defaultPet = "duoduo"
         var seed = 1
         for p in Pal.Lineup(Pal.Fallback) { Pets.Add(Pet(self, p, S, seed)); seed += 1 }
     }
@@ -130,8 +131,8 @@ extension World {
     func DefaultPetFor(_ pet: String) -> String {
         for id in Pal.LineupIds(lineup) { if id == pet { return pet } }
         if lineup == Pal.Mine { let mi = Pal.MineIds(); if mi.count > 0 { return mi[0] } }
-        return lineup == Pal.Teletubbies ? "po" : (lineup == Pal.Pikmin ? "pkred" : (lineup == Pal.Original ? "boba" : "spidey"))   //@fan
-        // <public> return "boba"
+        return lineup == Pal.Teletubbies ? "po" : (lineup == Pal.Pikmin ? "pkred" : (lineup == Pal.Original ? "duoduo" : "spidey"))   //@fan
+        // <public> return "duoduo"
     }
 
     // 每一櫃各自記：誰在外面、最近一隻、最愛（經典一櫃沿用原本的檔名）
@@ -1363,7 +1364,7 @@ extension World {
                 }
             }
         case "quit": QuitAll()
-        default: if !MisMsg(c, p, line) { StudyMsg(c, p, line) }   // mischief-…（59_mischief.swift）；course／exam／study-…（52_study.swift）
+        default: if !MisMsg(c, p, line) && !OrigMsg(c, p, line) { StudyMsg(c, p, line) }   // mischief-…（59_mischief.swift）；course／exam／study-…（52_study.swift）
         }
     }
 

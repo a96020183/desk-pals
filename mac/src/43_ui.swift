@@ -22,7 +22,8 @@ extension World {
         ["windows", "跟著視窗跑／跳上視窗"],
         ["season", "節日造型"],
         ["fireworks", "煙火"],
-        ["chatter", "閒聊泡泡（自己閒晃時講話）"]]
+        ["chatter", "閒聊泡泡（自己閒晃時講話）"],
+        ["bat_link", "沒電的電量跟工作時間連動"]]
     func Feat(_ key: String) -> Bool { var on = false; return feats.TryGetValue(key, &on) ? on : !World.MisDefaultOff(key) }   // 搶游標預設關（59_mischief.swift）
 
     func LoadFeatures() {
@@ -183,7 +184,10 @@ extension World {
 extension Pet {
     // 設定視窗用：站好的樣子畫成一張小圖（預覽用的 World 才叫這個）
     func IconPic() -> Bitmap {
-        let pad = 3 * S, top = P.TopRows * S
+        var pad = 3 * S
+        let top = P.TopRows * S
+        let extra = P.Spr != nil ? Math.Max(0, CInt(Math.Ceiling(P.Spr.Wc * Double(S))) - SW) : 0   // 圖片公仔比 12 格寬
+        pad += extra / 2
         let b = Bitmap(SW + 2 * pad, SH + top + 2 * pad, PixelFormat.Format32bppArgb)
         do {
             let g = Graphics.FromImage(b)

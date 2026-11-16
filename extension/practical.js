@@ -39,9 +39,14 @@ function setup(context, desktop) {
 const MISCHIEF_KEYS = [["mischief.grabCursor", "grab"], ["mischief.clearAtOffWork", "clear"], ["mischief.shoppingPolice", "shop"], ["mischief.typingTooHard", "typing"]];
 function mischiefSetLines(get, isSet) {
 	const lines = [];
-	for (const [k, key] of MISCHIEF_KEYS) if (isSet(k)) lines.push(`mischief-set ${key} ${get(k, key !== "grab") ? 1 : 0}`);
+	for (const [k, key] of MISCHIEF_KEYS) if (isSet(k)) lines.push(`mischief-set ${key} ${get(k, key !== "grab" && key !== "typing") ? 1 : 0}`);   // 搶游標、打字太兇預設關
 	if (isSet("mischief.grabMinutes")) lines.push(`mischief-set grabmin ${Math.max(1, Math.min(60, Math.round(Number(get("mischief.grabMinutes", 3))) || 3))}`);
 	return lines;
+}
+
+// 續命小隊「沒電」的電量連動（桌面版小屋的開關 bat_link）：VS Code 設過的才推
+function batterySetLines(get, isSet) {
+	return isSet("battery.link") ? [`battery-link ${get("battery.link", true) ? 1 : 0}`] : [];
 }
 
 function mischiefSetup(context, desktop) {
@@ -49,10 +54,11 @@ function mischiefSetup(context, desktop) {
 		const c = cfg();
 		const isSet = (k) => { const i = c.inspect(k); return !!i && (i.globalValue !== undefined || i.workspaceValue !== undefined || i.workspaceFolderValue !== undefined); };
 		for (const line of mischiefSetLines((k, d) => c.get(k, d), isSet)) desktop.send(line);
+		for (const line of batterySetLines((k, d) => c.get(k, d), isSet)) desktop.send(line);
 	};
 	const prevCfg = desktop.onConfig;
 	desktop.onConfig = () => { if (prevCfg) prevCfg(); sync(); };   // 每次連上桌面版都推一次
-	context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => { if (e.affectsConfiguration("deskPals.mischief")) sync(); }));
+	context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => { if (e.affectsConfiguration("deskPals.mischief") || e.affectsConfiguration("deskPals.battery")) sync(); }));
 	context.subscriptions.push(vscode.commands.registerCommand("deskPals.mischiefRestore", () => desktop.send("act mischief restore")));
 }
 
@@ -813,4 +819,4 @@ async function schoolSetupCmd() {
 	vscode.window.showInformationMessage(`🎒 加好了（共 ${now.length} 個學校行事曆）。上課前會提醒你，作業截止前 3 天、1 天、3 小時、1 小時也會叫你。`);
 }
 
-module.exports = { setup, parseIcs, occurrences, parseWhen, parseTicketTime, rainText, rainFromWttr, rainFromMetno, schoolUrls, hhmmOk, studySetLines, mischiefSetLines };
+module.exports = { setup, parseIcs, occurrences, parseWhen, parseTicketTime, rainText, rainFromWttr, rainFromMetno, schoolUrls, hhmmOk, studySetLines, mischiefSetLines, batterySetLines };

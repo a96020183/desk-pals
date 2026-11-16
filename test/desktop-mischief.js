@@ -4,7 +4,7 @@
 // 用法：先用離屏模式啟動桌面版（pipe 名稱自訂；建議 DESKPALS_ISOLATED=1），再
 //   node test/desktop-mischief.js <pipe> [截圖資料夾] [desk-pals.log 的路徑]
 //   Mac：<pipe> 換成 unix socket 的路徑（桌面版的 argv[1]）。給了 log 路徑就順便檢查「收工前會把視窗叫回來」。
-//   最後會送 quit（桌面版會收工）。MIS_PET＝要放出來的公仔（預設 boba）。
+//   最後會送 quit（桌面版會收工）。MIS_PET＝要放出來的公仔（預設 duoduo，續命小隊的躲躲）。
 const net = require("net");
 const fs = require("fs");
 const path = require("path");
@@ -13,7 +13,7 @@ const assert = require("node:assert/strict");
 const pipe = process.argv[2] || "desk-pals-mistest";
 const shots = (process.argv[3] || path.join(__dirname, "..", "shots-mischief")).replace(/\\/g, "/");
 const logFile = process.argv[4] || "";
-const PET = process.env.MIS_PET || "boba";
+const PET = process.env.MIS_PET || "duoduo";
 
 const s = net.connect(pipe.includes("/") ? pipe : "\\\\.\\pipe\\" + pipe);
 s.setEncoding("utf8");
@@ -75,9 +75,9 @@ s.on("connect", async () => {
 	// 游標放在公仔上方（不管螢幕多大都在畫面裡）
 	const cx = pos.x > 420 ? pos.x - 300 : pos.x + 300, cy = Math.max(80, pos.y - 260);
 
-	await check("離屏測試一定用假的副作用（不碰真的游標、視窗、鍵盤）；預設：搶游標關、其他開", () => {
+	await check("離屏測試一定用假的副作用（不碰真的游標、視窗、鍵盤）；預設：搶游標、打字太兇關，其他開", () => {
 		assert.equal(field(d, "backend"), "fake");
-		assert.deepEqual(["grab", "clear", "shop", "typing", "grabmin"].map((k) => field(d, k)), ["0", "1", "1", "1", "3"]);
+		assert.deepEqual(["grab", "clear", "shop", "typing", "grabmin"].map((k) => field(d, k)), ["0", "1", "1", "0", "3"]);
 	});
 
 	// ---------- 搶游標 ----------
@@ -183,9 +183,17 @@ s.on("connect", async () => {
 	d = await until(kindIs("-"), 20000);
 	send("mischief-fake fg ");
 
-	// ---------- 打字太兇 ----------
+	// ---------- 打字太兇（預設關）----------
 	d = await dump();
-	await check("打字太兇：開著就數按鍵次數（Windows 低階掛鉤／Mac 計數器）", () => { assert.equal(fake(d, "watching"), "1"); });
+	await check("打字太兇：預設關著，不數按鍵（掛鉤沒裝）", () => { assert.equal(field(d, "typing"), "0"); assert.equal(fake(d, "watching"), "0"); });
+	send("mischief-fake typing 12 6");
+	await sleep(7000);
+	d = await dump();
+	await check("打字太兇：關著時打很快也不會被震飛", () => assert.equal(field(d, "kind"), "-"));
+	send("mischief-set typing 1");   // VS Code 設定推過來
+	await sleep(1000);
+	d = await dump();
+	await check("打字太兇：打開就數按鍵次數（Windows 低階掛鉤／Mac 計數器）", () => { assert.equal(field(d, "typing"), "1"); assert.equal(fake(d, "watching"), "1"); });
 	send("mischief-fake typing 4 5");
 	await sleep(6500);
 	d = await dump();

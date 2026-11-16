@@ -47,6 +47,7 @@ namespace DeskPals
         [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
         [DllImport("user32.dll")] static extern bool IsHungAppWindow(IntPtr h);
         [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref W.LASTINPUTINFO li);
+        [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vk);
         delegate IntPtr HookProc(int code, IntPtr wParam, IntPtr lParam);
         [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetWindowsHookEx(int id, HookProc fn, IntPtr mod, uint thread);
         [DllImport("user32.dll")] static extern bool UnhookWindowsHookEx(IntPtr h);
@@ -68,6 +69,14 @@ namespace DeskPals
             return GetLastInputInfo(ref li) ? li.dwTime : 0;
         }
         public virtual void Warp(int x, int y) { SetCursorPos(x, y); }
+        // 搶游標期間：你有沒有按鍵盤。不能用最後輸入時間（SetCursorPos 之後系統會非同步地更新它，會被誤當成你動了），
+        // 改成只在搶游標那幾秒掃一輪按鍵狀態（GetAsyncKeyState：只看有沒有按，不記是哪個鍵）；滑鼠鍵另外看、滑鼠移動看游標偏離
+        public virtual void KeyPrime() { for (int vk = 8; vk < 256; vk++) GetAsyncKeyState(vk); }   // 清掉「上次呼叫之後按過」的記號
+        public virtual bool KeyPressed()
+        {
+            for (int vk = 8; vk < 256; vk++) if ((GetAsyncKeyState(vk) & 0x8001) != 0) return true;   // 1～6 是滑鼠鍵，不在這裡看
+            return false;
+        }
 
         // 前景視窗的標題（購物警察用；自己的視窗不算）
         public virtual string FgTitle()
@@ -197,8 +206,13 @@ namespace DeskPals
         public override Point CursorPos() { return Cur; }
         public override bool Buttons() { return Btn; }
         public override bool Fullscreen() { return Fs; }
-        public override long InputStamp() { return Stamp; }
-        public override void Warp(int x, int y) { Cur = new Point(x, y); LastWarp = Cur; Warps++; }
+        // 跟真的系統一樣：移游標之後「最後輸入時間」會（晚一點、非同步地）被更新——第一次讀還是舊的，下一次就變新的
+        int warpPending;
+        public override long InputStamp() { if (warpPending == 1) warpPending = 2; else if (warpPending == 2) { Stamp += 50; warpPending = 0; } return Stamp; }
+        public override void Warp(int x, int y) { Cur = new Point(x, y); LastWarp = Cur; Warps++; warpPending = 1; }
+        public bool KeyDown;                                      // mischief-fake input：假裝你按了鍵盤
+        public override void KeyPrime() { KeyDown = false; }
+        public override bool KeyPressed() { return KeyDown; }
         public override string FgTitle() { return Fg; }
         public void AddWin(Rectangle r, string title)
         {
@@ -305,16 +319,12 @@ namespace DeskPals
         // 回傳 true＝這隻自己設好了狀態；false＝用通用演法
         bool MisCharPose(string what)
         {
-            if (P.Orig && (what == "cry" || what == "caught"))
-            {
-                state = "orig"; oAct = "pose";
-                oPose = what == "cry" && Is("boba") ? "worry" : "panic";   // 半糖皺眉、其他人舉手慌張
-                return true;
-            }
+            // 續命小隊（躲躲、沒電、刺刺）：狀態照通用的走（移動、物理不變），畫哪一張圖由 Pet.MisFrame 決定（DeskPals.Original.cs）：
+            // 躲躲抓到游標收進紙箱、拖著跑用「箱子長腳逃跑」；沒電搶到游標抱著當枕頭；刺刺抱錢包哭（圖上已經有錢包和眼淚）
             return false;
         }
         // 抱著的小道具（預設：錢包）；角色專屬的道具也從這裡換
-        string[] MisPropArt(string what) { return what == "cry" ? MIS_WALLET : null; }
+        string[] MisPropArt(string what) { return what == "cry" && !P.Orig ? MIS_WALLET : null; }   // 續命小隊的哭圖已經畫了錢包
 
         // 通用演法：只用現有的狀態，每個角色都畫得出來
         public void MisPose(string what)
@@ -440,6 +450,7 @@ namespace DeskPals
             MisPose("cry");
             Say(MisLine(n >= 2 ? "shop_n" : "shop").Replace("{n}", World.MisNum(n)).Replace("{site}", site), 4.5);
             Mark(4);
+            if (Is("meidian") && SqBattery.Link) SqBattery.Level = Math.Max(0, SqBattery.Level - 0.02);   // 錢包痛，電也痛
         }
         void MisCryStep(double dt)
         {
@@ -461,6 +472,7 @@ namespace DeskPals
             supH = IntPtr.Zero; sc = 1; dir = d; rolling = true;
             MisPose("fly"); Burst(10); Mark(1);
             Say(MisLine("typing"), 2.4);
+            if (Is("meidian") && SqBattery.Link) SqBattery.Level = Math.Max(0, SqBattery.Level - 0.03);   // 被震掉 3% 的電
         }
         void MisFlyStep(double dt)
         {
@@ -527,7 +539,7 @@ namespace DeskPals
         }
         void MisDraw(Graphics g, int ox, int oy)
         {
-            if (misAct != "cry") return;
+            if (misAct != "cry" || P.Orig) return;   // 續命小隊的哭圖已經有錢包和眼淚
             string[] art = MisPropArt("cry");
             if (art != null)
             {
@@ -556,7 +568,7 @@ namespace DeskPals
             new string[] { "mis_clear", "下班清場（把視窗推出螢幕）" },
             new string[] { "mis_shop", "購物警察（逛購物網站會哭）" },
             new string[] { "mis_typing", "打字太兇（會被震飛）" } };
-        static bool MisDefaultOff(string key) { return key == "mis_grab"; }
+        static bool MisDefaultOff(string key) { return key == "mis_grab" || key == "mis_typing"; }   // 搶游標、打字太兇預設關
 
         // 購物網站：{ 顯示的名字, 視窗標題裡會出現的字… }（不分大小寫、不看空白；要加網站就加一行）
         public static readonly string[][] MisShops = {
@@ -612,15 +624,29 @@ namespace DeskPals
             d["typing"] = new string[] { "哇啊啊！鍵盤地震！", "打太兇了啦～", "鍵盤要冒煙了！", "你是在跟鍵盤吵架嗎" };
             d["typing_back"] = new string[] { "呼…爬回來了", "我回來了…輕一點打好嗎", "飛好遠…先喘一下", "鍵盤颱風過了嗎…" };
             // 續命小隊
-            d["boba.shop_n"] = new string[] { "珍珠都嚇掉了…這個月第{n}次了欸", "這個月已經買第{n}次了欸" };
-            d["boba.typing"] = new string[] { "珍珠都被震出來了！", "哇啊啊！鍵盤地震！" };
-            d["coffee.typing"] = new string[] { "咖啡灑出來了！打慢一點～", "鍵盤要冒煙了！" };
-            d["coffee.grab_start"] = new string[] { "游標借我提神一下", "你的游標我先保管" };
-            d["onigiri.grab_start"] = new string[] { "游標我用海苔包起來帶走囉", "你的游標我先保管" };
-            d["onigiri.typing_back"] = new string[] { "滾…滾回來了", "呼…爬回來了" };
-            d["sticky.grab_start"] = new string[] { "游標黏走囉～", "你的游標我先保管" };
-            d["sticky.grab_drop"] = new string[] { "游標黏在這，自己撕下來～", "放這邊，自己來拿～" };
-            d["sticky.clear_done"] = new string[] { "下班了，視窗都回家了（便條：明天見）", "下班了，視窗都回家了" };
+            d["duoduo.grab_start"] = new string[] { "游標…我先收進箱子保管", "這個游標…可以住我的箱子嗎", "（箱子打開）游標，進來" };
+            d["duoduo.grab_carry"] = new string[] { "箱子長腳了！跑！", "（箱子咚咚咚跑走）", "不、不要追我！" };
+            d["duoduo.grab_drop"] = new string[] { "還、還你…放這裡了", "游標在箱子裡睡著了…還你", "（從箱子裡把游標推出來）" };
+            d["duoduo.grab_caught"] = new string[] { "被發現了！還你還你", "我、我只是幫你保管！" };
+            d["duoduo.clear_start"] = new string[] { "下班了…視窗們也該回箱子了", "（推推）視窗回家…" };
+            d["duoduo.shop"] = new string[] { "{site}的箱子…會送來跟我搶位子嗎", "又要買新的箱子嗎…（抱緊錢包）" };
+            d["duoduo.shop_n"] = new string[] { "這個月第{n}個包裹了…家裡箱子比我還多", "第{n}次了…我的箱子要被比下去了" };
+            d["duoduo.typing"] = new string[] { "鍵盤地震！我的箱子要塌了", "哇啊啊箱子飛起來了！" };
+            d["duoduo.typing_back"] = new string[] { "呼…箱子還在…我回來了", "（箱子長腳慢慢走回來）" };
+            d["meidian.grab_start"] = new string[] { "借你的游標當枕頭", "這游標看起來很好睡", "游標借我充電一下" };
+            d["meidian.grab_carry"] = new string[] { "嘿…咻…（好耗電）", "拖著游標好累…" };
+            d["meidian.grab_drop"] = new string[] { "（抱著游標睡著了）zZ", "游標當枕頭剛剛好…還你", "睡飽了…游標還你" };
+            d["meidian.clear_start"] = new string[] { "我快沒電了，視窗們也一起關機吧", "下班了…大家都去充電" };
+            d["meidian.shop_n"] = new string[] { "第{n}次了…我的電跟你的錢一起在掉", "這個月第{n}次…電量和存款都紅了" };
+            d["meidian.typing"] = new string[] { "震掉我 3% 了！", "哇啊！電要灑出來了！" };
+            d["meidian.typing_back"] = new string[] { "呼…電還在…爬回來了", "（慢慢走回來）剩一點電了" };
+            d["cici.grab_start"] = new string[] { "這游標我沒收了", "游標借我。不還", "哼，游標歸我" };
+            d["cici.grab_caught"] = new string[] { "哼，誰要你的游標", "拿去！才不稀罕" };
+            d["cici.grab_drop"] = new string[] { "放這裡了。不是故意的", "還你。…才沒有很好玩" };
+            d["cici.clear_done"] = new string[] { "下班。不是為了你，是視窗很吵", "清乾淨了。快回家" };
+            d["cici.shop"] = new string[] { "買那個幹嘛…（偷看）多少錢", "{site}？…錢包在哭，我才沒有" };
+            d["cici.typing"] = new string[] { "再打那麼大力我要炸毛了", "盆、盆要翻了！" };
+            d["cici.typing_back"] = new string[] { "哼，我自己走回來的", "土都灑出來了…" };
             return d;
         }
         public static string[] MisLinesFor(string id, string key)
@@ -643,7 +669,7 @@ namespace DeskPals
         string misShopSite = "";
         public string MisKind = "";          // 正在演哪一個：grab／clear／shop／typing（""＝沒有）
         Pet misPet;
-        long misStamp, misKeysLast = -1;
+        long misKeysLast = -1;
         readonly double[] misBuckets = new double[6];   // 最近幾秒，每秒放開幾個按鍵（只有次數）
         int misBucket;
         double misBucketT;
@@ -767,7 +793,7 @@ namespace DeskPals
             switch (p[1])
             {
                 case "cursor": if (p.Length >= 4 && int.TryParse(p[2], out a) && int.TryParse(p[3], out b)) f.Cur = new Point(a, b); break;
-                case "input": f.Stamp += 1000; f.IdleSec = 0; break;
+                case "input": f.Stamp += 1000; f.IdleSec = 0; f.KeyDown = true; break;
                 case "button": f.Btn = p.Length >= 3 && p[2] == "1"; break;
                 case "fs": f.Fs = p.Length >= 3 && p[2] == "1"; break;
                 case "idle": if (p.Length >= 3 && double.TryParse(p[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v)) f.IdleSec = v; break;
@@ -879,7 +905,7 @@ namespace DeskPals
             if (!Inside(c.X, c.Y)) return false;
             l.WakeIfSleep();
             MisKind = "grab"; misPet = l; misGrabCd = 15 * 60;
-            misStamp = mis.InputStamp();
+            mis.KeyPrime();
             l.MisGrab(c);
             App.Log("mischief grab" + (force ? " (asked)" : ""));
             return true;
@@ -893,16 +919,16 @@ namespace DeskPals
             x = Math.Max(wa.Left + 1, Math.Min(wa.Right - 2, x));
             y = Math.Max(wa.Top + 1, Math.Min(wa.Bottom - 2, y));
             mis.Warp(x, y);
-            misStamp = mis.InputStamp();
             return true;
         }
         public Point MisCursor() { return mis.CursorPos(); }
-        // 你動了嗎：按著滑鼠鍵、有任何輸入（最後輸入時間變了）、游標不在公仔放的地方
+        // 你動了嗎：按著滑鼠鍵、按了鍵盤、游標不在公仔放的地方（容忍 DPI 四捨五入 4 px）。
+        // 不看「最後輸入時間」：公仔自己移游標之後系統也會更新它（非同步），會被當成你動了，拖不到半秒就放手
         public bool MisUserMoved(Point expect)
         {
-            if (mis.Buttons() || Math.Abs(mis.InputStamp() - misStamp) > 40) return true;
+            if (mis.Buttons() || mis.KeyPressed()) return true;
             Point c = mis.CursorPos();
-            return Math.Abs(c.X - expect.X) > 3 || Math.Abs(c.Y - expect.Y) > 3;
+            return Math.Abs(c.X - expect.X) > 4 || Math.Abs(c.Y - expect.Y) > 4;
         }
 
         // ---------- 購物警察 ----------

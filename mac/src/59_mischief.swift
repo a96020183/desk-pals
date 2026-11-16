@@ -41,6 +41,15 @@ class MisSys {
         _ = CGWarpMouseCursorPosition(CGPoint(x: CGFloat(x), y: CGFloat(y)))
         _ = CGAssociateMouseAndMouseCursorPosition(1)
     }
+    // 搶游標期間：你有沒有按鍵盤。不看「最後輸入時間」（移游標之後可能被系統更新，會誤判成你動了）；
+    // 改成 keyDown 的計數器有沒有變（沒「輸入監控」權限時讀不到，再看一輪目前按著的鍵）；只看有沒有按，不記是哪個鍵
+    var keyDownBase = 0
+    func KeyPrime() { keyDownBase = Int(CGEventSource.counterForEventType(.combinedSessionState, eventType: .keyDown)) }
+    func KeyPressed() -> Bool {
+        if Int(CGEventSource.counterForEventType(.combinedSessionState, eventType: .keyDown)) != keyDownBase { return true }
+        for code in 0..<128 { if CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(code)) { return true } }
+        return false
+    }
 
     // 前景視窗的標題（購物警察用；自己的視窗不算）
     func FgTitle() -> String {
@@ -125,8 +134,13 @@ final class MisFake: MisSys {
     override func CursorPos() -> Point { return Cur }
     override func Buttons() -> Bool { return Btn }
     override func Fullscreen() -> Bool { return Fs }
-    override func InputStamp() -> Int { return Stamp }
-    override func Warp(_ x: Int, _ y: Int) { Cur = Point(x, y); LastWarp = Cur; Warps += 1 }
+    // 跟真的系統一樣：移游標之後「最後輸入時間」會（晚一點、非同步地）被更新——第一次讀還是舊的，下一次就變新的
+    var warpPending = 0
+    override func InputStamp() -> Int { if warpPending == 1 { warpPending = 2 } else if warpPending == 2 { Stamp += 50; warpPending = 0 }; return Stamp }
+    override func Warp(_ x: Int, _ y: Int) { Cur = Point(x, y); LastWarp = Cur; Warps += 1; warpPending = 1 }
+    var KeyDown = false                                   // mischief-fake input：假裝你按了鍵盤
+    override func KeyPrime() { KeyDown = false }
+    override func KeyPressed() -> Bool { return KeyDown }
     override func FgTitle() -> String { return Fg }
     func AddWin(_ r: Rectangle, _ title: String) {
         let m = MisWin()
@@ -237,15 +251,12 @@ extension Pet {
     //       cry 抱錢包哭／fly 被震飛／dizzy 暈／back 爬回來／idle
     // 回傳 true＝這隻自己設好了狀態；false＝用通用演法
     func MisCharPose(_ what: String) -> Bool {
-        if P.Orig && (what == "cry" || what == "caught") {
-            state = "orig"; oAct = "pose"
-            oPose = what == "cry" && Is("boba") ? "worry" : "panic"   // 半糖皺眉、其他人舉手慌張
-            return true
-        }
+        // 續命小隊（躲躲、沒電、刺刺）：狀態照通用的走（移動、物理不變），畫哪一張圖由 Pet.MisFrame 決定（51_original.swift）：
+        // 躲躲抓到游標收進紙箱、拖著跑用「箱子長腳逃跑」；沒電搶到游標抱著當枕頭；刺刺抱錢包哭（圖上已經有錢包和眼淚）
         return false
     }
     // 抱著的小道具（預設：錢包）；角色專屬的道具也從這裡換
-    func MisPropArt(_ what: String) -> [String]? { return what == "cry" ? Pet.MIS_WALLET : nil }
+    func MisPropArt(_ what: String) -> [String]? { return what == "cry" && !P.Orig ? Pet.MIS_WALLET : nil }   // 續命小隊的哭圖已經畫了錢包
 
     // 通用演法：只用現有的狀態，每個角色都畫得出來
     func MisPose(_ what: String) {
@@ -352,6 +363,7 @@ extension Pet {
         MisPose("cry")
         Say(MisLine(n >= 2 ? "shop_n" : "shop").Replace("{n}", World.MisNum(n)).Replace("{site}", site), 4.5)
         Mark(4)
+        if Is("meidian") && SqBattery.Link { SqBattery.Level = Math.Max(0.0, SqBattery.Level - 0.02) }   // 錢包痛，電也痛
     }
     func MisCryStep(_ dt: Double) {
         if rnd.NextDouble() < dt * 2.5 { Mark(4) }
@@ -371,6 +383,7 @@ extension Pet {
         supH = 0; sc = 1; dir = d; rolling = true
         MisPose("fly"); Burst(10); Mark(1)
         Say(MisLine("typing"), 2.4)
+        if Is("meidian") && SqBattery.Link { SqBattery.Level = Math.Max(0.0, SqBattery.Level - 0.03) }   // 被震掉 3% 的電
     }
     func MisFlyStep(_ dt: Double) {
         switch misPh {
@@ -424,7 +437,7 @@ extension Pet {
         }
     }
     func MisDraw(_ g: Graphics, _ ox: Int, _ oy: Int) {
-        if misAct != "cry" { return }
+        if misAct != "cry" || P.Orig { return }   // 續命小隊的哭圖已經有錢包和眼淚
         if let art = MisPropArt("cry") {
             let ps = Math.Max(1, S * 2 / 3), aw = art[0].Length * ps, ah = art.count * ps
             Pet.MisPix(g, art, CInt(Math.Round(Cx - Double(aw) / 2.0)) - ox, CInt(Math.Round(y + Double(SH) * 0.58 - Double(ah) / 2.0)) - oy, ps)
@@ -455,7 +468,7 @@ extension Pet {
     var misShopSite = ""
     var MisKind = ""                     // 正在演哪一個：grab／clear／shop／typing（""＝沒有）
     var misPet: Pet! = nil
-    var misStamp = 0, misKeysLast = -1
+    var misKeysLast = -1
     var misBuckets: [Double] = [0, 0, 0, 0, 0, 0]   // 最近幾秒，每秒放開幾個按鍵（只有次數）
     var misBucket = 0
     var misBucketT: Double = 0
@@ -477,7 +490,7 @@ extension World {
         ["mis_clear", "下班清場（把視窗推出螢幕）"],
         ["mis_shop", "購物警察（逛購物網站會哭）"],
         ["mis_typing", "打字太兇（會被震飛）"]]
-    static func MisDefaultOff(_ key: String) -> Bool { return key == "mis_grab" }
+    static func MisDefaultOff(_ key: String) -> Bool { return key == "mis_grab" || key == "mis_typing" }   // 搶游標、打字太兇預設關
 
     // 購物網站：[ 顯示的名字, 視窗標題裡會出現的字… ]（不分大小寫、不看空白；要加網站就加一行）
     static let MisShops: [[String]] = [
@@ -531,15 +544,29 @@ extension World {
         d["typing"] = ["哇啊啊！鍵盤地震！", "打太兇了啦～", "鍵盤要冒煙了！", "你是在跟鍵盤吵架嗎"]
         d["typing_back"] = ["呼…爬回來了", "我回來了…輕一點打好嗎", "飛好遠…先喘一下", "鍵盤颱風過了嗎…"]
         // 續命小隊
-        d["boba.shop_n"] = ["珍珠都嚇掉了…這個月第{n}次了欸", "這個月已經買第{n}次了欸"]
-        d["boba.typing"] = ["珍珠都被震出來了！", "哇啊啊！鍵盤地震！"]
-        d["coffee.typing"] = ["咖啡灑出來了！打慢一點～", "鍵盤要冒煙了！"]
-        d["coffee.grab_start"] = ["游標借我提神一下", "你的游標我先保管"]
-        d["onigiri.grab_start"] = ["游標我用海苔包起來帶走囉", "你的游標我先保管"]
-        d["onigiri.typing_back"] = ["滾…滾回來了", "呼…爬回來了"]
-        d["sticky.grab_start"] = ["游標黏走囉～", "你的游標我先保管"]
-        d["sticky.grab_drop"] = ["游標黏在這，自己撕下來～", "放這邊，自己來拿～"]
-        d["sticky.clear_done"] = ["下班了，視窗都回家了（便條：明天見）", "下班了，視窗都回家了"]
+        d["duoduo.grab_start"] = ["游標…我先收進箱子保管", "這個游標…可以住我的箱子嗎", "（箱子打開）游標，進來"]
+        d["duoduo.grab_carry"] = ["箱子長腳了！跑！", "（箱子咚咚咚跑走）", "不、不要追我！"]
+        d["duoduo.grab_drop"] = ["還、還你…放這裡了", "游標在箱子裡睡著了…還你", "（從箱子裡把游標推出來）"]
+        d["duoduo.grab_caught"] = ["被發現了！還你還你", "我、我只是幫你保管！"]
+        d["duoduo.clear_start"] = ["下班了…視窗們也該回箱子了", "（推推）視窗回家…"]
+        d["duoduo.shop"] = ["{site}的箱子…會送來跟我搶位子嗎", "又要買新的箱子嗎…（抱緊錢包）"]
+        d["duoduo.shop_n"] = ["這個月第{n}個包裹了…家裡箱子比我還多", "第{n}次了…我的箱子要被比下去了"]
+        d["duoduo.typing"] = ["鍵盤地震！我的箱子要塌了", "哇啊啊箱子飛起來了！"]
+        d["duoduo.typing_back"] = ["呼…箱子還在…我回來了", "（箱子長腳慢慢走回來）"]
+        d["meidian.grab_start"] = ["借你的游標當枕頭", "這游標看起來很好睡", "游標借我充電一下"]
+        d["meidian.grab_carry"] = ["嘿…咻…（好耗電）", "拖著游標好累…"]
+        d["meidian.grab_drop"] = ["（抱著游標睡著了）zZ", "游標當枕頭剛剛好…還你", "睡飽了…游標還你"]
+        d["meidian.clear_start"] = ["我快沒電了，視窗們也一起關機吧", "下班了…大家都去充電"]
+        d["meidian.shop_n"] = ["第{n}次了…我的電跟你的錢一起在掉", "這個月第{n}次…電量和存款都紅了"]
+        d["meidian.typing"] = ["震掉我 3% 了！", "哇啊！電要灑出來了！"]
+        d["meidian.typing_back"] = ["呼…電還在…爬回來了", "（慢慢走回來）剩一點電了"]
+        d["cici.grab_start"] = ["這游標我沒收了", "游標借我。不還", "哼，游標歸我"]
+        d["cici.grab_caught"] = ["哼，誰要你的游標", "拿去！才不稀罕"]
+        d["cici.grab_drop"] = ["放這裡了。不是故意的", "還你。…才沒有很好玩"]
+        d["cici.clear_done"] = ["下班。不是為了你，是視窗很吵", "清乾淨了。快回家"]
+        d["cici.shop"] = ["買那個幹嘛…（偷看）多少錢", "{site}？…錢包在哭，我才沒有"]
+        d["cici.typing"] = ["再打那麼大力我要炸毛了", "盆、盆要翻了！"]
+        d["cici.typing_back"] = ["哼，我自己走回來的", "土都灑出來了…"]
         return d
     }
     static func MisLinesFor(_ id: String, _ key: String) -> [String] {
@@ -645,7 +672,7 @@ extension World {
         var v: Double = 0
         switch p[1] {
         case "cursor": if p.count >= 4 && int.TryParse(p[2], &a) && int.TryParse(p[3], &b) { f.Cur = Point(a, b) }
-        case "input": f.Stamp += 1000; f.IdleSec = 0
+        case "input": f.Stamp += 1000; f.IdleSec = 0; f.KeyDown = true
         case "button": f.Btn = p.count >= 3 && p[2] == "1"
         case "fs": f.Fs = p.count >= 3 && p[2] == "1"
         case "idle": if p.count >= 3 && double.TryParse(p[2], &v) { f.IdleSec = v }
@@ -758,7 +785,7 @@ extension World {
         if !Inside(Double(c.X), Double(c.Y)) { return false }
         l.WakeIfSleep()
         MisKind = "grab"; misPet = l; misGrabCd = 15 * 60
-        misStamp = mis.InputStamp()
+        mis.KeyPrime()
         l.MisGrab(c)
         App.Log("mischief grab" + (force ? " (asked)" : ""))
         return true
@@ -771,15 +798,15 @@ extension World {
         let x = Math.Max(wa.Left + 1, Math.Min(wa.Right - 2, x0))
         let y = Math.Max(wa.Top + 1, Math.Min(wa.Bottom - 2, y0))
         mis.Warp(x, y)
-        misStamp = mis.InputStamp()
         return true
     }
     func MisCursor() -> Point { return mis.CursorPos() }
     // 你動了嗎：按著滑鼠鍵、有任何輸入（最後輸入時間變了）、游標不在公仔放的地方
+    // 你動了嗎：按著滑鼠鍵、按了鍵盤、游標不在公仔放的地方（容忍 4 px）。不看「最後輸入時間」：公仔自己移游標之後系統也可能更新它
     func MisUserMoved(_ expect: Point) -> Bool {
-        if mis.Buttons() || Math.Abs(mis.InputStamp() - misStamp) > 40 { return true }
+        if mis.Buttons() || mis.KeyPressed() { return true }
         let c = mis.CursorPos()
-        return Math.Abs(c.X - expect.X) > 3 || Math.Abs(c.Y - expect.Y) > 3
+        return Math.Abs(c.X - expect.X) > 4 || Math.Abs(c.Y - expect.Y) > 4
     }
 
     // ---------- 購物警察 ----------

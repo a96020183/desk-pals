@@ -23,9 +23,21 @@ test("mischiefSetLines：四個開關的名字跟桌面版的 mischief-set 一�
 	assert.deepEqual(P.mischiefSetLines(() => true, (k) => all.includes(k)), ["mischief-set grab 1", "mischief-set clear 1", "mischief-set shop 1", "mischief-set typing 1"]);
 });
 
-test("package.json：四個開關＋分鐘數都有設定項，搶游標預設關、其他預設開", () => {
+test("package.json：四個開關＋分鐘數都有設定項，搶游標、打字太兇預設關，其他預設開", () => {
 	const props = require("../extension/package.json").contributes.configuration.properties;
 	assert.equal(props["deskPals.mischief.grabCursor"].default, false);
+	assert.equal(props["deskPals.mischief.typingTooHard"].default, false);
 	assert.equal(props["deskPals.mischief.grabMinutes"].default, 3);
-	for (const k of ["clearAtOffWork", "shoppingPolice", "typingTooHard"]) assert.equal(props["deskPals.mischief." + k].default, true, k);
+	for (const k of ["clearAtOffWork", "shoppingPolice"]) assert.equal(props["deskPals.mischief." + k].default, true, k);
+});
+
+test("mischiefSetLines：打字太兇沒給值時照預設（關）", () => {
+	assert.deepEqual(P.mischiefSetLines((k, d) => d, (k) => k === "mischief.typingTooHard"), ["mischief-set typing 0"]);
+});
+
+test("batterySetLines：沒電的電量連動，設過才推（安靜改桌面版小屋的開關），預設開", () => {
+	assert.deepEqual(P.batterySetLines((k, d) => d, () => false), []);
+	assert.deepEqual(P.batterySetLines((k, d) => d, (k) => k === "battery.link"), ["battery-link 1"]);
+	assert.deepEqual(P.batterySetLines(() => false, (k) => k === "battery.link"), ["battery-link 0"]);
+	assert.equal(require("../extension/package.json").contributes.configuration.properties["deskPals.battery.link"].default, true);
 });

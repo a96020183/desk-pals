@@ -661,6 +661,7 @@ extension Pet
     func DrawFigure(_ g: Graphics, _ f: Fr, _ sbx: Int, _ sby: Int, _ sps: Int, _ fx: Bool, _ extras: Bool)
     {
         if P.Cu { DrawFigureCu(g, f, sbx, sby, sps, fx, extras); return }   // 自己做的公仔（53_custom.swift）
+        if P.Orig { DrawFigureOrig(g, f, sbx, sby, sps, fx, extras); return }   // 續命小隊（圖片，51_original.swift）
         // 圖一律貼齊 16 格框的底（比較高的角色往上長），Top 再額外上下移
         var rows = f.Rows
         var top = f.Top + 16 - rows.count
@@ -1481,7 +1482,7 @@ extension Pet
             case "pkred", "pkyellow", "pkblue":
                 DrawPikShelf(g, fx, bx, by, ps, flip, tt, blink, cell)
                 // </fan>
-            case "boba", "coffee", "onigiri", "sticky":
+            case "duoduo", "meidian", "cici":
                 DrawOrigShelf(g, fx, bx, by, ps, flip, tt, blink, cell)
             default:
                 if blink { ReplaceFace(&head, "SLEEPY") }

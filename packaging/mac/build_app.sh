@@ -52,6 +52,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BUILD/DeskPals" "$APP/Contents/MacOS/DeskPals"
 cp "$BUILD/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 cp "$SRC/claude-hook.js" "$SRC/ci-watch.js" "$APP/Contents/Resources/"
+cp -R "$SRC/pals" "$APP/Contents/Resources/pals"   # 續命小隊的圖（51_original.swift 讀 Bundle 的 Resources/pals）
 sed -e "s/__VERSION__/$VERSION/g" -e "s/__BUILD__/$VERSION/g" -e "s/__BUNDLE_ID__/$BUNDLE_ID/g" -e "s/__MIN_MACOS__/$MIN_MACOS/g" \
   packaging/mac/Info.plist > "$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist"

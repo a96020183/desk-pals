@@ -77,8 +77,8 @@ final class Pal
         return l
     }
     // 這一櫃預設放在大格的（經典一櫃照用最久的那隻）
-    static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Teletubbies ? "po" : (NormLineup(lineup) == Original ? "boba" : nil) }   //@fan
-    // <public> static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Original ? "boba" : nil }
+    static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Teletubbies ? "po" : (NormLineup(lineup) == Original ? "duoduo" : nil) }   //@fan
+    // <public> static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Original ? "duoduo" : nil }
     // 設定視窗、小屋「換一櫃」列出來的櫃子（之後新增一櫃：這裡加一個 id、LineupIds／LineupName 加一行）
     static let Lineups: [String] = [Original, Classic, Teletubbies, Pikmin]   //@fan
     // <public> static let Lineups: [String] = [Original]

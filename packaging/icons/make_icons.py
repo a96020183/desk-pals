@@ -1,8 +1,8 @@
-"""公仔櫃 Desk Pals：產生獨立版要用的所有圖示（全部從 tools/original_art/final_art.py 的像素圖畫出來，不放二進位檔進 repo）。
+"""公仔櫃 Desk Pals：產生獨立版要用的所有圖示（從續命小隊的圖畫出來：packaging/icons/squad/<id>.png，tools/squad_art/icon_art.py 產生）。
 
 用法：python -I packaging/icons/make_icons.py [輸出資料夾]   （預設 build/icons；需要 Pillow）
 產出：
-  DeskPals.ico                      Windows exe／安裝程式／捷徑（16～256，透明底，像素清楚）
+  DeskPals.ico                      Windows exe／安裝程式／捷徑（16～256，透明底）
   png/icon-<n>.png                  同一套的 PNG
   AppIcon.iconset/                  macOS（iconutil -c icns 轉成 AppIcon.icns；圓角磚＋小木架）
   msix/Assets/*.png                 Microsoft Store（MSIX）磚與 Logo（scale-100／200、targetsize、altform-unplated）
@@ -15,105 +15,40 @@ from io import BytesIO
 
 from PIL import Image, ImageDraw
 
-sys.dont_write_bytecode = True   # 不在 tools/original_art 留 __pycache__
-
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
-sys.path.insert(0, os.path.join(ROOT, "tools", "original_art"))
-import final_art as A  # noqa: E402
-
-SHARED = dict(S="#E23B3B", W="#FFFFFF", Y="#F5C842", P="#FF8FB0", B="#B8D6FF", **{"1": "#D9A55B", "2": "#A8743A"})
+ART = os.path.join(HERE, "squad")
 
 
-def hexc(h, a=255):
-    h = h.lstrip("#")
-    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4)) + (a,)
+def art(pid):
+    im = Image.open(os.path.join(ART, pid + ".png")).convert("RGBA")
+    return im.crop(im.getbbox())
 
 
-def pal_of(pid):
-    d = dict(A.PALS[pid]["pal"])
-    d.update(A.EXTRA[pid])
-    d.update(SHARED)
-    return d
+# 主角：躲躲從紙箱探頭（新安裝的預設一櫃「續命小隊」的大格）；小尺寸只畫上半（頭＋箱子口）
+HERO = "duoduo"
+HERO_HEAD_FRAC = 0.62
 
 
-def frame(pid, head="HEAD", body="BODY", legs="LEGS_A", face=None):
-    p = A.PALS[pid]
-    rows = list(p.get(head, p["HEAD"])) + list(p.get(body, p["BODY"])) + list(p.get(legs, p["LEGS_A"]))
-    if face:
-        for i, r in enumerate(p["FACES"][face]):
-            j = p["FACE_ROW"] + i
-            if j < len(rows) and len(r) == len(rows[j]):
-                rows[j] = r
-    return rows
+def hero_img(head_only):
+    im = art(HERO)
+    return im.crop((0, 0, im.width, int(im.height * HERO_HEAD_FRAC))) if head_only else im
 
 
-def trim(rows):
-    """去掉上下左右全空的行列（煙、吸管上面的空白）。"""
-    rows = [r for r in rows]
-    while rows and set(rows[0]) <= {"."}:
-        rows.pop(0)
-    while rows and set(rows[-1]) <= {"."}:
-        rows.pop()
-    w = max(len(r) for r in rows)
-    rows = [r.ljust(w, ".") for r in rows]
-    l = min((len(r) - len(r.lstrip(".")) for r in rows if r.strip(".")), default=0)
-    rr = min((len(r) - len(r.rstrip(".")) for r in rows if r.strip(".")), default=0)
-    return [r[l:w - rr] for r in rows]
-
-
-# 主角：半糖舉手開心（新安裝的預設一櫃「續命小隊」的大格）
-HERO = ("boba", dict(head="HEAD_UP", body="BODY_UP", face="HAPPY"))
-HERO_HEAD_ROWS = 12          # 小尺寸只畫頭（吸管＋杯蓋＋臉）
-
-
-def sprite(rows, pal, ps, halo):
-    """像素圖 → RGBA。halo＝每顆像素外面一圈白邊的寬度（跟桌面版一樣的畫法）。"""
-    w, h = max(len(r) for r in rows), len(rows)
-    img = Image.new("RGBA", (w * ps + 2 * halo, h * ps + 2 * halo), (0, 0, 0, 0))
-    d = ImageDraw.Draw(img)
-    if halo:
-        for y, r in enumerate(rows):
-            for x, c in enumerate(r):
-                if c != ".":
-                    d.rectangle([x * ps, y * ps, x * ps + ps + 2 * halo - 1, y * ps + ps + 2 * halo - 1], fill=(255, 255, 255, 255))
-    for y, r in enumerate(rows):
-        for x, c in enumerate(r):
-            if c != ".":
-                d.rectangle([halo + x * ps, halo + y * ps, halo + x * ps + ps - 1, halo + y * ps + ps - 1], fill=hexc(pal.get(c, "#FF00FF")))
-    return img
-
-
-def hero_rows(head_only):
-    pid, pose = HERO
-    rows = frame(pid, **pose)
-    return trim(rows[:HERO_HEAD_ROWS] if head_only else rows)
-
-
-def fit(rows, box, halo_frac=3, max_ps=None):
-    """在 box×box 裡放得下的最大整數像素倍率（含白邊）。回傳 (ps, halo)。"""
-    w, h = max(len(r) for r in rows), len(rows)
-    best = (0, 0)
-    for ps in range(1, 64):
-        halo = max(1, ps // halo_frac) if ps >= 2 or box >= 20 else 0
-        if w * ps + 2 * halo <= box and h * ps + 2 * halo <= box:
-            best = (ps, halo)
-    if max_ps:
-        best = (min(best[0], max_ps), max(1, min(best[0], max_ps) // halo_frac))
-    return best
+def fit_img(im, box):
+    """等比縮進 box×box（貼圖本身有白邊，不另外加）。"""
+    k = min(box / im.width, box / im.height)
+    w, h = max(1, round(im.width * k)), max(1, round(im.height * k))
+    return im.convert("RGBa").resize((w, h), Image.LANCZOS).convert("RGBA")
 
 
 def figure_icon(n, pad=0.0):
     """透明底、只有公仔（Windows 圖示的慣例）。小尺寸只畫頭。"""
     head_only = n < 48
-    rows = hero_rows(head_only)
     box = int(round(n * (1 - 2 * pad)))
-    ps, halo = fit(rows, box)
-    if ps == 0:
-        ps, halo = 1, 0
-    spr = sprite(rows, pal_of(HERO[0]), ps, halo)
+    spr = fit_img(hero_img(head_only), box)
     img = Image.new("RGBA", (n, n), (0, 0, 0, 0))
-    img.alpha_composite(spr, ((n - spr.width) // 2, (n - spr.height + (1 if head_only else 0)) // 2))
+    img.alpha_composite(spr, ((n - spr.width) // 2, (n - spr.height) // 2))
     return img
 
 
@@ -149,74 +84,72 @@ def mac_icon(n):
     bg, ins, side = tile_bg(n)
     img = bg.copy()
     head_only = n < 64
-    rows = hero_rows(head_only)
     plank = not head_only
-    inner = int(side * (0.62 if plank else 0.78))
-    ps, halo = fit(rows, inner)
-    if ps == 0:
-        ps, halo = 1, 0
-    spr = sprite(rows, pal_of(HERO[0]), ps, halo)
+    inner = int(side * (0.66 if plank else 0.80))
+    spr = fit_img(hero_img(head_only), inner)
     cx = ins + side // 2
     if plank:
-        # 小木架：一塊像素木板，公仔站在上面
+        # 小木架：一塊木板，公仔站在上面
         pw = int(side * 0.70)
-        ph = max(2, ps * 2)
-        py = ins + int(side * 0.80)
+        ph = max(2, side // 40)
+        py = ins + int(side * 0.82)
         d = ImageDraw.Draw(img)
         x0 = cx - pw // 2
+        lip = max(1, ph // 4)
         d.rectangle([x0, py, x0 + pw - 1, py + ph - 1], fill=PLANK + (255,))
-        d.rectangle([x0, py, x0 + pw - 1, py + max(1, ps // 2) - 1], fill=PLANK_L + (255,))
-        d.rectangle([x0, py + ph - max(1, ps // 2), x0 + pw - 1, py + ph - 1], fill=PLANK_D + (255,))
-        img.alpha_composite(spr, (cx - spr.width // 2, py - spr.height + halo))
+        d.rectangle([x0, py, x0 + pw - 1, py + lip - 1], fill=PLANK_L + (255,))
+        d.rectangle([x0, py + ph - lip, x0 + pw - 1, py + ph - 1], fill=PLANK_D + (255,))
+        img.alpha_composite(spr, (cx - spr.width // 2, py - spr.height + max(1, ph // 3)))
     else:
         img.alpha_composite(spr, (cx - spr.width // 2, ins + (side - spr.height) // 2))
     return img
 
 
-# ---------------- 一整櫃（續命小隊四隻站在兩層木架上）----------------
-SQUAD = ["boba", "coffee", "onigiri", "sticky"]
+# ---------------- 一整櫃（續命小隊三隻站在木架上）----------------
+SQUAD = ["duoduo", "meidian", "cici"]
 
 
-def squad_sprites(ps, halo):
-    out = []
-    for pid in SQUAD:
-        rows = trim(frame(pid, face="HAPPY"))
-        out.append(sprite(rows, pal_of(pid), ps, halo))
-    return out
+def squad_sprites(h):
+    """三隻一起縮放（保持彼此的大小比例），最高的那隻＝h。"""
+    arts = [art(pid) for pid in SQUAD]
+    top = max(a.height for a in arts)
+    return [fit_img(a, max(1, round(max(a.width, a.height) * h / top))) for a in arts]
 
 
 def shelf_image(w, h, ps, bg_top=TOP, bg_bottom=BOTTOM):
-    """安裝程式左邊那張：直的公仔櫃，兩層、每層兩隻。"""
+    """安裝程式左邊那張：直的公仔櫃，上層兩隻、下層一隻。"""
     img = Image.new("RGBA", (w, h))
     d = ImageDraw.Draw(img)
     for y in range(h):
         t = y / max(1, h - 1)
         d.line([(0, y), (w, y)], fill=tuple(int(bg_top[i] + (bg_bottom[i] - bg_top[i]) * t) for i in range(3)) + (255,))
-    halo = max(1, ps // 3)
-    sp = squad_sprites(ps, halo)
     shelf_h = ps * 2
+    sp = squad_sprites(int(min(w * 0.40, h * 0.30)))
     row_h = max(s.height for s in sp) + shelf_h + ps * 3
     top = (h - 2 * row_h) // 2 + ps * 2
-    for r in range(2):
-        pair = sp[r * 2:r * 2 + 2]
+    for r, pair in enumerate((sp[:2], sp[2:])):
         py = top + (r + 1) * row_h - shelf_h
         x0, x1 = ps * 2, w - ps * 2
         d.rectangle([x0, py, x1, py + shelf_h - 1], fill=PLANK + (255,))
         d.rectangle([x0, py, x1, py + max(1, ps // 2) - 1], fill=PLANK_L + (255,))
         d.rectangle([x0, py + shelf_h - max(1, ps // 2), x1, py + shelf_h - 1], fill=PLANK_D + (255,))
-        gap = (w - sum(s.width for s in pair)) // 3
+        gap = (w - sum(s.width for s in pair)) // (len(pair) + 1)
         x = gap
         for s in pair:
-            img.alpha_composite(s, (x, py - s.height + halo))
+            img.alpha_composite(s, (x, py - s.height + ps // 2))
             x += s.width + gap
     return img
 
 
-def squad_strip(w, h, ps):
-    """寬磚（310×150）：四隻排成一排，透明底。"""
+def squad_strip(w, h):
+    """寬磚（310×150）：三隻排成一排，透明底。"""
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    halo = max(1, ps // 3)
-    sp = squad_sprites(ps, halo)
+    sh = int(h * 0.8)
+    while True:
+        sp = squad_sprites(sh)
+        if sum(s.width for s in sp) <= w * 0.86 or sh <= 8:
+            break
+        sh -= 2
     total = sum(s.width for s in sp)
     gap = (w - total) // (len(sp) + 1)
     base = (h + max(s.height for s in sp)) // 2
@@ -225,15 +158,6 @@ def squad_strip(w, h, ps):
         img.alpha_composite(s, (x, base - s.height))
         x += s.width + gap
     return img
-
-
-def fit_strip(w, h):
-    for ps in range(32, 0, -1):
-        halo = max(1, ps // 3)
-        sp = squad_sprites(ps, halo)
-        if sum(s.width for s in sp) + 5 * ps * 2 <= w and max(s.height for s in sp) <= h * 0.8:
-            return ps
-    return 1
 
 
 # ---------------- 檔案格式 ----------------
@@ -316,7 +240,7 @@ def main(out):
         save(figure_icon(int(150 * k), pad=0.16), a, f"Square150x150Logo.scale-{sc}.png")
         save(figure_icon(int(310 * k), pad=0.18), a, f"LargeTile.scale-{sc}.png")
         w, h = int(310 * k), int(150 * k)
-        save(squad_strip(w, h, fit_strip(w, h)), a, f"Wide310x150Logo.scale-{sc}.png")
+        save(squad_strip(w, h), a, f"Wide310x150Logo.scale-{sc}.png")
     for n in (16, 24, 32, 48, 256):
         im = figure_icon(n)
         save(im, a, f"Square44x44Logo.targetsize-{n}.png")

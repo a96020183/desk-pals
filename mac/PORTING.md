@@ -164,12 +164,15 @@ are spread across files, so:
 
 ## 續命小隊（original lineup）— ported (`mac/src/51_original.swift`)
 
-`extension/desktop/DeskPals.Original.cs` holds the original lineup 「續命小隊」: 半糖 boba / 醒醒 coffee / 糰糰 onigiri / 貼貼 sticky
-— `Pal` data (art is generated from the design source `tools/original_art/final_art.py` into the `像素圖` block; every pal has
-HEAD / HEAD_UP / BODY / BODY_UP / BODY_HUG / LEGS_* plus `F_<face>` rows merged into the stacked frame at `FaceRow`, keeping non-'.'
-pixels of the head), the `Pet` behaviour (state `"orig"` + `oAct`, like Pikmin's `"pik"`), a grid-paper `ShelfForm` background and
-the `World` scenes. DeskPals.cs only has one-line hooks (`P.Orig`, `OrigLineup`, `StartLineup()`); grep `Orig` to find them — every
-one has a Swift counterpart in the core parts (same count: 56 lines).
+`extension/desktop/DeskPals.Original.cs` holds the original lineup 「續命小隊」: 躲躲 duoduo / 沒電 meidian / 刺刺 cici (since 2026-11;
+the old pixel lineup boba / coffee / onigiri / sticky is in git history and its saved data is migrated by `OrigMigrate`). The pals are
+image sprites: `SqArt` reads `extension/desktop/pals/squad/<id>/<1x|2x>/<frame>.png` (+ `squad.txt`: canvas, foot anchor, body box) into a
+`CuSprite` with `AnchorX/AnchorY/NoHalo/BodyH` and draws through the custom-pal path (`CuDraw`); mac always uses 2x (Retina 1:1),
+the .app reads `Contents/Resources/pals`, the extension reads `pals` next to the binary. 沒電's battery liquid (`SqLiquid`, `SqBattery`)
+recolours `<frame>.liquid.png` masks at run time (same integer maths both sides; `battery-dump` is checked against
+`tools/squad_art/levels.json` by `test/desktop-squad.js`). Behaviour is state `"orig"` + `oAct` (frame names in `oPose`), scenes in `World`.
+DeskPals.cs only has one-line hooks (`P.Orig`, `OrigLineup`, `StartLineup()`, `DrawFigureOrig`, `OrigPatted`, `OrigMsg`, `OrigMigrate`); grep `Orig` to find them — every
+one has a Swift counterpart in the core parts.
 When the art changes: re-run `export_cs.py` for the C#, then convert the `像素圖` block the same way (`p.Col('x', …)` → `p.Col("x", …)`,
 `new string[] { … };` → `[ … ]`) — the strings must stay byte-identical.
 Mac differences (all marked `// mac:`):
