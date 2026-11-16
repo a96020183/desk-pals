@@ -204,7 +204,8 @@ jobs:
           node .github/legacy-upgrade.js upgrade "$T/a.sock" "$T/SpideyDesktop" "$T/LaunchAgents" "$T/data" - -- extension/desktop/DeskPals "$T/a.sock" "" ""
           node .github/legacy-upgrade.js fresh "$T/b.sock" "$T/none-b" "$T/LaunchAgents-b" "$T/data-b" - -- extension/desktop/DeskPals "$T/b.sock" "" ""
           node .github/legacy-upgrade.js fresh "$T/c.sock" "$T/none-c" "$T/LaunchAgents-c" "$T/data-c" - -- build/public/extension/desktop/DeskPals "$T/c.sock" "" ""
-      # ---------- standalone Desk Pals.app / DMG ----------      - name: Developer ID certificate (only if the secrets exist)
+      # ---------- standalone Desk Pals.app / DMG ----------
+      - name: Developer ID certificate (only if the secrets exist)
         env:
           MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
@@ -417,7 +418,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "fresh install test (personal) failed" }
           node .github/legacy-upgrade.js fresh desk-pals-lg-c "$T\none-c" "$T\Startup-c" "$T\data-c" spidey-pet-lg-c -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File $pub -PipeName desk-pals-lg-c
           if ($LASTEXITCODE -ne 0) { throw "fresh install test (public) failed" }
-      - name: Build vsix (public → dist, personal → dist-personal)        run: |
+      - name: Build vsix (public → dist, personal → dist-personal)
+        run: |
           python -I build_vsix.py --public
           python -I build_vsix.py --personal --out dist-personal
 
@@ -510,7 +512,8 @@ jobs:
           $bad += @(Get-ChildItem "$env:LOCALAPPDATA\DeskPals" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "spidey" } | ForEach-Object { $_.FullName })
           Get-ChildItem "$env:LOCALAPPDATA\DeskPals" -ErrorAction SilentlyContinue | Format-Table Name, Length
           if ($bad.Count -gt 0) { $bad; throw "a fresh install created something with the old name" }
-          "nothing with the old name"      - name: MSIX installs and runs (test-signed copy; best effort)
+          "nothing with the old name"
+      - name: MSIX installs and runs (test-signed copy; best effort)
         continue-on-error: true
         shell: powershell
         run: |
