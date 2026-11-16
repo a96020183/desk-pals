@@ -19,7 +19,7 @@ content_types = (
         f'<Default Extension="{e}" ContentType="{t}"/>'
         for e, t in [
             (".json", "application/json"), (".js", "application/javascript"), (".html", "text/html"),
-            (".svg", "image/svg+xml"), (".vsixmanifest", "text/xml"), (".cs", "text/plain"),
+            (".svg", "image/svg+xml"), (".vsixmanifest", "text/xml"), (".cs", "text/plain"), (".exe", "application/octet-stream"),
             (".ps1", "text/plain"), (".swift", "text/plain"), (".sh", "text/plain"), (".md", "text/markdown"),
         ]
     )
