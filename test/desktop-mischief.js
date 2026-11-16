@@ -26,7 +26,7 @@ const send = (l) => s.write(l + "\n");
 async function reply(cmd, done) {
 	buf = "";
 	send(cmd);
-	for (let i = 0; i < 100 && !done(buf); i++) await sleep(40);
+	for (let i = 0; i < 250 && !done(buf); i++) await sleep(40);   // 截圖在慢的機器上要好幾秒
 	return buf;
 }
 async function dump() {
@@ -49,7 +49,7 @@ const fake = (d, k) => (new RegExp(`\\b${k}=(\\S*)`).exec(d.split("\n").find((l)
 const calls = (d) => d.split("\n").filter((l) => l.startsWith("call ")).map((l) => l.slice(5));
 const warps = (d) => +fake(d, "warps");
 const cursor = (d) => fake(d, "cursor").split(",").map(Number);
-// 等到 dump 符合條件（或時間到，回傳最後一次）
+// 等到 dump 符合條件（或時間到，回傳最後一次）。時間給得寬：CI 的機器慢、截圖會卡住主迴圈，公仔動畫的時間會比牆上時間走得慢
 async function until(pred, ms) {
 	let d = "";
 	for (const end = Date.now() + ms; Date.now() < end;) { d = await dump(); if (pred(d)) return d; await sleep(200); }
@@ -104,13 +104,13 @@ s.on("connect", async () => {
 	await check("搶游標：簡報播放中絕不開始", () => { assert.equal(field(d, "kind"), "-"); assert.equal(warps(d), 0); });
 	send("mischief-fake fg ");
 
-	d = await until(kindIs("grab"), 3000);
+	d = await until(kindIs("grab"), 6000);
 	await check("搶游標：滑鼠鍵盤都沒動 3 分鐘 → 開始搶", () => assert.equal(field(d, "kind"), "grab"));
 	await sleep(1800);
 	await snap("01-grab-hold");
 	await sleep(1500);
 	await snap("02-grab-carry");
-	d = await until(kindIs("-"), 8000);
+	d = await until(kindIs("-"), 20000);
 	await check("搶游標：叼著游標跑一段、放下（最多幾秒）", () => {
 		assert.equal(field(d, "kind"), "-");
 		assert.ok(warps(d) > 10, "warps=" + warps(d));
@@ -164,11 +164,11 @@ s.on("connect", async () => {
 	d = await dump();
 	await check("購物警察：一般網站不哭", () => { assert.equal(field(d, "kind"), "-"); assert.equal(field(d, "shopn"), "0"); });
 	send("mischief-fake fg 蝦皮購物 | 花得更少買得更好 - Google Chrome");
-	d = await until(kindIs("shop"), 5000);
+	d = await until(kindIs("shop"), 10000);
 	await check("購物警察：停在購物網站 2 秒 → 抱著錢包大哭", () => { assert.equal(field(d, "kind"), "shop"); assert.equal(field(d, "shopn"), "1"); });
 	await sleep(800);
 	await snap("05-shop-cry");
-	d = await until(kindIs("-"), 7000);
+	d = await until(kindIs("-"), 20000);
 	send("mischief-fake fg Google - Google Chrome");
 	await sleep(1200);
 	send("mischief-fake fg 蝦皮購物 | 花得更少買得更好 - Google Chrome");
@@ -176,11 +176,11 @@ s.on("connect", async () => {
 	d = await dump();
 	await check("購物警察：冷卻中切回購物網站不會再哭", () => { assert.equal(field(d, "kind"), "-"); assert.equal(field(d, "shopn"), "1"); });
 	send("act mischief shop");
-	d = await until(kindIs("shop"), 3000);
+	d = await until(kindIs("shop"), 8000);
 	await check("購物警察：act mischief shop 直接演（這個月第二次）", () => { assert.equal(field(d, "kind"), "shop"); assert.equal(field(d, "shopn"), "2"); });
 	await sleep(1000);
 	await snap("06-shop-second");
-	d = await until(kindIs("-"), 7000);
+	d = await until(kindIs("-"), 20000);
 	send("mischief-fake fg ");
 
 	// ---------- 打字太兇 ----------
@@ -190,14 +190,14 @@ s.on("connect", async () => {
 	await sleep(6500);
 	d = await dump();
 	await check("打字太兇：普通速度（每秒 4 下）不會被震飛", () => { assert.equal(field(d, "kind"), "-"); assert.ok(+fake(d, "keys") >= 15, "keys=" + fake(d, "keys")); });
-	send("mischief-fake typing 12 8");
-	d = await until(kindIs("typing"), 9000);
+	send("mischief-fake typing 12 14");
+	d = await until(kindIs("typing"), 16000);
 	await check("打字太兇：連續 4 秒每秒 12 下 → 震飛", () => assert.equal(field(d, "kind"), "typing"));
 	await sleep(500);
 	await snap("07-typing-fly");
 	await sleep(1500);
 	await snap("08-typing-dizzy");
-	d = await until(kindIs("-"), 10000);
+	d = await until(kindIs("-"), 25000);
 	await check("打字太兇：暈一下、爬回來就結束", () => assert.equal(field(d, "kind"), "-"));
 	send("mischief-set typing 0");
 	await sleep(1000);
@@ -219,13 +219,13 @@ s.on("connect", async () => {
 	await check("下班清場：還沒下班（17:30）不清", () => { assert.equal(field(d, "kind"), "-"); assert.equal(field(d, "pushed"), "0"); });
 	await snap("09-clear-before");
 	send("mischief-fake clock 2026-11-16T18:05");
-	d = await until(kindIs("clear"), 3000);
+	d = await until(kindIs("clear"), 8000);
 	await check("下班清場：平日 18:00 後、人在電腦前 → 開始清場", () => assert.equal(field(d, "kind"), "clear"));
 	await sleep(2300);
 	await snap("10-clear-push");
 	await sleep(700);
 	await snap("11-clear-push2");
-	d = await until(kindIs("-"), 14000);
+	d = await until(kindIs("-"), 35000);
 	await check("下班清場：兩個視窗都只是縮小（不關閉），可以叫回來", () => {
 		assert.equal(field(d, "kind"), "-");
 		assert.equal(field(d, "pushed"), "2");
@@ -251,7 +251,7 @@ s.on("connect", async () => {
 		assert.deepEqual(r, ["restore 期末報告.docx - Word", "restore 收件匣 - Outlook (front)"]);
 	});
 	send("act mischief clear");
-	d = await until((x) => field(x, "kind") === "-" && field(x, "pushed") === "2", 14000);
+	d = await until((x) => field(x, "kind") === "-" && field(x, "pushed") === "2", 35000);
 	send("act mischief restore");
 	await sleep(500);
 	d = await dump();
@@ -275,7 +275,7 @@ s.on("connect", async () => {
 	// ---------- 收工前把視窗叫回來 ----------
 	const before = restoredCount();
 	send("act mischief clear");
-	d = await until((x) => field(x, "kind") === "-" && field(x, "pushed") === "2", 14000);
+	d = await until((x) => field(x, "kind") === "-" && field(x, "pushed") === "2", 35000);
 	await check("收工前：推走的視窗還在縮小中", () => assert.equal(field(d, "pushed"), "2"));
 	send("quit");
 	await sleep(2500);

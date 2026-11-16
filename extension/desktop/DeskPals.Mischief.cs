@@ -937,9 +937,8 @@ namespace DeskPals
             if (misKeysLast < 0 || kc < misKeysLast) misKeysLast = kc;
             misBuckets[misBucket] += kc - misKeysLast;
             misKeysLast = kc;
-            misBucketT += dt;
-            if (misBucketT < 1) return;
-            misBucketT = 0;
+            if (Now - misBucketT < 1) return;   // 每一格是牆上時間的 1 秒（主迴圈卡住也一樣）
+            misBucketT = Now;
             // 最近 4 秒：每一秒都 ≥ 6 下、加起來 ≥ 36 下 → 震飛
             bool fast = true;
             double sum = 0;
