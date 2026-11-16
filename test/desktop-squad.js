@@ -81,6 +81,7 @@ async function check(name, fn) {
 	send("act all");
 	await sleep(5000);
 	send("act light");
+	send("act lunchend");   // 不管現在幾點都不是午休（CI 是 UTC，12 點剛好午休：沒電會在充電、手上拿便當，電量顏色就測不準）
 	let pos = await where();
 	await check("三隻都出來了（續命小隊＝躲躲、沒電、刺刺）", () => { for (const id of ["duoduo", "meidian", "cici"]) assert.ok(pos[id], id + " 不在外面"); });
 
@@ -98,13 +99,19 @@ async function check(name, fn) {
 		assert.equal(n, 16);
 	});
 
-	// 電量 10% 紅、90% 綠：只留沒電一隻在外面，在他身上截一小塊
-	send("act select meidian");
-	await sleep(3500);
-	send("act f_stand meidian");
-	await sleep(1500);
-	pos = await where();
-	const m = pos.meidian;
+	// 電量 10% 紅、90% 綠：只留沒電一隻在外面、站好不動，在他身上截一小塊
+	// （CI 比較慢、剛結束午休時大家會再出來：一直等到真的只剩沒電一隻、而且站定了才截）
+	let m = null;
+	for (let tries = 0; tries < 15 && !m; tries++) {
+		send("act select meidian");
+		await sleep(tries ? 1500 : 3500);
+		send("act f_stand meidian");
+		await sleep(800);
+		pos = await where();
+		const others = Object.keys(pos).filter((k) => k !== "meidian");
+		if (pos.meidian && pos.meidian.state === "orig" && others.length === 0) m = pos.meidian;
+	}
+	if (!m) console.log("note: meidian never settled alone: " + JSON.stringify(pos));
 	const rect = m ? { x: m.x - 40, y: m.y - 80, w: 160, h: 160 } : null;
 	send("battery-set 10"); await sleep(800);
 	const low = hues(await snap("squad-battery-10", rect));
