@@ -283,6 +283,8 @@ s.on("connect", async () => {
 
 	console.log(results.map((r) => r[0] + "  " + r[1]).join("\n"));
 	const fail = results.filter((r) => r[0] === "FAIL").length;
+	// GitHub Actions：失敗的項目也變成 annotation（在 Actions 頁面上直接看得到）
+	if (process.env.GITHUB_ACTIONS) for (const r of results) if (r[0] === "FAIL") console.log("::error title=desktop-mischief::" + r[1].replace(/%/g, "%25").replace(/\r?\n/g, "%0A"));
 	console.log(`\n${results.length - fail}/${results.length} passed`);
 	s.end();
 	process.exit(fail ? 1 : 0);
