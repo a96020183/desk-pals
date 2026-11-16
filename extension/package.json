@@ -1,8 +1,8 @@
 {
 	"name": "desk-pals",
 	"displayName": "公仔櫃 Desk Pals",
-	"description": "右下角一個公仔櫃，裡面有 Spidey、小波、史迪仔、人魚漢頓；也可以換成天線寶寶一櫃（丁丁、迪西、拉拉、小波）。選一隻出來，他就在整個螢幕陪你：散步、抱抱、敲螢幕、存檔比讚、Claude／Codex 卡住提醒你；平日下班後催你下班。",
-	"version": "0.6.0",
+	"description": "大學生桌面小夥伴：皮克敏陪你專注、提醒休息，並在 Codex／Claude 長指令、CI 或下載完成時通知。",
+	"version": "0.6.1",
 	"publisher": "local",
 	"engines": {
 		"vscode": "^1.70.0"
