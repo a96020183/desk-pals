@@ -58,20 +58,20 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Compile DeskPals (same as desk-pals.ps1)
+      - name: Compile DeskPals.exe
         shell: powershell
         run: |
-          $src = [System.IO.File]::ReadAllText("extension\desktop\DeskPals.cs", [System.Text.Encoding]::UTF8)
-          foreach ($f in (Get-ChildItem -Path "extension\desktop" -Filter "DeskPals.*.cs" | Sort-Object Name)) { $src += "`n" + [System.IO.File]::ReadAllText($f.FullName, [System.Text.Encoding]::UTF8) }
-          Add-Type -TypeDefinition $src -ReferencedAssemblies System.Windows.Forms, System.Drawing, System.Web.Extensions -ErrorAction Stop
+          $csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          & $csc /nologo /target:winexe /optimize+ /out:extension\desktop\DeskPals.exe /reference:System.Windows.Forms.dll /reference:System.Drawing.dll /reference:System.Web.Extensions.dll extension\desktop\DeskPals.cs extension\desktop\DeskPals.Pikmin.cs extension\desktop\Launcher.cs
+          if ($LASTEXITCODE -ne 0) { throw "C# compile failed: $LASTEXITCODE" }
           "COMPILED OK"
       - name: Smoke run (offscreen, all four pets, snapshot, quit)
         shell: powershell
         run: |
           $env:DESKPALS_OFFSCREEN = "1"
           $env:DESKPALS_DATA_DIR = "$env:RUNNER_TEMP\dp-data"
-          $ps1 = (Resolve-Path "extension\desktop\desk-pals.ps1").Path
-          Start-Process powershell.exe -ArgumentList "-NoProfile -File `"$ps1`" -PipeName desk-pals-ci -Pet po"
+          $exe = (Resolve-Path "extension\desktop\DeskPals.exe").Path
+          Start-Process -FilePath $exe -ArgumentList "desk-pals-ci po classic"
           Start-Sleep -Seconds 12
           node .github/smoke.js
           Start-Sleep -Seconds 3
