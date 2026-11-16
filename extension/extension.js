@@ -307,7 +307,7 @@ class Desktop {
 		// 舊版只有 Spidey 的 Mac 桌面版（SpideyDesktop.swift）→ 換成公仔櫃
 		this.macOldSpidey = process.platform === "darwin" && fs.existsSync(path.join(this.home, "SpideyDesktop.swift"));
 		this.migratedFromSpidey = (this.win && fs.existsSync(this.oldHome)) || this.macOldSpidey;
-		this.ps1 = "desk-pals.ps1";
+		this.exe = "DeskPals.exe";
 		this.sh = "desk-pals.sh";
 		this.lnkName = "公仔櫃 Desk Pals.lnk";
 		this.onActive = () => {};
@@ -434,7 +434,7 @@ class Desktop {
 		const src = path.join(this.context.extensionPath, "desktop");
 		fs.mkdirSync(this.home, { recursive: true });
 		const files = this.win
-			? ["DeskPals.cs", "DeskPals.Pikmin.cs", "desk-pals.ps1", "claude-hook.js", "ci-watch.js"]
+			? [this.exe, "claude-hook.js", "ci-watch.js"]
 			: ["DeskPals.swift", this.sh, "claude-hook.js", "ci-watch.js"];
 		const copy = (f, dir) => {
 			const from = path.join(src, f), to = path.join(dir, f);
@@ -456,19 +456,20 @@ class Desktop {
 		if (process.platform === "win32") {
 			const startup = path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
 			const lnk = path.join(startup, this.lnkName);
-			if (fs.existsSync(lnk)) return;
-			const ps1 = path.join(this.home, this.ps1);
+			const exe = path.join(this.home, this.exe);
 			const script = [
-				"$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:SPIDEY_LNK)",
-				"$s.TargetPath = \"$env:SystemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\"",
-				"$s.Arguments = '-NoProfile -WindowStyle Hidden -File \"' + $env:SPIDEY_PS1 + '\" -PipeName ' + $env:SPIDEY_NAME",
+				"$w = New-Object -ComObject WScript.Shell",
+				"if (Test-Path -LiteralPath $env:SPIDEY_LNK) { $old = $w.CreateShortcut($env:SPIDEY_LNK); $owned = ($old.TargetPath -match '(?i)powershell\\.exe$' -and $old.Arguments -match '(?i)desk-pals\\.ps1'); if (-not $owned -and $old.TargetPath -ne $env:SPIDEY_EXE) { exit 0 } }",
+				"$s = $w.CreateShortcut($env:SPIDEY_LNK)",
+				"$s.TargetPath = $env:SPIDEY_EXE",
+				"$s.Arguments = $env:SPIDEY_NAME",
 				"$s.WindowStyle = 7",
 				"$s.Description = '公仔櫃 Desk Pals（整個螢幕的像素公仔）'",
 				"$s.Save()",
 			].join("; ");
 			cp.execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
 				windowsHide: true,
-				env: Object.assign({}, process.env, { SPIDEY_LNK: lnk, SPIDEY_PS1: ps1, SPIDEY_NAME: this.name }),
+				env: Object.assign({}, process.env, { SPIDEY_LNK: lnk, SPIDEY_EXE: exe, SPIDEY_NAME: this.name }),
 			}, () => {});
 		} else if (process.platform === "darwin") {
 			const dir = path.join(os.homedir(), "Library", "LaunchAgents");
@@ -504,12 +505,10 @@ class Desktop {
 		try {
 			let p;
 			if (process.platform === "win32") {
-				// detached 的 powershell 沒有主控台會直接結束；改由短命的 powershell 用 Start-Process 叫一支獨立的起來
 				const lu = lineupSetting();
 				const pet = vscode.workspace.getConfiguration("deskPals").get("character", "spidey");
-				const args = `-NoProfile -WindowStyle Hidden -File "${path.join(this.home, this.ps1)}" -PipeName ${this.name} -Pet ${inLineup(pet, lu) ? pet : (lu === "teletubbies" ? "po" : (lu === "pikmin" ? "pkred" : "spidey"))} -Lineup ${lu}`;
-				p = cp.spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList $env:SPIDEY_ARGS"],
-					{ stdio: "ignore", windowsHide: true, env: Object.assign({}, process.env, { SPIDEY_ARGS: args }) });
+				p = cp.spawn(path.join(this.home, this.exe), [this.name, inLineup(pet, lu) ? pet : (lu === "teletubbies" ? "po" : (lu === "pikmin" ? "pkred" : "spidey")), lu],
+					{ detached: true, stdio: "ignore", windowsHide: true });
 			} else {
 				const lu = lineupSetting();
 				const pet = vscode.workspace.getConfiguration("deskPals").get("character", "spidey");
