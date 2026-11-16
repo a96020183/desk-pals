@@ -29,6 +29,7 @@ def pack(ext, out):
                 (".json", "application/json"), (".js", "application/javascript"), (".html", "text/html"),
                 (".svg", "image/svg+xml"), (".vsixmanifest", "text/xml"), (".cs", "text/plain"),
                 (".ps1", "text/plain"), (".swift", "text/plain"), (".sh", "text/plain"), (".md", "text/markdown"),
+                (".png", "image/png"), (".txt", "text/plain"),
             ]
         )
         + "</Types>"

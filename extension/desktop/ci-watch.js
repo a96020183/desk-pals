@@ -12,9 +12,9 @@ const [, , dir, tag, env = "other"] = process.argv;
 if (!dir || !tag) process.exit(0);
 
 const user = (os.userInfo().username || "me").replace(/[^A-Za-z0-9_.-]/g, "_");
-const endpoints = process.platform === "win32"
-	? ["\\\\.\\pipe\\desk-pals-" + user, "\\\\.\\pipe\\spidey-pet-" + user]
-	: [path.join(os.homedir(), "Library", "Application Support", "SpideyDesktop", "spidey.sock")];
+const endpoints = process.env.DESKPALS_ENDPOINT ? [process.env.DESKPALS_ENDPOINT]
+	: process.platform === "win32" ? ["\\\\.\\pipe\\desk-pals-" + user]
+	: [path.join(os.homedir(), "Library", "Application Support", "DeskPals", "desk-pals.sock")];
 
 function send(line) {
 	return new Promise((resolve) => {

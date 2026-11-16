@@ -1,8 +1,8 @@
 // 95_standalone.swift — 獨立版 Desk Pals.app（不用 VS Code）的開場：只有從 .app 包裡跑的時候才做事，
 // VS Code 擴充套件編出來的那支（desk-pals.sh）、CI 的離屏測試（DESKPALS_OFFSCREEN=1）都不受影響。
 //   ・已經開著：叫它出來打個招呼就結束（不會開兩個）
-//   ・寫 ~/Library/Application Support/SpideyDesktop/standalone.json：VS Code 擴充套件看到就不再自己編一份、不建開機啟動，只負責連上
-//   ・開機自動啟動：~/Library/LaunchAgents/local.spidey-pet.plist（跟擴充套件同一個 Label → 直接換成 .app 版，不會開兩次）
+//   ・寫 ~/Library/Application Support/DeskPals/standalone.json：VS Code 擴充套件看到就不再自己編一份、不建開機啟動，只負責連上
+//   ・開機自動啟動：~/Library/LaunchAgents/local.desk-pals.plist（跟擴充套件同一個 Label → 直接換成 .app 版，不會開兩次）
 //     擴充套件那份還開著的話先請它收工，再換這個上來
 //   ・還在「下載項目」／DMG 裡直接打開（App Translocation）：提醒先拖進「應用程式」，這次不設開機啟動
 //   ・在 Finder／Launchpad 再點一次：叫公仔打招呼
@@ -11,8 +11,8 @@ import AppKit
 import Carbon
 
 enum Standalone {
-    static let Label = "local.spidey-pet"
-    static var home: String { return NSHomeDirectory() + "/Library/Application Support/SpideyDesktop" }
+    static let Label = "local.desk-pals"
+    static var home: String { return NSHomeDirectory() + "/Library/Application Support/DeskPals" }
     static var reopen: ReopenHandler? = nil
 
     static func Prepare() {
@@ -20,7 +20,7 @@ enum Standalone {
         if !bundle.hasSuffix(".app") || App.Offscreen { return }
         let a = CommandLine.arguments   // （macOS 13 以後 Finder 不會再帶 -psn_ 參數）
         if a.count >= 2 && a[1].hasPrefix("--") { return }   // --preview 之類的開發用指令
-        let sock = a.count >= 2 && !a[1].isEmpty ? a[1] : home + "/spidey.sock"
+        let sock = a.count >= 2 && !a[1].isEmpty ? a[1] : home + "/desk-pals.sock"
         let exe = Bundle.main.executablePath ?? (bundle + "/Contents/MacOS/DeskPals")
         let translocated = bundle.contains("/AppTranslocation/") || bundle.hasPrefix("/Volumes/")
         var tookOver = false
@@ -48,7 +48,7 @@ enum Standalone {
         try? data.write(to: URL(fileURLWithPath: home + "/standalone.json"))
     }
 
-    // Claude Code hooks 的設定指著 SpideyDesktop/claude-hook.js（Mac安裝說明這樣寫）：放一份過去
+    // Claude Code hooks 的設定指著 DeskPals/claude-hook.js（Mac安裝說明這樣寫）：放一份過去
     static func CopyHooks() {
         for f in ["claude-hook.js", "ci-watch.js"] {
             guard let from = Bundle.main.path(forResource: (f as NSString).deletingPathExtension, ofType: "js"),

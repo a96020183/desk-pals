@@ -9,10 +9,10 @@ const path = require("path");
 
 const ev = process.argv[2] || "";
 const user = (os.userInfo().username || "me").replace(/[^A-Za-z0-9_.-]/g, "_");
-// Windows 先找公仔櫃，找不到再找舊版 Spidey 小夥伴
-const endpoints = process.platform === "win32"
-	? ["\\\\.\\pipe\\desk-pals-" + user, "\\\\.\\pipe\\spidey-pet-" + user]
-	: [path.join(os.homedir(), "Library", "Application Support", "SpideyDesktop", "spidey.sock")];
+// DESKPALS_ENDPOINT：測試用（指到別的 pipe／socket）
+const endpoints = process.env.DESKPALS_ENDPOINT ? [process.env.DESKPALS_ENDPOINT]
+	: process.platform === "win32" ? ["\\\\.\\pipe\\desk-pals-" + user]
+	: [path.join(os.homedir(), "Library", "Application Support", "DeskPals", "desk-pals.sock")];
 
 const bail = setTimeout(() => process.exit(0), 1500);
 

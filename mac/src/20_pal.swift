@@ -65,10 +65,10 @@ final class Pal
     static func LineupIds(_ lineup: String!) -> [String]
     {
         if NormLineup(lineup) == Pikmin { return PikminIds }   // 皮克敏一櫃：大格是休息花（50_pikmin.swift）   //@fan
-        if NormLineup(lineup) == Original { return OriginalIds }   // 續命小隊（51_original.swift）
+        if NormLineup(lineup) == Original { return OrigLineupIds() }   // 續命小隊（51_original.swift；第 4 格放你自己做的公仔）
         if NormLineup(lineup) == Mine { return MineIds() }                       // 我的櫃：自己做的公仔（53_custom.swift）
         return NormLineup(lineup) == Teletubbies ? ["tinky", "dipsy", "laalaa", "po"] : ["spidey", "po", "stitch", "hangyodon"]   //@fan
-        // <public> return OriginalIds
+        // <public> return OrigLineupIds()
     }
     static func Lineup(_ lineup: String!) -> List<Pal>
     {
@@ -77,8 +77,8 @@ final class Pal
         return l
     }
     // 這一櫃預設放在大格的（經典一櫃照用最久的那隻）
-    static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Teletubbies ? "po" : (NormLineup(lineup) == Original ? "boba" : nil) }   //@fan
-    // <public> static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Original ? "boba" : nil }
+    static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Teletubbies ? "po" : (NormLineup(lineup) == Original ? "duoduo" : nil) }   //@fan
+    // <public> static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Original ? "duoduo" : nil }
     // 設定視窗、小屋「換一櫃」列出來的櫃子（之後新增一櫃：這裡加一個 id、LineupIds／LineupName 加一行）
     static let Lineups: [String] = [Original, Classic, Teletubbies, Pikmin]   //@fan
     // <public> static let Lineups: [String] = [Original]

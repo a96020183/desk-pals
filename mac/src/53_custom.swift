@@ -146,6 +146,14 @@ final class CuSprite
     let Frames = Dict<String, Bitmap>()   // 動作表：stand walk1 walk2 jump sleep happy held sit
     var Wc: Double { return Double(W) / Double(R) }
     var Hc: Double { return Double(H) / Double(R) }
+    // 內建的圖片公仔（續命小隊，51_original.swift）：腳底不在畫布底（AnchorX／AnchorY，-1＝底部置中）、圖本身有白邊（NoHalo）、
+    // 身體的範圍（BodyTop／BodyH，stand 的不透明範圍；泡泡、櫃子高度用）、沒電的電量液體（Liquid）
+    var AnchorX: Double = -1, AnchorY: Double = -1
+    var NoHalo = false
+    var BodyTop = -1, BodyH = -1, BodyLeft = -1, BodyW = -1
+    var Liquid: Dict<String, SqLiquid>! = nil
+    var AX: Double { return AnchorX >= 0 ? AnchorX : Double(W) / 2.0 }
+    var AY: Double { return AnchorY >= 0 ? AnchorY : Double(H) }
     func HasFrame(_ k: String) -> Bool { return Frames.ContainsKey(k) }
 
     init() {}
@@ -546,8 +554,8 @@ enum CuStore
 extension Pal
 {
     static let Mine = "mine"
-    static let Guests: [String] = ["boba", "coffee", "onigiri", "sticky", "spidey", "po", "stitch", "hangyodon", "tinky", "dipsy", "laalaa"]   // 可以來我的櫃作客的內建公仔   //@fan
-    // <public> static let Guests: [String] = ["boba", "coffee", "onigiri", "sticky"]
+    static let Guests: [String] = ["duoduo", "meidian", "cici", "spidey", "po", "stitch", "hangyodon", "tinky", "dipsy", "laalaa"]   // 可以來我的櫃作客的內建公仔   //@fan
+    // <public> static let Guests: [String] = ["duoduo", "meidian", "cici"]
 
     static func CuReset() { all = nil }
     static func GetBuiltin(_ id: String) -> Pal! { if all == nil { return nil }; for p in all! { if p.Id == id && !p.Cu { return p } }; return nil }
@@ -834,12 +842,13 @@ extension Pet
     // ---------- 畫：先在小畫布上把頭／身體／腳組起來，再放大畫上去（加白邊、晚上變暗） ----------
     // 每一格：直接組在「螢幕大小」的小圖上（像素風先在格子大小組好再放大），
     // 再一次把白邊、晚上變暗、左右翻轉做完（逐像素），最後原尺寸貼上去——四隻一起跑也不會卡
-    func CuDraw(_ g: Graphics, _ p: CuPose, _ feetX: Double, _ feetY: Double, _ ps: Int, _ fx: Bool)
+    func CuDraw(_ g: Graphics, _ p: CuPose, _ feetX: Double, _ feetY: Double, _ ps: Int, _ fx: Bool) { CuDrawSc(g, p, feetX, feetY, Double(ps) / Double(P.Spr.R), ps, fx) }
+    // sc 自己給：續命小隊在櫃子裡依格子大小縮放（不限整數倍）
+    func CuDrawSc(_ g: Graphics, _ p: CuPose, _ feetX: Double, _ feetY: Double, _ sc: Double, _ ps: Int, _ fx: Bool)
     {
         let s: CuSprite = P.Spr
         var mb = 0, cw = 0, ch = 0
         Pet.CuCanvasSize(s, &cw, &ch, &mb)
-        let sc = Double(ps) / Double(s.R)
         let hw = Math.Max(1, ps / 3), pad = hw + 1
         let tw = CInt(Math.Ceiling(Double(cw) * sc)) + 2 * pad, th = CInt(Math.Ceiling(Double(ch) * sc)) + 2 * pad
         if cuOut == nil || cuOut.Width != tw || cuOut.Height != th
@@ -869,7 +878,7 @@ extension Pet
                 Pet.CuCompose(og, s, p, cw / 2, ch - mb, bm)
             }
         }
-        CuHaloPass(cuOut, hw, Night ? P.HaloNight : P.Halo, Night, fx)
+        CuHaloPass(cuOut, hw, Night ? P.HaloNight : P.Halo, Night, fx, !s.NoHalo)
         let dx = CInt(Math.Round(feetX - Double(pad) - Double(cw) / 2.0 * sc)), dy = CInt(Math.Round(feetY - Double(pad) - Double(ch - mb) * sc))
         let im = g.InterpolationMode, pom = g.PixelOffsetMode
         g.InterpolationMode = InterpolationMode.NearestNeighbor; g.PixelOffsetMode = PixelOffsetMode.Half
@@ -881,7 +890,7 @@ extension Pet
     static func CuDevScale() -> Double { return Double(Math.Max(1, CInt(Math.Round(Bitmap.DefaultScale)))) }
 
     // 白邊（往外 hw 像素的實心框，跟內建公仔一樣）、晚上變暗、左右翻轉：一次掃完（預乘 alpha）
-    func CuHaloPass(_ b: Bitmap, _ hw0: Int, _ halo: Color, _ night: Bool, _ flip: Bool)
+    func CuHaloPass(_ b: Bitmap, _ hw0: Int, _ halo: Color, _ night: Bool, _ flip: Bool, _ ring: Bool)
     {
         // mac: 在裝置像素上掃（C# 是邏輯像素）；白邊寬度乘上倍率，看起來一樣粗
         let ds = Math.Max(1, CInt(Math.Round(b.Scale)))
@@ -891,7 +900,8 @@ extension Pet
         if cuMask == nil || cuMask.count != n { cuBuf = nil; cuMask = [UInt8](repeating: 0, count: n); cuTmp = [UInt8](repeating: 0, count: n) }
         var mask: [UInt8] = cuMask, tmp: [UInt8] = cuTmp
         cuMask = nil; cuTmp = nil   // 借出來用（避免逐格複製）
-        // 剪影往外長 hw（先橫再直）
+        // 剪影往外長 hw（先橫再直）；圖本身有白邊的（ring＝false）不加
+        if ring {
         for y in 0..<h
         {
             let row = y * w
@@ -909,13 +919,14 @@ extension Pet
             var y = h - 1
             while y >= 0 { if tmp[y * w + x] != 0 { run = y }; if run - y <= hw { mask[y * w + x] = 1 }; y -= 1 }
         }
+        }
         let hr = halo.R, hg = halo.G, hb = halo.B
         for i in 0..<n
         {
             let v = buf[i]
             var a = (v >> 24) & 255, r = (v >> 16) & 255, gg = (v >> 8) & 255, bb = v & 255
             if night && a > 0 { r = r * 58 / 100 + a * 5 / 255; gg = gg * 60 / 100 + a * 5 / 255; bb = bb * 78 / 100 + a * 18 / 255 }
-            if mask[i] != 0 && a < 255 { let inv = 255 - a; r += hr * inv / 255; gg += hg * inv / 255; bb += hb * inv / 255; a = 255 }
+            if ring && mask[i] != 0 && a < 255 { let inv = 255 - a; r += hr * inv / 255; gg += hg * inv / 255; bb += hb * inv / 255; a = 255 }
             buf[i] = (a << 24) | (Math.Min(255, r) << 16) | (Math.Min(255, gg) << 8) | Math.Min(255, bb)
         }
         if flip
@@ -933,11 +944,12 @@ extension Pet
 
     static func CuCanvasSize(_ s: CuSprite, _ cw: inout Int, _ ch: inout Int, _ mb: inout Int)
     {
-        let R = s.R, m = Math.Max(s.W, s.H)
+        let R = s.R, ext = CInt(Math.Ceiling(2 * Math.Max(s.AX, Double(s.W) - s.AX))), m = Math.Max(ext, s.H)
         cw = m + 6 * R + 2
-        let mt = Math.Max(3 * R + s.H / 6, (s.W - s.H) / 2 + 3 * R)
-        mb = Math.Max(2 * R, (s.W - s.H) / 2 + 2 * R)
-        ch = s.H + mt + mb
+        let mt = Math.Max(3 * R + s.H / 6, (ext - s.H) / 2 + 3 * R)
+        let below = CInt(Math.Ceiling(Double(s.H) - s.AY))   // 腳底以下還有圖（跳的動作線、垂下來的電線）
+        mb = Math.Max(2 * R, (ext - s.H) / 2 + 2 * R) + below
+        ch = CInt(Math.Ceiling(s.AY)) + mt + mb
         if cw % 2 == 1 { cw += 1 }
     }
 
@@ -1022,12 +1034,13 @@ extension Pet
         }
         let m: Matrix = baseM == nil ? Matrix() : baseM.Clone()
         m.Translate(Double(ox) + q(p.X), Double(oy) + q(p.Y))
-        if p.Rot90 != 0 { m.Translate(0, -Double(s.H) / 2); m.Rotate(Double(90 * p.Rot90)); m.Translate(0, Double(s.H) / 2) }
-        if Math.Abs(p.Rot) > 0.01 { let pv = -Double(s.H) * p.PivotY; m.Translate(0, pv); m.Rotate(p.Rot); m.Translate(0, -pv) }
+        let ay = s.AY
+        if p.Rot90 != 0 { m.Translate(0, -ay / 2); m.Rotate(Double(90 * p.Rot90)); m.Translate(0, ay / 2) }
+        if Math.Abs(p.Rot) > 0.01 { let pv = -ay * p.PivotY; m.Translate(0, pv); m.Rotate(p.Rot); m.Translate(0, -pv) }
         if Math.Abs(p.Sx - 1) > 0.001 || Math.Abs(p.Sy - 1) > 0.001 { m.Scale(p.Sx, p.Sy) }
-        let L = Double(-(s.W / 2)), T = Double(-s.H)
-        if p.Frame != nil, let fr = s.Frames.Get(p.Frame!) { CuPut(cg, m, fr, L, T, 0, 0, 0, 0, 0); return }
-        if !s.Rig { CuPut(cg, m, s.Stand, L, T, 0, 0, 0, 0, 0); return }
+        let L = s.AnchorX >= 0 ? -s.AnchorX : Double(-(s.W / 2)), T = -ay
+        if p.Frame != nil, var fr = s.Frames.Get(p.Frame!) { if s.Liquid != nil, let lq = SqBattery.Frame(s, p.Frame!) { fr = lq }; CuPut(cg, m, fr, L, T, 0, 0, 0, 0, 0); return }
+        if !s.Rig { var st: Bitmap! = s.Stand; if s.Liquid != nil, let lq = SqBattery.Frame(s, "stand") { st = lq }; CuPut(cg, m, st, L, T, 0, 0, 0, 0, 0); return }
         // 腳（踩在地上；抬腳往上、轉繞腳的最上面）
         if !p.NoLegs
         {
@@ -1091,13 +1104,14 @@ extension Pet
         CuCanvasSize(s, &cw, &ch, &mb)
         let c = Bitmap(cw, ch, s.Pixel ? PixelFormat.Format32bppArgb : PixelFormat.Format32bppPArgb)
         do { let cg = Graphics.FromImage(c); cg.Clear(Color.Transparent); let p = CuPose(); CuCompose(cg, s, p, cw / 2, ch - mb, nil) }
-        CuBlit(g, c, s, feetX, feetY, cw, ch, mb, ps, fx, halo, night, 1)
+        CuBlit(g, c, s, feetX, feetY, cw, ch, mb, ps, fx, s.NoHalo ? Color.Transparent : halo, night, 1)
     }
 
     // ---------- 配件：帽子戴在頭頂（頭太小／太歪就不戴）、圍巾圍在脖子那條線、節日的紅包蛋糕放旁邊 ----------
     func CuAccessories(_ g: Graphics, _ p: CuPose, _ sbx: Int, _ sby: Int, _ ps: Int, _ fx: Bool, _ sides: Bool)
     {
         let s: CuSprite = P.Spr
+        if s.NoHalo { return }   // 續命小隊：不戴帽子圍巾
         let lv = Level()
         let hc = s.Hc
         let sy = p.Sy
@@ -1171,7 +1185,8 @@ extension Pet
     }
 
     // 外出中的格子：淡淡的剪影
-    func CuGhost(_ g: Graphics, _ fx: Int, _ fy: Int, _ ps: Int, _ night: Bool)
+    func CuGhost(_ g: Graphics, _ fx: Int, _ fy: Int, _ ps: Int, _ night: Bool) { CuGhostSc(g, fx, fy, Double(ps) / Double(P.Spr.R), night) }
+    func CuGhostSc(_ g: Graphics, _ fx: Int, _ fy: Int, _ sc: Double, _ night: Bool)
     {
         let s: CuSprite = P.Spr
         var mb = 0, cw = 0, ch = 0
@@ -1185,7 +1200,6 @@ extension Pet
         do {
             let ia = ImageAttributes()
             ia.SetColorMatrix(cm)
-            let sc = Double(ps) / Double(s.R)
             let im = g.InterpolationMode
             g.InterpolationMode = s.Pixel ? InterpolationMode.NearestNeighbor : InterpolationMode.HighQualityBilinear
             g.DrawImage(c, Rectangle(CInt(Double(fx) - Double(cw) / 2.0 * sc), CInt(Double(fy) - Double(ch - mb) * sc), CInt(Double(cw) * sc), CInt(Double(ch) * sc)), 0, 0, cw, ch, GraphicsUnit.Pixel, ia)
@@ -1587,7 +1601,7 @@ extension World
     {
         CuStore.Reset(false)
         if lineup == Pal.Mine && !Pal.HasCustom() { SwitchLineup(Pal.Fallback, ""); return }
-        if lineup != Pal.Mine { return }
+        if lineup != Pal.Mine && !OrigLineup { return }   // 續命小隊的第 4 格也放自己的公仔：一起重建
         // 跟 SwitchLineup 一樣，只是同一櫃也要重建（公仔的資料換了）
         AbortScene()
         ClearProps()
@@ -1653,7 +1667,7 @@ extension World
     {
         if Single && singleId == id { singleId = ""; World.WriteText("mode.txt", "single ") }
         let mine = List<String>(Pal.MineIds()); mine.Remove(id); Pal.SaveMine(mine)
-        if lineup == Pal.Mine { let l: Pet! = Lead(); CuReload(l != nil && l.P.Id != id ? l.P.Id : "") }
+        if lineup == Pal.Mine || OrigLineup { let l: Pet! = Lead(); CuReload(l != nil && l.P.Id != id ? l.P.Id : "") }
         else { CuStore.Reset(false) }
         CuBroadcast()
     }

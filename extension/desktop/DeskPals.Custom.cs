@@ -139,6 +139,14 @@ namespace DeskPals
         public readonly Dictionary<string, Bitmap> Frames = new Dictionary<string, Bitmap>();   // 動作表：stand walk1 walk2 jump sleep happy held sit
         public double Wc { get { return W / (double)R; } }
         public double Hc { get { return H / (double)R; } }
+        // 內建的圖片公仔（續命小隊，DeskPals.Original.cs）：腳底不在畫布底（AnchorX／AnchorY，-1＝底部置中）、圖本身有白邊（NoHalo）、
+        // 身體的範圍（BodyTop／BodyH，stand 的不透明範圍；泡泡、櫃子高度用）、沒電的電量液體（Liquid）
+        public double AnchorX = -1, AnchorY = -1;
+        public bool NoHalo;
+        public int BodyTop = -1, BodyH = -1, BodyLeft = -1, BodyW = -1;
+        public Dictionary<string, SqLiquid> Liquid;
+        public double AX { get { return AnchorX >= 0 ? AnchorX : W / 2.0; } }
+        public double AY { get { return AnchorY >= 0 ? AnchorY : H; } }
         public bool HasFrame(string k) { return Frames.ContainsKey(k); }
 
         public static readonly string[] SheetKeys = { "stand", "walk1", "walk2", "jump", "sleep", "happy", "held", "sit" };
@@ -513,8 +521,8 @@ namespace DeskPals
         public CuMeta Meta;
         public CuSprite Spr;
         public const string Mine = "mine";
-        public static readonly string[] Guests = { "boba", "coffee", "onigiri", "sticky", "spidey", "po", "stitch", "hangyodon", "tinky", "dipsy", "laalaa" };   // 可以來我的櫃作客的內建公仔   //@fan
-        // <public> public static readonly string[] Guests = { "boba", "coffee", "onigiri", "sticky" };
+        public static readonly string[] Guests = { "duoduo", "meidian", "cici", "spidey", "po", "stitch", "hangyodon", "tinky", "dipsy", "laalaa" };   // 可以來我的櫃作客的內建公仔   //@fan
+        // <public> public static readonly string[] Guests = { "duoduo", "meidian", "cici" };
 
         public static void CuReset() { all = null; }
         public static Pal GetBuiltin(string id) { if (all == null) return null; foreach (Pal p in all) if (p.Id == id && !p.Cu) return p; return null; }
@@ -797,12 +805,13 @@ namespace DeskPals
         Bitmap cuOut;
         int[] cuBuf;
         byte[] cuMask, cuTmp;
-        void CuDraw(Graphics g, CuPose p, double feetX, double feetY, int ps, bool fx)
+        void CuDraw(Graphics g, CuPose p, double feetX, double feetY, int ps, bool fx) { CuDrawSc(g, p, feetX, feetY, ps / (float)P.Spr.R, ps, fx); }
+        // sc 自己給：續命小隊在櫃子裡依格子大小縮放（不限整數倍）
+        void CuDrawSc(Graphics g, CuPose p, double feetX, double feetY, float sc, int ps, bool fx)
         {
             CuSprite s = P.Spr;
             int mb, cw, ch;
             CuCanvasSize(s, out cw, out ch, out mb);
-            float sc = ps / (float)s.R;
             int hw = Math.Max(1, ps / 3), pad = hw + 1;
             int tw = (int)Math.Ceiling(cw * sc) + 2 * pad, th = (int)Math.Ceiling(ch * sc) + 2 * pad;
             if (cuOut == null || cuOut.Width != tw || cuOut.Height != th)
@@ -829,7 +838,7 @@ namespace DeskPals
                 else
                     using (Matrix bm = new Matrix(sc, 0, 0, sc, pad, pad)) CuCompose(og, s, p, cw / 2, ch - mb, bm);
             }
-            CuHaloPass(cuOut, hw, Night ? P.HaloNight : P.Halo, Night, fx);
+            CuHaloPass(cuOut, hw, Night ? P.HaloNight : P.Halo, Night, fx, !s.NoHalo);
             int dx = (int)Math.Round(feetX - pad - cw / 2.0 * sc), dy = (int)Math.Round(feetY - pad - (ch - mb) * sc);
             InterpolationMode im = g.InterpolationMode; PixelOffsetMode pom = g.PixelOffsetMode;
             g.InterpolationMode = InterpolationMode.NearestNeighbor; g.PixelOffsetMode = PixelOffsetMode.Half;
@@ -838,7 +847,7 @@ namespace DeskPals
         }
 
         // 白邊（往外 hw 像素的實心框，跟內建公仔一樣）、晚上變暗、左右翻轉：一次掃完（預乘 alpha）
-        void CuHaloPass(Bitmap b, int hw, Color halo, bool night, bool flip)
+        void CuHaloPass(Bitmap b, int hw, Color halo, bool night, bool flip, bool ring)
         {
             int w = b.Width, h = b.Height, n = w * h;
             if (cuBuf == null || cuBuf.Length != n) { cuBuf = new int[n]; cuMask = new byte[n]; cuTmp = new byte[n]; }
@@ -846,7 +855,8 @@ namespace DeskPals
             try
             {
                 for (int y = 0; y < h; y++) System.Runtime.InteropServices.Marshal.Copy(new IntPtr(d.Scan0.ToInt64() + (long)y * d.Stride), cuBuf, y * w, w);
-                // 剪影往外長 hw（先橫再直）
+                // 剪影往外長 hw（先橫再直）；圖本身有白邊的（ring＝false）不加
+                if (ring)
                 for (int y = 0; y < h; y++)
                 {
                     int row = y * w, run = -100000;
@@ -854,6 +864,7 @@ namespace DeskPals
                     run = 100000;
                     for (int x = w - 1; x >= 0; x--) { if (((cuBuf[row + x] >> 24) & 255) >= 60) run = x; if (run - x <= hw) cuTmp[row + x] = 1; }
                 }
+                if (ring)
                 for (int x = 0; x < w; x++)
                 {
                     int run = -100000;
@@ -866,7 +877,7 @@ namespace DeskPals
                 {
                     int v = cuBuf[i], a = (v >> 24) & 255, r = (v >> 16) & 255, gg = (v >> 8) & 255, bb = v & 255;
                     if (night && a > 0) { r = r * 58 / 100 + a * 5 / 255; gg = gg * 60 / 100 + a * 5 / 255; bb = bb * 78 / 100 + a * 18 / 255; }
-                    if (cuMask[i] != 0 && a < 255) { int inv = 255 - a; r += hr * inv / 255; gg += hg * inv / 255; bb += hb * inv / 255; a = 255; }
+                    if (ring && cuMask[i] != 0 && a < 255) { int inv = 255 - a; r += hr * inv / 255; gg += hg * inv / 255; bb += hb * inv / 255; a = 255; }
                     cuBuf[i] = (a << 24) | (Math.Min(255, r) << 16) | (Math.Min(255, gg) << 8) | Math.Min(255, bb);
                 }
                 if (flip)
@@ -882,11 +893,12 @@ namespace DeskPals
 
         static void CuCanvasSize(CuSprite s, out int cw, out int ch, out int mb)
         {
-            int R = s.R, m = Math.Max(s.W, s.H);
+            int R = s.R, ext = (int)Math.Ceiling(2 * Math.Max(s.AX, s.W - s.AX)), m = Math.Max(ext, s.H);
             cw = m + 6 * R + 2;
-            int mt = Math.Max(3 * R + s.H / 6, (s.W - s.H) / 2 + 3 * R);
-            mb = Math.Max(2 * R, (s.W - s.H) / 2 + 2 * R);
-            ch = s.H + mt + mb;
+            int mt = Math.Max(3 * R + s.H / 6, (ext - s.H) / 2 + 3 * R);
+            int below = (int)Math.Ceiling(s.H - s.AY);   // 腳底以下還有圖（跳的動作線、垂下來的電線）
+            mb = Math.Max(2 * R, (ext - s.H) / 2 + 2 * R) + below;
+            ch = (int)Math.Ceiling(s.AY) + mt + mb;
             if (cw % 2 == 1) cw++;
         }
 
@@ -970,13 +982,14 @@ namespace DeskPals
             using (Matrix m = baseM == null ? new Matrix() : baseM.Clone())
             {
                 m.Translate(ox + q(p.X), oy + q(p.Y));
-                if (p.Rot90 != 0) { m.Translate(0, -s.H / 2f); m.Rotate(90 * p.Rot90); m.Translate(0, s.H / 2f); }
-                if (Math.Abs(p.Rot) > 0.01) { float pv = (float)(-s.H * p.PivotY); m.Translate(0, pv); m.Rotate((float)p.Rot); m.Translate(0, -pv); }
+                float ay = (float)s.AY;
+                if (p.Rot90 != 0) { m.Translate(0, -ay / 2f); m.Rotate(90 * p.Rot90); m.Translate(0, ay / 2f); }
+                if (Math.Abs(p.Rot) > 0.01) { float pv = (float)(-ay * p.PivotY); m.Translate(0, pv); m.Rotate((float)p.Rot); m.Translate(0, -pv); }
                 if (Math.Abs(p.Sx - 1) > 0.001 || Math.Abs(p.Sy - 1) > 0.001) m.Scale((float)p.Sx, (float)p.Sy);
-                float L = -(s.W / 2), T = -s.H;
+                float L = s.AnchorX >= 0 ? (float)-s.AnchorX : -(s.W / 2), T = -ay;
                 Bitmap fr;
-                if (p.Frame != null && s.Frames.TryGetValue(p.Frame, out fr)) { CuPut(cg, m, fr, L, T, 0, 0, 0, 0, 0); return; }
-                if (!s.Rig) { CuPut(cg, m, s.Stand, L, T, 0, 0, 0, 0, 0); return; }
+                if (p.Frame != null && s.Frames.TryGetValue(p.Frame, out fr)) { if (s.Liquid != null) { Bitmap lq = SqBattery.Frame(s, p.Frame); if (lq != null) fr = lq; } CuPut(cg, m, fr, L, T, 0, 0, 0, 0, 0); return; }
+                if (!s.Rig) { Bitmap st = s.Stand; if (s.Liquid != null) { Bitmap lq = SqBattery.Frame(s, "stand"); if (lq != null) st = lq; } CuPut(cg, m, st, L, T, 0, 0, 0, 0, 0); return; }
                 // 腳（踩在地上；抬腳往上、轉繞腳的最上面）
                 if (!p.NoLegs)
                 {
@@ -1041,7 +1054,7 @@ namespace DeskPals
             using (Bitmap c = new Bitmap(cw, ch, s.Pixel ? PixelFormat.Format32bppArgb : PixelFormat.Format32bppPArgb))
             {
                 using (Graphics cg = Graphics.FromImage(c)) { cg.Clear(Color.Transparent); CuPose p = new CuPose(); CuCompose(cg, s, p, cw / 2, ch - mb, null); }
-                CuBlit(g, c, s, feetX, feetY, cw, ch, mb, ps, fx, halo, night, 1f);
+                CuBlit(g, c, s, feetX, feetY, cw, ch, mb, ps, fx, s.NoHalo ? Color.Transparent : halo, night, 1f);
             }
         }
 
@@ -1049,6 +1062,7 @@ namespace DeskPals
         void CuAccessories(Graphics g, CuPose p, int sbx, int sby, int ps, bool fx, bool sides)
         {
             CuSprite s = P.Spr;
+            if (s.NoHalo) return;   // 續命小隊：不戴帽子圍巾
             int lv = Level();
             double hc = s.Hc;
             double sy = p.Sy;
@@ -1120,7 +1134,8 @@ namespace DeskPals
         }
 
         // 外出中的格子：淡淡的剪影
-        void CuGhost(Graphics g, int fx, int fy, int ps, bool night)
+        void CuGhost(Graphics g, int fx, int fy, int ps, bool night) { CuGhostSc(g, fx, fy, ps / (float)P.Spr.R, night); }
+        void CuGhostSc(Graphics g, int fx, int fy, float sc, bool night)
         {
             CuSprite s = P.Spr;
             int mb, cw, ch;
@@ -1135,7 +1150,6 @@ namespace DeskPals
                 using (ImageAttributes ia = new ImageAttributes())
                 {
                     ia.SetColorMatrix(cm);
-                    float sc = ps / (float)s.R;
                     InterpolationMode im = g.InterpolationMode;
                     g.InterpolationMode = s.Pixel ? InterpolationMode.NearestNeighbor : InterpolationMode.HighQualityBilinear;
                     g.DrawImage(c, new Rectangle((int)(fx - cw / 2.0 * sc), (int)(fy - (ch - mb) * sc), (int)(cw * sc), (int)(ch * sc)), 0, 0, cw, ch, GraphicsUnit.Pixel, ia);
@@ -1524,7 +1538,7 @@ namespace DeskPals
         {
             CuStore.Reset(false);
             if (lineup == Pal.Mine && !Pal.HasCustom()) { SwitchLineup(Pal.Fallback, ""); return; }
-            if (lineup != Pal.Mine) return;
+            if (lineup != Pal.Mine && !OrigLineup) return;   // 續命小隊的第 4 格也放自己的公仔：一起重建
             // 跟 SwitchLineup 一樣，只是同一櫃也要重建（公仔的資料換了）
             AbortScene();
             ClearProps();
@@ -1588,7 +1602,7 @@ namespace DeskPals
         {
             if (Single && singleId == id) { singleId = ""; WriteText("mode.txt", "single "); }
             List<string> mine = new List<string>(Pal.MineIds()); mine.Remove(id); Pal.SaveMine(mine);
-            if (lineup == Pal.Mine) { Pet l = Lead(); CuReload(l != null && l.P.Id != id ? l.P.Id : ""); }
+            if (lineup == Pal.Mine || OrigLineup) { Pet l = Lead(); CuReload(l != null && l.P.Id != id ? l.P.Id : ""); }
             else CuStore.Reset(false);
             CuBroadcast();
         }

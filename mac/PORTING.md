@@ -34,6 +34,7 @@ mac/
     56_custom_make.swift  DeskPals.CustomMake.cs（CuMaker 做公仔視窗、拖放、開檔／存檔、`custom …` 測試指令）
     57_share.swift      DeskPals.Share.cs（分享短片 GIF89a 編碼器、`.deskpal` 匯出匯入）
     58_fan.swift        DeskPals.Fan.cs（經典一櫃、天線寶寶一櫃的 Pal 資料、專屬動作、串場；個人版才有）
+    59_mischief.swift   DeskPals.Mischief.cs（搗蛋：搶游標、下班清場、購物警察、打字太兇；MisSys／MisFake）
     03_shim_custom_a.swift / 04_shim_custom_b.swift  做公仔用到的 shim（Matrix、ColorMatrix 像素處理、拖放、NSOpenPanel／NSSavePanel）
 ```
 (Line numbers above are from the first port and drift as the C# grows — find your range by the section comments.)
@@ -124,7 +125,7 @@ Override points (Swift `override func`): `OnPaint(_ e: PaintEventArgs)` (`e.Grap
 `Application.Exit()`, `Application.DoEvents()`.
 
 ## Platform differences (decisions)
-- Pipe → Unix domain socket. Path is passed as argv[1] (default `~/Library/Application Support/SpideyDesktop/spidey.sock`). Same line protocol. `claude-hook.js` and the VS Code extension already speak this.
+- Pipe → Unix domain socket. Path is passed as argv[1] (default `~/Library/Application Support/DeskPals/desk-pals.sock`). Same line protocol. `claude-hook.js` and the VS Code extension already speak this.
 - Window list (EnumWindows / GetWindowRect / class names / titles / IsIconic / foreground / z-order) → `CGWindowListCopyWindowInfo(.optionOnScreenOnly, .excludeDesktopElements)`, layer 0 only, skip our own PID, owner name in place of class name, `kCGWindowName` as title when available (may be empty without Screen Recording permission — code must cope). Front-to-back order = z-order. Foreground window = frontmost app's first layer-0 window (`NSWorkspace.shared.frontmostApplication`). See existing `extension/desktop/SpideyDesktop.swift` (≈ line 2100) for working code.
 - Full-screen detection: a layer-0 window of the frontmost app covering a whole screen.
 - Hotkey Ctrl+Alt+S (RegisterHotKey) → Carbon `RegisterEventHotKey` Control+Option+S (see SpideyDesktop.swift ≈ line 1128).
@@ -163,20 +164,23 @@ are spread across files, so:
 
 ## 續命小隊（original lineup）— ported (`mac/src/51_original.swift`)
 
-`extension/desktop/DeskPals.Original.cs` holds the original lineup 「續命小隊」: 半糖 boba / 醒醒 coffee / 糰糰 onigiri / 貼貼 sticky
-— `Pal` data (art is generated from the design source `tools/original_art/final_art.py` into the `像素圖` block; every pal has
-HEAD / HEAD_UP / BODY / BODY_UP / BODY_HUG / LEGS_* plus `F_<face>` rows merged into the stacked frame at `FaceRow`, keeping non-'.'
-pixels of the head), the `Pet` behaviour (state `"orig"` + `oAct`, like Pikmin's `"pik"`), a grid-paper `ShelfForm` background and
-the `World` scenes. DeskPals.cs only has one-line hooks (`P.Orig`, `OrigLineup`, `StartLineup()`); grep `Orig` to find them — every
-one has a Swift counterpart in the core parts (same count: 56 lines).
+`extension/desktop/DeskPals.Original.cs` holds the original lineup 「續命小隊」: 躲躲 duoduo / 沒電 meidian / 刺刺 cici (since 2026-11;
+the old pixel lineup boba / coffee / onigiri / sticky is in git history and its saved data is migrated by `OrigMigrate`). The pals are
+image sprites: `SqArt` reads `extension/desktop/pals/squad/<id>/<1x|2x>/<frame>.png` (+ `squad.txt`: canvas, foot anchor, body box) into a
+`CuSprite` with `AnchorX/AnchorY/NoHalo/BodyH` and draws through the custom-pal path (`CuDraw`); mac always uses 2x (Retina 1:1),
+the .app reads `Contents/Resources/pals`, the extension reads `pals` next to the binary. 沒電's battery liquid (`SqLiquid`, `SqBattery`)
+recolours `<frame>.liquid.png` masks at run time (same integer maths both sides; `battery-dump` is checked against
+`tools/squad_art/levels.json` by `test/desktop-squad.js`). Behaviour is state `"orig"` + `oAct` (frame names in `oPose`), scenes in `World`.
+DeskPals.cs only has one-line hooks (`P.Orig`, `OrigLineup`, `StartLineup()`, `DrawFigureOrig`, `OrigPatted`, `OrigMsg`, `OrigMigrate`); grep `Orig` to find them — every
+one has a Swift counterpart in the core parts.
 When the art changes: re-run `export_cs.py` for the C#, then convert the `像素圖` block the same way (`p.Col('x', …)` → `p.Col("x", …)`,
 `new string[] { … };` → `[ … ]`) — the strings must stay byte-identical.
 Mac differences (all marked `// mac:`):
 - `World.StartLineup()` is `static` (it runs in `World.init` before `super.init`).
 - Fresh install = no `lineup.txt`, `out.txt`, `profile.txt`, `usage.txt` in the data dir → `original` (writes `lineup.txt`), same as
   Windows. Windows treats an existing `%LOCALAPPDATA%\SpideyDesktop` folder as "upgraded from old Spidey"; on mac
-  `~/Library/Application Support/SpideyDesktop` always exists (VS Code keeps the binary and socket there), so the mac checks for the old
-  Spidey data files `bond.txt` / `pats.txt` in it instead (the files `Migrate()` copies).
+  `~/Library/Application Support/SpideyDesktop` also held the program and socket in 0.5–0.8, so the mac checks for the old
+  Spidey data files `bond.txt` / `pats.txt` in it instead (the files `Migrate()` copies). Both go through `World.LegacyDir()`.
 - `OrigPairScene` skips a pair scene when one of the two pets is missing (C# throws inside `Begin` and the exception is swallowed by `Later`).
 
 ## 讀書小幫手 — ported (`mac/src/52_study.swift`)
@@ -210,6 +214,24 @@ The table below is the porting map that was used (C# file → Mac approach). CI 
 Hooks in DeskPals.cs are one-liners (`P.Cu ? … : …`, `if (P.Cu) { CuXxx(); return; }`), next to the existing `P.Pik` hooks — port them in the same places.
 `SetupForm` changed: two steps (選公仔 with the "把你家的貓狗變成桌面公仔" hero card + 匯入, 怎麼擺 with 只要一隻 first); the old 你是？(student/work) step and `World.Student` are gone; first run with no `mode.txt` defaults to 只要一隻.
 
+## 搗蛋 — ported (`mac/src/59_mischief.swift`)
+
+Same names and rules as `DeskPals.Mischief.cs`. Everything that touches the real machine goes through `MisSys`; offscreen mode
+(`DESKPALS_OFFSCREEN=1`) always uses `MisFake` (records calls, fake cursor／windows／key counter／clock), unless `DESKPALS_MISCHIEF_REAL=1`.
+CI drives it with `test/desktop-mischief.js` (same script on both platforms). Hooks in the core parts are one-liners (grep `Mis`):
+`Pet.Step` → `MisStep`, `Watch`／`Free` → `MisBusy`, `PaintPet` → `MisDraw`, `TickInner` → `MisTick`, `OnMsg` default → `MisMsg`,
+`Act` → `"mischief"`, `Start` → `MisStart`, `QuitAll` → `MisQuit`, `NoticeClicked` → `MisClicked`, `Feat`／`SaveFeatures`／`SetFeat` →
+`MisFeatureList`／`MisDefaultOff`／`MisFeatChanged`, `HouseMenu` → `MisHouseMenu`, `Snap` → `MisSnapWins`／`MisSnapCursor`.
+Mac differences (all marked `// mac:`):
+- Cursor: `SetCursorPos` → `CGWarpMouseCursorPosition` (posts no events) + `CGAssociateMouseAndMouseCursorPosition(1)`.
+  "Did the user move": `GetLastInputInfo` → `CGEventSource.secondsSinceLastEventType` turned into a ms timestamp (compared with ±40 ms, same as C#).
+- 下班清場: minimize → hide the whole app (`NSRunningApplication.hide`, one window per app, up to 3), restore → `unhide` (+ `activate` for the front one).
+  No window capture (needs Screen Recording; `CGWindowListCreateImage` is obsoleted): the fake window is always the drawn cartoon window.
+- 打字太兇: low-level keyboard hook → `CGEventSource.counterForEventType(.combinedSessionState, .keyUp)` (a count only). Input Monitoring
+  is requested (`IOHIDRequestAccess`) only when the user turns the switch on in the 小屋 menu — never at startup, never from VS Code pushes.
+- `MisWin.Pid` (mac only) — the app to hide／unhide.
+- Long `+`／`?:` string chains are split (`MisFlags()`) so the Swift type checker doesn't time out.
+
 ## 公開版（`python3 mac/assemble.py --public`）
 
 公開版（上架、公開下載）不帶粉絲作品：`50_pikmin.swift`、`58_fan.swift` 整個檔案不組進去，其他檔案裡跟 C# 一樣的標記照 `tools/variant.py`
@@ -217,3 +239,12 @@ Hooks in DeskPals.cs are one-liners (`P.Cu ? … : …`, `if (P.Cu) { CuXxx(); r
 Swift 沒有 C# 的 `else` 單獨一行的寫法問題，但拿掉 `if` 之後剩下的 `{ … }` 會變成 closure，要寫成 `do { … }`。
 輸出 `build/public/extension/desktop/DeskPals.swift`（不進 repo）；CI 會編譯它並跑離屏測試。
 
+
+## 舊版「Spidey 小夥伴」升級接手（`DeskPals.Fan.cs` ↔ `58_fan.swift`，個人版才有）
+
+`World.LegacyTakeOver()`（`Start()` 裡 `Migrate()` 之後，行尾 `//@fan`）：舊資料夾（Windows `%LOCALAPPDATA%\SpideyDesktop`、Mac
+`~/Library/Application Support/SpideyDesktop`）存在才做事 → 叫舊的收工（Windows pipe `spidey-pet-<帳號>`、Mac 舊資料夾裡的 `spidey.sock`）、
+拿掉舊的開機啟動（Windows「啟動」資料夾的 `Spidey 小夥伴.lnk`、Mac `~/Library/LaunchAgents/local.spidey-pet.plist`）、舊程式檔和舊 log，
+把舊位置的 `claude-hook.js` 換成轉發到 `<DataDir>/claude-hook.js` 的小檔（`~/.claude/settings.json` 的 hooks 可能指著它，settings.json 不動）。
+資料只複製不搬走（`Migrate()` 照舊）。測試用 `DESKPALS_LEGACY_DIR`／`DESKPALS_AUTOSTART_DIR`／`DESKPALS_LEGACY_PIPE`（Windows）指到假的；
+離屏模式沒指定就完全不碰真的。CI：`.github/legacy-upgrade.js`（upgrade／fresh 兩種）。

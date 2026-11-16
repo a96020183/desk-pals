@@ -2166,3 +2166,60 @@ extension World {
         At(d + 6.2) { }
     }
 }
+
+// ================= 舊版「Spidey 小夥伴」升級（DeskPals.Fan.cs 同一段；舊使用者都是個人版，所以只有個人版有這段）=================
+// mac 舊版的東西：~/Library/Application Support/SpideyDesktop（程式、socket spidey.sock、舊版 Spidey 的 bond.txt／pats.txt、
+// claude-hook.js、獨立版的 standalone.json）、~/Library/LaunchAgents/local.spidey-pet.plist、~/Library/Logs/spidey-desktop.log。
+// 新版開起來時接手：叫舊的收工、拿掉舊的 LaunchAgent 和舊程式檔（感情等級由 Migrate() 複製過來，原檔不動）、
+// 舊資料夾的 claude-hook.js 換成轉發到新位置的小檔（有人在 ~/.claude/settings.json 的 hooks 指著它；settings.json 不動）。
+// 全新安裝沒有舊資料夾：什麼都不做、什麼都不建。
+// 測試：DESKPALS_LEGACY_DIR／DESKPALS_AUTOSTART_DIR 指到假的；離屏測試沒指定就完全不碰真的。
+// mac: 舊的 socket 就在舊資料夾裡（Windows 是 pipe，另外有 DESKPALS_LEGACY_PIPE）。
+extension World {
+    static func LegacyDir() -> String {
+        let d = ProcessInfo.processInfo.environment["DESKPALS_LEGACY_DIR"] ?? ""
+        if !d.isEmpty { return d }
+        if App.Offscreen { return "" }
+        return NSHomeDirectory() + "/Library/Application Support/SpideyDesktop"
+    }
+
+    static func LegacyEnv(_ name: String, _ real: String) -> String {
+        let v = ProcessInfo.processInfo.environment[name] ?? ""
+        if !v.isEmpty { return v }
+        return App.Offscreen ? "" : real
+    }
+
+    // 轉發用的 claude-hook.js：交給新位置那支（找不到就安靜結束，絕不擋 Claude）
+    static func LegacyHookStub(_ target: String) -> String {
+        let js = target.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        return "#!/usr/bin/env node\n"
+            + "// 公仔櫃 Desk Pals：這裡是舊版的位置。Claude Code hooks 指著這裡的話，會轉給新位置的 claude-hook.js（設定不用改）。\n"
+            + "try { require(\"" + js + "\"); } catch (e) { process.exit(0); }\n"
+    }
+
+    func LegacyTakeOver() {
+        let old = World.LegacyDir()
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        if old.isEmpty || !fm.fileExists(atPath: old, isDirectory: &isDir) || !isDir.boolValue { return }
+        let sock = (old as NSString).appendingPathComponent("spidey.sock")
+        if fm.fileExists(atPath: sock) && Standalone.Send(sock, "quit") { App.Log("legacy: asked the old one to quit") }
+        let agents = World.LegacyEnv("DESKPALS_AUTOSTART_DIR", NSHomeDirectory() + "/Library/LaunchAgents")
+        if !agents.isEmpty { World.LegacyDelete((agents as NSString).appendingPathComponent("local.spidey-pet.plist")) }
+        if !App.Offscreen { World.LegacyDelete(NSHomeDirectory() + "/Library/Logs/spidey-desktop.log") }
+        for f in ["SpideyDesktop.swift", "SpideyDesktop", "spidey-desktop.sh", "DeskPals.swift", "DeskPals", "desk-pals.sh", "ci-watch.js",
+                  "spidey.sock", "spidey.sock.lock", "standalone.json"] {
+            World.LegacyDelete((old as NSString).appendingPathComponent(f))
+        }
+        let stub = World.LegacyHookStub(World.FilePath("claude-hook.js"))
+        let sp = (old as NSString).appendingPathComponent("claude-hook.js")
+        if (try? String(contentsOfFile: sp, encoding: .utf8)) != stub {
+            if (try? stub.write(toFile: sp, atomically: true, encoding: .utf8)) != nil { App.Log("legacy: claude-hook.js forwards to " + World.DataDir) }
+        }
+    }
+
+    static func LegacyDelete(_ f: String) {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: f) && (try? fm.removeItem(atPath: f)) != nil { App.Log("legacy: removed " + (f as NSString).lastPathComponent) }
+    }
+}

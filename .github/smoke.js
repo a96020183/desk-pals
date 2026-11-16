@@ -35,14 +35,15 @@ const pikmin = [
 	"act flower 60", "act flower wilt", "wait", "wait", "wait", "wait", "snap " + out + "/shot-pikmin-wilt.png",
 	"act flower rest", "wait", "wait", "wait", "wait", "wait", "wait", "snap " + out + "/shot-pikmin-nectar.png", "where",
 ];
-// SMOKE_ORIGINAL=1（Mac 的 job）：全新安裝（沒傳櫃子）→ 預設續命小隊；整櫃、點餐、拿鐵拉花、右鍵選單、午餐、天黑、打烊
+// SMOKE_ORIGINAL=1（Mac 的 job）：全新安裝（沒傳櫃子）→ 預設續命小隊；整櫃、下午三點續命、沒電插在刺刺的盆土裡充電、電量、右鍵選單、午餐、天黑、下班
 const W = (n) => Array(n).fill("wait");
 const original = [
 	"hello", "wait", "snap " + out + "/shot-original-setup.png",
 	"act setup next", "act setup mode:shelf", "act setup next", "wait",
-	"act all", ...W(3), "act scene order", ...W(8), "snap " + out + "/shot-original.png", "where",
-	"act scene boba-coffee", ...W(6), "snap " + out + "/shot-original-latte.png",
-	"act menu boba", "act menuhover 3", "snap " + out + "/shot-original-menu.png", "act menuclose",
+	"act all", ...W(3), "act scene teatime", ...W(8), "snap " + out + "/shot-original.png", "where",
+	"act scene cici-meidian", ...W(6), "snap " + out + "/shot-original-plug.png",
+	"battery-set 15", "act f_sig2 meidian", "wait", "snap " + out + "/shot-original-battery.png", "battery-set 100",
+	"act menu meidian", "act menuhover 1", "snap " + out + "/shot-original-menu.png", "act menuclose",
 	"act lunch", ...W(2), "snap " + out + "/shot-original-lunch.png", "act lunchend", "wait",
 	"act dark", "wait", "snap " + out + "/shot-original-night.png", "act scene byebye", ...W(6), "where",
 ];

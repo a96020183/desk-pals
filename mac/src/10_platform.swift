@@ -97,7 +97,7 @@ enum App {
             // <public> PreviewShelf(a[2], night)
             exit(0)
         }
-        let def = (NSHomeDirectory() as NSString).appendingPathComponent("Library/Application Support/SpideyDesktop/spidey.sock")
+        let def = (NSHomeDirectory() as NSString).appendingPathComponent("Library/Application Support/DeskPals/desk-pals.sock")
         let sock = a.count >= 2 && !a[1].isEmpty ? a[1] : def
         let pet = a.count >= 3 ? a[2] : ""
         let lineup = a.count >= 4 ? a[3] : ""

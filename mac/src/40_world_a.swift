@@ -46,7 +46,7 @@ final class World: Form {
     var SeasonNow = ""
     var birthday = ""
     var nightChecked = -1
-    var forceNight = ProcessInfo.processInfo.environment["SPIDEY_FORCE_DARK"] == "1" ? 1 : -1
+    var forceNight = ProcessInfo.processInfo.environment["DESKPALS_FORCE_DARK"] == "1" ? 1 : -1
     var userHidden = false, sharing = false, fsNow = false
     var CursorStill: Double = 0
     var lastCursor = Point(0, 0)
@@ -86,6 +86,7 @@ final class World: Form {
 
     init(_ pipeName: String, _ pet: String, _ lineupArg: String) {
         self.pipeName = pipeName
+        World.OrigMigrate()   // 舊的像素續命小隊的資料轉給新三隻（只做一次，51_original.swift）
         // 哪一櫃：有傳就用（並記住），沒傳（開機捷徑）就照上次的
         lineup = Pal.NormLineup(lineupArg.isEmpty ? World.StartLineup() : lineupArg)   // 全新安裝：續命小隊（51_original.swift）
         if !lineupArg.isEmpty { World.WriteText("lineup.txt", lineup) }
@@ -105,7 +106,7 @@ final class World: Form {
         pipeName = ""; self.S = S; k = Double(S) / 3.0
         super.init()
         lineup = Pal.NormLineup(lineupId); defaultPet = "po"   //@fan
-        // <public> lineup = Pal.NormLineup(lineupId); defaultPet = "boba"
+        // <public> lineup = Pal.NormLineup(lineupId); defaultPet = "duoduo"
         var seed = 1
         for p in Pal.Lineup(lineup) { Pets.Add(Pet(self, p, S, seed)); seed += 1 }
     }
@@ -114,7 +115,7 @@ final class World: Form {
         pipeName = ""; self.S = S; k = Double(S) / 3.0
         super.init()
         defaultPet = "spidey"   //@fan
-        // <public> defaultPet = "boba"
+        // <public> defaultPet = "duoduo"
         var seed = 1
         for p in Pal.Lineup(Pal.Fallback) { Pets.Add(Pet(self, p, S, seed)); seed += 1 }
     }
@@ -130,8 +131,8 @@ extension World {
     func DefaultPetFor(_ pet: String) -> String {
         for id in Pal.LineupIds(lineup) { if id == pet { return pet } }
         if lineup == Pal.Mine { let mi = Pal.MineIds(); if mi.count > 0 { return mi[0] } }
-        return lineup == Pal.Teletubbies ? "po" : (lineup == Pal.Pikmin ? "pkred" : (lineup == Pal.Original ? "boba" : "spidey"))   //@fan
-        // <public> return "boba"
+        return lineup == Pal.Teletubbies ? "po" : (lineup == Pal.Pikmin ? "pkred" : (lineup == Pal.Original ? "duoduo" : "spidey"))   //@fan
+        // <public> return "duoduo"
     }
 
     // 每一櫃各自記：誰在外面、最近一隻、最愛（經典一櫃沿用原本的檔名）
@@ -193,8 +194,10 @@ extension World {
         if h == 0 { App.Log("no handle") }
         try? FileManager.default.createDirectory(atPath: World.DataDir, withIntermediateDirectories: true)
         Migrate()
+        LegacyTakeOver()   //@fan
         LoadState()
         LoadFeatures()
+        MisStart()   // 搗蛋（59_mischief.swift）
         LoadMode()
         SeasonNow = Season()
         Night = NightNow()
@@ -286,10 +289,10 @@ extension World {
         // <fan>
         // 舊的 Spidey 桌面版好感度搬過來（只複製，不動原檔）
         // mac: 舊的 mac 版 SpideyDesktop.swift 存在 ~/Library/Application Support/SpideyDesktop（bond.txt「xp 日期」、pats.txt「日期 次數」，格式一樣）
-        let old = NSHomeDirectory() + "/Library/Application Support/SpideyDesktop"
+        let old = World.LegacyDir()
         let map: [[String]] = [["bond.txt", "bond-spidey.txt"], ["pats.txt", "pats-spidey.txt"]]
         let fm = FileManager.default
-        for i in 0..<2 {
+        for i in 0..<(old.isEmpty ? 0 : 2) {
             let src = (old as NSString).appendingPathComponent(map[i][0]), dst = World.FilePath(map[i][1])
             if fm.fileExists(atPath: src) && !fm.fileExists(atPath: dst) {
                 if (try? fm.copyItem(atPath: src, toPath: dst)) != nil { App.Log("migrated " + map[i][0]) }
@@ -427,8 +430,8 @@ extension World {
 
     func ShelfClick(_ cell: Int) {
         let p0 = CellPets()[cell]
-        guard let p = p0 else { if cell == 0 && PikLineup { FlowerClicked() }; return }   //@fan
-        // <public> guard let p = p0 else { return }
+        guard let p = p0 else { if cell == 0 && PikLineup { FlowerClicked() } else if OrigLineup { CuOpenMaker(nil, false) }; return }   //@fan
+        // <public> guard let p = p0 else { if OrigLineup { CuOpenMaker(nil, false) }; return }   // 續命小隊的空格＝做一隻自己的公仔
         if p.Out { if p.state != "stowfly" && p.state != "enter" && p.state != "exit" { p.StowToShelf(true) } }
         else { BringOut(p, true) }
     }
@@ -513,6 +516,7 @@ extension World {
         ReminderTick()
         TicketTick()
         StudyTick()          // 讀書小幫手（52_study.swift）：學校行事曆、作業死線、考試倒數、熬夜
+        MisTick(dt)          // 搗蛋（59_mischief.swift）：搶游標、下班清場、購物警察、打字太兇
         DownloadTick(dt)
         ExpireNotice()
         MenuWatch()
@@ -1360,7 +1364,7 @@ extension World {
                 }
             }
         case "quit": QuitAll()
-        default: StudyMsg(c, p, line)   // course／exam／study-…（52_study.swift）
+        default: if !MisMsg(c, p, line) && !OrigMsg(c, p, line) { StudyMsg(c, p, line) }   // mischief-…（59_mischief.swift）；course／exam／study-…（52_study.swift）
         }
     }
 
@@ -1424,12 +1428,14 @@ extension World {
         case "menuclose": if pmenu != nil { pmenu.CloseMenu() }; return
         case "setup": if arg == "" { ShowSetup(false) } else if setupForm != nil && !setupForm.IsDisposed { setupForm.Press(arg) }; return
         case "feature": do { let q = arg.components(separatedBy: "="); if q.count == 2 { SetFeat(q[0], q[1] == "1") } }; return
+        case "mischief": MisAct(arg); return   // 搗蛋：act mischief cursor|clear|shop|typing|restore|stop（59_mischief.swift）
         default: break
         }
         if target != nil && arg != "" { target!.Act(a) } else { l.Act(a) }
     }
 
     func QuitAll() {
+        MisQuit()   // 推走的視窗先全部叫回來、不再數按鍵（59_mischief.swift）
         closing = true
         SaveUsage(); SaveOut()
         lock(clients) { for c in clients { World.Send(c, "bye\n") } }

@@ -174,6 +174,7 @@ extension World {
         if n.NextRound { StartFocus(focusMin); return true }
         if ReminderClicked(p, n) { return true }
         if StudyClicked(p, n) { return true }   // 作業：打開／交了
+        if MisClicked(p, n) { return true }     // 下班清場：把視窗叫回來
         if n.Url != nil {
             if World.OpenUrl(n.Url) { p.Say("好～幫你打開了 👍", 1.4) }
             else { App.Log("open url: failed " + n.Url); p.Say("打不開耶…", 1.4) }
@@ -1416,7 +1417,7 @@ extension Pet {
 extension Pet {
     // 外出中的格子：淡淡的剪影，櫃子還是他的位置
     func DrawGhost(_ g: Graphics, _ fx: Int, _ fy: Int, _ ps: Int, _ night: Bool) {
-        if P.Cu { CuGhost(g, fx, fy, ps, night); return }
+        if P.Spr != nil { CuGhost(g, fx, fy, ps, night); return }
         let rows: [String] = Pal.Stack(A("HEAD"), A("BODY"), A("LEGS_A"))
         let bx = fx - rows[0].Length * ps / 2, by = fy - rows.count * ps
         let c: Color = P.Accent
@@ -1551,7 +1552,7 @@ extension World {
         shelf = ShelfForm(self, S)
         shelf.Place(Rectangle(0, 0, 400, 400))
         let favs: [String] = ["spidey", "po", "stitch", "hangyodon", "po"]   //@fan
-        // <public> let favs: [String] = ["boba", "coffee", "onigiri", "sticky", "boba"]
+        // <public> let favs: [String] = ["duoduo", "meidian", "cici", "duoduo", "meidian"]
         let W0 = shelf.Area.Width + 16, H0 = shelf.Area.Height + 16
         do {
             let b = Bitmap(W0 * favs.count, H0)

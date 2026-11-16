@@ -51,12 +51,12 @@ jobs:
           mkdir -p "$DESKPALS_DATA_DIR"
           printf done > "$DESKPALS_DATA_DIR/profile.txt"; printf shelf > "$DESKPALS_DATA_DIR/mode.txt"
           SOCK="$RUNNER_TEMP/dp-pub-study.sock"
-          build/public/extension/desktop/DeskPals "$SOCK" boba original > run-public-study.log 2>&1 &
+          build/public/extension/desktop/DeskPals "$SOCK" duoduo original > run-public-study.log 2>&1 &
           PID=$!
           sleep 8
           kill -0 $PID || { echo "died at startup"; cat run-public-study.log; exit 1; }
           set +e
-          STUDY_PET=boba node test/desktop-study.js "$SOCK" "$GITHUB_WORKSPACE/public-shots/study"
+          STUDY_PET=duoduo node test/desktop-study.js "$SOCK" "$GITHUB_WORKSPACE/public-shots/study"
           RC=$?
           set -e
           kill -0 $PID 2>/dev/null || { echo "app died during the test"; cat run-public-study.log; exit 1; }
@@ -76,6 +76,46 @@ jobs:
           RC=$?
           set -e
           if kill -0 $PID 2>/dev/null; then echo "did not quit"; kill $PID; RC=1; fi
+          exit $RC
+      # 搗蛋四個玩法：離屏模式一定用假的游標／視窗／按鍵計數（MisFake），不會動到 runner 的滑鼠
+      - name: Public mischief test (grab cursor, clear at off-work, shopping police, typing; fake side effects)
+        run: |
+          export DESKPALS_OFFSCREEN=1 DESKPALS_ISOLATED=1
+          export DESKPALS_DATA_DIR="$RUNNER_TEMP/dp-pub-mis"
+          mkdir -p "$DESKPALS_DATA_DIR"
+          printf done > "$DESKPALS_DATA_DIR/profile.txt"; printf shelf > "$DESKPALS_DATA_DIR/mode.txt"
+          SOCK="$RUNNER_TEMP/dp-pub-mis.sock"
+          build/public/extension/desktop/DeskPals "$SOCK" duoduo original > run-public-mischief.log 2>&1 &
+          PID=$!
+          sleep 8
+          kill -0 $PID || { echo "died at startup"; cat run-public-mischief.log; exit 1; }
+          set +e
+          node test/desktop-mischief.js "$SOCK" "$GITHUB_WORKSPACE/public-shots/mischief" "$HOME/Library/Logs/desk-pals.log"
+          RC=$?
+          set -e
+          grep -E "mischief" "$HOME/Library/Logs/desk-pals.log" | tail -n 40 || true
+          sleep 2
+          if kill -0 $PID 2>/dev/null; then echo "::error::public mischief: desktop did not quit"; kill $PID; RC=1; fi
+          exit $RC
+      - name: Public squad test (續命小隊：圖、沒電的電量、舊資料轉給新三隻)
+        run: |
+          export DESKPALS_OFFSCREEN=1 DESKPALS_ISOLATED=1
+          export DESKPALS_DATA_DIR="$RUNNER_TEMP/dp-pub-squad"
+          mkdir -p "$DESKPALS_DATA_DIR"
+          printf done > "$DESKPALS_DATA_DIR/profile.txt"; printf shelf > "$DESKPALS_DATA_DIR/mode.txt"; printf original > "$DESKPALS_DATA_DIR/lineup.txt"
+          printf 12 > "$DESKPALS_DATA_DIR/bond-boba.txt"; printf 5 > "$DESKPALS_DATA_DIR/bond-coffee.txt"; printf "boba coffee sticky" > "$DESKPALS_DATA_DIR/out-original.txt"
+          SOCK="$RUNNER_TEMP/dp-pub-squad.sock"
+          build/public/extension/desktop/DeskPals "$SOCK" "" "" > run-public-squad.log 2>&1 &
+          PID=$!
+          sleep 8
+          kill -0 $PID || { echo "::error::public squad: died at startup"; cat run-public-squad.log; exit 1; }
+          set +e
+          SQUAD_LEGACY=1 node test/desktop-squad.js "$SOCK" "$GITHUB_WORKSPACE/public-shots/squad" "$DESKPALS_DATA_DIR"
+          RC=$?
+          set -e
+          grep -E "squad|battery" "$HOME/Library/Logs/desk-pals.log" | tail -n 20 || true
+          sleep 2
+          if kill -0 $PID 2>/dev/null; then echo "::error::public squad: desktop did not quit"; kill $PID; RC=1; fi
           exit $RC
       # ---------- 個人版（全部角色，含同人）：跟以前一樣的測試，截圖只放 personal-mac-result ----------
       - name: Personal smoke run (offscreen, all pets, snapshot, quit)
@@ -158,6 +198,33 @@ jobs:
           grep -E "custom|share" "$HOME/Library/Logs/desk-pals.log" | tail -n 60 || true
           if kill -0 $PID 2>/dev/null; then echo "did not quit"; kill $PID; RC=1; fi
           exit $RC
+      - name: Personal mischief test (fake side effects)
+        run: |
+          export DESKPALS_OFFSCREEN=1 DESKPALS_ISOLATED=1
+          export DESKPALS_DATA_DIR="$RUNNER_TEMP/dp-data-mis"
+          mkdir -p "$DESKPALS_DATA_DIR"
+          printf done > "$DESKPALS_DATA_DIR/profile.txt"; printf shelf > "$DESKPALS_DATA_DIR/mode.txt"
+          SOCK="$RUNNER_TEMP/dp-mis.sock"
+          extension/desktop/DeskPals "$SOCK" duoduo original > run-mischief.log 2>&1 &
+          PID=$!
+          sleep 8
+          kill -0 $PID || { echo "::error::personal mischief: died at startup"; cat run-mischief.log; exit 1; }
+          set +e
+          node test/desktop-mischief.js "$SOCK" "$GITHUB_WORKSPACE/shots-mischief" "$HOME/Library/Logs/desk-pals.log"
+          RC=$?
+          set -e
+          grep -E "mischief" "$HOME/Library/Logs/desk-pals.log" | tail -n 40 || true
+          sleep 2
+          if kill -0 $PID 2>/dev/null; then echo "::error::personal mischief: desktop did not quit"; kill $PID; RC=1; fi
+          exit $RC
+      # ---------- 舊版「Spidey 小夥伴」升級接手（個人版）＋全新安裝不會建出舊名字的東西：都在臨時資料夾，不碰 runner 的家目錄 ----------
+      - name: Legacy upgrade takeover (personal) + fresh installs create nothing old (personal, public)
+        run: |
+          T="$RUNNER_TEMP/lg"
+          mkdir -p "$T"
+          node .github/legacy-upgrade.js upgrade "$T/a.sock" "$T/SpideyDesktop" "$T/LaunchAgents" "$T/data" - -- extension/desktop/DeskPals "$T/a.sock" "" ""
+          node .github/legacy-upgrade.js fresh "$T/b.sock" "$T/none-b" "$T/LaunchAgents-b" "$T/data-b" - -- extension/desktop/DeskPals "$T/b.sock" "" ""
+          node .github/legacy-upgrade.js fresh "$T/c.sock" "$T/none-c" "$T/LaunchAgents-c" "$T/data-c" - -- build/public/extension/desktop/DeskPals "$T/c.sock" "" ""
       # ---------- standalone Desk Pals.app / DMG ----------
       - name: Developer ID certificate (only if the secrets exist)
         env:
@@ -207,7 +274,7 @@ jobs:
           # offscreen: same public smoke as above (fresh install → 續命小隊), with the bundled binary
           export DESKPALS_OFFSCREEN=1 DESKPALS_DATA_DIR="$RUNNER_TEMP/dp-data-app"
           SOCK="$RUNNER_TEMP/dp-app.sock"
-          "$BIN" "$SOCK" boba original > run-app.log 2>&1 &
+          "$BIN" "$SOCK" duoduo original > run-app.log 2>&1 &
           PID=$!
           sleep 8
           kill -0 $PID || { echo "died at startup"; cat run-app.log; exit 1; }
@@ -220,13 +287,13 @@ jobs:
           set -e
           APP="$RUNNER_TEMP/apps/Desk Pals.app"
           BIN="$APP/Contents/MacOS/DeskPals"
-          HOME_DIR="$HOME/Library/Application Support/SpideyDesktop"
-          SOCK="$HOME_DIR/spidey.sock"
-          PLIST="$HOME/Library/LaunchAgents/local.spidey-pet.plist"
+          HOME_DIR="$HOME/Library/Application Support/DeskPals"
+          SOCK="$HOME_DIR/desk-pals.sock"
+          PLIST="$HOME/Library/LaunchAgents/local.desk-pals.plist"
           mkdir -p "$HOME/Library/LaunchAgents" "$HOME_DIR"
           # what the VS Code extension leaves behind: LaunchAgent → desk-pals.sh, its own compiled copy running on the same socket
-          printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>Label</key><string>local.spidey-pet</string><key>ProgramArguments</key><array><string>/bin/bash</string><string>%s/desk-pals.sh</string></array></dict></plist>\n' "$HOME_DIR" > "$PLIST"
-          DESKPALS_OFFSCREEN=1 DESKPALS_DATA_DIR="$RUNNER_TEMP/dp-ext" extension/desktop/DeskPals "$SOCK" boba original > run-ext.log 2>&1 &
+          printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>Label</key><string>local.desk-pals</string><key>ProgramArguments</key><array><string>/bin/bash</string><string>%s/desk-pals.sh</string></array></dict></plist>\n' "$HOME_DIR" > "$PLIST"
+          DESKPALS_OFFSCREEN=1 DESKPALS_DATA_DIR="$RUNNER_TEMP/dp-ext" extension/desktop/DeskPals "$SOCK" duoduo original > run-ext.log 2>&1 &
           EXT=$!
           node .github/ping.js "$SOCK"
           # open the .app (not offscreen: this is the real first launch path; the runner has no user to bother)
@@ -248,6 +315,8 @@ jobs:
           node .github/ping.js "$SOCK" quit
           sleep 3
           if kill -0 $STD 2>/dev/null; then echo "did not quit"; kill $STD; exit 1; fi
+          # 全新安裝（這台 runner 沒有舊版）：不能建出舊名字的資料夾、LaunchAgent、紀錄檔
+          if ls -d "$HOME/Library/Application Support/"* "$HOME/Library/LaunchAgents/"* "$HOME/Library/Logs/"* "$HOME_DIR/"* | grep -i spidey; then echo "a fresh install created something with the old name"; exit 1; fi
           rm -f "$PLIST" "$HOME_DIR/standalone.json"
       # 公開版的測試結果（只有續命小隊、自己做的公仔）
       - uses: actions/upload-artifact@v4
@@ -273,8 +342,10 @@ jobs:
             run-original.log
             run-study.log
             run-custom.log
+            run-mischief.log
             shot*.png
             shots-study/*.png
+            shots-mischief/*.png
             custom-out/*.png
             custom-out/*.deskpal
             custom-out/share/*
@@ -333,6 +404,62 @@ jobs:
           Start-Sleep -Seconds 3
           if ((Get-Content "$env:DESKPALS_DATA_DIR\lineup.txt") -ne "original") { throw "fresh install did not start in original" }
           if (-not (Test-Path public-ps1-shots\shot-original.png)) { throw "no snapshot" }
+      # 搗蛋四個玩法（公開版＋個人版）：離屏模式一定用假的游標／視窗／按鍵計數（MisFake），不會動到 runner 的滑鼠、視窗、鍵盤
+      - name: Mischief tests (public + personal, offscreen, fake side effects) + VS Code settings unit test
+        shell: powershell
+        run: |
+          node --test test/mischief.test.js
+          if ($LASTEXITCODE -ne 0) { throw "mischief unit test failed" }
+          $runs = @(@{ n = "pub"; ps1 = "build\public\extension\desktop\desk-pals.ps1"; out = "public-ps1-shots\mischief" }, @{ n = "per"; ps1 = "extension\desktop\desk-pals.ps1"; out = "ps1-shots\mischief" })
+          foreach ($v in $runs) {
+            $env:DESKPALS_OFFSCREEN = "1"; $env:DESKPALS_ISOLATED = "1"
+            $env:DESKPALS_DATA_DIR = "$env:RUNNER_TEMP\dp-mis-" + $v.n
+            New-Item -ItemType Directory -Force $env:DESKPALS_DATA_DIR | Out-Null
+            Set-Content "$env:DESKPALS_DATA_DIR\profile.txt" "done" -NoNewline
+            Set-Content "$env:DESKPALS_DATA_DIR\mode.txt" "shelf" -NoNewline
+            $ps1 = (Resolve-Path $v.ps1).Path
+            $pipe = "desk-pals-mis-" + $v.n
+            Start-Process powershell.exe -ArgumentList "-NoProfile -File `"$ps1`" -PipeName $pipe -Pet duoduo -Lineup original"
+            node .github/ping.js $pipe
+            if ($LASTEXITCODE -ne 0) { throw "desktop did not start (" + $v.n + ")" }
+            New-Item -ItemType Directory -Force $v.out | Out-Null
+            node test/desktop-mischief.js $pipe (Resolve-Path $v.out).Path "$env:TEMP\desk-pals.log"
+            if ($LASTEXITCODE -ne 0) { throw "mischief test failed (" + $v.n + ")" }
+          }
+      # 續命小隊（躲躲、沒電、刺刺）：圖讀得到（VS Code 的 desk-pals.ps1 路徑）、沒電的液面跟 levels.json 一樣、電量改顏色、舊的像素版資料轉過去
+      - name: Squad test (public, desk-pals.ps1)
+        shell: powershell
+        run: |
+          $env:DESKPALS_OFFSCREEN = "1"; $env:DESKPALS_ISOLATED = "1"
+          $env:DESKPALS_DATA_DIR = "$env:RUNNER_TEMP\dp-squad"
+          New-Item -ItemType Directory -Force $env:DESKPALS_DATA_DIR | Out-Null
+          Set-Content "$env:DESKPALS_DATA_DIR\profile.txt" "done" -NoNewline
+          Set-Content "$env:DESKPALS_DATA_DIR\mode.txt" "shelf" -NoNewline
+          Set-Content "$env:DESKPALS_DATA_DIR\lineup.txt" "original" -NoNewline
+          Set-Content "$env:DESKPALS_DATA_DIR\bond-boba.txt" "12" -NoNewline
+          Set-Content "$env:DESKPALS_DATA_DIR\bond-coffee.txt" "5" -NoNewline
+          Set-Content "$env:DESKPALS_DATA_DIR\out-original.txt" "boba coffee sticky" -NoNewline
+          $ps1 = (Resolve-Path "build\public\extension\desktop\desk-pals.ps1").Path
+          Start-Process powershell.exe -ArgumentList "-NoProfile -File `"$ps1`" -PipeName desk-pals-squad"
+          node .github/ping.js desk-pals-squad
+          if ($LASTEXITCODE -ne 0) { throw "desktop did not start (squad)" }
+          New-Item -ItemType Directory -Force public-ps1-shots\squad | Out-Null
+          $env:SQUAD_LEGACY = "1"
+          node test/desktop-squad.js desk-pals-squad (Resolve-Path public-ps1-shots\squad).Path $env:DESKPALS_DATA_DIR
+          if ($LASTEXITCODE -ne 0) { throw "squad test failed" }
+      # 舊版「Spidey 小夥伴」升級接手（個人版）＋全新安裝不會建出舊名字的東西：都在臨時資料夾，不碰 runner 的 %LOCALAPPDATA%、「啟動」資料夾
+      - name: Legacy upgrade takeover (personal) + fresh installs create nothing old (personal, public)
+        shell: powershell
+        run: |
+          $T = "$env:RUNNER_TEMP\lg"
+          $ps1 = (Resolve-Path "extension\desktop\desk-pals.ps1").Path
+          $pub = (Resolve-Path "build\public\extension\desktop\desk-pals.ps1").Path
+          node .github/legacy-upgrade.js upgrade desk-pals-lg-a "$T\SpideyDesktop" "$T\Startup" "$T\data" spidey-pet-lg-a -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ps1 -PipeName desk-pals-lg-a
+          if ($LASTEXITCODE -ne 0) { throw "legacy upgrade test failed" }
+          node .github/legacy-upgrade.js fresh desk-pals-lg-b "$T\none-b" "$T\Startup-b" "$T\data-b" spidey-pet-lg-b -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ps1 -PipeName desk-pals-lg-b
+          if ($LASTEXITCODE -ne 0) { throw "fresh install test (personal) failed" }
+          node .github/legacy-upgrade.js fresh desk-pals-lg-c "$T\none-c" "$T\Startup-c" "$T\data-c" spidey-pet-lg-c -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File $pub -PipeName desk-pals-lg-c
+          if ($LASTEXITCODE -ne 0) { throw "fresh install test (public) failed" }
       - name: Build vsix (public → dist, personal → dist-personal)
         run: |
           python -I build_vsix.py --public
@@ -389,7 +516,7 @@ jobs:
           node .github/ping.js desk-pals-studytest
           node .github/share-check.js desk-pals-studytest $env:DESKPALS_DATA_DIR
           if ($LASTEXITCODE -ne 0) { throw "share GIF failed" }
-          $env:STUDY_PET = "boba"
+          $env:STUDY_PET = "duoduo"
           node test/desktop-study.js desk-pals-studytest exe-shots
           if ($LASTEXITCODE -ne 0) { throw "desktop-study failed" }
           Start-Process dist\DeskPals.exe -ArgumentList "--pipe desk-pals-studytest --quit" -Wait
@@ -416,6 +543,18 @@ jobs:
           $setup = (Get-ChildItem dist\DeskPals-Setup-*.exe).FullName
           powershell -NoProfile -ExecutionPolicy Bypass -File .github\test-installer.ps1 -Setup $setup
           if ($LASTEXITCODE -ne 0) { throw "installer test failed" }
+      # 上面的安裝程式、獨立版都是真的裝在 runner 上（全新安裝）：不能留下舊名字的資料夾、開機捷徑、紀錄檔
+      - name: Real fresh install left nothing with the old name
+        shell: powershell
+        run: |
+          $bad = @()
+          if (Test-Path "$env:LOCALAPPDATA\SpideyDesktop") { $bad += "$env:LOCALAPPDATA\SpideyDesktop" }
+          $bad += @(Get-ChildItem ([Environment]::GetFolderPath("Startup")) -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "spidey" } | ForEach-Object { $_.FullName })
+          $bad += @(Get-ChildItem $env:TEMP -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "spidey" } | ForEach-Object { $_.FullName })
+          $bad += @(Get-ChildItem "$env:LOCALAPPDATA\DeskPals" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "spidey" } | ForEach-Object { $_.FullName })
+          Get-ChildItem "$env:LOCALAPPDATA\DeskPals" -ErrorAction SilentlyContinue | Format-Table Name, Length
+          if ($bad.Count -gt 0) { $bad; throw "a fresh install created something with the old name" }
+          "nothing with the old name"
       - name: MSIX installs and runs (test-signed copy; best effort)
         continue-on-error: true
         shell: powershell
@@ -430,6 +569,7 @@ jobs:
           name: windows-result
           path: |
             public-ps1-shots/*.png
+            public-ps1-shots/mischief/*.png
             exe-shots/*.png
       # 個人版的測試結果（含同人角色的截圖）：只給自己看，不會附到 Release
       - uses: actions/upload-artifact@v4
@@ -438,6 +578,7 @@ jobs:
           name: personal-windows-result
           path: |
             ps1-shots/*.png
+            ps1-shots/mischief/*.png
             personal-exe-shots/*.png
       # 公開版：Release 會附上這些
       - uses: actions/upload-artifact@v4

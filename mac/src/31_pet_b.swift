@@ -473,8 +473,8 @@ extension Pet {
     // 走到／跳到另一隻旁邊（串場前先湊在一起）；回傳大概要幾秒
     @discardableResult
     func ComeNear(_ o: Pet) -> Double {
-        let mul: Double = P.Tubby || o.P.Tubby ? 2.0 : (P.Orig ? 1.6 : 1.35)   // 天線寶寶比較寬（16 格＋道具）   //@fan
-        // <public> let mul: Double = P.Orig ? 1.6 : 1.35
+        let mul: Double = P.Tubby || o.P.Tubby ? 2.0 : (P.Orig ? 2.6 : 1.35)   // 天線寶寶比較寬（16 格＋道具）   //@fan
+        // <public> let mul: Double = P.Orig ? 2.6 : 1.35
         var tx = o.Cx + (Cx > o.Cx ? 1.0 : -1.0) * Double(o.SW) * mul
         let wa = w.WA(o.Cx, o.Foot - 4)
         tx = Pet.Clamp(tx, Double(wa.Left + SW), Double(wa.Right - SW))

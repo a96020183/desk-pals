@@ -99,7 +99,7 @@ extension Pet {
             return false
         }
     }
-    func Free() -> Bool { return Out && !InScene && !dragging && Grounded() && state != "sleep" && state != "hug" && !(Bt > 0 && bubblePri > 0) }
+    func Free() -> Bool { return Out && !InScene && !dragging && Grounded() && state != "sleep" && state != "hug" && !(Bt > 0 && bubblePri > 0) && !MisBusy }
     func SetState(_ s: String, _ dur: Double) { state = s; t = dur }
     func Say(_ s: String?, _ sec: Double) { Say(s, sec, false) }
     func Say(_ s: String?, _ sec: Double, _ alert: Bool) { if string.IsNullOrEmpty(s) || muteChat { return }; bubble = s!; Bt = sec; bubbleAlert = alert; bubbleHint = nil; bubblePri = 0 }
@@ -120,6 +120,7 @@ extension Pet {
         var s = Pick(a)
         var i = 0
         while i + 1 < kv.count { s = s.Replace("{" + kv[i] + "}", kv[i + 1]); i += 2 }
+        if s.IndexOf("{p}") >= 0 { s = s.Replace("{p}", String(SqBattery.Pct)) }   // 沒電的電量（51_original.swift）
         return s
     }
 
@@ -232,6 +233,7 @@ extension Pet {
             return
         }
         if P.Cu && CuPat() { return }
+        if P.Orig && OrigPatted() { return }   // 刺刺被拆穿開花、躲躲躲著被發現就逃跑（51_original.swift）
         let line = !Night && Level() >= 4 && rnd.NextDouble() < 0.4 ? L("pats_hi") : L("pats")
         if Is("hangyodon") && !Night && P.Lines["pats"].contains(line) { jokeT = 2.6 }   //@fan
         if Grounded() { Hug(line, 2.6) }
@@ -281,7 +283,7 @@ extension Pet {
     func Watch(_ dt: Double) {
         if stuckLine != nil { stuckRepeat -= dt; if stuckRepeat <= 0 { Say(stuckLine, 6, true); stuckLine = nil } }
         seekCd -= dt; hoverCd -= dt; lateCd -= dt; saveXpCd -= dt
-        if !Grounded() || state == "hug" || sleepMode || state == "sleep" || InScene || Quiet { return }
+        if !Grounded() || state == "hug" || sleepMode || state == "sleep" || InScene || Quiet || MisBusy { return }   // MisBusy：搗蛋中（59_mischief.swift）
         let c = Cursor.Position
         let cx = Cx, still = w.CursorStill
         let cX = Double(c.X), cY = Double(c.Y)
@@ -335,6 +337,7 @@ extension Pet {
             if f[3] > 2.2 { flakes.RemoveAt(i) }
             i -= 1
         }
+        if MisStep(dt) { return }   // 搗蛋中（59_mischief.swift）
         FollowFast()
         let wa = w.WA(Cx, y + Double(SH) / 2.0)
         if StepSpecial(dt, wa) { return }   // 角色專屬狀態
@@ -716,7 +719,7 @@ extension Pet {
         case "laalaa": line = "進球！🏀 啦啦啦～"
         case "pkred", "pkyellow", "pkblue": line = PikLine("goal")
         // </fan>
-        case "boba", "coffee", "onigiri", "sticky": line = OrigLine("goal")
+        case "duoduo", "meidian", "cici": line = OrigLine("goal")
         default: line = P.Cu ? L("x_goal") : "進球！🏀 Thwip!"   //@fan
         // <public> default: line = P.Cu ? L("x_goal") : "進球！🏀"
         }
@@ -739,7 +742,7 @@ extension Pet {
         case "laalaa": line = "啦啦～進了！"
         case "pkred", "pkyellow", "pkblue": line = PikLine("cheer")
         // </fan>
-        case "boba", "coffee", "onigiri", "sticky": line = OrigLine("cheer")
+        case "duoduo", "meidian", "cici": line = OrigLine("cheer")
         default: line = P.Cu ? L("x_cheer") : "好球！"
         }
         Say(line, 1.4)
@@ -758,7 +761,7 @@ extension Pet {
         case "laalaa": return "差一點！再來一次！"
         case "pkred", "pkyellow", "pkblue": return PikLine("miss")
         // </fan>
-        case "boba", "coffee", "onigiri", "sticky": return OrigLine("miss")
+        case "duoduo", "meidian", "cici": return OrigLine("miss")
         default: break
         }
         return P.Cu ? L("x_miss") : "差一點！再一次？"
@@ -1116,7 +1119,7 @@ extension Pet {
         case "dipsy": if Grounded() { HatToss(true) }; Say(line, 4); Burst(8)
         case "laalaa": if Grounded() { SetState("twirl", 2.4) }; Say(line, 4); for _ in 0..<4 { Mark(0) }; Burst(8)
         // </fan>
-        case "boba", "coffee", "onigiri", "sticky": OrigCelebrate(line, lead)
+        case "duoduo", "meidian", "cici": OrigCelebrate(line, lead)
         default:
             if lead { w.Fireworks(w.WA(Cx, y + Double(SH) / 2.0), 10, -1) }
             if Grounded() { SetState("dance", 3.5) }

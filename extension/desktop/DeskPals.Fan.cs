@@ -2269,5 +2269,86 @@ namespace DeskPals
             At(d + 6.2, delegate { });
         }
     }
+    // ================= 舊版「Spidey 小夥伴」升級（舊使用者都是個人版，所以只有個人版有這段）=================
+    // 舊版的東西：%LOCALAPPDATA%\SpideyDesktop（程式、感情等級 bond.txt／pats.txt、claude-hook.js）、pipe spidey-pet-<帳號>、
+    // 「啟動」資料夾的「Spidey 小夥伴.lnk」、%TEMP%\spidey-desktop.log。新版開起來時接手：
+    //   ・叫舊的收工、拿掉舊的開機捷徑和舊程式檔（感情等級由 Migrate() 複製過來，原檔不動）
+    //   ・舊資料夾的 claude-hook.js 換成轉發到新位置的小檔：有人在 ~/.claude/settings.json 的 hooks 指著它（settings.json 不動）
+    // 全新安裝沒有舊資料夾：什麼都不做、什麼都不建。
+    // 測試：DESKPALS_LEGACY_DIR／DESKPALS_LEGACY_PIPE／DESKPALS_AUTOSTART_DIR 指到假的；離屏測試沒指定就完全不碰真的。
+    // Mac 對應：mac/src/58_fan.swift 同名的一段。
+    partial class World
+    {
+        public static string LegacyDir()
+        {
+            string d = Environment.GetEnvironmentVariable("DESKPALS_LEGACY_DIR");
+            if (!string.IsNullOrEmpty(d)) return d;
+            if (App.Offscreen) return "";
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SpideyDesktop");
+        }
+
+        static string LegacyEnv(string name, string real)
+        {
+            string v = Environment.GetEnvironmentVariable(name);
+            if (!string.IsNullOrEmpty(v)) return v;
+            return App.Offscreen ? "" : real;
+        }
+
+        // 轉發用的 claude-hook.js：交給新位置那支（找不到就安靜結束，絕不擋 Claude）
+        public static string LegacyHookStub(string target)
+        {
+            string js = target.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            return "#!/usr/bin/env node\n"
+                + "// 公仔櫃 Desk Pals：這裡是舊版的位置。Claude Code hooks 指著這裡的話，會轉給新位置的 claude-hook.js（設定不用改）。\n"
+                + "try { require(\"" + js + "\"); } catch (e) { process.exit(0); }\n";
+        }
+
+        void LegacyTakeOver()
+        {
+            string old = LegacyDir();
+            if (old == "" || !Directory.Exists(old)) return;
+            string u = Environment.UserName;
+            if (string.IsNullOrEmpty(u)) u = "me";
+            string pipe = LegacyEnv("DESKPALS_LEGACY_PIPE", "spidey-pet-" + System.Text.RegularExpressions.Regex.Replace(u, "[^A-Za-z0-9_.-]", "_"));
+            if (pipe != "")
+            {
+                // 背景送：舊的沒在跑就等到逾時，不擋啟動
+                System.Threading.ThreadPool.QueueUserWorkItem(delegate
+                {
+                    try
+                    {
+                        using (System.IO.Pipes.NamedPipeClientStream c = new System.IO.Pipes.NamedPipeClientStream(".", pipe, System.IO.Pipes.PipeDirection.Out))
+                        {
+                            c.Connect(1500);
+                            byte[] b = new System.Text.UTF8Encoding(false).GetBytes("quit\n");
+                            c.Write(b, 0, b.Length);
+                            c.Flush();
+                            System.Threading.Thread.Sleep(150);
+                        }
+                        App.Log("legacy: asked the old one to quit");
+                    }
+                    catch { }
+                });
+            }
+            string startup = LegacyEnv("DESKPALS_AUTOSTART_DIR", Environment.GetFolderPath(Environment.SpecialFolder.Startup));
+            if (startup != "") LegacyDelete(Path.Combine(startup, "Spidey 小夥伴.lnk"));
+            if (!App.Offscreen) LegacyDelete(Path.Combine(Path.GetTempPath(), "spidey-desktop.log"));
+            foreach (string f in new string[] { "SpideyDesktop.cs", "spidey-desktop.ps1", "ci-watch.js" }) LegacyDelete(Path.Combine(old, f));
+            try
+            {
+                string stub = LegacyHookStub(Path.Combine(DataDir, "claude-hook.js"));
+                string sp = Path.Combine(old, "claude-hook.js");
+                string have = "";
+                try { have = File.ReadAllText(sp); } catch { }
+                if (have != stub) { File.WriteAllText(sp, stub, new System.Text.UTF8Encoding(false)); App.Log("legacy: claude-hook.js forwards to " + DataDir); }
+            }
+            catch (Exception ex) { App.Log("legacy hook: " + ex.Message); }
+        }
+
+        static void LegacyDelete(string f)
+        {
+            try { if (File.Exists(f)) { File.Delete(f); App.Log("legacy: removed " + Path.GetFileName(f)); } } catch { }
+        }
+    }
 }
 

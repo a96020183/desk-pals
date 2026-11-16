@@ -583,6 +583,7 @@ extension Pet
         }
 
         DrawTicketBadge(g, ox, oy)
+        MisDraw(g, ox, oy)   // 搗蛋的道具、眼淚（59_mischief.swift）
         let fps = Math.Max(1, S / 3)
         for fl in flakes { DrawPix(g, Pet.FLAKE, CInt(fl[0]) - ox - fps, CInt(fl[1]) - oy - fps, fps, false, false, false) }
 
@@ -660,6 +661,7 @@ extension Pet
     func DrawFigure(_ g: Graphics, _ f: Fr, _ sbx: Int, _ sby: Int, _ sps: Int, _ fx: Bool, _ extras: Bool)
     {
         if P.Cu { DrawFigureCu(g, f, sbx, sby, sps, fx, extras); return }   // 自己做的公仔（53_custom.swift）
+        if P.Orig { DrawFigureOrig(g, f, sbx, sby, sps, fx, extras); return }   // 續命小隊（圖片，51_original.swift）
         // 圖一律貼齊 16 格框的底（比較高的角色往上長），Top 再額外上下移
         var rows = f.Rows
         var top = f.Top + 16 - rows.count
@@ -978,8 +980,8 @@ final class ShelfForm: OverlayForm
             g.FillRectangle(LinearGradientBrush(board, w3, w1, 90.0), board)
             g.DrawLine(Pen(Color.FromArgb(Night ? 60 : 110, 255, 235, 205), Math.Max(1.0, dU * 0.4)), board.X, board.Y + 0.5, board.Right, board.Y + 0.5)
             // 名牌
-            let name = pet == nil ? (i == 0 && Pik ? "★ 休息花" : "？") : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)   //@fan
-            // <public> let name = pet == nil ? "？" : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)
+            let name = pet == nil ? (i == 0 && Pik ? "★ 休息花" : (Orig ? "＋ 做公仔" : "？")) : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)   //@fan
+            // <public> let name = pet == nil ? (Orig ? "＋ 做公仔" : "？") : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)
             do
             {
                 let f = Font("Microsoft JhengHei UI", Math.Max(9.0, 6.6 * k), FontStyle.Bold, GraphicsUnit.Pixel)
@@ -1272,12 +1274,12 @@ final class ShelfForm: OverlayForm
             let fx = c.X + c.Width / 2, fy = c.Bottom - plateH - U - (i == 0 ? PedH() : 0)
             g.SetClip(Rectangle(c.X, c.Y, c.Width, c.Height - plateH))
             if pet == nil && i == 0 && Pik { DrawRestFlower(g, c, t) }   //@fan
-            else if pet == nil { DrawUnknown(g, fx, fy, ps) }   //@fan
-            // <public> if pet == nil { DrawUnknown(g, fx, fy, ps) }
-            else if outNow[i] { pet!.DrawGhost(g, fx, fy, ps, Night); DrawAway(g, c, ps) }
+            else if pet == nil { if Orig { DrawMakeSlot(g, c, fx, fy) } else { DrawUnknown(g, fx, fy, ps) } }   //@fan
+            // <public> if pet == nil { if Orig { DrawMakeSlot(g, c, fx, fy) } else { DrawUnknown(g, fx, fy, ps) } }
+            else if outNow[i] { if pet!.P.Orig { pet!.OrigGhost(g, fx, fy, c, Night) } else { pet!.DrawGhost(g, fx, fy, ps, Night) }; DrawAway(g, c, ps) }
             else { pet!.DrawOnShelf(g, fx, fy, ps, c, t) }
             g.ResetClip()
-            if hover == i && pet != nil
+            if hover == i && (pet != nil || Orig)
             {
                 let hp = Pen(Color.FromArgb(150, 255, 236, 160), Math.Max(2.0, dU * 0.7))
                 g.DrawRectangle(hp, c.X + 1, c.Y + 1, c.Width - 3, c.Height - plateH - 2)
@@ -1480,7 +1482,7 @@ extension Pet
             case "pkred", "pkyellow", "pkblue":
                 DrawPikShelf(g, fx, bx, by, ps, flip, tt, blink, cell)
                 // </fan>
-            case "boba", "coffee", "onigiri", "sticky":
+            case "duoduo", "meidian", "cici":
                 DrawOrigShelf(g, fx, bx, by, ps, flip, tt, blink, cell)
             default:
                 if blink { ReplaceFace(&head, "SLEEPY") }
