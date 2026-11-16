@@ -11,6 +11,7 @@ namespace DeskPals
     using System;
     using System.Collections.Generic;
     using System.Drawing;
+    using System.Drawing.Drawing2D;
     using System.Drawing.Imaging;
     using System.IO;
     using System.Windows.Forms;
@@ -88,8 +89,8 @@ namespace DeskPals
             {
                 string[] a = line.Trim().Split(' ');
                 if (a.Length < 8 || a[0] != id || a[1] != r.ToString()) continue;
-                m = new int[6];
-                for (int i = 0; i < 6; i++) int.TryParse(a[i + 2], out m[i]);
+                m = new int[8];
+                for (int i = 0; i < 8 && i + 2 < a.Length; i++) int.TryParse(a[i + 2], out m[i]);
             }
             if (m == null) return null;
             CuSprite s = new CuSprite();
@@ -102,6 +103,7 @@ namespace DeskPals
             }
             s.Stand = s.Frames["stand"]; s.W = s.Stand.Width; s.H = s.Stand.Height;
             s.AnchorX = m[2]; s.AnchorY = m[3] + 1; s.BodyTop = m[4]; s.BodyH = m[5];
+            if (m[7] > 0) { s.BodyLeft = m[6]; s.BodyW = m[7]; }
             s.HeadTop = s.BodyTop; s.HeadCx = m[2]; s.HeadW = s.W / 4; s.NeckCx = m[2]; s.NeckW = s.W / 4;
             s.Neck = s.BodyTop + s.BodyH / 3; s.Hip = s.BodyTop + s.BodyH * 3 / 4; s.Split = m[2];
             s.Main = id == "duoduo" ? Color.FromArgb(0xD8, 0xA8, 0x6C) : (id == "meidian" ? Color.FromArgb(0xFB, 0xF0, 0xDF) : Color.FromArgb(0x90, 0xC0, 0x78));
@@ -272,6 +274,14 @@ namespace DeskPals
         public static readonly string[] OldOriginalIds = { "boba", "coffee", "onigiri", "sticky" };   // 舊的像素版（資料轉給新三隻）
 
         static List<Pal> OrigPals() { return new List<Pal>(new Pal[] { Duoduo(), Meidian(), Cici() }); }
+
+        // 這一櫃有誰：三隻＋（做過自己的公仔的話）第 4 格放你的公仔（我的櫃排第一的那隻）
+        public static string[] OrigLineupIds()
+        {
+            List<string> l = new List<string>(OriginalIds);
+            foreach (string id in MineIds()) if (CuStore.Get(id) != null) { l.Add(id); break; }
+            return l.ToArray();
+        }
 
         // 共用：圖、頭頂超出 16 格的列數、配件不戴
         static Pal OrigBase(string id, string name)
@@ -718,6 +728,8 @@ namespace DeskPals
                 if (SqBattery.Charging) oFull = false;
                 if (BatLink && SqBattery.Pct >= 100 && !oFull && Out && state == "sleep") { oFull = true; }
             }
+            if (oSpaceCd > 0) oSpaceCd -= dt;
+            if (Out && !InScene && !MisBusy && oSpaceCd <= 0 && (state == "walk" || state == "idle")) OrigKeepApart();
             if (state != "orig") return false;
             oT += dt;
             switch (oAct)
@@ -749,6 +761,46 @@ namespace DeskPals
                     return true;
             }
         }
+
+        // 自己閒晃時不要疊在一起：看兩隻的實際寬度，太近就轉身或停一下（串場、搗蛋時不管）
+        double oSpaceCd;
+        void OrigKeepApart()
+        {
+            foreach (Pet o in w.Pets)
+            {
+                if (o == this || !o.Out || o.InScene || !o.Grounded() || Math.Abs(o.Foot - Foot) > 6 * k) continue;
+                double dx = o.Cx - Cx, touch = HalfW(this) + HalfW(o), need = touch + 4 * S;   // 最小間距：身體之間留 4 格
+                if (Math.Abs(dx) >= need) continue;
+                int toward = dx > 0 ? 1 : (dx < 0 ? -1 : (rnd.NextDouble() < 0.5 ? 1 : -1));
+                // 走過去會撞到：轉身（偶爾停一下）
+                if (state == "walk" && toward == dir) { oSpaceCd = 0.6; if (rnd.NextDouble() < 0.7) dir = -dir; else SetState("idle", R(0.6, 1.4)); return; }
+                // 已經疊在一起（例如剛從櫃子出來、串場結束）：往另一邊走開，走到不疊為止
+                if (state == "idle" && Math.Abs(dx) < touch + 2 * k)
+                {
+                    dir = -toward; oSpaceCd = 0.4;
+                    SetState("walk", Math.Min(5, Math.Max(0.5, (need - Math.Abs(dx)) / Math.Max(1, P.Speed * k) + 0.2)));
+                    return;
+                }
+            }
+        }
+        // 看起來多寬的一半（圖片公仔用 stand 的身體寬度，像素公仔用 12 格框）
+        static double HalfW(Pet p)
+        {
+            CuSprite s = p.P.Spr;
+            if (s == null) return p.SW / 2.0;
+            return (s.BodyW > 0 ? s.BodyW : s.W) / (double)s.R * p.S / 2;
+        }
+
+        // 櫃子裡：依自己 stand 的身體大小撐到格子合適的大小（不限整數倍；大格、小格同一個留白規則）
+        public float OrigShelfSc(Rectangle cell, int fy)
+        {
+            CuSprite s = P.Spr;
+            double availH = fy - cell.Y - cell.Height * 0.07;
+            double bw = s.BodyW > 0 ? s.BodyW : s.W;
+            double sc = Math.Min(availH / Math.Max(1, s.BodyH), cell.Width * 0.86 / bw);
+            return (float)Math.Max(0.1, sc);
+        }
+        public void OrigGhost(Graphics g, int fx, int fy, Rectangle cell, bool night) { CuGhostSc(g, fx, fy, OrigShelfSc(cell, fy), night); }
 
         // 刺刺嘴硬之後馬上被摸：被拆穿，開花
         public bool OrigPatted()
@@ -903,7 +955,8 @@ namespace DeskPals
             else if ((tt % 9) < 0.9) fr = "happy";
             if (w.Lunch && !Night) fr = "sit";
             p.Frame = fr;
-            CuDraw(g, p, fx, by + 16 * ps, ps, flip);
+            int fy = by + 16 * ps;
+            CuDrawSc(g, p, fx, fy, OrigShelfSc(cell, fy), ps, flip);
             if (w.Lunch) DrawAt(g, BENTO, 8.5, P.BodyTop, bx, by, ps, flip, false, true);
         }
     }
@@ -937,6 +990,47 @@ namespace DeskPals
                 using (SolidBrush pin = new SolidBrush(Night ? C(0x9A3A3A) : C(0xE04848))) g.FillEllipse(pin, nx + 3.5f * u, ny - 0.8f * u, 2 * u, 2 * u);
             }
             g.Restore(st);
+        }
+    }
+
+    // 續命小隊的第 4 格：「＋ 做一隻你的公仔」入口（點了開做公仔視窗；做好了第 4 格就放那一隻）
+    partial class ShelfForm
+    {
+        void DrawMakeSlot(Graphics g, Rectangle c, int fx, int fy)
+        {
+            // 淡淡的虛線剪影（圓頭＋身體）＋身體上一顆加號＋底下一行小字
+            float h = fy - c.Y;
+            float fs = Math.Max(9f, c.Width * 0.115f);
+            float th = fs * 1.35f;
+            float top = c.Y + h * 0.1f, bot = fy - th - h * 0.03f, sh = bot - top;
+            float hd = sh * 0.36f, gap = sh * 0.05f;
+            float bw = Math.Min(c.Width * 0.56f, sh * 0.78f), bh = sh - hd - gap;
+            RectangleF head = new RectangleF(fx - hd / 2, top, hd, hd);
+            RectangleF body = new RectangleF(fx - bw / 2, top + hd + gap, bw, bh);
+            using (SolidBrush fill = new SolidBrush(Color.FromArgb(Night ? 20 : 50, 255, 255, 255)))
+            using (Pen dash = new Pen(Color.FromArgb(Night ? 110 : 150, 160, 120, 80), Math.Max(1.5f, c.Width * 0.018f)))
+            using (GraphicsPath bp = RoundRect(body, bw * 0.3f))
+            {
+                dash.DashStyle = DashStyle.Dash;
+                g.FillEllipse(fill, head); g.DrawEllipse(dash, head.X, head.Y, head.Width, head.Height);
+                g.FillPath(fill, bp); g.DrawPath(dash, bp);
+            }
+            float cr = Math.Min(bw, bh) * 0.27f, cx = fx, cy = body.Y + bh / 2;
+            using (SolidBrush cb = new SolidBrush(Night ? Color.FromArgb(200, 150, 120, 90) : Color.FromArgb(235, 236, 168, 96)))
+                g.FillEllipse(cb, cx - cr, cy - cr, 2 * cr, 2 * cr);
+            using (Pen pl = new Pen(Color.White, Math.Max(2f, cr * 0.32f)))
+            {
+                pl.StartCap = LineCap.Round; pl.EndCap = LineCap.Round;
+                g.DrawLine(pl, cx - cr * 0.5f, cy, cx + cr * 0.5f, cy);
+                g.DrawLine(pl, cx, cy - cr * 0.5f, cx, cy + cr * 0.5f);
+            }
+            using (Font f = new Font("Microsoft JhengHei UI", fs, FontStyle.Bold, GraphicsUnit.Pixel))
+            using (SolidBrush tb = new SolidBrush(Night ? Color.FromArgb(200, 232, 224, 244) : Color.FromArgb(225, 128, 84, 52)))
+            using (StringFormat sf = new StringFormat())
+            {
+                sf.Alignment = StringAlignment.Center; sf.LineAlignment = StringAlignment.Center;
+                g.DrawString("做一隻你的公仔", f, tb, new RectangleF(c.X, fy - th, c.Width, th), sf);
+            }
         }
     }
 

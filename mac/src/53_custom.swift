@@ -150,7 +150,7 @@ final class CuSprite
     // 身體的範圍（BodyTop／BodyH，stand 的不透明範圍；泡泡、櫃子高度用）、沒電的電量液體（Liquid）
     var AnchorX: Double = -1, AnchorY: Double = -1
     var NoHalo = false
-    var BodyTop = -1, BodyH = -1
+    var BodyTop = -1, BodyH = -1, BodyLeft = -1, BodyW = -1
     var Liquid: Dict<String, SqLiquid>! = nil
     var AX: Double { return AnchorX >= 0 ? AnchorX : Double(W) / 2.0 }
     var AY: Double { return AnchorY >= 0 ? AnchorY : Double(H) }
@@ -842,12 +842,13 @@ extension Pet
     // ---------- 畫：先在小畫布上把頭／身體／腳組起來，再放大畫上去（加白邊、晚上變暗） ----------
     // 每一格：直接組在「螢幕大小」的小圖上（像素風先在格子大小組好再放大），
     // 再一次把白邊、晚上變暗、左右翻轉做完（逐像素），最後原尺寸貼上去——四隻一起跑也不會卡
-    func CuDraw(_ g: Graphics, _ p: CuPose, _ feetX: Double, _ feetY: Double, _ ps: Int, _ fx: Bool)
+    func CuDraw(_ g: Graphics, _ p: CuPose, _ feetX: Double, _ feetY: Double, _ ps: Int, _ fx: Bool) { CuDrawSc(g, p, feetX, feetY, Double(ps) / Double(P.Spr.R), ps, fx) }
+    // sc 自己給：續命小隊在櫃子裡依格子大小縮放（不限整數倍）
+    func CuDrawSc(_ g: Graphics, _ p: CuPose, _ feetX: Double, _ feetY: Double, _ sc: Double, _ ps: Int, _ fx: Bool)
     {
         let s: CuSprite = P.Spr
         var mb = 0, cw = 0, ch = 0
         Pet.CuCanvasSize(s, &cw, &ch, &mb)
-        let sc = Double(ps) / Double(s.R)
         let hw = Math.Max(1, ps / 3), pad = hw + 1
         let tw = CInt(Math.Ceiling(Double(cw) * sc)) + 2 * pad, th = CInt(Math.Ceiling(Double(ch) * sc)) + 2 * pad
         if cuOut == nil || cuOut.Width != tw || cuOut.Height != th
@@ -1184,7 +1185,8 @@ extension Pet
     }
 
     // 外出中的格子：淡淡的剪影
-    func CuGhost(_ g: Graphics, _ fx: Int, _ fy: Int, _ ps: Int, _ night: Bool)
+    func CuGhost(_ g: Graphics, _ fx: Int, _ fy: Int, _ ps: Int, _ night: Bool) { CuGhostSc(g, fx, fy, Double(ps) / Double(P.Spr.R), night) }
+    func CuGhostSc(_ g: Graphics, _ fx: Int, _ fy: Int, _ sc: Double, _ night: Bool)
     {
         let s: CuSprite = P.Spr
         var mb = 0, cw = 0, ch = 0
@@ -1198,7 +1200,6 @@ extension Pet
         do {
             let ia = ImageAttributes()
             ia.SetColorMatrix(cm)
-            let sc = Double(ps) / Double(s.R)
             let im = g.InterpolationMode
             g.InterpolationMode = s.Pixel ? InterpolationMode.NearestNeighbor : InterpolationMode.HighQualityBilinear
             g.DrawImage(c, Rectangle(CInt(Double(fx) - Double(cw) / 2.0 * sc), CInt(Double(fy) - Double(ch - mb) * sc), CInt(Double(cw) * sc), CInt(Double(ch) * sc)), 0, 0, cw, ch, GraphicsUnit.Pixel, ia)
@@ -1600,7 +1601,7 @@ extension World
     {
         CuStore.Reset(false)
         if lineup == Pal.Mine && !Pal.HasCustom() { SwitchLineup(Pal.Fallback, ""); return }
-        if lineup != Pal.Mine { return }
+        if lineup != Pal.Mine && !OrigLineup { return }   // 續命小隊的第 4 格也放自己的公仔：一起重建
         // 跟 SwitchLineup 一樣，只是同一櫃也要重建（公仔的資料換了）
         AbortScene()
         ClearProps()
@@ -1666,7 +1667,7 @@ extension World
     {
         if Single && singleId == id { singleId = ""; World.WriteText("mode.txt", "single ") }
         let mine = List<String>(Pal.MineIds()); mine.Remove(id); Pal.SaveMine(mine)
-        if lineup == Pal.Mine { let l: Pet! = Lead(); CuReload(l != nil && l.P.Id != id ? l.P.Id : "") }
+        if lineup == Pal.Mine || OrigLineup { let l: Pet! = Lead(); CuReload(l != nil && l.P.Id != id ? l.P.Id : "") }
         else { CuStore.Reset(false) }
         CuBroadcast()
     }

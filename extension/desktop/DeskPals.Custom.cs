@@ -143,7 +143,7 @@ namespace DeskPals
         // 身體的範圍（BodyTop／BodyH，stand 的不透明範圍；泡泡、櫃子高度用）、沒電的電量液體（Liquid）
         public double AnchorX = -1, AnchorY = -1;
         public bool NoHalo;
-        public int BodyTop = -1, BodyH = -1;
+        public int BodyTop = -1, BodyH = -1, BodyLeft = -1, BodyW = -1;
         public Dictionary<string, SqLiquid> Liquid;
         public double AX { get { return AnchorX >= 0 ? AnchorX : W / 2.0; } }
         public double AY { get { return AnchorY >= 0 ? AnchorY : H; } }
@@ -805,12 +805,13 @@ namespace DeskPals
         Bitmap cuOut;
         int[] cuBuf;
         byte[] cuMask, cuTmp;
-        void CuDraw(Graphics g, CuPose p, double feetX, double feetY, int ps, bool fx)
+        void CuDraw(Graphics g, CuPose p, double feetX, double feetY, int ps, bool fx) { CuDrawSc(g, p, feetX, feetY, ps / (float)P.Spr.R, ps, fx); }
+        // sc 自己給：續命小隊在櫃子裡依格子大小縮放（不限整數倍）
+        void CuDrawSc(Graphics g, CuPose p, double feetX, double feetY, float sc, int ps, bool fx)
         {
             CuSprite s = P.Spr;
             int mb, cw, ch;
             CuCanvasSize(s, out cw, out ch, out mb);
-            float sc = ps / (float)s.R;
             int hw = Math.Max(1, ps / 3), pad = hw + 1;
             int tw = (int)Math.Ceiling(cw * sc) + 2 * pad, th = (int)Math.Ceiling(ch * sc) + 2 * pad;
             if (cuOut == null || cuOut.Width != tw || cuOut.Height != th)
@@ -1133,7 +1134,8 @@ namespace DeskPals
         }
 
         // 外出中的格子：淡淡的剪影
-        void CuGhost(Graphics g, int fx, int fy, int ps, bool night)
+        void CuGhost(Graphics g, int fx, int fy, int ps, bool night) { CuGhostSc(g, fx, fy, ps / (float)P.Spr.R, night); }
+        void CuGhostSc(Graphics g, int fx, int fy, float sc, bool night)
         {
             CuSprite s = P.Spr;
             int mb, cw, ch;
@@ -1148,7 +1150,6 @@ namespace DeskPals
                 using (ImageAttributes ia = new ImageAttributes())
                 {
                     ia.SetColorMatrix(cm);
-                    float sc = ps / (float)s.R;
                     InterpolationMode im = g.InterpolationMode;
                     g.InterpolationMode = s.Pixel ? InterpolationMode.NearestNeighbor : InterpolationMode.HighQualityBilinear;
                     g.DrawImage(c, new Rectangle((int)(fx - cw / 2.0 * sc), (int)(fy - (ch - mb) * sc), (int)(cw * sc), (int)(ch * sc)), 0, 0, cw, ch, GraphicsUnit.Pixel, ia);
@@ -1537,7 +1538,7 @@ namespace DeskPals
         {
             CuStore.Reset(false);
             if (lineup == Pal.Mine && !Pal.HasCustom()) { SwitchLineup(Pal.Fallback, ""); return; }
-            if (lineup != Pal.Mine) return;
+            if (lineup != Pal.Mine && !OrigLineup) return;   // 續命小隊的第 4 格也放自己的公仔：一起重建
             // 跟 SwitchLineup 一樣，只是同一櫃也要重建（公仔的資料換了）
             AbortScene();
             ClearProps();
@@ -1601,7 +1602,7 @@ namespace DeskPals
         {
             if (Single && singleId == id) { singleId = ""; WriteText("mode.txt", "single "); }
             List<string> mine = new List<string>(Pal.MineIds()); mine.Remove(id); Pal.SaveMine(mine);
-            if (lineup == Pal.Mine) { Pet l = Lead(); CuReload(l != null && l.P.Id != id ? l.P.Id : ""); }
+            if (lineup == Pal.Mine || OrigLineup) { Pet l = Lead(); CuReload(l != null && l.P.Id != id ? l.P.Id : ""); }
             else CuStore.Reset(false);
             CuBroadcast();
         }

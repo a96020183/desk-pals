@@ -623,10 +623,10 @@ namespace DeskPals
         public static string[] LineupIds(string lineup)
         {
             if (NormLineup(lineup) == Pikmin) return (string[])PikminIds.Clone();   // 皮克敏一櫃：大格是休息花（DeskPals.Pikmin.cs）   //@fan
-            if (NormLineup(lineup) == Original) return (string[])OriginalIds.Clone();   // 續命小隊（DeskPals.Original.cs）
+            if (NormLineup(lineup) == Original) return OrigLineupIds();   // 續命小隊（DeskPals.Original.cs；第 4 格放你自己做的公仔）
             if (NormLineup(lineup) == Mine) return MineIds();                       // 我的櫃：自己做的公仔（DeskPals.Custom.cs）
             return NormLineup(lineup) == Teletubbies ? new string[] { "tinky", "dipsy", "laalaa", "po" } : new string[] { "spidey", "po", "stitch", "hangyodon" };   //@fan
-            // <public> return (string[])OriginalIds.Clone();
+            // <public> return OrigLineupIds();
         }
         public static List<Pal> Lineup(string lineup)
         {
@@ -3250,8 +3250,8 @@ namespace DeskPals
                     using (LinearGradientBrush lb = new LinearGradientBrush(board, w3, w1, 90f)) g.FillRectangle(lb, board);
                     using (Pen edge = new Pen(Color.FromArgb(Night ? 60 : 110, 255, 235, 205), Math.Max(1f, U * 0.4f))) g.DrawLine(edge, board.X, board.Y + 0.5f, board.Right, board.Y + 0.5f);
                     // 名牌
-                    string name = pet == null ? (i == 0 && Pik ? "★ 休息花" : "？") : (i == 0 ? "★ " + pet.P.Name : pet.P.Name);   //@fan
-                    // <public> string name = pet == null ? "？" : (i == 0 ? "★ " + pet.P.Name : pet.P.Name);
+                    string name = pet == null ? (i == 0 && Pik ? "★ 休息花" : (Orig ? "＋ 做公仔" : "？")) : (i == 0 ? "★ " + pet.P.Name : pet.P.Name);   //@fan
+                    // <public> string name = pet == null ? (Orig ? "＋ 做公仔" : "？") : (i == 0 ? "★ " + pet.P.Name : pet.P.Name);
                     using (Font f = new Font("Microsoft JhengHei UI", (float)Math.Max(9, 6.6 * k), FontStyle.Bold, GraphicsUnit.Pixel))
                     {
                         SizeF ts = g.MeasureString(name, f);
@@ -3538,12 +3538,12 @@ namespace DeskPals
                     int fx = c.X + c.Width / 2, fy = c.Bottom - plateH - U - (i == 0 ? PedH() : 0);
                     g.SetClip(new Rectangle(c.X, c.Y, c.Width, c.Height - plateH));
                     if (pet == null && i == 0 && Pik) DrawRestFlower(g, c, t);   //@fan
-                    else if (pet == null) DrawUnknown(g, fx, fy, ps);   //@fan
-                    // <public> if (pet == null) DrawUnknown(g, fx, fy, ps);
-                    else if (outNow[i]) { pet.DrawGhost(g, fx, fy, ps, Night); DrawAway(g, c, ps); }
+                    else if (pet == null) { if (Orig) DrawMakeSlot(g, c, fx, fy); else DrawUnknown(g, fx, fy, ps); }   //@fan
+                    // <public> if (pet == null) { if (Orig) DrawMakeSlot(g, c, fx, fy); else DrawUnknown(g, fx, fy, ps); }
+                    else if (outNow[i]) { if (pet.P.Orig) pet.OrigGhost(g, fx, fy, c, Night); else pet.DrawGhost(g, fx, fy, ps, Night); DrawAway(g, c, ps); }
                     else pet.DrawOnShelf(g, fx, fy, ps, c, t);
                     g.ResetClip();
-                    if (hover == i && pet != null)
+                    if (hover == i && (pet != null || Orig))
                         using (Pen hp = new Pen(Color.FromArgb(150, 255, 236, 160), Math.Max(2f, U * 0.7f)))
                             g.DrawRectangle(hp, c.X + 1, c.Y + 1, c.Width - 3, c.Height - plateH - 2);
                 }
@@ -4195,8 +4195,8 @@ namespace DeskPals
         public void ShelfClick(int cell)
         {
             Pet p = CellPets()[cell];
-            if (p == null) { if (cell == 0 && PikLineup) FlowerClicked(); return; }   //@fan
-            // <public> if (p == null) { return; }
+            if (p == null) { if (cell == 0 && PikLineup) FlowerClicked(); else if (OrigLineup) CuOpenMaker(null, false); return; }   //@fan
+            // <public> if (p == null) { if (OrigLineup) CuOpenMaker(null, false); return; }   // 續命小隊的空格＝做一隻自己的公仔
             if (p.Out) { if (p.state != "stowfly" && p.state != "enter" && p.state != "exit") p.StowToShelf(true); }
             else BringOut(p, true);
         }

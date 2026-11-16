@@ -963,7 +963,7 @@ namespace DeskPals
                 case "delete": CuDelete(rest); break;
                 case "export": if (p.Length > 3) CuExport(p[2], t.Substring(t.IndexOf(p[2]) + p[2].Length + 1)); break;
                 case "importpal": CuImportFile(rest, false); break;
-                case "mine": { List<string> l = new List<string>(rest.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries)); Pal.SaveMine(l); if (lineup == Pal.Mine) CuReload(l.Count > 0 ? l[0] : ""); else CuStore.Reset(false); } break;
+                case "mine": { List<string> l = new List<string>(rest.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries)); Pal.SaveMine(l); if (lineup == Pal.Mine) CuReload(l.Count > 0 ? l[0] : ""); else if (OrigLineup) CuReload(""); else CuStore.Reset(false); } break;
                 case "callout": CuCallOut(rest); break;
                 case "fakewin": CuSetFakeWin(new Rectangle((int)a0, (int)a1, (int)a2, (int)a3)); break;   // 測試：custom fakewin x y w h
                 case "pet":

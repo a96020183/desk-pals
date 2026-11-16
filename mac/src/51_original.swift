@@ -53,8 +53,8 @@ enum SqArt
         for line in meta.components(separatedBy: "\n") {
             let a = line.Trim().components(separatedBy: " ")
             if a.count < 8 || a[0] != id || a[1] != String(r) { continue }
-            var mm = [Int](repeating: 0, count: 6)
-            for i in 0..<6 { mm[i] = Int(a[i + 2]) ?? 0 }
+            var mm = [Int](repeating: 0, count: 8)
+            for i in 0..<8 where i + 2 < a.count { mm[i] = Int(a[i + 2]) ?? 0 }
             m = mm
         }
         guard let mv = m else { return nil }
@@ -66,6 +66,7 @@ enum SqArt
         }
         s.Stand = s.Frames["stand"]; s.W = s.Stand.Width; s.H = s.Stand.Height
         s.AnchorX = Double(mv[2]); s.AnchorY = Double(mv[3] + 1); s.BodyTop = mv[4]; s.BodyH = mv[5]
+        if mv[7] > 0 { s.BodyLeft = mv[6]; s.BodyW = mv[7] }
         s.HeadTop = s.BodyTop; s.HeadCx = mv[2]; s.HeadW = s.W / 4; s.NeckCx = mv[2]; s.NeckW = s.W / 4
         s.Neck = s.BodyTop + s.BodyH / 3; s.Hip = s.BodyTop + s.BodyH * 3 / 4; s.Split = mv[2]
         if id == "duoduo" { s.Main = Color.FromArgb(0xD8, 0xA8, 0x6C) }
@@ -243,6 +244,13 @@ extension Pal {
     static let OldOriginalIds: [String] = ["boba", "coffee", "onigiri", "sticky"]   // 舊的像素版（資料轉給新三隻）
 
     static func OrigPals() -> List<Pal> { return List<Pal>([Duoduo(), Meidian(), Cici()]) }
+
+    // 這一櫃有誰：三隻＋（做過自己的公仔的話）第 4 格放你的公仔（我的櫃排第一的那隻）
+    static func OrigLineupIds() -> [String] {
+        var l: [String] = OriginalIds
+        for id in MineIds() { if CuStore.Get(id) != nil { l.append(id); break } }
+        return l
+    }
 
     // 共用：圖、頭頂超出 16 格的列數、配件不戴
     static func OrigBase(_ id: String, _ name: String) -> Pal
@@ -492,6 +500,7 @@ extension Pal {
     var oPend: String? = nil; var oPendDur: Double = 0
     var oFull = false
     var oTx: Double = Double.nan
+    var oSpaceCd: Double = 0
 //@@END
 
 extension Pet {
@@ -669,6 +678,8 @@ extension Pet {
             if SqBattery.Charging { oFull = false }
             if BatLink && SqBattery.Pct >= 100 && !oFull && Out && state == "sleep" { oFull = true }
         }
+        if oSpaceCd > 0 { oSpaceCd -= dt }
+        if Out && !InScene && !MisBusy && oSpaceCd <= 0 && (state == "walk" || state == "idle") { OrigKeepApart() }
         if state != "orig" { return false }
         oT += dt
         switch oAct {
@@ -696,6 +707,43 @@ extension Pet {
             return true
         }
     }
+
+    // 自己閒晃時不要疊在一起：看兩隻的實際寬度，太近就轉身或停一下（串場、搗蛋時不管）
+    func OrigKeepApart() {
+        for o in w.Pets {
+            if o === self || !o.Out || o.InScene || !o.Grounded() || Math.Abs(o.Foot - Foot) > 6 * k { continue }
+            let dx = o.Cx - Cx
+            let touch: Double = Pet.HalfW(self) + Pet.HalfW(o)
+            let need: Double = touch + 4 * Double(S)   // 最小間距：身體之間留 4 格
+            if Math.Abs(dx) >= need { continue }
+            var toward = rnd.NextDouble() < 0.5 ? 1 : -1
+            if dx > 0 { toward = 1 } else if dx < 0 { toward = -1 }
+            // 走過去會撞到：轉身（偶爾停一下）
+            if state == "walk" && toward == dir { oSpaceCd = 0.6; if rnd.NextDouble() < 0.7 { dir = -dir } else { SetState("idle", R(0.6, 1.4)) }; return }
+            // 已經疊在一起（例如剛從櫃子出來、串場結束）：往另一邊走開，走到不疊為止
+            if state == "idle" && Math.Abs(dx) < touch + 2 * k {
+                dir = -toward; oSpaceCd = 0.4
+                SetState("walk", Math.Min(5.0, Math.Max(0.5, (need - Math.Abs(dx)) / Math.Max(1.0, P.Speed * k) + 0.2)))
+                return
+            }
+        }
+    }
+    // 看起來多寬的一半（圖片公仔用 stand 的身體寬度，像素公仔用 12 格框）
+    static func HalfW(_ p: Pet) -> Double {
+        guard let s = p.P.Spr else { return Double(p.SW) / 2.0 }
+        let bw: Double = s.BodyW > 0 ? Double(s.BodyW) : Double(s.W)
+        return bw / Double(s.R) * Double(p.S) / 2
+    }
+
+    // 櫃子裡：依自己 stand 的身體大小撐到格子合適的大小（不限整數倍；大格、小格同一個留白規則）
+    func OrigShelfSc(_ cell: Rectangle, _ fy: Int) -> Double {
+        let s: CuSprite = P.Spr
+        let availH: Double = Double(fy - cell.Y) - Double(cell.Height) * 0.07
+        let bw: Double = s.BodyW > 0 ? Double(s.BodyW) : Double(s.W)
+        let sc = Math.Min(availH / Double(Math.Max(1, s.BodyH)), Double(cell.Width) * 0.86 / bw)
+        return Math.Max(0.1, sc)
+    }
+    func OrigGhost(_ g: Graphics, _ fx: Int, _ fy: Int, _ cell: Rectangle, _ night: Bool) { CuGhostSc(g, fx, fy, OrigShelfSc(cell, fy), night) }
 
     // 刺刺嘴硬之後馬上被摸：被拆穿，開花；躲躲躲著被點：被發現了，逃跑
     func OrigPatted() -> Bool {
@@ -833,7 +881,8 @@ extension Pet {
         else if tt.truncatingRemainder(dividingBy: 9) < 0.9 { fr = "happy" }
         if w.Lunch && !Night { fr = "sit" }
         p.Frame = fr
-        CuDraw(g, p, Double(fx), Double(by + 16 * ps), ps, flip)
+        let fy = by + 16 * ps
+        CuDrawSc(g, p, Double(fx), Double(fy), OrigShelfSc(cell, fy), ps, flip)
         if w.Lunch { DrawAt(g, Pet.BENTO, 8.5, Double(P.BodyTop), bx, by, ps, flip, false, true) }
     }
 }
@@ -870,6 +919,38 @@ extension ShelfForm {
             g.FillEllipse(SolidBrush(Night ? C(0x9A3A3A) : C(0xE04848)), nx + 3.5 * du, ny - 0.8 * du, 2 * du, 2 * du)
         }
         g.Restore(st)
+    }
+}
+
+// 續命小隊的第 4 格：「＋ 做一隻你的公仔」入口（點了開做公仔視窗；做好了第 4 格就放那一隻）
+extension ShelfForm {
+    func DrawMakeSlot(_ g: Graphics, _ c: Rectangle, _ fx: Int, _ fy: Int) {
+        // 淡淡的虛線剪影（圓頭＋身體）＋身體上一顆加號＋底下一行小字
+        let h = Double(fy - c.Y), cwd = Double(c.Width), dfx = Double(fx), dfy = Double(fy)
+        let fs = Math.Max(9.0, cwd * 0.115)
+        let th = fs * 1.35
+        let top = Double(c.Y) + h * 0.1, bot = dfy - th - h * 0.03, sh = bot - top
+        let hd = sh * 0.36, gap = sh * 0.05
+        let bw = Math.Min(cwd * 0.56, sh * 0.78), bh = sh - hd - gap
+        let head = RectangleF(dfx - hd / 2, top, hd, hd)
+        let body = RectangleF(dfx - bw / 2, top + hd + gap, bw, bh)
+        let fill = SolidBrush(Color.FromArgb(Night ? 20 : 50, 255, 255, 255))
+        let dash = Pen(Color.FromArgb(Night ? 110 : 150, 160, 120, 80), Math.Max(1.5, cwd * 0.018))
+        dash.DashStyle = DashStyle.Dash
+        let bp = RoundRect(body, bw * 0.3)
+        g.FillEllipse(fill, head); g.DrawEllipse(dash, head.X, head.Y, head.Width, head.Height)
+        g.FillPath(fill, bp); g.DrawPath(dash, bp)
+        let cr = Math.Min(bw, bh) * 0.27, cx = dfx, cy = body.Y + bh / 2
+        g.FillEllipse(SolidBrush(Night ? Color.FromArgb(200, 150, 120, 90) : Color.FromArgb(235, 236, 168, 96)), cx - cr, cy - cr, 2 * cr, 2 * cr)
+        let pl = Pen(Color.White, Math.Max(2.0, cr * 0.32))
+        pl.StartCap = LineCap.Round; pl.EndCap = LineCap.Round
+        g.DrawLine(pl, cx - cr * 0.5, cy, cx + cr * 0.5, cy)
+        g.DrawLine(pl, cx, cy - cr * 0.5, cx, cy + cr * 0.5)
+        let f = Font("Microsoft JhengHei UI", fs, FontStyle.Bold, GraphicsUnit.Pixel)
+        let tb = SolidBrush(Night ? Color.FromArgb(200, 232, 224, 244) : Color.FromArgb(225, 128, 84, 52))
+        let sf = StringFormat()
+        sf.Alignment = StringAlignment.Center; sf.LineAlignment = StringAlignment.Center
+        g.DrawString("做一隻你的公仔", f, tb, RectangleF(Double(c.X), dfy - th, cwd, th), sf)
     }
 }
 

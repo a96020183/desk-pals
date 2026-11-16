@@ -430,8 +430,8 @@ extension World {
 
     func ShelfClick(_ cell: Int) {
         let p0 = CellPets()[cell]
-        guard let p = p0 else { if cell == 0 && PikLineup { FlowerClicked() }; return }   //@fan
-        // <public> guard let p = p0 else { return }
+        guard let p = p0 else { if cell == 0 && PikLineup { FlowerClicked() } else if OrigLineup { CuOpenMaker(nil, false) }; return }   //@fan
+        // <public> guard let p = p0 else { if OrigLineup { CuOpenMaker(nil, false) }; return }   // 續命小隊的空格＝做一隻自己的公仔
         if p.Out { if p.state != "stowfly" && p.state != "enter" && p.state != "exit" { p.StowToShelf(true) } }
         else { BringOut(p, true) }
     }

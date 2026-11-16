@@ -897,7 +897,7 @@ extension World {
         case "mine":
             let l = List<String>(rest.Split(Character(","), StringSplitOptions.RemoveEmptyEntries))
             Pal.SaveMine(l)
-            if lineup == Pal.Mine { CuReload(l.Count > 0 ? l[0] : "") } else { CuStore.Reset(false) }
+            if lineup == Pal.Mine { CuReload(l.Count > 0 ? l[0] : "") } else if OrigLineup { CuReload("") } else { CuStore.Reset(false) }
         case "callout": CuCallOut(rest)
         case "fakewin": CuSetFakeWin(Rectangle(CInt(a0), CInt(a1), CInt(a2), CInt(a3)))   // 測試：custom fakewin x y w h
         case "pet":

@@ -113,9 +113,11 @@ async function check(name, fn) {
 	send("battery-set 50 charge"); await sleep(800);
 	const chg = hues(await snap("squad-battery-charging", rect));
 	await check("電量 10% 是紅的、90% 是綠的、充電中是綠的", () => {
-		assert.ok(low.red > 30 && low.red > low.green, "10%: " + JSON.stringify(low));
-		assert.ok(high.green > 200 && high.green > high.red * 2, "90%: " + JSON.stringify(high));
-		assert.ok(chg.green > 100, "充電: " + JSON.stringify(chg));
+		// 用三張的差來比：截圖範圍裡如果剛好有別的東西（櫃子的木頭、別隻）三張都一樣，會互相抵掉
+		const dump = JSON.stringify({ low, high, chg });
+		assert.ok(low.red - high.red > 30 && low.red > 30, "10% 不夠紅: " + dump);
+		assert.ok(high.green - low.green > 200, "90% 不夠綠: " + dump);
+		assert.ok(chg.green - low.green > 100, "充電不夠綠: " + dump);
 	});
 	send("battery-set 100");
 

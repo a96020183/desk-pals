@@ -980,8 +980,8 @@ final class ShelfForm: OverlayForm
             g.FillRectangle(LinearGradientBrush(board, w3, w1, 90.0), board)
             g.DrawLine(Pen(Color.FromArgb(Night ? 60 : 110, 255, 235, 205), Math.Max(1.0, dU * 0.4)), board.X, board.Y + 0.5, board.Right, board.Y + 0.5)
             // 名牌
-            let name = pet == nil ? (i == 0 && Pik ? "★ 休息花" : "？") : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)   //@fan
-            // <public> let name = pet == nil ? "？" : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)
+            let name = pet == nil ? (i == 0 && Pik ? "★ 休息花" : (Orig ? "＋ 做公仔" : "？")) : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)   //@fan
+            // <public> let name = pet == nil ? (Orig ? "＋ 做公仔" : "？") : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)
             do
             {
                 let f = Font("Microsoft JhengHei UI", Math.Max(9.0, 6.6 * k), FontStyle.Bold, GraphicsUnit.Pixel)
@@ -1274,12 +1274,12 @@ final class ShelfForm: OverlayForm
             let fx = c.X + c.Width / 2, fy = c.Bottom - plateH - U - (i == 0 ? PedH() : 0)
             g.SetClip(Rectangle(c.X, c.Y, c.Width, c.Height - plateH))
             if pet == nil && i == 0 && Pik { DrawRestFlower(g, c, t) }   //@fan
-            else if pet == nil { DrawUnknown(g, fx, fy, ps) }   //@fan
-            // <public> if pet == nil { DrawUnknown(g, fx, fy, ps) }
-            else if outNow[i] { pet!.DrawGhost(g, fx, fy, ps, Night); DrawAway(g, c, ps) }
+            else if pet == nil { if Orig { DrawMakeSlot(g, c, fx, fy) } else { DrawUnknown(g, fx, fy, ps) } }   //@fan
+            // <public> if pet == nil { if Orig { DrawMakeSlot(g, c, fx, fy) } else { DrawUnknown(g, fx, fy, ps) } }
+            else if outNow[i] { if pet!.P.Orig { pet!.OrigGhost(g, fx, fy, c, Night) } else { pet!.DrawGhost(g, fx, fy, ps, Night) }; DrawAway(g, c, ps) }
             else { pet!.DrawOnShelf(g, fx, fy, ps, c, t) }
             g.ResetClip()
-            if hover == i && pet != nil
+            if hover == i && (pet != nil || Orig)
             {
                 let hp = Pen(Color.FromArgb(150, 255, 236, 160), Math.Max(2.0, dU * 0.7))
                 g.DrawRectangle(hp, c.X + 1, c.Y + 1, c.Width - 3, c.Height - plateH - 2)

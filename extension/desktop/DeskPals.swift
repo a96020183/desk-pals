@@ -6615,10 +6615,10 @@ final class Pal
     static func LineupIds(_ lineup: String!) -> [String]
     {
         if NormLineup(lineup) == Pikmin { return PikminIds }   // 皮克敏一櫃：大格是休息花（50_pikmin.swift）   //@fan
-        if NormLineup(lineup) == Original { return OriginalIds }   // 續命小隊（51_original.swift）
+        if NormLineup(lineup) == Original { return OrigLineupIds() }   // 續命小隊（51_original.swift；第 4 格放你自己做的公仔）
         if NormLineup(lineup) == Mine { return MineIds() }                       // 我的櫃：自己做的公仔（53_custom.swift）
         return NormLineup(lineup) == Teletubbies ? ["tinky", "dipsy", "laalaa", "po"] : ["spidey", "po", "stitch", "hangyodon"]   //@fan
-        // <public> return OriginalIds
+        // <public> return OrigLineupIds()
     }
     static func Lineup(_ lineup: String!) -> List<Pal>
     {
@@ -6760,6 +6760,7 @@ final class Pet {
     var oPend: String? = nil; var oPendDur: Double = 0
     var oFull = false
     var oTx: Double = Double.nan
+    var oSpaceCd: Double = 0
     // ---- from 53_custom.swift ----
     var cuPose = Pet.CuPose()
     var cuCanvas: Bitmap! = nil
@@ -9365,8 +9366,8 @@ final class ShelfForm: OverlayForm
             g.FillRectangle(LinearGradientBrush(board, w3, w1, 90.0), board)
             g.DrawLine(Pen(Color.FromArgb(Night ? 60 : 110, 255, 235, 205), Math.Max(1.0, dU * 0.4)), board.X, board.Y + 0.5, board.Right, board.Y + 0.5)
             // 名牌
-            let name = pet == nil ? (i == 0 && Pik ? "★ 休息花" : "？") : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)   //@fan
-            // <public> let name = pet == nil ? "？" : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)
+            let name = pet == nil ? (i == 0 && Pik ? "★ 休息花" : (Orig ? "＋ 做公仔" : "？")) : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)   //@fan
+            // <public> let name = pet == nil ? (Orig ? "＋ 做公仔" : "？") : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)
             do
             {
                 let f = Font("Microsoft JhengHei UI", Math.Max(9.0, 6.6 * k), FontStyle.Bold, GraphicsUnit.Pixel)
@@ -9659,12 +9660,12 @@ final class ShelfForm: OverlayForm
             let fx = c.X + c.Width / 2, fy = c.Bottom - plateH - U - (i == 0 ? PedH() : 0)
             g.SetClip(Rectangle(c.X, c.Y, c.Width, c.Height - plateH))
             if pet == nil && i == 0 && Pik { DrawRestFlower(g, c, t) }   //@fan
-            else if pet == nil { DrawUnknown(g, fx, fy, ps) }   //@fan
-            // <public> if pet == nil { DrawUnknown(g, fx, fy, ps) }
-            else if outNow[i] { pet!.DrawGhost(g, fx, fy, ps, Night); DrawAway(g, c, ps) }
+            else if pet == nil { if Orig { DrawMakeSlot(g, c, fx, fy) } else { DrawUnknown(g, fx, fy, ps) } }   //@fan
+            // <public> if pet == nil { if Orig { DrawMakeSlot(g, c, fx, fy) } else { DrawUnknown(g, fx, fy, ps) } }
+            else if outNow[i] { if pet!.P.Orig { pet!.OrigGhost(g, fx, fy, c, Night) } else { pet!.DrawGhost(g, fx, fy, ps, Night) }; DrawAway(g, c, ps) }
             else { pet!.DrawOnShelf(g, fx, fy, ps, c, t) }
             g.ResetClip()
-            if hover == i && pet != nil
+            if hover == i && (pet != nil || Orig)
             {
                 let hp = Pen(Color.FromArgb(150, 255, 236, 160), Math.Max(2.0, dU * 0.7))
                 g.DrawRectangle(hp, c.X + 1, c.Y + 1, c.Width - 3, c.Height - plateH - 2)
@@ -10516,8 +10517,8 @@ extension World {
 
     func ShelfClick(_ cell: Int) {
         let p0 = CellPets()[cell]
-        guard let p = p0 else { if cell == 0 && PikLineup { FlowerClicked() }; return }   //@fan
-        // <public> guard let p = p0 else { return }
+        guard let p = p0 else { if cell == 0 && PikLineup { FlowerClicked() } else if OrigLineup { CuOpenMaker(nil, false) }; return }   //@fan
+        // <public> guard let p = p0 else { if OrigLineup { CuOpenMaker(nil, false) }; return }   // 續命小隊的空格＝做一隻自己的公仔
         if p.Out { if p.state != "stowfly" && p.state != "enter" && p.state != "exit" { p.StowToShelf(true) } }
         else { BringOut(p, true) }
     }
@@ -16221,8 +16222,8 @@ enum SqArt
         for line in meta.components(separatedBy: "\n") {
             let a = line.Trim().components(separatedBy: " ")
             if a.count < 8 || a[0] != id || a[1] != String(r) { continue }
-            var mm = [Int](repeating: 0, count: 6)
-            for i in 0..<6 { mm[i] = Int(a[i + 2]) ?? 0 }
+            var mm = [Int](repeating: 0, count: 8)
+            for i in 0..<8 where i + 2 < a.count { mm[i] = Int(a[i + 2]) ?? 0 }
             m = mm
         }
         guard let mv = m else { return nil }
@@ -16234,6 +16235,7 @@ enum SqArt
         }
         s.Stand = s.Frames["stand"]; s.W = s.Stand.Width; s.H = s.Stand.Height
         s.AnchorX = Double(mv[2]); s.AnchorY = Double(mv[3] + 1); s.BodyTop = mv[4]; s.BodyH = mv[5]
+        if mv[7] > 0 { s.BodyLeft = mv[6]; s.BodyW = mv[7] }
         s.HeadTop = s.BodyTop; s.HeadCx = mv[2]; s.HeadW = s.W / 4; s.NeckCx = mv[2]; s.NeckW = s.W / 4
         s.Neck = s.BodyTop + s.BodyH / 3; s.Hip = s.BodyTop + s.BodyH * 3 / 4; s.Split = mv[2]
         if id == "duoduo" { s.Main = Color.FromArgb(0xD8, 0xA8, 0x6C) }
@@ -16408,6 +16410,13 @@ extension Pal {
     static let OldOriginalIds: [String] = ["boba", "coffee", "onigiri", "sticky"]   // 舊的像素版（資料轉給新三隻）
 
     static func OrigPals() -> List<Pal> { return List<Pal>([Duoduo(), Meidian(), Cici()]) }
+
+    // 這一櫃有誰：三隻＋（做過自己的公仔的話）第 4 格放你的公仔（我的櫃排第一的那隻）
+    static func OrigLineupIds() -> [String] {
+        var l: [String] = OriginalIds
+        for id in MineIds() { if CuStore.Get(id) != nil { l.append(id); break } }
+        return l
+    }
 
     // 共用：圖、頭頂超出 16 格的列數、配件不戴
     static func OrigBase(_ id: String, _ name: String) -> Pal
@@ -16827,6 +16836,8 @@ extension Pet {
             if SqBattery.Charging { oFull = false }
             if BatLink && SqBattery.Pct >= 100 && !oFull && Out && state == "sleep" { oFull = true }
         }
+        if oSpaceCd > 0 { oSpaceCd -= dt }
+        if Out && !InScene && !MisBusy && oSpaceCd <= 0 && (state == "walk" || state == "idle") { OrigKeepApart() }
         if state != "orig" { return false }
         oT += dt
         switch oAct {
@@ -16854,6 +16865,43 @@ extension Pet {
             return true
         }
     }
+
+    // 自己閒晃時不要疊在一起：看兩隻的實際寬度，太近就轉身或停一下（串場、搗蛋時不管）
+    func OrigKeepApart() {
+        for o in w.Pets {
+            if o === self || !o.Out || o.InScene || !o.Grounded() || Math.Abs(o.Foot - Foot) > 6 * k { continue }
+            let dx = o.Cx - Cx
+            let touch: Double = Pet.HalfW(self) + Pet.HalfW(o)
+            let need: Double = touch + 4 * Double(S)   // 最小間距：身體之間留 4 格
+            if Math.Abs(dx) >= need { continue }
+            var toward = rnd.NextDouble() < 0.5 ? 1 : -1
+            if dx > 0 { toward = 1 } else if dx < 0 { toward = -1 }
+            // 走過去會撞到：轉身（偶爾停一下）
+            if state == "walk" && toward == dir { oSpaceCd = 0.6; if rnd.NextDouble() < 0.7 { dir = -dir } else { SetState("idle", R(0.6, 1.4)) }; return }
+            // 已經疊在一起（例如剛從櫃子出來、串場結束）：往另一邊走開，走到不疊為止
+            if state == "idle" && Math.Abs(dx) < touch + 2 * k {
+                dir = -toward; oSpaceCd = 0.4
+                SetState("walk", Math.Min(5.0, Math.Max(0.5, (need - Math.Abs(dx)) / Math.Max(1.0, P.Speed * k) + 0.2)))
+                return
+            }
+        }
+    }
+    // 看起來多寬的一半（圖片公仔用 stand 的身體寬度，像素公仔用 12 格框）
+    static func HalfW(_ p: Pet) -> Double {
+        guard let s = p.P.Spr else { return Double(p.SW) / 2.0 }
+        let bw: Double = s.BodyW > 0 ? Double(s.BodyW) : Double(s.W)
+        return bw / Double(s.R) * Double(p.S) / 2
+    }
+
+    // 櫃子裡：依自己 stand 的身體大小撐到格子合適的大小（不限整數倍；大格、小格同一個留白規則）
+    func OrigShelfSc(_ cell: Rectangle, _ fy: Int) -> Double {
+        let s: CuSprite = P.Spr
+        let availH: Double = Double(fy - cell.Y) - Double(cell.Height) * 0.07
+        let bw: Double = s.BodyW > 0 ? Double(s.BodyW) : Double(s.W)
+        let sc = Math.Min(availH / Double(Math.Max(1, s.BodyH)), Double(cell.Width) * 0.86 / bw)
+        return Math.Max(0.1, sc)
+    }
+    func OrigGhost(_ g: Graphics, _ fx: Int, _ fy: Int, _ cell: Rectangle, _ night: Bool) { CuGhostSc(g, fx, fy, OrigShelfSc(cell, fy), night) }
 
     // 刺刺嘴硬之後馬上被摸：被拆穿，開花；躲躲躲著被點：被發現了，逃跑
     func OrigPatted() -> Bool {
@@ -16991,7 +17039,8 @@ extension Pet {
         else if tt.truncatingRemainder(dividingBy: 9) < 0.9 { fr = "happy" }
         if w.Lunch && !Night { fr = "sit" }
         p.Frame = fr
-        CuDraw(g, p, Double(fx), Double(by + 16 * ps), ps, flip)
+        let fy = by + 16 * ps
+        CuDrawSc(g, p, Double(fx), Double(fy), OrigShelfSc(cell, fy), ps, flip)
         if w.Lunch { DrawAt(g, Pet.BENTO, 8.5, Double(P.BodyTop), bx, by, ps, flip, false, true) }
     }
 }
@@ -17025,6 +17074,38 @@ extension ShelfForm {
             g.FillEllipse(SolidBrush(Night ? C(0x9A3A3A) : C(0xE04848)), nx + 3.5 * du, ny - 0.8 * du, 2 * du, 2 * du)
         }
         g.Restore(st)
+    }
+}
+
+// 續命小隊的第 4 格：「＋ 做一隻你的公仔」入口（點了開做公仔視窗；做好了第 4 格就放那一隻）
+extension ShelfForm {
+    func DrawMakeSlot(_ g: Graphics, _ c: Rectangle, _ fx: Int, _ fy: Int) {
+        // 淡淡的虛線剪影（圓頭＋身體）＋身體上一顆加號＋底下一行小字
+        let h = Double(fy - c.Y), cwd = Double(c.Width), dfx = Double(fx), dfy = Double(fy)
+        let fs = Math.Max(9.0, cwd * 0.115)
+        let th = fs * 1.35
+        let top = Double(c.Y) + h * 0.1, bot = dfy - th - h * 0.03, sh = bot - top
+        let hd = sh * 0.36, gap = sh * 0.05
+        let bw = Math.Min(cwd * 0.56, sh * 0.78), bh = sh - hd - gap
+        let head = RectangleF(dfx - hd / 2, top, hd, hd)
+        let body = RectangleF(dfx - bw / 2, top + hd + gap, bw, bh)
+        let fill = SolidBrush(Color.FromArgb(Night ? 20 : 50, 255, 255, 255))
+        let dash = Pen(Color.FromArgb(Night ? 110 : 150, 160, 120, 80), Math.Max(1.5, cwd * 0.018))
+        dash.DashStyle = DashStyle.Dash
+        let bp = RoundRect(body, bw * 0.3)
+        g.FillEllipse(fill, head); g.DrawEllipse(dash, head.X, head.Y, head.Width, head.Height)
+        g.FillPath(fill, bp); g.DrawPath(dash, bp)
+        let cr = Math.Min(bw, bh) * 0.27, cx = dfx, cy = body.Y + bh / 2
+        g.FillEllipse(SolidBrush(Night ? Color.FromArgb(200, 150, 120, 90) : Color.FromArgb(235, 236, 168, 96)), cx - cr, cy - cr, 2 * cr, 2 * cr)
+        let pl = Pen(Color.White, Math.Max(2.0, cr * 0.32))
+        pl.StartCap = LineCap.Round; pl.EndCap = LineCap.Round
+        g.DrawLine(pl, cx - cr * 0.5, cy, cx + cr * 0.5, cy)
+        g.DrawLine(pl, cx, cy - cr * 0.5, cx, cy + cr * 0.5)
+        let f = Font("Microsoft JhengHei UI", fs, FontStyle.Bold, GraphicsUnit.Pixel)
+        let tb = SolidBrush(Night ? Color.FromArgb(200, 232, 224, 244) : Color.FromArgb(225, 128, 84, 52))
+        let sf = StringFormat()
+        sf.Alignment = StringAlignment.Center; sf.LineAlignment = StringAlignment.Center
+        g.DrawString("做一隻你的公仔", f, tb, RectangleF(Double(c.X), dfy - th, cwd, th), sf)
     }
 }
 
@@ -19324,7 +19405,7 @@ final class CuSprite
     // 身體的範圍（BodyTop／BodyH，stand 的不透明範圍；泡泡、櫃子高度用）、沒電的電量液體（Liquid）
     var AnchorX: Double = -1, AnchorY: Double = -1
     var NoHalo = false
-    var BodyTop = -1, BodyH = -1
+    var BodyTop = -1, BodyH = -1, BodyLeft = -1, BodyW = -1
     var Liquid: Dict<String, SqLiquid>! = nil
     var AX: Double { return AnchorX >= 0 ? AnchorX : Double(W) / 2.0 }
     var AY: Double { return AnchorY >= 0 ? AnchorY : Double(H) }
@@ -20001,12 +20082,13 @@ extension Pet
     // ---------- 畫：先在小畫布上把頭／身體／腳組起來，再放大畫上去（加白邊、晚上變暗） ----------
     // 每一格：直接組在「螢幕大小」的小圖上（像素風先在格子大小組好再放大），
     // 再一次把白邊、晚上變暗、左右翻轉做完（逐像素），最後原尺寸貼上去——四隻一起跑也不會卡
-    func CuDraw(_ g: Graphics, _ p: CuPose, _ feetX: Double, _ feetY: Double, _ ps: Int, _ fx: Bool)
+    func CuDraw(_ g: Graphics, _ p: CuPose, _ feetX: Double, _ feetY: Double, _ ps: Int, _ fx: Bool) { CuDrawSc(g, p, feetX, feetY, Double(ps) / Double(P.Spr.R), ps, fx) }
+    // sc 自己給：續命小隊在櫃子裡依格子大小縮放（不限整數倍）
+    func CuDrawSc(_ g: Graphics, _ p: CuPose, _ feetX: Double, _ feetY: Double, _ sc: Double, _ ps: Int, _ fx: Bool)
     {
         let s: CuSprite = P.Spr
         var mb = 0, cw = 0, ch = 0
         Pet.CuCanvasSize(s, &cw, &ch, &mb)
-        let sc = Double(ps) / Double(s.R)
         let hw = Math.Max(1, ps / 3), pad = hw + 1
         let tw = CInt(Math.Ceiling(Double(cw) * sc)) + 2 * pad, th = CInt(Math.Ceiling(Double(ch) * sc)) + 2 * pad
         if cuOut == nil || cuOut.Width != tw || cuOut.Height != th
@@ -20343,7 +20425,8 @@ extension Pet
     }
 
     // 外出中的格子：淡淡的剪影
-    func CuGhost(_ g: Graphics, _ fx: Int, _ fy: Int, _ ps: Int, _ night: Bool)
+    func CuGhost(_ g: Graphics, _ fx: Int, _ fy: Int, _ ps: Int, _ night: Bool) { CuGhostSc(g, fx, fy, Double(ps) / Double(P.Spr.R), night) }
+    func CuGhostSc(_ g: Graphics, _ fx: Int, _ fy: Int, _ sc: Double, _ night: Bool)
     {
         let s: CuSprite = P.Spr
         var mb = 0, cw = 0, ch = 0
@@ -20357,7 +20440,6 @@ extension Pet
         do {
             let ia = ImageAttributes()
             ia.SetColorMatrix(cm)
-            let sc = Double(ps) / Double(s.R)
             let im = g.InterpolationMode
             g.InterpolationMode = s.Pixel ? InterpolationMode.NearestNeighbor : InterpolationMode.HighQualityBilinear
             g.DrawImage(c, Rectangle(CInt(Double(fx) - Double(cw) / 2.0 * sc), CInt(Double(fy) - Double(ch - mb) * sc), CInt(Double(cw) * sc), CInt(Double(ch) * sc)), 0, 0, cw, ch, GraphicsUnit.Pixel, ia)
@@ -20755,7 +20837,7 @@ extension World
     {
         CuStore.Reset(false)
         if lineup == Pal.Mine && !Pal.HasCustom() { SwitchLineup(Pal.Fallback, ""); return }
-        if lineup != Pal.Mine { return }
+        if lineup != Pal.Mine && !OrigLineup { return }   // 續命小隊的第 4 格也放自己的公仔：一起重建
         // 跟 SwitchLineup 一樣，只是同一櫃也要重建（公仔的資料換了）
         AbortScene()
         ClearProps()
@@ -20821,7 +20903,7 @@ extension World
     {
         if Single && singleId == id { singleId = ""; World.WriteText("mode.txt", "single ") }
         let mine = List<String>(Pal.MineIds()); mine.Remove(id); Pal.SaveMine(mine)
-        if lineup == Pal.Mine { let l: Pet! = Lead(); CuReload(l != nil && l.P.Id != id ? l.P.Id : "") }
+        if lineup == Pal.Mine || OrigLineup { let l: Pet! = Lead(); CuReload(l != nil && l.P.Id != id ? l.P.Id : "") }
         else { CuStore.Reset(false) }
         CuBroadcast()
     }
@@ -23224,7 +23306,7 @@ extension World {
         case "mine":
             let l = List<String>(rest.Split(Character(","), StringSplitOptions.RemoveEmptyEntries))
             Pal.SaveMine(l)
-            if lineup == Pal.Mine { CuReload(l.Count > 0 ? l[0] : "") } else { CuStore.Reset(false) }
+            if lineup == Pal.Mine { CuReload(l.Count > 0 ? l[0] : "") } else if OrigLineup { CuReload("") } else { CuStore.Reset(false) }
         case "callout": CuCallOut(rest)
         case "fakewin": CuSetFakeWin(Rectangle(CInt(a0), CInt(a1), CInt(a2), CInt(a3)))   // 測試：custom fakewin x y w h
         case "pet":
