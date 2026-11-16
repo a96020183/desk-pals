@@ -6505,14 +6505,28 @@ namespace DeskPals
         // 專注、安靜、提醒、搶票、今天的小結（公仔、櫃子、小屋的選單都有）
         void AddHelpers(ToolStripItemCollection items)
         {
-            if (focusOn) items.Add("結束專注（還剩 " + FocusLeft() + " 分）", null, delegate { StopFocus(false); });
+            if (Student)
+            {
+                items.Add(new ToolStripLabel("學生小隊｜讀書、作業、休息"));
+                ToolStripMenuItem focus = new ToolStripMenuItem("開啟讀書衝刺");
+                focus.DropDownItems.Add("25 分鐘｜先開始一小段 🍅", null, delegate { StartFocus(25); });
+                focus.DropDownItems.Add("50 分鐘｜寫報告／讀一章", null, delegate { StartFocus(50); });
+                focus.DropDownItems.Add("90 分鐘｜考前長時段", null, delegate { StartFocus(90); });
+                if (focusOn)
+                {
+                    focus.DropDownItems.Add(new ToolStripSeparator());
+                    focus.DropDownItems.Add("結束這段專注", null, delegate { StopFocus(false); });
+                }
+                items.Add(focus);
+            }
+            else if (focusOn) items.Add("結束專注（還剩 " + FocusLeft() + " 分）", null, delegate { StopFocus(false); });
             else items.Add("專注 25 分鐘 🍅", null, delegate { StartFocus(25); });
             AddQuietMenu(items);
+            items.Add("提醒我上課／交作業…", null, delegate { ShowReminderForm(); });
             AddReminderMenus(items);
             AddTicketMenus(items);
             items.Add("今天的小結", null, delegate { DailyWrap(true); });
         }
-
         void AddQuietMenu(ToolStripItemCollection items)
         {
             if (quietOn) { items.Add("結束安靜（還剩 " + QuietLeft() + " 分）", null, delegate { StopQuiet(); }); return; }
