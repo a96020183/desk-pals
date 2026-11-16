@@ -1181,11 +1181,11 @@ extension World {
         let fm = FileManager.default
         var fresh = !fm.fileExists(atPath: World.FilePath("out.txt")) && !fm.fileExists(atPath: World.FilePath("profile.txt")) && !fm.fileExists(atPath: World.FilePath("usage.txt"))
         // <fan>
-        if fresh && !App.Isolated {
+        if fresh {
             // mac: 舊版 Spidey（SpideyDesktop.swift）的資料在 ~/Library/Application Support/SpideyDesktop（bond.txt／pats.txt，見 Migrate）。
-            //      這個資料夾現在也是 VS Code 放程式和 socket 的地方，一定存在，所以看舊的資料檔在不在（Windows 是看資料夾在不在）。
-            let old = NSHomeDirectory() + "/Library/Application Support/SpideyDesktop"
-            if fm.fileExists(atPath: old + "/bond.txt") || fm.fileExists(atPath: old + "/pats.txt") { fresh = false }   // 從舊版 Spidey 小夥伴升級的：維持經典一櫃
+            //      0.5～0.8 版在 Mac 上也用這個資料夾放程式和 socket，所以看舊的資料檔在不在（Windows 是看資料夾在不在）。離屏測試（沒指定假的舊資料夾）是空的。
+            let old = World.LegacyDir()
+            if !old.isEmpty && (fm.fileExists(atPath: old + "/bond.txt") || fm.fileExists(atPath: old + "/pats.txt")) { fresh = false }   // 從舊版 Spidey 小夥伴升級的：維持經典一櫃
         }
         // </fan>
         if !fresh { return "" }

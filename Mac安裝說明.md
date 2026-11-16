@@ -22,7 +22,7 @@
 
 第一次啟動時會在背景編譯，大約 30 秒到 1 分鐘，之後公仔櫃就會出現在螢幕右下角。以後開機會自動出現，不用開 VS Code。
 
-**從舊版（只有 Spidey）升級**：不用做任何事。新版會自動叫舊的 Spidey 收工、換成公仔櫃，Spidey 的感情等級也會帶過來。
+**從舊版升級**（只有 Spidey 的那版，或 0.8 以前程式放在 `~/Library/Application Support/SpideyDesktop` 的版本）：不用做任何事。新版第一次開起來會自動叫舊的收工、拿掉舊的開機啟動項（`local.spidey-pet`）和舊程式，Spidey 的感情等級也會帶過來。之後程式、設定、紀錄都在 `~/Library/Application Support/DeskPals`。
 
 ## 跟 Windows 版不一樣的地方
 
@@ -34,13 +34,13 @@
 ## 跟 Claude Code 一起用
 
 - **卡住提醒（不用設定）**：Claude Code 在問你問題 90 秒、停在某個工具 3 分鐘（多半在等你按允許）、或 5 分鐘沒回應時，公仔會跳出來敲螢幕提醒你。
-- **做完通知（選用）**：把下面這段加進 `~/.claude/settings.json` 最外層的 `{ }`。已經有 `hooks` 的話，把裡面四項併進去。舊版 Spidey 已經設過的話不用改。
+- **做完通知（選用）**：把下面這段加進 `~/.claude/settings.json` 最外層的 `{ }`。已經有 `hooks` 的話，把裡面四項併進去。舊版設過的（路徑是 `…/SpideyDesktop/claude-hook.js`）不用改：舊位置留了一個小檔，會自動轉到新位置。
   ```json
   "hooks": {
-    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"$HOME/Library/Application Support/SpideyDesktop/claude-hook.js\" start", "timeout": 3 }] }],
-    "Stop": [{ "hooks": [{ "type": "command", "command": "node \"$HOME/Library/Application Support/SpideyDesktop/claude-hook.js\" done", "timeout": 3 }] }],
-    "Notification": [{ "hooks": [{ "type": "command", "command": "node \"$HOME/Library/Application Support/SpideyDesktop/claude-hook.js\" wait", "timeout": 3 }] }],
-    "PostToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "node \"$HOME/Library/Application Support/SpideyDesktop/claude-hook.js\" post", "timeout": 3 }] }]
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"$HOME/Library/Application Support/DeskPals/claude-hook.js\" start", "timeout": 3 }] }],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "node \"$HOME/Library/Application Support/DeskPals/claude-hook.js\" done", "timeout": 3 }] }],
+    "Notification": [{ "hooks": [{ "type": "command", "command": "node \"$HOME/Library/Application Support/DeskPals/claude-hook.js\" wait", "timeout": 3 }] }],
+    "PostToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "node \"$HOME/Library/Application Support/DeskPals/claude-hook.js\" post", "timeout": 3 }] }]
   }
   ```
 
@@ -53,7 +53,7 @@
 在終端機執行下面這行，看輸出和 log 的錯誤訊息：
 
 ```
-bash ~/Library/Application\ Support/SpideyDesktop/desk-pals.sh; cat ~/Library/Logs/desk-pals.log
+bash ~/Library/Application\ Support/DeskPals/desk-pals.sh; cat ~/Library/Logs/desk-pals.log
 ```
 
 - 出現 `swiftc not found`：Command Line Tools 沒裝好，重跑 `xcode-select --install`。

@@ -160,6 +160,8 @@ Codex 不用設定。Claude Code 想要「做完通知」的話，把下面這�
 }
 ```
 
+舊版設過的（路徑是 `…/AppData/Local/SpideyDesktop/claude-hook.js`）不用改：舊位置留了一個小檔，會自動轉到新位置。
+
 ## 不想要了
 
 在 VS Code 按 `Ctrl+Shift+P`，執行「公仔櫃：收工（關掉整個螢幕版）」。公仔和櫃子會離開，下次開機也不會再出現。

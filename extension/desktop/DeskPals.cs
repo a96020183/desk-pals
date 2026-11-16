@@ -3853,7 +3853,7 @@ namespace DeskPals
         public string SeasonNow = "";
         string birthday = "";
         int nightChecked = -1;
-        int forceNight = Environment.GetEnvironmentVariable("SPIDEY_FORCE_DARK") == "1" ? 1 : -1;
+        int forceNight = Environment.GetEnvironmentVariable("DESKPALS_FORCE_DARK") == "1" ? 1 : -1;
         bool userHidden, sharing, fsNow;
         public double CursorStill;
         Point lastCursor;
@@ -3965,6 +3965,7 @@ namespace DeskPals
             if (h == IntPtr.Zero) App.Log("no handle");
             try { Directory.CreateDirectory(DataDir); } catch { }
             Migrate();
+            LegacyTakeOver();   //@fan
             LoadState();
             LoadFeatures();
             LoadMode();
@@ -4034,9 +4035,9 @@ namespace DeskPals
         {
             // <fan>
             // 舊的 Spidey 桌面版好感度搬過來（只複製，不動原檔）
-            string old = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SpideyDesktop");
+            string old = LegacyDir();
             string[,] map = { { "bond.txt", "bond-spidey.txt" }, { "pats.txt", "pats-spidey.txt" } };
-            for (int i = 0; i < 2; i++)
+            for (int i = 0; old != "" && i < 2; i++)
             {
                 string src = Path.Combine(old, map[i, 0]), dst = FilePath(map[i, 1]);
                 try { if (File.Exists(src) && !File.Exists(dst)) { File.Copy(src, dst); App.Log("migrated " + map[i, 0]); } } catch { }

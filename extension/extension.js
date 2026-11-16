@@ -332,7 +332,8 @@ function isDarkTime(n) {
 
 // ================= 桌面版（整台電腦）=================
 // Windows：%LOCALAPPDATA%\DeskPals ＋「啟動」資料夾捷徑，named pipe 溝通（多角色＋公仔櫃）
-// macOS：~/Library/Application Support/SpideyDesktop ＋ LaunchAgent，unix socket 溝通（同一套公仔櫃；資料夾沿用舊版 Spidey 的，hooks 設定不用改）
+// macOS：~/Library/Application Support/DeskPals ＋ LaunchAgent（local.desk-pals），unix socket（desk-pals.sock）溝通
+// 舊版留下來的資料夾、socket、開機啟動項，由桌面版程式自己接手（叫舊的收工、搬資料、拿掉舊的開機啟動）
 class Desktop {
 	constructor(context) {
 		this.context = context;
@@ -342,18 +343,12 @@ class Desktop {
 		const user = (os.userInfo().username || "me").replace(/[^A-Za-z0-9_.-]/g, "_");
 		this.win = process.platform === "win32";
 		this.user = user;
-		this.name = (this.win ? "desk-pals-" : "spidey-pet-") + user;
+		this.name = "desk-pals-" + user;
 		this.supported = this.win || process.platform === "darwin";
 		const local = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
-		this.oldHome = path.join(local, "SpideyDesktop"); // 舊版 Spidey 小夥伴（Windows）   //@fan
 		this.home = this.win
 			? path.join(local, "DeskPals")
-			: path.join(os.homedir(), "Library", "Application Support", "SpideyDesktop");
-		// <fan>
-		// 舊版只有 Spidey 的 Mac 桌面版（SpideyDesktop.swift）→ 換成公仔櫃
-		this.macOldSpidey = process.platform === "darwin" && fs.existsSync(path.join(this.home, "SpideyDesktop.swift"));
-		this.migratedFromSpidey = (this.win && fs.existsSync(this.oldHome)) || this.macOldSpidey;
-		// </fan>
+			: path.join(os.homedir(), "Library", "Application Support", "DeskPals");
 		this.ps1 = "desk-pals.ps1";
 		this.sh = "desk-pals.sh";
 		this.lnkName = "公仔櫃 Desk Pals.lnk";
@@ -368,7 +363,7 @@ class Desktop {
 		this.onFlower = () => {};
 		this.onPals = () => {};
 		// macOS 的 socket 放固定位置（開機由 launchd 啟動時 TMPDIR 不一定相同）
-		this.endpoint = process.platform === "win32" ? "\\\\.\\pipe\\" + this.name : path.join(this.home, "spidey.sock");
+		this.endpoint = process.platform === "win32" ? "\\\\.\\pipe\\" + this.name : path.join(this.home, "desk-pals.sock");
 	}
 	connected() { return !!this.sock; }
 
@@ -504,7 +499,7 @@ class Desktop {
 			if (left > 0) setTimeout(() => this.connect(left - 1, spawned), 500);
 			else {
 				this.want = false;
-				const log = this.win ? "%TEMP%\\desk-pals.log" : "~/Library/Logs/spidey-desktop.log";
+				const log = this.win ? "%TEMP%\\desk-pals.log" : "~/Library/Logs/desk-pals.log";
 				vscode.window.showWarningMessage(`公仔櫃桌面版沒有啟動成功，詳情見 ${log}`);
 			}
 		});
@@ -529,11 +524,7 @@ class Desktop {
 		};
 		for (const f of files) copy(f, this.home);
 		if (sa) return;
-		if (this.win && this.migratedFromSpidey) this.migrateFromSpidey(copy);   //@fan
-		if (process.platform === "darwin") {
-			fs.chmodSync(path.join(this.home, this.sh), 0o755);
-			if (this.macOldSpidey) this.migrateMacSpidey();   //@fan
-		}
+		if (process.platform === "darwin") fs.chmodSync(path.join(this.home, this.sh), 0o755);
 		this.installAutostart();
 	}
 
@@ -544,24 +535,24 @@ class Desktop {
 			if (fs.existsSync(lnk)) return;
 			const ps1 = path.join(this.home, this.ps1);
 			const script = [
-				"$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:SPIDEY_LNK)",
+				"$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:DESKPALS_LNK)",
 				"$s.TargetPath = \"$env:SystemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\"",
-				"$s.Arguments = '-NoProfile -WindowStyle Hidden -File \"' + $env:SPIDEY_PS1 + '\" -PipeName ' + $env:SPIDEY_NAME",
+				"$s.Arguments = '-NoProfile -WindowStyle Hidden -File \"' + $env:DESKPALS_PS1 + '\" -PipeName ' + $env:DESKPALS_PIPE",
 				"$s.WindowStyle = 7",
 				"$s.Description = '公仔櫃 Desk Pals（整個螢幕的像素公仔）'",
 				"$s.Save()",
 			].join("; ");
 			cp.execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
 				windowsHide: true,
-				env: Object.assign({}, process.env, { SPIDEY_LNK: lnk, SPIDEY_PS1: ps1, SPIDEY_NAME: this.name }),
+				env: Object.assign({}, process.env, { DESKPALS_LNK: lnk, DESKPALS_PS1: ps1, DESKPALS_PIPE: this.name }),
 			}, () => {});
 		} else if (process.platform === "darwin") {
 			const dir = path.join(os.homedir(), "Library", "LaunchAgents");
-			const plist = path.join(dir, "local.spidey-pet.plist");
+			const plist = path.join(dir, "local.desk-pals.plist");
 			const want = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>local.spidey-pet</string>
+  <key>Label</key><string>local.desk-pals</string>
   <key>ProgramArguments</key><array><string>/bin/bash</string><string>${path.join(this.home, this.sh)}</string><string>${this.name}</string></array>
   <key>RunAtLoad</key><true/>
   <key>LimitLoadToSessionType</key><string>Aqua</string>
@@ -580,7 +571,7 @@ class Desktop {
 			const lnk = path.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs", "Startup", this.lnkName);
 			if (fs.existsSync(lnk)) fs.unlinkSync(lnk);
 		} else if (process.platform === "darwin") {
-			const plist = path.join(os.homedir(), "Library", "LaunchAgents", "local.spidey-pet.plist");
+			const plist = path.join(os.homedir(), "Library", "LaunchAgents", "local.desk-pals.plist");
 			if (fs.existsSync(plist)) fs.unlinkSync(plist);
 		}
 	}
@@ -604,8 +595,8 @@ class Desktop {
 				const pet = vscode.workspace.getConfiguration("deskPals").get("character", "spidey");   //@fan
 				// <public> const pet = vscode.workspace.getConfiguration("deskPals").get("character", "boba");
 				const args = `-NoProfile -WindowStyle Hidden -File "${path.join(this.home, this.ps1)}" -PipeName ${this.name} -Pet ${inLineup(pet, lu) && /^\w+$/.test(pet) ? pet : lineupDefaultPet(lu)}${lineupExplicit() ? " -Lineup " + lu : ""}`;
-				p = cp.spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList $env:SPIDEY_ARGS"],
-					{ stdio: "ignore", windowsHide: true, env: Object.assign({}, process.env, { SPIDEY_ARGS: args }) });
+				p = cp.spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList $env:DESKPALS_ARGS"],
+					{ stdio: "ignore", windowsHide: true, env: Object.assign({}, process.env, { DESKPALS_ARGS: args }) });
 			} else {
 				const lu = lineupSetting();
 				const pet = vscode.workspace.getConfiguration("deskPals").get("character", "spidey");   //@fan
@@ -618,35 +609,6 @@ class Desktop {
 			console.error("deskpals spawn", e);
 		}
 	}
-
-	// <fan>
-	// 舊版 Spidey 小夥伴 → 公仔櫃：關掉舊的桌面版、拿掉舊的開機捷徑；
-	// 舊位置的 claude-hook.js 也換新（你 settings.json 的 hooks 指著那裡，新版會改送到公仔櫃）
-	migrateFromSpidey(copy) {
-		const oldLnk = path.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs", "Startup", "Spidey 小夥伴.lnk");
-		try { if (fs.existsSync(oldLnk)) fs.unlinkSync(oldLnk); } catch (e) {}
-		try { copy("claude-hook.js", this.oldHome); copy("ci-watch.js", this.oldHome); } catch (e) {}
-		try {
-			const s = net.connect("\\\\.\\pipe\\spidey-pet-" + this.user);
-			s.on("connect", () => s.end("quit\n"));
-			s.on("error", () => {});
-		} catch (e) {}
-	}
-
-	// Mac 舊版（只有 Spidey）→ 公仔櫃：叫舊的 Spidey 收工、拿掉舊程式（同一個 socket，新版會接手）
-	migrateMacSpidey() {
-		this.macOldSpidey = false;
-		this.restarting = true;   // 舊版收工時會送 bye，別當成使用者按了收工
-		for (const f of ["SpideyDesktop.swift", "SpideyDesktop", "spidey-desktop.sh"]) {
-			try { fs.unlinkSync(path.join(this.home, f)); } catch (e) {}
-		}
-		try {
-			const s = net.connect(this.endpoint);
-			s.on("connect", () => s.end("quit\n"));
-			s.on("error", () => {});
-		} catch (e) {}
-	}
-	// </fan>
 
 	dispose() { clearTimeout(this.watchTimer); if (this.sock) this.sock.end(); }
 }

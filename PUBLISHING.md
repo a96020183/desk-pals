@@ -48,7 +48,7 @@ GitHub 的位置：repo →「Settings」→「Secrets and variables」→「Act
 2. 共用程式碼裡碰到粉絲角色的地方用註解標記：`// <fan>`…`// </fan>` 整段拿掉、行尾 `//@fan` 那一行拿掉、`// <public> …` 公開版才有的那一行（例如沒選過櫃子時回到續命小隊）。側邊欄 `pet.html`、`extension.js` 也一樣；`package.json` 的角色、櫃子選項由 `variant.py` 直接過濾。標記都是註解，個人版編譯出來的程式跟沒標記時一模一樣。
 3. 留下來的註解裡提到粉絲角色的，整段註解拿掉（擴充套件會帶原始碼，所以連註解也不能有）。
 4. **guard**：最後把公開版的原始碼、編好的 `DeskPals.exe`（字串常數是 UTF-16，識別字是 UTF-8，兩種都掃）、Mac 執行檔、`.msix`／`.vsix`（打開來掃裡面每個檔）、DMG 裡的 `.app` 掃一遍：角色名字（中英文）、id（`spidey`、`stitch`、`hangyodon`、`tinky`、`dipsy`、`laalaa`、`pkred`…；`po` 太短，只抓 `"po"`、`Po(` 這種寫法）、口頭禪（Thwip、Eh-oh、Ohana、噗咿…）、版權方名字，出現任何一個就建置失敗。Release 步驟發版前也會再掃一次、並確認沒有 `-personal` 的檔案。
-   - 唯一放行的是舊版「Spidey 小夥伴」留下來的幾個**資料夾／通道名稱**：`SpideyDesktop`（Mac 的程式＋socket 資料夾）、`spidey.sock`、`spidey-pet`（舊版 pipe、Mac 的 LaunchAgent 名稱）、`SPIDEY_` 開頭的環境變數。Mac 的 VS Code 擴充套件、獨立版 App、`claude-hook.js` 靠這幾個名字找到彼此，改名會斷線；它們不是角色內容，使用者也看不到（除了 Mac 的 `~/Library/Application Support/SpideyDesktop` 資料夾名稱）。
+   - 沒有放行清單：資料夾、socket、pipe、LaunchAgent、環境變數都叫 DeskPals／desk-pals（Windows `%LOCALAPPDATA%\DeskPals`、Mac `~/Library/Application Support/DeskPals`、`desk-pals.sock`、`local.desk-pals`、`DESKPALS_*`）。舊版「Spidey 小夥伴」的名稱只出現在個人版的升級接手程式（`DeskPals.Fan.cs`、`58_fan.swift`）裡；舊使用者都是個人版，公開版沒有舊安裝要接手。
 
 自己檢查：`python -I tools/variant.py public`（產生並掃公開版）、`python -I tools/variant.py guard <檔案或資料夾…>`（掃任何檔案，例如下載下來的 Release）。
 

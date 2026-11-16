@@ -5829,7 +5829,7 @@ enum App {
             // <public> PreviewShelf(a[2], night)
             exit(0)
         }
-        let def = (NSHomeDirectory() as NSString).appendingPathComponent("Library/Application Support/SpideyDesktop/spidey.sock")
+        let def = (NSHomeDirectory() as NSString).appendingPathComponent("Library/Application Support/DeskPals/desk-pals.sock")
         let sock = a.count >= 2 && !a[1].isEmpty ? a[1] : def
         let pet = a.count >= 3 ? a[2] : ""
         let lineup = a.count >= 4 ? a[3] : ""
@@ -9983,7 +9983,7 @@ final class World: Form {
     var SeasonNow = ""
     var birthday = ""
     var nightChecked = -1
-    var forceNight = ProcessInfo.processInfo.environment["SPIDEY_FORCE_DARK"] == "1" ? 1 : -1
+    var forceNight = ProcessInfo.processInfo.environment["DESKPALS_FORCE_DARK"] == "1" ? 1 : -1
     var userHidden = false, sharing = false, fsNow = false
     var CursorStill: Double = 0
     var lastCursor = Point(0, 0)
@@ -10247,6 +10247,7 @@ extension World {
         if h == 0 { App.Log("no handle") }
         try? FileManager.default.createDirectory(atPath: World.DataDir, withIntermediateDirectories: true)
         Migrate()
+        LegacyTakeOver()   //@fan
         LoadState()
         LoadFeatures()
         LoadMode()
@@ -10340,10 +10341,10 @@ extension World {
         // <fan>
         // 舊的 Spidey 桌面版好感度搬過來（只複製，不動原檔）
         // mac: 舊的 mac 版 SpideyDesktop.swift 存在 ~/Library/Application Support/SpideyDesktop（bond.txt「xp 日期」、pats.txt「日期 次數」，格式一樣）
-        let old = NSHomeDirectory() + "/Library/Application Support/SpideyDesktop"
+        let old = World.LegacyDir()
         let map: [[String]] = [["bond.txt", "bond-spidey.txt"], ["pats.txt", "pats-spidey.txt"]]
         let fm = FileManager.default
-        for i in 0..<2 {
+        for i in 0..<(old.isEmpty ? 0 : 2) {
             let src = (old as NSString).appendingPathComponent(map[i][0]), dst = World.FilePath(map[i][1])
             if fm.fileExists(atPath: src) && !fm.fileExists(atPath: dst) {
                 if (try? fm.copyItem(atPath: src, toPath: dst)) != nil { App.Log("migrated " + map[i][0]) }
@@ -17280,11 +17281,11 @@ extension World {
         let fm = FileManager.default
         var fresh = !fm.fileExists(atPath: World.FilePath("out.txt")) && !fm.fileExists(atPath: World.FilePath("profile.txt")) && !fm.fileExists(atPath: World.FilePath("usage.txt"))
         // <fan>
-        if fresh && !App.Isolated {
+        if fresh {
             // mac: 舊版 Spidey（SpideyDesktop.swift）的資料在 ~/Library/Application Support/SpideyDesktop（bond.txt／pats.txt，見 Migrate）。
-            //      這個資料夾現在也是 VS Code 放程式和 socket 的地方，一定存在，所以看舊的資料檔在不在（Windows 是看資料夾在不在）。
-            let old = NSHomeDirectory() + "/Library/Application Support/SpideyDesktop"
-            if fm.fileExists(atPath: old + "/bond.txt") || fm.fileExists(atPath: old + "/pats.txt") { fresh = false }   // 從舊版 Spidey 小夥伴升級的：維持經典一櫃
+            //      0.5～0.8 版在 Mac 上也用這個資料夾放程式和 socket，所以看舊的資料檔在不在（Windows 是看資料夾在不在）。離屏測試（沒指定假的舊資料夾）是空的。
+            let old = World.LegacyDir()
+            if !old.isEmpty && (fm.fileExists(atPath: old + "/bond.txt") || fm.fileExists(atPath: old + "/pats.txt")) { fresh = false }   // 從舊版 Spidey 小夥伴升級的：維持經典一櫃
         }
         // </fan>
         if !fresh { return "" }
@@ -26179,12 +26180,68 @@ extension World {
     }
 }
 
+// ================= 舊版「Spidey 小夥伴」升級（DeskPals.Fan.cs 同一段；舊使用者都是個人版，所以只有個人版有這段）=================
+// mac 舊版的東西：~/Library/Application Support/SpideyDesktop（程式、socket spidey.sock、舊版 Spidey 的 bond.txt／pats.txt、
+// claude-hook.js、獨立版的 standalone.json）、~/Library/LaunchAgents/local.spidey-pet.plist、~/Library/Logs/spidey-desktop.log。
+// 新版開起來時接手：叫舊的收工、拿掉舊的 LaunchAgent 和舊程式檔（感情等級由 Migrate() 複製過來，原檔不動）、
+// 舊資料夾的 claude-hook.js 換成轉發到新位置的小檔（有人在 ~/.claude/settings.json 的 hooks 指著它；settings.json 不動）。
+// 全新安裝沒有舊資料夾：什麼都不做、什麼都不建。
+// 測試：DESKPALS_LEGACY_DIR／DESKPALS_AUTOSTART_DIR 指到假的；離屏測試沒指定就完全不碰真的。
+// mac: 舊的 socket 就在舊資料夾裡（Windows 是 pipe，另外有 DESKPALS_LEGACY_PIPE）。
+extension World {
+    static func LegacyDir() -> String {
+        let d = ProcessInfo.processInfo.environment["DESKPALS_LEGACY_DIR"] ?? ""
+        if !d.isEmpty { return d }
+        if App.Offscreen { return "" }
+        return NSHomeDirectory() + "/Library/Application Support/SpideyDesktop"
+    }
+
+    static func LegacyEnv(_ name: String, _ real: String) -> String {
+        let v = ProcessInfo.processInfo.environment[name] ?? ""
+        if !v.isEmpty { return v }
+        return App.Offscreen ? "" : real
+    }
+
+    // 轉發用的 claude-hook.js：交給新位置那支（找不到就安靜結束，絕不擋 Claude）
+    static func LegacyHookStub(_ target: String) -> String {
+        let js = target.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        return "#!/usr/bin/env node\n"
+            + "// 公仔櫃 Desk Pals：這裡是舊版的位置。Claude Code hooks 指著這裡的話，會轉給新位置的 claude-hook.js（設定不用改）。\n"
+            + "try { require(\"" + js + "\"); } catch (e) { process.exit(0); }\n"
+    }
+
+    func LegacyTakeOver() {
+        let old = World.LegacyDir()
+        let fm = FileManager.default
+        var isDir: ObjCBool = false
+        if old.isEmpty || !fm.fileExists(atPath: old, isDirectory: &isDir) || !isDir.boolValue { return }
+        let sock = (old as NSString).appendingPathComponent("spidey.sock")
+        if fm.fileExists(atPath: sock) && Standalone.Send(sock, "quit") { App.Log("legacy: asked the old one to quit") }
+        let agents = World.LegacyEnv("DESKPALS_AUTOSTART_DIR", NSHomeDirectory() + "/Library/LaunchAgents")
+        if !agents.isEmpty { World.LegacyDelete((agents as NSString).appendingPathComponent("local.spidey-pet.plist")) }
+        if !App.Offscreen { World.LegacyDelete(NSHomeDirectory() + "/Library/Logs/spidey-desktop.log") }
+        for f in ["SpideyDesktop.swift", "SpideyDesktop", "spidey-desktop.sh", "DeskPals.swift", "DeskPals", "desk-pals.sh", "ci-watch.js",
+                  "spidey.sock", "spidey.sock.lock", "standalone.json"] {
+            World.LegacyDelete((old as NSString).appendingPathComponent(f))
+        }
+        let stub = World.LegacyHookStub(World.FilePath("claude-hook.js"))
+        let sp = (old as NSString).appendingPathComponent("claude-hook.js")
+        if (try? String(contentsOfFile: sp, encoding: .utf8)) != stub {
+            if (try? stub.write(toFile: sp, atomically: true, encoding: .utf8)) != nil { App.Log("legacy: claude-hook.js forwards to " + World.DataDir) }
+        }
+    }
+
+    static func LegacyDelete(_ f: String) {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: f) && (try? fm.removeItem(atPath: f)) != nil { App.Log("legacy: removed " + (f as NSString).lastPathComponent) }
+    }
+}
 // ===== 95_standalone.swift =====
 // 95_standalone.swift — 獨立版 Desk Pals.app（不用 VS Code）的開場：只有從 .app 包裡跑的時候才做事，
 // VS Code 擴充套件編出來的那支（desk-pals.sh）、CI 的離屏測試（DESKPALS_OFFSCREEN=1）都不受影響。
 //   ・已經開著：叫它出來打個招呼就結束（不會開兩個）
-//   ・寫 ~/Library/Application Support/SpideyDesktop/standalone.json：VS Code 擴充套件看到就不再自己編一份、不建開機啟動，只負責連上
-//   ・開機自動啟動：~/Library/LaunchAgents/local.spidey-pet.plist（跟擴充套件同一個 Label → 直接換成 .app 版，不會開兩次）
+//   ・寫 ~/Library/Application Support/DeskPals/standalone.json：VS Code 擴充套件看到就不再自己編一份、不建開機啟動，只負責連上
+//   ・開機自動啟動：~/Library/LaunchAgents/local.desk-pals.plist（跟擴充套件同一個 Label → 直接換成 .app 版，不會開兩次）
 //     擴充套件那份還開著的話先請它收工，再換這個上來
 //   ・還在「下載項目」／DMG 裡直接打開（App Translocation）：提醒先拖進「應用程式」，這次不設開機啟動
 //   ・在 Finder／Launchpad 再點一次：叫公仔打招呼
@@ -26193,8 +26250,8 @@ import AppKit
 import Carbon
 
 enum Standalone {
-    static let Label = "local.spidey-pet"
-    static var home: String { return NSHomeDirectory() + "/Library/Application Support/SpideyDesktop" }
+    static let Label = "local.desk-pals"
+    static var home: String { return NSHomeDirectory() + "/Library/Application Support/DeskPals" }
     static var reopen: ReopenHandler? = nil
 
     static func Prepare() {
@@ -26202,7 +26259,7 @@ enum Standalone {
         if !bundle.hasSuffix(".app") || App.Offscreen { return }
         let a = CommandLine.arguments   // （macOS 13 以後 Finder 不會再帶 -psn_ 參數）
         if a.count >= 2 && a[1].hasPrefix("--") { return }   // --preview 之類的開發用指令
-        let sock = a.count >= 2 && !a[1].isEmpty ? a[1] : home + "/spidey.sock"
+        let sock = a.count >= 2 && !a[1].isEmpty ? a[1] : home + "/desk-pals.sock"
         let exe = Bundle.main.executablePath ?? (bundle + "/Contents/MacOS/DeskPals")
         let translocated = bundle.contains("/AppTranslocation/") || bundle.hasPrefix("/Volumes/")
         var tookOver = false
@@ -26230,7 +26287,7 @@ enum Standalone {
         try? data.write(to: URL(fileURLWithPath: home + "/standalone.json"))
     }
 
-    // Claude Code hooks 的設定指著 SpideyDesktop/claude-hook.js（Mac安裝說明這樣寫）：放一份過去
+    // Claude Code hooks 的設定指著 DeskPals/claude-hook.js（Mac安裝說明這樣寫）：放一份過去
     static func CopyHooks() {
         for f in ["claude-hook.js", "ci-watch.js"] {
             guard let from = Bundle.main.path(forResource: (f as NSString).deletingPathExtension, ofType: "js"),

@@ -124,7 +124,7 @@ Override points (Swift `override func`): `OnPaint(_ e: PaintEventArgs)` (`e.Grap
 `Application.Exit()`, `Application.DoEvents()`.
 
 ## Platform differences (decisions)
-- Pipe → Unix domain socket. Path is passed as argv[1] (default `~/Library/Application Support/SpideyDesktop/spidey.sock`). Same line protocol. `claude-hook.js` and the VS Code extension already speak this.
+- Pipe → Unix domain socket. Path is passed as argv[1] (default `~/Library/Application Support/DeskPals/desk-pals.sock`). Same line protocol. `claude-hook.js` and the VS Code extension already speak this.
 - Window list (EnumWindows / GetWindowRect / class names / titles / IsIconic / foreground / z-order) → `CGWindowListCopyWindowInfo(.optionOnScreenOnly, .excludeDesktopElements)`, layer 0 only, skip our own PID, owner name in place of class name, `kCGWindowName` as title when available (may be empty without Screen Recording permission — code must cope). Front-to-back order = z-order. Foreground window = frontmost app's first layer-0 window (`NSWorkspace.shared.frontmostApplication`). See existing `extension/desktop/SpideyDesktop.swift` (≈ line 2100) for working code.
 - Full-screen detection: a layer-0 window of the frontmost app covering a whole screen.
 - Hotkey Ctrl+Alt+S (RegisterHotKey) → Carbon `RegisterEventHotKey` Control+Option+S (see SpideyDesktop.swift ≈ line 1128).
@@ -175,8 +175,8 @@ Mac differences (all marked `// mac:`):
 - `World.StartLineup()` is `static` (it runs in `World.init` before `super.init`).
 - Fresh install = no `lineup.txt`, `out.txt`, `profile.txt`, `usage.txt` in the data dir → `original` (writes `lineup.txt`), same as
   Windows. Windows treats an existing `%LOCALAPPDATA%\SpideyDesktop` folder as "upgraded from old Spidey"; on mac
-  `~/Library/Application Support/SpideyDesktop` always exists (VS Code keeps the binary and socket there), so the mac checks for the old
-  Spidey data files `bond.txt` / `pats.txt` in it instead (the files `Migrate()` copies).
+  `~/Library/Application Support/SpideyDesktop` also held the program and socket in 0.5–0.8, so the mac checks for the old
+  Spidey data files `bond.txt` / `pats.txt` in it instead (the files `Migrate()` copies). Both go through `World.LegacyDir()`.
 - `OrigPairScene` skips a pair scene when one of the two pets is missing (C# throws inside `Begin` and the exception is swallowed by `Later`).
 
 ## 讀書小幫手 — ported (`mac/src/52_study.swift`)
@@ -217,3 +217,12 @@ Hooks in DeskPals.cs are one-liners (`P.Cu ? … : …`, `if (P.Cu) { CuXxx(); r
 Swift 沒有 C# 的 `else` 單獨一行的寫法問題，但拿掉 `if` 之後剩下的 `{ … }` 會變成 closure，要寫成 `do { … }`。
 輸出 `build/public/extension/desktop/DeskPals.swift`（不進 repo）；CI 會編譯它並跑離屏測試。
 
+
+## 舊版「Spidey 小夥伴」升級接手（`DeskPals.Fan.cs` ↔ `58_fan.swift`，個人版才有）
+
+`World.LegacyTakeOver()`（`Start()` 裡 `Migrate()` 之後，行尾 `//@fan`）：舊資料夾（Windows `%LOCALAPPDATA%\SpideyDesktop`、Mac
+`~/Library/Application Support/SpideyDesktop`）存在才做事 → 叫舊的收工（Windows pipe `spidey-pet-<帳號>`、Mac 舊資料夾裡的 `spidey.sock`）、
+拿掉舊的開機啟動（Windows「啟動」資料夾的 `Spidey 小夥伴.lnk`、Mac `~/Library/LaunchAgents/local.spidey-pet.plist`）、舊程式檔和舊 log，
+把舊位置的 `claude-hook.js` 換成轉發到 `<DataDir>/claude-hook.js` 的小檔（`~/.claude/settings.json` 的 hooks 可能指著它，settings.json 不動）。
+資料只複製不搬走（`Migrate()` 照舊）。測試用 `DESKPALS_LEGACY_DIR`／`DESKPALS_AUTOSTART_DIR`／`DESKPALS_LEGACY_PIPE`（Windows）指到假的；
+離屏模式沒指定就完全不碰真的。CI：`.github/legacy-upgrade.js`（upgrade／fresh 兩種）。

@@ -47,39 +47,27 @@ FAN_TERMS = [
 ]
 # 小波的 id「po」太短不能整個字串掃，只抓當成 id／名字／工廠用的寫法（區分大小寫）
 FAN_TERMS_CS = [r"[\"']po[\"']", r"\bPo\(", r"\bPo\b(?!['’]?s\b)"]
-# 不是角色內容、而是跨元件的基礎設施名稱（舊版「Spidey 小夥伴」留下的資料夾／socket／pipe／LaunchAgent／環境變數）：
-# Mac 的 VS Code 擴充套件、獨立版 .app、claude-hook.js 都靠這幾個名字找到彼此，改名會斷線，所以放行（只放行這幾個完整的寫法）
-INFRA_ALLOW = [r"SpideyDesktop", r"spidey\.sock", r"spidey-pet", r"SPIDEY_[A-Z_]+", r"spidey-desktop\.(?:log|sh)"]
-
+# 沒有放行清單：資料夾、socket、pipe、LaunchAgent、環境變數都叫 DeskPals／desk-pals（舊版「Spidey 小夥伴」的名稱只出現在個人版的升級接手程式裡）
 _fan_re = re.compile("|".join(FAN_TERMS), re.I)
 _fan_cs_re = re.compile("|".join(FAN_TERMS_CS))
-_allow_re = re.compile("|".join(INFRA_ALLOW))
 
 
 def fan_hits(text):
-    """回傳文字裡的同人字眼（已扣掉放行的基礎設施名稱）"""
-    t = _allow_re.sub(" ", text)
-    return [m.group(0) for m in _fan_re.finditer(t)] + [m.group(0) for m in _fan_cs_re.finditer(t)]
+    """回傳文字裡的同人字眼"""
+    return [m.group(0) for m in _fan_re.finditer(text)] + [m.group(0) for m in _fan_cs_re.finditer(text)]
 
 
 # 二進位檔：.NET 字串常數是 UTF-16LE、識別字是 UTF-8；Swift／一般檔是 UTF-8。只掃夠長、不會誤判的字。
 BIN_TERMS = ["Spidey", "spidey", "Stitch", "stitch", "Hangyodon", "hangyodon", "Tinky", "tinky", "Dipsy", "dipsy", "LaaLaa", "laalaa",
              "Teletubb", "Tubby", "tubby", "Pikmin", "pikmin", "pkred", "pkyellow", "pkblue", "Thwip", "Eh-oh", "Ohana", "Aloha",
              "FramePo", "PoBall", "小波", "史迪", "漢頓", "丁丁", "迪西", "天線寶寶", "太陽寶寶", "皮克敏", "蜘蛛", "噗咿", "休息花"]
-BIN_ALLOW = ["SpideyDesktop", "spidey.sock", "spidey-pet", "SPIDEY_FORCE_DARK", "spidey-desktop.log", "spidey-desktop.sh",
-             # Swift 把 15 個位元組以內的字串（"/spidey.sock"）直接塞進 x86_64 指令的 8 位元組常數，切成 "/spidey." + "sock"，
-             # 完整的放行名稱就對不上了：只放行後面緊接 . 或 - 的寫法（角色 id 本身是 "spidey" 後面接 0，照樣抓得到；原始碼另外有嚴格的掃描）
-             "spidey.", "spidey-"]
 
 
 def bin_hits(data):
     hits = []
     for enc in ("utf-8", "utf-16-le"):
-        d = data
-        for a in BIN_ALLOW:
-            d = d.replace(a.encode(enc), b" " * len(a.encode(enc)))
         for t in BIN_TERMS:
-            if t.encode(enc) in d:
+            if t.encode(enc) in data:
                 hits.append(f"{t} ({enc})")
     return hits
 

@@ -6,11 +6,11 @@ NAME="${1:-desk-pals}"
 PET="${2:-}"
 LINEUP="${3:-}"
 DIR="$(cd "$(dirname "$0")" && pwd)"
-APPDIR="$HOME/Library/Application Support/SpideyDesktop"
+APPDIR="$HOME/Library/Application Support/DeskPals"
 LOG="$HOME/Library/Logs/desk-pals.log"
 SRC="$DIR/DeskPals.swift"
 BIN="$DIR/DeskPals"
-SOCK="$APPDIR/spidey.sock"
+SOCK="$APPDIR/desk-pals.sock"
 
 mkdir -p "$HOME/Library/Logs" "$APPDIR"
 log() { echo "$(date '+%Y-%m-%dT%H:%M:%S') sh[$NAME]: $*" >> "$LOG"; }

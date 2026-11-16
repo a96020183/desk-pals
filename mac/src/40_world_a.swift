@@ -46,7 +46,7 @@ final class World: Form {
     var SeasonNow = ""
     var birthday = ""
     var nightChecked = -1
-    var forceNight = ProcessInfo.processInfo.environment["SPIDEY_FORCE_DARK"] == "1" ? 1 : -1
+    var forceNight = ProcessInfo.processInfo.environment["DESKPALS_FORCE_DARK"] == "1" ? 1 : -1
     var userHidden = false, sharing = false, fsNow = false
     var CursorStill: Double = 0
     var lastCursor = Point(0, 0)
@@ -193,6 +193,7 @@ extension World {
         if h == 0 { App.Log("no handle") }
         try? FileManager.default.createDirectory(atPath: World.DataDir, withIntermediateDirectories: true)
         Migrate()
+        LegacyTakeOver()   //@fan
         LoadState()
         LoadFeatures()
         LoadMode()
@@ -286,10 +287,10 @@ extension World {
         // <fan>
         // 舊的 Spidey 桌面版好感度搬過來（只複製，不動原檔）
         // mac: 舊的 mac 版 SpideyDesktop.swift 存在 ~/Library/Application Support/SpideyDesktop（bond.txt「xp 日期」、pats.txt「日期 次數」，格式一樣）
-        let old = NSHomeDirectory() + "/Library/Application Support/SpideyDesktop"
+        let old = World.LegacyDir()
         let map: [[String]] = [["bond.txt", "bond-spidey.txt"], ["pats.txt", "pats-spidey.txt"]]
         let fm = FileManager.default
-        for i in 0..<2 {
+        for i in 0..<(old.isEmpty ? 0 : 2) {
             let src = (old as NSString).appendingPathComponent(map[i][0]), dst = World.FilePath(map[i][1])
             if fm.fileExists(atPath: src) && !fm.fileExists(atPath: dst) {
                 if (try? fm.copyItem(atPath: src, toPath: dst)) != nil { App.Log("migrated " + map[i][0]) }

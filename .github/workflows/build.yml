@@ -158,8 +158,15 @@ jobs:
           grep -E "custom|share" "$HOME/Library/Logs/desk-pals.log" | tail -n 60 || true
           if kill -0 $PID 2>/dev/null; then echo "did not quit"; kill $PID; RC=1; fi
           exit $RC
-      # ---------- standalone Desk Pals.app / DMG ----------
-      - name: Developer ID certificate (only if the secrets exist)
+      # ---------- 舊版「Spidey 小夥伴」升級接手（個人版）＋全新安裝不會建出舊名字的東西：都在臨時資料夾，不碰 runner 的家目錄 ----------
+      - name: Legacy upgrade takeover (personal) + fresh installs create nothing old (personal, public)
+        run: |
+          T="$RUNNER_TEMP/lg"
+          mkdir -p "$T"
+          node .github/legacy-upgrade.js upgrade "$T/a.sock" "$T/SpideyDesktop" "$T/LaunchAgents" "$T/data" - -- extension/desktop/DeskPals "$T/a.sock" "" ""
+          node .github/legacy-upgrade.js fresh "$T/b.sock" "$T/none-b" "$T/LaunchAgents-b" "$T/data-b" - -- extension/desktop/DeskPals "$T/b.sock" "" ""
+          node .github/legacy-upgrade.js fresh "$T/c.sock" "$T/none-c" "$T/LaunchAgents-c" "$T/data-c" - -- build/public/extension/desktop/DeskPals "$T/c.sock" "" ""
+      # ---------- standalone Desk Pals.app / DMG ----------      - name: Developer ID certificate (only if the secrets exist)
         env:
           MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
@@ -220,12 +227,12 @@ jobs:
           set -e
           APP="$RUNNER_TEMP/apps/Desk Pals.app"
           BIN="$APP/Contents/MacOS/DeskPals"
-          HOME_DIR="$HOME/Library/Application Support/SpideyDesktop"
-          SOCK="$HOME_DIR/spidey.sock"
-          PLIST="$HOME/Library/LaunchAgents/local.spidey-pet.plist"
+          HOME_DIR="$HOME/Library/Application Support/DeskPals"
+          SOCK="$HOME_DIR/desk-pals.sock"
+          PLIST="$HOME/Library/LaunchAgents/local.desk-pals.plist"
           mkdir -p "$HOME/Library/LaunchAgents" "$HOME_DIR"
           # what the VS Code extension leaves behind: LaunchAgent → desk-pals.sh, its own compiled copy running on the same socket
-          printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>Label</key><string>local.spidey-pet</string><key>ProgramArguments</key><array><string>/bin/bash</string><string>%s/desk-pals.sh</string></array></dict></plist>\n' "$HOME_DIR" > "$PLIST"
+          printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict><key>Label</key><string>local.desk-pals</string><key>ProgramArguments</key><array><string>/bin/bash</string><string>%s/desk-pals.sh</string></array></dict></plist>\n' "$HOME_DIR" > "$PLIST"
           DESKPALS_OFFSCREEN=1 DESKPALS_DATA_DIR="$RUNNER_TEMP/dp-ext" extension/desktop/DeskPals "$SOCK" boba original > run-ext.log 2>&1 &
           EXT=$!
           node .github/ping.js "$SOCK"
@@ -248,6 +255,8 @@ jobs:
           node .github/ping.js "$SOCK" quit
           sleep 3
           if kill -0 $STD 2>/dev/null; then echo "did not quit"; kill $STD; exit 1; fi
+          # 全新安裝（這台 runner 沒有舊版）：不能建出舊名字的資料夾、LaunchAgent、紀錄檔
+          if ls -d "$HOME/Library/Application Support/"* "$HOME/Library/LaunchAgents/"* "$HOME/Library/Logs/"* "$HOME_DIR/"* | grep -i spidey; then echo "a fresh install created something with the old name"; exit 1; fi
           rm -f "$PLIST" "$HOME_DIR/standalone.json"
       # 公開版的測試結果（只有續命小隊、自己做的公仔）
       - uses: actions/upload-artifact@v4
@@ -333,8 +342,20 @@ jobs:
           Start-Sleep -Seconds 3
           if ((Get-Content "$env:DESKPALS_DATA_DIR\lineup.txt") -ne "original") { throw "fresh install did not start in original" }
           if (-not (Test-Path public-ps1-shots\shot-original.png)) { throw "no snapshot" }
-      - name: Build vsix (public → dist, personal → dist-personal)
+      # 舊版「Spidey 小夥伴」升級接手（個人版）＋全新安裝不會建出舊名字的東西：都在臨時資料夾，不碰 runner 的 %LOCALAPPDATA%、「啟動」資料夾
+      - name: Legacy upgrade takeover (personal) + fresh installs create nothing old (personal, public)
+        shell: powershell
         run: |
+          $T = "$env:RUNNER_TEMP\lg"
+          $ps1 = (Resolve-Path "extension\desktop\desk-pals.ps1").Path
+          $pub = (Resolve-Path "build\public\extension\desktop\desk-pals.ps1").Path
+          node .github/legacy-upgrade.js upgrade desk-pals-lg-a "$T\SpideyDesktop" "$T\Startup" "$T\data" spidey-pet-lg-a -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ps1 -PipeName desk-pals-lg-a
+          if ($LASTEXITCODE -ne 0) { throw "legacy upgrade test failed" }
+          node .github/legacy-upgrade.js fresh desk-pals-lg-b "$T\none-b" "$T\Startup-b" "$T\data-b" spidey-pet-lg-b -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File $ps1 -PipeName desk-pals-lg-b
+          if ($LASTEXITCODE -ne 0) { throw "fresh install test (personal) failed" }
+          node .github/legacy-upgrade.js fresh desk-pals-lg-c "$T\none-c" "$T\Startup-c" "$T\data-c" spidey-pet-lg-c -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File $pub -PipeName desk-pals-lg-c
+          if ($LASTEXITCODE -ne 0) { throw "fresh install test (public) failed" }
+      - name: Build vsix (public → dist, personal → dist-personal)        run: |
           python -I build_vsix.py --public
           python -I build_vsix.py --personal --out dist-personal
 
@@ -416,7 +437,18 @@ jobs:
           $setup = (Get-ChildItem dist\DeskPals-Setup-*.exe).FullName
           powershell -NoProfile -ExecutionPolicy Bypass -File .github\test-installer.ps1 -Setup $setup
           if ($LASTEXITCODE -ne 0) { throw "installer test failed" }
-      - name: MSIX installs and runs (test-signed copy; best effort)
+      # 上面的安裝程式、獨立版都是真的裝在 runner 上（全新安裝）：不能留下舊名字的資料夾、開機捷徑、紀錄檔
+      - name: Real fresh install left nothing with the old name
+        shell: powershell
+        run: |
+          $bad = @()
+          if (Test-Path "$env:LOCALAPPDATA\SpideyDesktop") { $bad += "$env:LOCALAPPDATA\SpideyDesktop" }
+          $bad += @(Get-ChildItem ([Environment]::GetFolderPath("Startup")) -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "spidey" } | ForEach-Object { $_.FullName })
+          $bad += @(Get-ChildItem $env:TEMP -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "spidey" } | ForEach-Object { $_.FullName })
+          $bad += @(Get-ChildItem "$env:LOCALAPPDATA\DeskPals" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "spidey" } | ForEach-Object { $_.FullName })
+          Get-ChildItem "$env:LOCALAPPDATA\DeskPals" -ErrorAction SilentlyContinue | Format-Table Name, Length
+          if ($bad.Count -gt 0) { $bad; throw "a fresh install created something with the old name" }
+          "nothing with the old name"      - name: MSIX installs and runs (test-signed copy; best effort)
         continue-on-error: true
         shell: powershell
         run: |
