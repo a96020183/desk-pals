@@ -5,15 +5,16 @@ import AppKit
 // ================= 公仔小屋（蛋的右鍵）：娛樂功能開關、重新設定；只要一隻；第一次設定 =================
 //@@IN World
     let feats = Dict<String, Bool>()
+    let featSet = List<String>()   // 自己動過的開關（features.txt 的 set=…，逗號隔開）
     // ---- 設定過了沒（profile.txt）、擺法（mode.txt：shelf｜single <id>）----
-    var Single = false                            // 只要一隻：沒有櫃子，那隻的家是蛋，其他隻不出來
+    var Single = false                            // 只要一隻：沒有櫃子，那隻的家是收起來的小紙箱（以前是蛋），其他隻不出來
     var singleId = ""
     // ---- 設定視窗 ----
     var setupForm: SetupForm! = nil
 //@@END
 
 extension World {
-    // 小屋的開關（features.txt：一行一個 key=0/1；沒寫的＝開，跟以前一樣）
+    // 小屋的開關（features.txt：一行一個 key=0/1；沒寫的＝開，下班時間和搗蛋除外（FeatDefaultOff）；set=…＝自己動過的）
     static let FeatureList: [[String]] = [
         ["scenes", "串門子劇情"],
         ["lunch", "午餐變身"],
@@ -25,25 +26,37 @@ extension World {
         ["chatter", "閒聊泡泡（自己閒晃時講話）"],
         ["bat_link", "沒電的電量跟工作時間連動"],
         ["wb_water", "破破提醒喝水（窩伴小世界）"]]
-    func Feat(_ key: String) -> Bool { var on = false; return feats.TryGetValue(key, &on) ? on : !World.MisDefaultOff(key) }   // 搶游標預設關（59_mischief.swift）
+    func Feat(_ key: String) -> Bool { var on = false; return feats.TryGetValue(key, &on) ? on : !World.FeatDefaultOff(key) }
+    // 預設關的：下班時間（很多人裝在家裡的電腦上，晚上黑化、催下班反而怪）、搗蛋那幾個（59_mischief.swift）
+    static func FeatDefaultOff(_ key: String) -> Bool { return key == "night" || World.MisDefaultOff(key) }
 
     func LoadFeatures() {
         feats.Clear()
+        featSet.Clear()
         for line in World.ReadText("features.txt").components(separatedBy: "\n") {
             let a = line.Trim().components(separatedBy: "=")
-            if a.count == 2 && a[0].Trim() != "" { feats[a[0].Trim()] = a[1].Trim() != "0" }
+            if a.count != 2 || a[0].Trim() == "" { continue }
+            if a[0].Trim() == "set" {
+                for k2 in a[1].components(separatedBy: ",") { let kk = k2.Trim(); if kk != "" && !featSet.Contains(kk) { featSet.Add(kk) } }
+                continue
+            }
+            feats[a[0].Trim()] = a[1].Trim() != "0"
         }
+        // 下班時間以前預設開，存檔時跟著寫成 night=1：沒自己動過的（set 裡沒有 night）一律當作沒寫＝關；自己打開過的照舊
+        if !featSet.Contains("night") { feats.Remove("night") }
     }
 
     func SaveFeatures() {
         let sb = StringBuilder()
         for f in World.FeatureList { sb.Append(f[0] + "=" + (Feat(f[0]) ? "1" : "0") + "\n") }
         for f in World.MisFeatureList { sb.Append(f[0] + "=" + (Feat(f[0]) ? "1" : "0") + "\n") }   // 搗蛋的開關
+        if featSet.Count > 0 { sb.Append("set=" + featSet.ToArray().joined(separator: ",") + "\n") }
         World.WriteText("features.txt", sb.ToString())
     }
 
     func SetFeat(_ key: String, _ on: Bool) {
         feats[key] = on
+        if !featSet.Contains(key) { featSet.Add(key) }
         SaveFeatures()
         App.Log("feature " + key + "=" + (on ? "1" : "0"))
         if key == "night" || key == "season" { nightChecked = -1; CheckNight() }   // 馬上換樣子（黑化、節日帽子）
@@ -60,7 +73,7 @@ extension World {
 
     func LoadMode() {
         var m = World.ReadText("mode.txt")
-        if m == "" && !File.Exists(World.FilePath("profile.txt")) { m = "single" }   // 第一次（還沒設定）：預設只要一隻
+        if m == "" { m = "shelf" }   // 沒有 mode.txt（設定精靈沒按完、或是舊版）＝整櫃。以前沒設定完預設「只要一隻」，結果有人一直不知道有櫃子；存過 mode.txt 的照舊
         Single = m.StartsWith("single")
         singleId = Single && m.Length > 6 ? m.Substring(6).Trim() : ""
     }
@@ -68,39 +81,37 @@ extension World {
     // 只要一隻的那隻（換到沒有他的那一櫃：用那一櫃預設的那隻）
     func SinglePet() -> String { return Get(singleId) != nil ? singleId : defaultPet }
 
-    // 只要一隻：點蛋＝叫他出來／回蛋裡
+    // 只要一隻：點收起來的小紙箱＝叫他出來／回去。第一次點：說明一下（整櫃模式點小紙箱是打開櫃子，這裡不一樣）
     func EggClick() {
         let p: Pet! = Get(SinglePet())
         if p == nil { return }
+        let hint = World.ReadText("egg-hint.txt") == ""
         if p.Out { if p.state != "stowfly" && p.state != "enter" && p.state != "exit" { p.StowToShelf(true) } }
         else { BringOut(p, true) }
+        if !hint { return }
+        World.WriteText("egg-hint.txt", "1")
+        App.Log("egg: first click hint (single)")
+        Later(1.6) { let who: Pet = p.Out ? p : self.Lead(); who.Say("點" + self.MiniName + "叫我出來、再點一下回去～要整櫃：右鍵 → 重新設定", 6) }
     }
 
     // ---- 公仔小屋選單：開關＋小幫手＋公仔們 ----
     func HouseMenu() { HouseMenu(Cursor.Position) }
+    // 最上層只留最常用的（打開／收起櫃子、叫出來、回家），其他照類型分成四個子選單（點一下在選單裡展開，同一層一次開一個）：
+    //   我的公仔：換一櫃（個人版的同人櫃也在這裡）、做公仔、我的公仔、我的櫃放誰、匯入、分享短片、躲起來
+    //   娛樂：串門子、午餐、閒聊、跟著視窗跑、節日、煙火、搗蛋（子選單）
+    //   工作：下班時間、早上點名、沒電連動、喝水提醒、小幫手（專注／安靜／提醒）
+    //   設定：重新設定、讀書小幫手設定（學校行事曆、熬夜）、匿名回報（公開版有 ID 才有）（mac：沒有 C# 的開機自動出現）
+    // 每個項目只出現在一個地方；開關（FeatureList）不在 WorkFeats 裡的都算娛樂，新加的開關不會漏掉。收工在最下面。
+    static let WorkFeats: [String] = ["night", "rollcall", "bat_link", "wb_water"]
     func HouseMenu(_ at: Point) {
         let m = ContextMenuStrip()
-        m.Items.Add(ToolStripLabel("開關（打勾＝開著）"))
-        for f in World.FeatureList {
-            let key = f[0]
-            let mi = ToolStripMenuItem(f[1])
-            mi.CheckOnClick = true
-            mi.Checked = Feat(key)
-            mi.Click = { [unowned mi] in self.SetFeat(key, !self.Feat(key)); mi.Checked = self.Feat(key) }
-            m.Items.Add(mi)
-        }
-        MisHouseMenu(m)  // 搗蛋的開關、把推走的視窗叫回來（59_mischief.swift）
-        StatsHouseMenu(m)   // 匿名回報的開關（公開版、有 ID 才有；61_stats.swift）
-        // mac: C# 這裡還有 StartupHouseMenu（Microsoft Store 版的開機啟動），Mac 沒有
-        m.Items.Add(ToolStripSeparator())
-        let help = ToolStripMenuItem("小幫手（專注、安靜、提醒）")
-        AddHelpers(help.DropDownItems)
-        m.Items.Add(help)
-        m.Items.Add(ToolStripSeparator())
-        m.Items.Add(ToolStripLabel(Single ? "我的公仔" : "公仔們"))
-        if !Single { m.Items.Add(shelf.Collapsed ? "打開公仔櫃" : "收合成蛋 🥚", nil, { self.ToggleEgg(!self.shelf.Collapsed) }) }
+        if !Single { m.Items.Add(shelf.Collapsed ? "打開公仔櫃" : MenuFold, nil, { self.ToggleEgg(!self.shelf.Collapsed) }) }
         m.Items.Add(Single ? "叫" + Get(SinglePet()).P.Name + "出來" : "全部出來", nil, { self.AllOut() })
-        m.Items.Add(Single ? "回蛋裡" : "全部回家", nil, { self.AllHome() })
+        m.Items.Add(Single ? "回" + MiniName + "裡" : "全部回家", nil, { self.AllHome() })
+        MisRestoreMenu(m.Items)   // 把推走的視窗叫回來（有推走的才有；59_mischief.swift）
+        m.Items.Add(ToolStripSeparator())
+
+        let mine = ToolStripMenuItem("我的公仔")
         let sw = ToolStripMenuItem("換一櫃")
         for lu in Pal.LineupsNow() {
             let l2 = lu
@@ -108,14 +119,42 @@ extension World {
             li.Checked = lu == lineup
             sw.DropDownItems.Add(li)
         }
-        m.Items.Add(sw)
-        m.Items.Add("重新設定…", nil, { self.ShowSetup(false) })
-        m.Items.Add("讀書小幫手設定（學校行事曆、熬夜）…", nil, { self.ShowStudySettings() })
-        m.Items.Add("躲起來（⌃⌥S）", nil, { self.ToggleHide() })
-        CuHouseMenu(m)   // 自己做的公仔、分享短片（53_custom.swift）
+        mine.DropDownItems.Add(sw)
+        CuHouseMenu(mine.DropDownItems)   // 做公仔、我的公仔、我的櫃放誰、匯入、分享短片（53_custom.swift）
+        mine.DropDownItems.Add("躲起來（⌃⌥S）", nil, { self.ToggleHide() })
+        m.Items.Add(mine)
+
+        let fun = ToolStripMenuItem("娛樂")
+        for f in World.FeatureList { if !World.WorkFeats.contains(f[0]) { fun.DropDownItems.Add(FeatItem(f[0], f[1])) } }
+        MisHouseMenu(fun.DropDownItems)  // 搗蛋的開關（59_mischief.swift）
+        m.Items.Add(fun)
+
+        let work = ToolStripMenuItem("工作")
+        for f in World.FeatureList { if World.WorkFeats.contains(f[0]) { work.DropDownItems.Add(FeatItem(f[0], f[1])) } }
+        let help = ToolStripMenuItem("小幫手（專注、安靜、提醒）")
+        AddHelpers(help.DropDownItems)
+        work.DropDownItems.Add(help)
+        m.Items.Add(work)
+
+        let setm = ToolStripMenuItem("設定")
+        setm.DropDownItems.Add("重新設定…", nil, { self.ShowSetup(false) })
+        setm.DropDownItems.Add("讀書小幫手設定（學校行事曆、熬夜）…", nil, { self.ShowStudySettings() })
+        StatsHouseMenu(setm.DropDownItems)   // 匿名回報的開關（公開版、有 ID 才有；61_stats.swift）
+        // mac: C# 這裡還有 StartupHouseMenu（Microsoft Store 版的開機啟動），Mac 沒有
+        m.Items.Add(setm)
+
         m.Items.Add(ToolStripSeparator())
         m.Items.Add("收工（關掉 Desk Pals）", nil, { self.QuitAll() })
         ShowMenu(m, "公仔小屋", true, at)
+    }
+
+    // 小屋的一個開關（打勾＝開著；按了選單不關）
+    func FeatItem(_ key: String, _ text: String) -> ToolStripMenuItem {
+        let mi = ToolStripMenuItem(text)
+        mi.CheckOnClick = true
+        mi.Checked = Feat(key)
+        mi.Click = { [unowned mi] in self.SetFeat(key, !self.Feat(key)); mi.Checked = self.Feat(key) }
+        return mi
     }
 
     // 測試用：act menu pet｜house（開在公仔／蛋旁邊，不看游標）
@@ -133,7 +172,7 @@ extension World {
 
     func ShowSetup(_ first: Bool) {
         if setupForm == nil || setupForm.IsDisposed {
-            setupForm = SetupForm(self, first, lineup, Single || first, Single ? SinglePet() : "")
+            setupForm = SetupForm(self, first, lineup, Single, Single ? SinglePet() : "")   // 第一次也先選「整櫃」
         }
         let wa: Rectangle = App.Offscreen ? screens[0].WorkingArea : Screen.FromPoint(Cursor.Position).WorkingArea
         setupForm.Location = Point(wa.Left + (wa.Width - setupForm.Width) / 2, wa.Top + Math.Max(0, (wa.Height - setupForm.Height) / 2))
@@ -160,7 +199,7 @@ extension World {
             if lu != lineup { SwitchLineup(lu, pet) }
             else { let p: Pet! = Get(pet); if p != nil { SelectOnly(p) } }
             let sp: Pet! = Get(SinglePet())
-            if sp != nil { Later(1.6) { sp.Say("以後我住在右下角的蛋裡～點一下蛋就叫我 🥚", 3.5) } }
+            if sp != nil { Later(1.6) { sp.Say("以後我住在右下角的" + self.MiniName + "裡～點一下" + self.MiniName + "就叫我出來", 3.5) } }
         }
         else {
             if lu != lineup { SwitchLineup(lu, "") }
@@ -411,6 +450,23 @@ class PixelMenu: OverlayForm {
     }
 
     func SetHover(_ i: Int) { hover = i >= 0 && i < rows.Count && Selectable(i) ? i : -1; Invalidate() }
+    // 測試用（pipe menu-info）：每一列「row 第幾列 深度 子選單 展開 打勾 文字」
+    func Info() -> String {
+        let b = Bounds
+        var sb: String = "menu " + (House ? "house" : "pet") + " " + String(rows.Count) + " " + String(b.X) + " " + String(b.Y) + " " + String(b.Width) + " " + String(b.Height) + "\n"
+        var i = 0
+        while i < rows.Count {
+            let r = rows[i]
+            let mi = r.It as? ToolStripMenuItem
+            let kind: String = r.Sep ? "sep" : (r.Header ? "header" : "item")
+            let isOpen: Bool = opened.Exists({ $0 === r.It })
+            let ck: Bool = mi != nil && mi!.Checked
+            let a: String = "row " + String(i) + " " + String(r.Depth) + " " + kind + " " + (r.Sub ? "1" : "0")
+            sb += a + " " + (isOpen ? "1" : "0") + " " + (ck ? "1" : "0") + " " + RowText(r) + "\n"
+            i += 1
+        }
+        return sb
+    }
 
     func MoveHover(_ dir: Int) {
         let n = rows.Count
@@ -775,7 +831,7 @@ class SetupForm: Form {
         else {
             EnsurePics(lu)
             let cw = Sc(240), ch = Sc(116), gap = Sc(24), x0 = (W0 - 2 * cw - gap) / 2
-            Add("mode:single", "只要一隻", "沒有櫃子，他住在右下角的蛋裡", Rectangle(x0, top, cw, ch), 0, mode == "single")
+            Add("mode:single", "只要一隻", "沒有櫃子，他住在右下角的" + ShelfArt.For(lu).MiniName + "裡", Rectangle(x0, top, cw, ch), 0, mode == "single")
             Add("mode:shelf", lu == Pal.Pikmin ? "整櫃（三隻＋花）" : "整櫃", lu == Pal.Pikmin ? "三隻皮克敏和休息花住在櫃子裡" : "大家住在公仔櫃裡，點格子叫他們出來", Rectangle(x0 + cw + gap, top, cw, ch), 0, mode == "shelf")   //@fan
             // <public> Add("mode:shelf", "整櫃", "大家住在公仔櫃裡，點格子叫他們出來", Rectangle(x0 + cw + gap, top, cw, ch), 0, mode == "shelf")
             if mode == "single" {
@@ -872,7 +928,8 @@ class SetupForm: Form {
         Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.Right + 4 * U, pr.Y + plh / 2 - 2 * U, U)
         Steps(g, W0, Sc(68))
         let q = step == 0 ? "選你的公仔" : "怎麼擺？"
-        let hint = step == 0 ? "兩櫃原創公仔選一櫃，或用自己的照片做一隻（之後在小屋、選單都能換櫃）" : (mode == "single" ? "選一隻，他會住在右下角的蛋裡" : "公仔櫃放在右下角，點格子就叫他們出來")
+        let singleHint: String = "選一隻，他會住在右下角的" + ShelfArt.For(lu).MiniName + "裡"
+        let hint: String = step == 0 ? "兩櫃原創公仔選一櫃，或用自己的照片做一隻（之後在小屋、選單都能換櫃）" : (mode == "single" ? singleHint : "公仔櫃放在右下角，點格子就叫他們出來")
         TextRenderer.DrawText(g, q, qF, Rectangle(0, Sc(100), W0, Sc(30)), Pix.TextC, Pix.Mid)
         TextRenderer.DrawText(g, hint, subF, Rectangle(0, Sc(130), W0, Sc(18)), Pix.C(0x9A6338), Pix.Mid)
         if step == 0 {
@@ -996,6 +1053,14 @@ class SetupForm: Form {
                 g.DrawImage(pic, ix + (iconW - pw) / 2, r.Y + Sc(12), pw, ph)
                 g.InterpolationMode = im
             }
+        }
+        else if ShelfArt.For(lu).Mini(2, false) != nil {
+            let mi: Bitmap! = ShelfArt.For(lu).Mini(2, false)   // 收起來的小紙箱／小書包
+            let mh = Math.Min(r.Height - Sc(30), Sc(66)), mw = mi.Width * mh / mi.Height
+            let im = g.InterpolationMode
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic
+            g.DrawImage(mi, ix + (iconW - mw) / 2, r.Y + (r.Height - mh) / 2, mw, mh)
+            g.InterpolationMode = im
         }
         else {
             let pal = Dict<Character, Color>()

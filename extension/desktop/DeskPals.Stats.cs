@@ -197,14 +197,14 @@ namespace DeskPals
         }
 
         // 小屋的開關（有 ID 的公開版才有）
-        void StatsHouseMenu(ContextMenuStrip m)
+        void StatsHouseMenu(ToolStripItemCollection items)
         {
             if (!Stats.Available) return;
             ToolStripMenuItem mi = new ToolStripMenuItem("匿名回報選了哪一櫃（幫我們決定下一櫃）");
             mi.CheckOnClick = true;
             mi.Checked = StatsOn;
             mi.Click += delegate { StatsSet(!StatsOn); mi.Checked = StatsOn; };
-            m.Items.Add(mi);
+            items.Add(mi);
         }
         void StatsSet(bool on)
         {

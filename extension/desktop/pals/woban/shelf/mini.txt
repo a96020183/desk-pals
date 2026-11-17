@@ -1,0 +1,5 @@
+# 公仔櫃收起來的樣子（tools/shelf_art/mini_art.py 產生，別手改）。座標＝2x mini.png 的像素
+# lid 蓋子／提把跟下面的分界y（吞公仔時上面那塊往上掀）；name 選單、泡泡裡的叫法；btn 收合鈕畫風（ink 白邊黑線貼紙／clay 黏土）
+lid 58
+name 小書包
+btn clay

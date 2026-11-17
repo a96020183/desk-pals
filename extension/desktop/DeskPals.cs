@@ -2975,7 +2975,7 @@ namespace DeskPals
 
     // ================= 櫃子的圖：每一櫃可以有自己的櫃子（pals/<資料夾>/shelf：窩伴小世界的書包小屋），沒有就用紙箱櫃（pals/shelf，tools/shelf_art/shelf_art.py 產生）=================
     // shelf.txt 的座標是 2x 圖的像素（1x 圖剛好一半）；櫃子用 S/8 換算（100% 縮放 S=4＝1x 圖原尺寸）。
-    // 晚上版不另外存圖：整張往深藍紫混一半（跟以前木頭櫃晚上的背板同一個顏色）。圖讀不到就用程式畫一個簡單的紙箱，不要當掉。
+    // 晚上版不另外存圖：整張乘一個稍暗、稍偏藍的顏色（ShelfArt.Night）。圖讀不到就用程式畫一個簡單的紙箱，不要當掉。
     class ShelfArt
     {
         public string Dir = "shelf", ImageName = "box.png";   // pals 底下哪個資料夾、圖的檔名（shelf.txt 的 image）
@@ -2983,6 +2983,9 @@ namespace DeskPals
         public int W2 = 512, H2 = 668, Crown = 88, N = 4;      // N＝幾格（紙箱櫃 4 格；書包小屋 3 間）
         public bool Pedestal = true, Note = true;              // 格 0 的展示台、大格背板的便利貼（shelf.txt 的 pedestal 0／note 0 關掉）
         public int[] Tab = { 382, 60, 44, 22 };
+        // 收起來的樣子（mini.txt＋{1x,2x}/mini.png，tools/shelf_art/mini_art.py 產生）：紙箱櫃＝封好的小紙箱、書包小屋＝小書包；圖讀不到就畫以前的像素蛋
+        public int MiniLid = 42;                               // 蓋子／提把跟下面的分界（2x 圖的像素）：吞公仔時上面那塊往上掀
+        public string MiniName = "小紙箱", Btn = "ink";        // 選單、泡泡裡的叫法；收合鈕的畫風（ink＝白邊黑線貼紙、clay＝黏土）
         public readonly int[][] Cells = {
             new int[] { 248, 106, 178, 508, 282, 107, 144, 477, 586, 614, 344, 603, 288, 620, 98, 20 },
             new int[] { 48, 106, 164, 132, 82, 106, 130, 108, 216, 238, 137, 230, 83, 244, 97, 20 },
@@ -3030,6 +3033,31 @@ namespace DeskPals
                 else if (a[0] == "cell" && a.Length >= 18 && v[1] >= 0 && v[1] < 4) { int[] c = new int[16]; Array.Copy(v, 2, c, 0, 16); Cells[v[1]] = c; n = Math.Max(n, v[1] + 1); }
             }
             if (n > 0) N = n;
+            byte[] mm = SqArt.Read(Dir + "/mini.txt");
+            if (mm == null) return;
+            foreach (string line in System.Text.Encoding.UTF8.GetString(mm).Split('\n'))
+            {
+                string t = line.Trim();
+                int sp = t.IndexOf(' ');
+                if (sp <= 0 || t.StartsWith("#")) continue;
+                string k = t.Substring(0, sp), v = t.Substring(sp + 1).Trim();
+                int iv;
+                if (k == "lid" && int.TryParse(v, out iv)) MiniLid = iv;
+                else if (k == "name" && v != "") MiniName = v;
+                else if (k == "btn" && v != "") Btn = v;
+            }
+        }
+
+        // 收起來的樣子：r＝1x／2x、night＝晚上版。讀不到＝null（畫像素蛋）
+        public Bitmap Mini(int r, bool night)
+        {
+            string key = "m" + r + (night ? "n" : "d");
+            Bitmap b;
+            if (imgs.TryGetValue(key, out b)) return b;
+            if (night) { Bitmap d = Mini(r, false); b = d == null ? null : Night(d); }
+            else b = SqArt.Png(Dir + "/" + r + "x/mini.png");
+            imgs[key] = b;
+            return b;
         }
 
         // r：1＝1x 圖、2＝2x 圖；night：晚上版（第一次用到才算）。讀不到＝null
@@ -3044,7 +3072,7 @@ namespace DeskPals
             return b;
         }
 
-        // 晚上：每個顏色往 #2A2238 混 55%（白邊、黑線、紙箱、背板一起暗下來、偏藍紫）
+        // 晚上：整張乘一個稍暗的顏色（紅 ×0.86、綠 ×0.83、藍 ×0.88）：暗一點、帶一點夜色，但顏色不變灰（以前往深藍紫混一半，灰濛濛的）
         public static Bitmap Night(Bitmap d)
         {
             int[] px = CuImg.Pixels(d);
@@ -3052,7 +3080,7 @@ namespace DeskPals
             {
                 int v = px[i], a = (v >> 24) & 255;
                 if (a == 0) continue;
-                int r = (((v >> 16) & 255) * 45 + 0x2A * 55) / 100, g = (((v >> 8) & 255) * 45 + 0x22 * 55) / 100, b = ((v & 255) * 45 + 0x38 * 55) / 100;
+                int r = ((v >> 16) & 255) * 86 / 100, g = ((v >> 8) & 255) * 83 / 100, b = (v & 255) * 88 / 100;
                 px[i] = (a << 24) | (r << 16) | (g << 8) | b;
             }
             return CuImg.FromPixels(px, d.Width, d.Height);
@@ -3072,6 +3100,7 @@ namespace DeskPals
         public ShelfArt Kit = ShelfArt.For("");   // 這一櫃的櫃子（Place 時照 World 現在的櫃換）
         public bool Tubby;                   // 天線寶寶一櫃：格子裡是藍天綠山丘，大格有太陽寶寶   //@fan
         int hover = -1;
+        bool tabHover, miniHover;            // 滑鼠在收合鈕上／在收起來的小紙箱上
         Bitmap bmp, bg;
         string bgKey = "";
         Rectangle area;                      // 螢幕座標
@@ -3079,11 +3108,11 @@ namespace DeskPals
         readonly Rectangle[] cells = new Rectangle[4]; // 本地座標：開口＋名牌（點這裡＝點這一格）
         readonly Rectangle[] opening = new Rectangle[4], back = new Rectangle[4], plate = new Rectangle[4];   // 開口（公仔畫在裡面）、背板、名牌
         readonly Point[] foot = new Point[4];          // 公仔腳踩的地方（地板中間）
-        Rectangle tab;                                  // 收合鈕「－」
+        Rectangle tab;                                  // 收合鈕的位置（shelf.txt 的 tab：按鈕畫在它的中心，大小照 S 算）
         int crown;                                      // 箱子正面的上緣：再上面是蓋子（可以拖著搬家、掛徽章）
-        // ---- 收合成蛋 ----
+        // ---- 收起來（以前是一顆蛋；現在是每一櫃自己的小紙箱／小書包，Kit.Mini；圖讀不到才畫 EGG）----
         public bool Collapsed;
-        double fold, gulp, wobT, nextWob = 4;    // fold：0 櫃子 → 1 蛋
+        double fold, gulp, wobT, nextWob = 4;    // fold：0 櫃子 → 1 收起來
         public int Attention;                     // 蛋上的小紅點（存著的通知、快到的提醒）
         public bool Lunch;
         public static readonly string[] EGG = {
@@ -3108,11 +3137,33 @@ namespace DeskPals
             "....kkkkkkkkkk...." };
         public bool Animating { get { return (Collapsed ? fold < 1 : fold > 0) || gulp > 0 || wobT > 0; } }
         int EggPs { get { return TU; } }
-        public Rectangle EggLocal() { int ps = EggPs; int ew = 18 * ps, eh = 19 * ps; return new Rectangle(Area.Width - ew - 4, Area.Height - eh - 2, ew, eh); }
+        // 收起來的大小：小紙箱／小書包的 2x 圖 × S/8（100% 縮放＝1x 圖原尺寸）；圖讀不到＝以前的像素蛋（18×19 格）
+        public Rectangle EggLocal()
+        {
+            Bitmap m = Kit.Mini(2, false);
+            int ew = m != null ? Sc(m.Width) : 18 * EggPs, eh = m != null ? Sc(m.Height) : 19 * EggPs;
+            return new Rectangle(Area.Width - ew - 4, Area.Height - eh - 2, ew, eh);
+        }
         public Rectangle EggScreen() { Rectangle r = EggLocal(); r.Offset(Area.Location); return r; }
-        Rectangle TabLocal() { return tab; }
-        // 點擊範圍：收合鈕太扁（書包小屋提把下那條只有 5 px）就上下各放大，至少 3 格高
-        Rectangle TabHit() { Rectangle t = tab; int need = 3 * TU - t.Height; if (need > 0) t.Inflate(0, (need + 1) / 2); return t; }
+        // 收合鈕：一張看得出來是按鈕的小貼紙（圖示＋「收起」），中心在 shelf.txt 的 tab，大小照 S 算（100% 縮放 60×22）；
+        // 太低就往上挪，按鈕和點擊範圍都不蓋到格子的開口（書包小屋的 tab 在提把下面，貼著房間）
+        Rectangle TabLocal()
+        {
+            int bw = 15 * TU, bh = 5 * TU + 2;
+            int x = Math.Max(2, Math.Min(Area.Width - bw - 2, tab.X + tab.Width / 2 - bw / 2)), y = tab.Y + tab.Height / 2 - bh / 2;
+            y = Math.Max(2, Math.Min(y, OpenTop() - bh - TU - 2));
+            return new Rectangle(x, y, bw, bh);
+        }
+        int OpenTop() { int top = int.MaxValue; for (int i = 0; i < Kit.N; i++) top = Math.Min(top, opening[i].Y); return top; }
+        // 點擊範圍：按鈕四周再放大一圈（比按鈕大、好點），但不蓋到格子的開口
+        Rectangle TabHit()
+        {
+            Rectangle b = TabLocal(), t = b;
+            t.Inflate(TU + 2, TU + 2);
+            int top = OpenTop();
+            if (t.Bottom > top - 1 && top - 1 > b.Bottom) t.Height = top - 1 - t.Y;
+            return t;
+        }
         public void Gulp() { gulp = 0.5; wobT = 0.7; }
         public void SnapFold() { fold = Collapsed ? 1 : 0; }
         public void Step(double dt)
@@ -3127,7 +3178,7 @@ namespace DeskPals
                 if (nextWob <= 0) { wobT = Attention > 0 ? 0.9 : 0.6; nextWob = Attention > 0 ? 2.5 : 6 + new Random().NextDouble() * 6; }
             }
         }
-        // 蛋的腳（公仔收進蛋裡的位置）
+        // 收起來的腳（公仔收進小紙箱裡的位置）
         public Point EggFoot() { Rectangle r = EggScreen(); return new Point(r.X + r.Width / 2, r.Y + r.Height * 2 / 3); }
 
         // ---- 拖著蛋（或櫃頂）搬家：右下角擋到東西時可以移開；位置存在 shelfpos.txt（相對右下角的位移） ----
@@ -3213,7 +3264,10 @@ namespace DeskPals
                 Point f = Foot(i);
                 sb.Append("cell " + i + " " + (Area.X + opening[i].X) + " " + (Area.Y + opening[i].Y) + " " + opening[i].Width + " " + opening[i].Height + " " + (Area.X + plate[i].X) + " " + (Area.Y + plate[i].Y) + " " + plate[i].Width + " " + plate[i].Height + " " + f.X + " " + f.Y + "\n");
             }
-            sb.Append("tab " + (Area.X + tab.X) + " " + (Area.Y + tab.Y) + " " + tab.Width + " " + tab.Height + "\n");
+            Rectangle tl = TabLocal(), th = TabHit(), er = EggScreen();
+            sb.Append("tab " + (Area.X + tl.X) + " " + (Area.Y + tl.Y) + " " + tl.Width + " " + tl.Height + "\n");
+            sb.Append("tabhit " + (Area.X + th.X) + " " + (Area.Y + th.Y) + " " + th.Width + " " + th.Height + " " + (tabHover ? 1 : 0) + "\n");
+            sb.Append("mini " + er.X + " " + er.Y + " " + er.Width + " " + er.Height + " " + (Kit.Mini(2, false) != null ? 1 : 0) + " " + (miniHover ? 1 : 0) + " " + Kit.MiniName + "\n");
             return sb.ToString();
         }
 
@@ -3273,9 +3327,22 @@ namespace DeskPals
                 if (dragMoved) { OffX = dragOX + dx; OffY = dragOY + dy; Place(lastWa); w.RepaintShelf(); }
                 return;
             }
-            hover = CellAt(cp);
+            SimHover(cp);
         }
-        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); hover = -1; }
+        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); hover = -1; SetHot(false, false); }
+        // 滑鼠在哪（真的滑鼠或測試用 act shelfhover 都走這裡）：格子亮一圈、收合鈕變黃浮起來、收起來的小紙箱浮起來
+        public void SimHover(Point screen)
+        {
+            hover = CellAt(screen);
+            Point p = new Point(screen.X - Area.X, screen.Y - Area.Y);
+            SetHot(!Collapsed && fold <= 0.001 && TabHit().Contains(p), Collapsed && EggLocal().Contains(p));
+        }
+        void SetHot(bool tabOn, bool miniOn)
+        {
+            if (tabOn == tabHover && miniOn == miniHover) return;
+            tabHover = tabOn; miniHover = miniOn;
+            w.RepaintShelf();
+        }
 
         static Color C(int rgb) { return Color.FromArgb((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255); }
         static Color Mix(Color a, Color b, double f) { return Color.FromArgb((int)(a.R + (b.R - a.R) * f), (int)(a.G + (b.G - a.G) * f), (int)(a.B + (b.B - a.B) * f)); }
@@ -3359,7 +3426,7 @@ namespace DeskPals
                 gp.AddEllipse(new RectangleF(c.X - c.Width * 0.2f, c.Y - c.Width * 0.35f, c.Width * 1.4f, Math.Min(c.Height * 0.8f, c.Width * 1.3f)));
                 using (PathGradientBrush pg = new PathGradientBrush(gp))
                 {
-                    pg.CenterColor = Color.FromArgb(120, 255, 214, 150);
+                    pg.CenterColor = Color.FromArgb(150, 255, 214, 150);
                     pg.SurroundColors = new Color[] { Color.FromArgb(0, 255, 240, 220) };
                     g.SetClip(c);
                     g.FillPath(pg, gp);
@@ -3473,7 +3540,7 @@ namespace DeskPals
             else   //@fan
                 using (SolidBrush sb = new SolidBrush(Night ? Color.FromArgb(50, 255, 220, 150) : Color.FromArgb(90, 255, 214, 120))) g.FillPolygon(sb, star);
             // 圓台：側面（下緣是半個橢圓）＋金色細帶＋頂面，都描粗黑邊
-            Color m1 = Night ? C(0x8A7A70) : C(0xFFF6E8), m2 = Night ? C(0x4E443F) : C(0xD9C7AE);
+            Color m1 = Night ? C(0xD6CCBE) : C(0xFFF6E8), m2 = Night ? C(0xA8988A) : C(0xD9C7AE);
             float lw = Math.Max(1.5f, TU * 0.5f), x0 = cx - pw / 2;
             using (Pen ink = new Pen(Night ? C(0x221E28) : C(0x1E1E24), lw))
             using (GraphicsPath side = new GraphicsPath())
@@ -3492,7 +3559,7 @@ namespace DeskPals
                 }
                 using (SolidBrush gold = new SolidBrush(Night ? C(0xB08A3C) : C(0xE2B550))) g.FillRectangle(gold, x0, top + eh * 0.55f, pw, Math.Max(1f, eh * 0.28f));
                 g.DrawPath(ink, side);
-                using (SolidBrush tp = new SolidBrush(Night ? C(0x9C8B80) : C(0xFFFBF3))) g.FillEllipse(tp, x0, top - eh / 2, pw, eh);
+                using (SolidBrush tp = new SolidBrush(Night ? C(0xDCD2C4) : C(0xFFFBF3))) g.FillEllipse(tp, x0, top - eh / 2, pw, eh);
                 g.DrawEllipse(ink, x0, top - eh / 2, pw, eh);
             }
         }
@@ -3535,26 +3602,87 @@ namespace DeskPals
             return cab;
         }
 
-        // 收合鈕「－」（大箱子蓋子上的小貼紙）
+        // 收合鈕：大箱子蓋子上一張貼紙按鈕（白色貼紙邊＋粗黑線、往下收的箭頭＋「收起」）；書包小屋是紫色黏土小牌子（沒有黑線）。
+        // 滑過：變黃（黏土版變亮）、浮起來一點，下面多一張小牌子「收成小紙箱」
         void DrawTab(Bitmap b)
         {
             using (Graphics g = Graphics.FromImage(b))
             {
                 g.SmoothingMode = SmoothingMode.AntiAlias;
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
                 Rectangle r = TabLocal();
-                float lw = Math.Max(1.5f, TU * 0.45f);
-                RectangleF rf = new RectangleF(r.X + lw / 2, r.Y + lw / 2, r.Width - lw, r.Height - lw);
-                using (GraphicsPath p = RoundRect(rf, rf.Height * 0.35f))
-                using (SolidBrush bg2 = new SolidBrush(Night ? C(0xA49A90) : C(0xFFF8EC)))
-                using (Pen rim = new Pen(C(0x1E1E24), lw)) { g.FillPath(bg2, p); g.DrawPath(rim, p); }
-                using (Pen mp = new Pen(C(0x1E1E24), Math.Max(1.5f, TU * 0.55f)))
+                bool clay = Kit.Btn == "clay", hot = tabHover;
+                float lift = hot ? Math.Max(1f, TU * 0.4f) : 0f, lw = Math.Max(1.5f, TU * 0.45f);
+                RectangleF rf = new RectangleF(r.X, r.Y - lift, r.Width, r.Height);
+                // 影子（浮起來時大一點）
+                using (GraphicsPath sp = RoundRect(new RectangleF(r.X + 1, r.Y + Math.Max(1.5f, TU * 0.45f), r.Width, r.Height), r.Height / 2f))
+                using (SolidBrush sb = new SolidBrush(Color.FromArgb(hot ? 110 : 70, 30, 20, 40))) g.FillPath(sb, sp);
+                Color text;
+                if (clay)
                 {
-                    mp.StartCap = LineCap.Round; mp.EndCap = LineCap.Round;
-                    g.DrawLine(mp, r.X + r.Width * 0.33f, r.Y + r.Height / 2f, r.X + r.Width * 0.67f, r.Y + r.Height / 2f);
+                    Color top = hot ? C(0xC9B6F6) : C(0xB8A2EE), bot = hot ? C(0x9C80E2) : C(0x8C70D4);
+                    if (Night) { top = Mix(top, C(0x2A2238), 0.15); bot = Mix(bot, C(0x2A2238), 0.15); }
+                    using (GraphicsPath p = RoundRect(rf, rf.Height / 2f))
+                    {
+                        using (LinearGradientBrush lb = new LinearGradientBrush(new RectangleF(rf.X, rf.Y - 1, rf.Width, rf.Height + 2), top, bot, 90f)) g.FillPath(lb, p);
+                        using (Pen rim = new Pen(Color.FromArgb(160, 0x6E, 0x55, 0xB0), Math.Max(1f, TU * 0.25f))) g.DrawPath(rim, p);
+                    }
+                    using (GraphicsPath hp = RoundRect(new RectangleF(rf.X + rf.Height * 0.35f, rf.Y + rf.Height * 0.12f, rf.Width - rf.Height * 0.7f, rf.Height * 0.3f), rf.Height * 0.15f))
+                    using (SolidBrush hb = new SolidBrush(Color.FromArgb(hot ? 120 : 90, 255, 255, 255))) g.FillPath(hb, hp);   // 黏土的亮面
+                    text = Color.White;
                 }
+                else
+                {
+                    using (GraphicsPath wp = RoundRect(new RectangleF(rf.X - lw, rf.Y - lw, rf.Width + 2 * lw, rf.Height + 2 * lw), rf.Height / 2f + lw))
+                    using (SolidBrush wb = new SolidBrush(Night ? C(0xE4E0EA) : Color.White)) g.FillPath(wb, wp);   // 白色貼紙邊
+                    RectangleF ir = new RectangleF(rf.X + lw / 2, rf.Y + lw / 2, rf.Width - lw, rf.Height - lw);
+                    using (GraphicsPath p = RoundRect(ir, ir.Height / 2f))
+                    using (SolidBrush fb = new SolidBrush(hot ? C(0xFFD95A) : (Night ? C(0xF2E6CC) : C(0xFFF6E0))))
+                    using (Pen rim = new Pen(C(0x1E1E24), lw)) { g.FillPath(fb, p); g.DrawPath(rim, p); }
+                    text = C(0x2A1E16);
+                }
+                // 圖示（往下收：∨ 加一條底線）＋「收起」
+                float fs = Math.Max(10f, TU * 2.9f);
+                using (Font f = new Font("Microsoft JhengHei UI", fs, FontStyle.Bold, GraphicsUnit.Pixel))
+                using (StringFormat sf = new StringFormat())
+                {
+                    string s = "收起";
+                    float tw = g.MeasureString(s, f).Width - fs * 0.25f, iw = TU * 2.4f, gap = TU * 0.7f;
+                    float x0 = rf.X + (rf.Width - iw - gap - tw) / 2f, cy = rf.Y + rf.Height / 2f;
+                    using (Pen ip = new Pen(text, Math.Max(1.5f, TU * 0.5f)))
+                    {
+                        ip.StartCap = LineCap.Round; ip.EndCap = LineCap.Round; ip.LineJoin = LineJoin.Round;
+                        g.DrawLines(ip, new PointF[] { new PointF(x0, cy - iw * 0.42f), new PointF(x0 + iw / 2f, cy + iw * 0.08f), new PointF(x0 + iw, cy - iw * 0.42f) });
+                        g.DrawLine(ip, x0, cy + iw * 0.45f, x0 + iw, cy + iw * 0.45f);
+                    }
+                    sf.Alignment = StringAlignment.Near; sf.LineAlignment = StringAlignment.Center; sf.FormatFlags = StringFormatFlags.NoWrap;
+                    if (clay) using (SolidBrush sh = new SolidBrush(Color.FromArgb(120, 0x5A, 0x40, 0x9A))) g.DrawString(s, f, sh, new RectangleF(x0 + iw + gap - fs * 0.1f, rf.Y + 1.5f, tw + fs, rf.Height), sf);
+                    using (SolidBrush tb = new SolidBrush(text)) g.DrawString(s, f, tb, new RectangleF(x0 + iw + gap - fs * 0.1f, rf.Y + 0.5f, tw + fs, rf.Height), sf);
+                }
+                if (hot) DrawTip(g, "收成" + Kit.MiniName, rf.X + rf.Width / 2f, rf.Bottom + lw + TU, clay);
             }
         }
 
+        // 滑過收合鈕時的小牌子（中心 cx、上緣 y；不超出櫃子）
+        void DrawTip(Graphics g, string s, float cx, float y, bool clay)
+        {
+            float fs = Math.Max(9.5f, TU * 2.6f);
+            using (Font f = new Font("Microsoft JhengHei UI", fs, FontStyle.Bold, GraphicsUnit.Pixel))
+            using (StringFormat sf = new StringFormat())
+            {
+                SizeF ts = g.MeasureString(s, f);
+                float w2 = ts.Width + TU * 1.5f, h2 = ts.Height + TU * 0.6f;
+                float x = Math.Max(2f, Math.Min(Area.Width - w2 - 2f, cx - w2 / 2f));
+                RectangleF tr = new RectangleF(x, y, w2, h2);
+                using (GraphicsPath p = RoundRect(tr, h2 * 0.3f))
+                using (SolidBrush bb = new SolidBrush(clay ? Color.FromArgb(245, 255, 255, 255) : Color.FromArgb(245, 0x2A, 0x1E, 0x16)))
+                    g.FillPath(bb, p);
+                sf.Alignment = StringAlignment.Center; sf.LineAlignment = StringAlignment.Center; sf.FormatFlags = StringFormatFlags.NoWrap;
+                using (SolidBrush tb = new SolidBrush(clay ? C(0x6E55B0) : C(0xFFF6E0))) g.DrawString(s, f, tb, new RectangleF(tr.X - 4, tr.Y + 0.5f, tr.Width + 8, tr.Height), sf);
+            }
+        }
+
+        // 收起來的樣子：小紙箱／小書包（Kit.Mini）；圖讀不到才畫以前的像素蛋
         void DrawEgg(Graphics g, double t, double appear)
         {
             if (appear <= 0.02) return;
@@ -3563,13 +3691,22 @@ namespace DeskPals
             // 搖一搖（有通知存著時搖比較大）
             double ang = 0;
             if (wobT > 0) ang = Math.Sin(wobT * 26) * (Attention > 0 ? 11 : 6) * Math.Min(1, wobT * 2);
-            // 打開的程度：收合動畫的頭尾、吞公仔時裂開
+            // 打開的程度：收合動畫的頭尾、吞公仔時蓋子掀開
             double open = Math.Max(Math.Max(0, 1 - appear) * 1.6, gulp > 0 ? Math.Sin(gulp / 0.5 * Math.PI) * 0.6 : 0);
             open = Math.Min(1, open);
+            Bitmap mini = Kit.Mini(TU <= 4 ? 1 : 2, Night);
             GraphicsState st = g.Save();
-            g.TranslateTransform(er.X + er.Width / 2f, er.Bottom);
+            g.TranslateTransform(er.X + er.Width / 2f, er.Bottom - (miniHover && appear > 0.9 ? Math.Max(1f, TU * 0.5f) : 0f));   // 滑過：浮起來一點
             g.RotateTransform((float)ang);
             g.TranslateTransform(-er.Width / 2f, -er.Height);
+            if (mini != null)
+            {
+                DrawMini(g, mini, er.Width, er.Height, open, (int)(255 * Math.Min(1, appear * 1.4)));
+                if (Lunch) DrawNapkin(g, er.Width / 18f, er.Height / 19f, (int)(255 * Math.Min(1, appear * 1.4)));
+                g.Restore(st);
+                DrawEggMarks(g, er, appear);
+                return;
+            }
             int crack = 8;
             Dictionary<char, Color> pal = new Dictionary<char, Color>();
             pal['k'] = Color.FromArgb(0x6B, 0x4A, 0x2E); pal['c'] = Night ? Color.FromArgb(0xE6, 0xDA, 0xC4) : Color.FromArgb(0xFF, 0xF4, 0xDC);
@@ -3591,17 +3728,54 @@ namespace DeskPals
                     g.DrawLines(cp, z);
                 }
             // 午餐時間：小餐巾
-            if (Lunch)
-                using (SolidBrush nb = new SolidBrush(Color.FromArgb(alpha, 255, 255, 255)))
-                using (SolidBrush ck = new SolidBrush(Color.FromArgb(alpha, 0xE2, 0x4A, 0x4A)))
-                {
-                    PointF[] tri = { new PointF(5 * ps, 9 * ps), new PointF(13 * ps, 9 * ps), new PointF(9 * ps, 14 * ps) };
-                    g.FillPolygon(nb, tri);
-                    using (Pen np = new Pen(Color.FromArgb(alpha, 0xB8, 0xA8, 0x90), Math.Max(1f, ps * 0.3f))) g.DrawPolygon(np, tri);
-                    for (int i = 0; i < 4; i++) g.FillRectangle(ck, (6 + i * 2) * ps, 9 * ps, ps, ps);
-                    g.FillRectangle(ck, 8 * ps, 11 * ps, ps, ps); g.FillRectangle(ck, 10 * ps, 11 * ps, ps, ps);
-                }
+            if (Lunch) DrawNapkin(g, ps, ps, alpha);
             g.Restore(st);
+            DrawEggMarks(g, er, appear);
+        }
+
+        // 小紙箱／小書包：下面那塊照放；蓋子（Kit.MiniLid 以上）打開時往上抬、以左邊為軸往上掀（吞公仔、收合動畫）
+        void DrawMini(Graphics g, Bitmap m, int ew, int eh, double open, int alpha)
+        {
+            Bitmap m2 = Kit.Mini(2, false);
+            float f = m2 == null ? 0.3f : Math.Max(0.1f, Math.Min(0.9f, Kit.MiniLid / (float)m2.Height));
+            int sy = (int)Math.Round(m.Height * f), dy = (int)Math.Round(eh * f);
+            GraphicsState st = g.Save();
+            using (ImageAttributes ia = new ImageAttributes())
+            {
+                ColorMatrix cm = new ColorMatrix(); cm.Matrix33 = alpha / 255f;
+                ia.SetColorMatrix(cm);
+                ia.SetWrapMode(WrapMode.TileFlipXY);   // 縮放時邊緣不要變淡
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                g.DrawImage(m, new Rectangle(0, dy, ew, eh - dy), 0, sy, m.Width, m.Height - sy, GraphicsUnit.Pixel, ia);
+                if (open > 0.01)
+                {
+                    g.TranslateTransform(0, dy - (float)(open * eh * 0.18));
+                    g.RotateTransform((float)(-open * 16));
+                    g.TranslateTransform(0, -dy);
+                }
+                g.DrawImage(m, new Rectangle(0, 0, ew, dy), 0, 0, m.Width, sy, GraphicsUnit.Pixel, ia);
+            }
+            g.Restore(st);
+        }
+
+        // 午餐時間：收起來的正面掛一條小餐巾（sx、sy＝蛋的一格多大；小紙箱照 18×19 格換算）
+        void DrawNapkin(Graphics g, float sx, float sy, int alpha)
+        {
+            using (SolidBrush nb = new SolidBrush(Color.FromArgb(alpha, 255, 255, 255)))
+            using (SolidBrush ck = new SolidBrush(Color.FromArgb(alpha, 0xE2, 0x4A, 0x4A)))
+            {
+                PointF[] tri = { new PointF(5 * sx, 9 * sy), new PointF(13 * sx, 9 * sy), new PointF(9 * sx, 14 * sy) };
+                g.FillPolygon(nb, tri);
+                using (Pen np = new Pen(Color.FromArgb(alpha, 0xB8, 0xA8, 0x90), Math.Max(1f, sx * 0.3f))) g.DrawPolygon(np, tri);
+                for (int i = 0; i < 4; i++) g.FillRectangle(ck, (6 + i * 2) * sx, 9 * sy, sx, sy);
+                g.FillRectangle(ck, 8 * sx, 11 * sy, sx, sy); g.FillRectangle(ck, 10 * sx, 11 * sy, sx, sy);
+            }
+        }
+
+        // 收起來的上面：小紅點、拖著公仔時的光圈、番茄／安靜徽章
+        void DrawEggMarks(Graphics g, Rectangle er, double appear)
+        {
             // 小紅點：有存著的通知／快到的提醒
             if (Attention > 0 && appear > 0.9)
             {
@@ -3619,7 +3793,7 @@ namespace DeskPals
             if (Hot && appear > 0.9)
                 using (Pen hp = new Pen(Over ? Color.FromArgb(230, 255, 120, 165) : Color.FromArgb(170, 255, 200, 120), Math.Max(2f, U)))
                     g.DrawEllipse(hp, er.X - 2 * U, er.Y - 2 * U, er.Width + 4 * U, er.Height + 4 * U);
-            // 番茄／安靜徽章掛在蛋上面
+            // 番茄／安靜徽章掛在收起來的小紙箱上面
             int left = w.FocusLeft(), qleft = w.QuietLeft();
             float bcx = er.X + er.Width / 2f, bcy = er.Y - 3 * U;
             if (left >= 0 && qleft >= 0) { DrawBadgeAt(g, qleft, true, bcx, bcy); DrawBadgeAt(g, left, false, bcx, bcy - 8 * U); }
@@ -4094,7 +4268,7 @@ namespace DeskPals
             nightChecked = DateTime.Now.Minute;
             shelf = new ShelfForm(this, S);
             shelf.Night = Night;
-            shelf.Collapsed = Single || ReadText("shelf-state.txt") == "egg";   // 只要一隻：沒有櫃子，蛋就是家
+            shelf.Collapsed = Single || ReadText("shelf-state.txt") == "egg";   // 只要一隻：沒有櫃子，收起來的小紙箱就是家
             if (shelf.Collapsed) shelf.SnapFold();
             shelf.Place(ShelfWA());
             lastT = clock.Elapsed.TotalSeconds; Now = lastT;
@@ -4981,7 +5155,7 @@ namespace DeskPals
                 m.Items.Add("全部回櫃子", null, delegate { AllHome(); });
                 m.Items.Add(favPin == p.P.Id ? "取消最愛" : "設為最愛 ★", null, delegate { SetFav(p); });
             }
-            m.Items.Add(Single ? "回蛋裡待著" : "回櫃子裡待著", null, delegate { p.StowToShelf(true); });
+            m.Items.Add(Single ? "回" + MiniName + "裡待著" : "回櫃子裡待著", null, delegate { p.StowToShelf(true); });
             m.Items.Add("躲起來（Ctrl+Alt+S）", null, delegate { ToggleHide(); });
             m.Items.Add(new ToolStripSeparator());
             m.Items.Add("收工（關掉 Desk Pals）", null, delegate { QuitAll(); });
@@ -5009,18 +5183,21 @@ namespace DeskPals
             items.Add(q);
         }
 
-        // 收合成蛋／打開公仔櫃
+        // 收起公仔櫃（變成小紙箱／小書包）／打開公仔櫃（shelf-state.txt 的值沿用以前的 egg／open）
         public void ToggleEgg(bool collapse)
         {
             if (shelf.Collapsed == collapse) return;
-            if (Single && !collapse) { Lead().Say("現在是「只要一隻」，蛋就是我家～（小屋 → 重新設定 可以換）", 3); return; }
+            if (Single && !collapse) { Lead().Say("現在是「只要一隻」，" + MiniName + "就是我家～（小屋 → 重新設定 可以換成整櫃）", 3); return; }
             shelf.Collapsed = collapse;
             WriteText("shelf-state.txt", collapse ? "egg" : "open");
             Pet l = Lead();
-            if (collapse) l.Say(Pick2("公仔櫃收起來囉～變成一顆蛋 🥚", "收合！大家住進蛋裡"), 1.8);
-            else l.Say(Pick2("蛋打開了！公仔櫃登場 ✨", "喀啦喀啦～櫃子打開囉"), 1.8);
+            if (collapse) l.Say(Pick2("公仔櫃收起來囉～變成" + MiniName + " 📦", "收合！大家住進" + MiniName + "裡"), 1.8);
+            else l.Say(Pick2("打開了！公仔櫃登場 ✨", "喀啦喀啦～櫃子打開囉"), 1.8);
             RenderShelf();
         }
+        // 收起來叫什麼（選單、泡泡用）：紙箱櫃＝小紙箱、書包小屋＝小書包
+        public string MiniName { get { return shelf != null ? shelf.Kit.MiniName : "小紙箱"; } }
+        public string MenuFold { get { return "收起公仔櫃（變成" + MiniName + "）"; } }
         string Pick2(string a, string b) { return rnd.NextDouble() < 0.5 ? a : b; }
 
         // 蛋上的小紅點：專注／安靜時存著的通知，加上 10 分鐘內要到的提醒、搶票
@@ -5112,7 +5289,7 @@ namespace DeskPals
                 m.Items.Add(new ToolStripSeparator());
             }
             if (PikLineup) m.Items.Add("休息花：還能撐多久？🌸", null, delegate { FlowerClicked(); });   //@fan
-            m.Items.Add(shelf.Collapsed ? "打開公仔櫃" : "收合成蛋 🥚", null, delegate { ToggleEgg(!shelf.Collapsed); });
+            m.Items.Add(shelf.Collapsed ? "打開公仔櫃" : MenuFold, null, delegate { ToggleEgg(!shelf.Collapsed); });
             m.Items.Add("全部放出來", null, delegate { AllOut(); });
             m.Items.Add("全部回櫃子", null, delegate { AllHome(); });
             ToolStripMenuItem help = new ToolStripMenuItem("小幫手（專注、安靜、提醒）");
@@ -5255,6 +5432,9 @@ namespace DeskPals
                     }
                     break;
                 case "shelf-info": Send(c, (shelf == null ? "" : shelf.Info()) + "maker " + (maker != null && !maker.IsDisposed && maker.VVisible ? 1 : 0) + "\nend\n"); break;   // 測試用（test/desktop-shelf.js）
+                case "feat-info": { StringBuilder fb = new StringBuilder("feat"); foreach (string[] f in FeatureList) fb.Append(" " + f[0] + "=" + (Feat(f[0]) ? 1 : 0)); Send(c, fb + " nightnow=" + (NightNow() ? 1 : 0) + " set=" + string.Join(",", featSet.ToArray()) + "\nend\n"); } break;   // 測試用（test/desktop-egg.js）
+                case "menu-info": Send(c, (pmenu != null && !pmenu.Done ? pmenu.Info() : "menu none\n") + "end\n"); break;   // 測試用：現在開著的像素選單有哪幾列（test/desktop-egg.js）
+                case "mode-info": Send(c, "mode " + (Single ? "single" : "shelf") + " " + (Single ? SinglePet() : "-") + " collapsed=" + (shelf != null && shelf.Collapsed ? 1 : 0) + " profile=" + (File.Exists(FilePath("profile.txt")) ? 1 : 0) + " hint=" + (ReadText("egg-hint.txt") == "" ? 0 : 1) + "\nend\n"); break;   // 測試用（test/desktop-egg.js）
                 case "setup-info": Send(c, (setupForm != null && !setupForm.IsDisposed && (setupForm.VVisible || setupForm.Visible) ? setupForm.Info() : "setup none\n") + "end\n"); break;   // 測試用（test/desktop-woban.js）：設定視窗現在有哪些按鈕
                 case "notify":
                     if (p.Length >= 4)
@@ -5326,6 +5506,7 @@ namespace DeskPals
                 case "lunch": forceLunch = 1; LunchTick(true); return;
                 case "egg": ToggleEgg(true); return;
                 case "unegg": ToggleEgg(false); return;
+                case "shelfhover": { string[] q = arg.Split(','); int hx, hy; if (shelf != null && q.Length == 2 && int.TryParse(q[0], out hx) && int.TryParse(q[1], out hy)) shelf.SimHover(new Point(hx, hy)); } return;   // 測試用：滑鼠移到櫃子上的這一點
                 case "lunchnap": forceLunch = 2; LunchTick(true); return;
                 case "lunchsoon": forceLunch = -1; LunchState = "nap"; foreach (Pet x in OutPets()) x.WakeIfSleep(); LunchState = "soon"; Lead().Say("午休快結束囉～", 3); return;
                 case "lunchend": forceLunch = 0; LunchTick(true); return;
@@ -7867,7 +8048,7 @@ namespace DeskPals
     // ================= 公仔小屋（蛋的右鍵）：娛樂功能開關、重新設定；只要一隻；第一次設定 =================
     partial class World
     {
-        // 小屋的開關（features.txt：一行一個 key=0/1；沒寫的＝開，跟以前一樣）
+        // 小屋的開關（features.txt：一行一個 key=0/1；沒寫的＝開，下班時間和搗蛋除外（FeatDefaultOff）；set=…＝自己動過的）
         public static readonly string[][] FeatureList = {
             new string[] { "scenes", "串門子劇情" },
             new string[] { "lunch", "午餐變身" },
@@ -7880,16 +8061,24 @@ namespace DeskPals
             new string[] { "bat_link", "沒電的電量跟工作時間連動" },
             new string[] { "wb_water", "破破提醒喝水（窩伴小世界）" } };
         readonly Dictionary<string, bool> feats = new Dictionary<string, bool>();
-        public bool Feat(string key) { bool on; return feats.TryGetValue(key, out on) ? on : !MisDefaultOff(key); }   // 搶游標預設關（DeskPals.Mischief.cs）
+        readonly List<string> featSet = new List<string>();   // 自己動過的開關（features.txt 的 set=…，逗號隔開）
+        public bool Feat(string key) { bool on; return feats.TryGetValue(key, out on) ? on : !FeatDefaultOff(key); }
+        // 預設關的：下班時間（很多人裝在家裡的電腦上，晚上黑化、催下班反而怪）、搗蛋那幾個（DeskPals.Mischief.cs）
+        static bool FeatDefaultOff(string key) { return key == "night" || MisDefaultOff(key); }
 
         void LoadFeatures()
         {
             feats.Clear();
+            featSet.Clear();
             foreach (string line in ReadText("features.txt").Split('\n'))
             {
                 string[] a = line.Trim().Split('=');
-                if (a.Length == 2 && a[0].Trim() != "") feats[a[0].Trim()] = a[1].Trim() != "0";
+                if (a.Length != 2 || a[0].Trim() == "") continue;
+                if (a[0].Trim() == "set") { foreach (string k2 in a[1].Split(',')) if (k2.Trim() != "" && !featSet.Contains(k2.Trim())) featSet.Add(k2.Trim()); continue; }
+                feats[a[0].Trim()] = a[1].Trim() != "0";
             }
+            // 下班時間以前預設開，存檔時跟著寫成 night=1：沒自己動過的（set 裡沒有 night）一律當作沒寫＝關；自己打開過的照舊
+            if (!featSet.Contains("night")) feats.Remove("night");
         }
 
         void SaveFeatures()
@@ -7897,12 +8086,14 @@ namespace DeskPals
             StringBuilder sb = new StringBuilder();
             foreach (string[] f in FeatureList) sb.Append(f[0] + "=" + (Feat(f[0]) ? "1" : "0") + "\n");
             foreach (string[] f in MisFeatureList) sb.Append(f[0] + "=" + (Feat(f[0]) ? "1" : "0") + "\n");   // 搗蛋的開關
+            if (featSet.Count > 0) sb.Append("set=" + string.Join(",", featSet.ToArray()) + "\n");
             WriteText("features.txt", sb.ToString());
         }
 
         public void SetFeat(string key, bool on)
         {
             feats[key] = on;
+            if (!featSet.Contains(key)) featSet.Add(key);
             SaveFeatures();
             App.Log("feature " + key + "=" + (on ? "1" : "0"));
             if (key == "night" || key == "season") { nightChecked = -1; CheckNight(); }   // 馬上換樣子（黑化、節日帽子）
@@ -7918,13 +8109,13 @@ namespace DeskPals
         }
 
         // ---- 設定過了沒（profile.txt）、擺法（mode.txt：shelf｜single <id>）----
-        public bool Single;                           // 只要一隻：沒有櫃子，那隻的家是蛋，其他隻不出來
+        public bool Single;                           // 只要一隻：沒有櫃子，那隻的家是收起來的小紙箱（以前是蛋），其他隻不出來
         string singleId = "";
 
         void LoadMode()
         {
             string m = ReadText("mode.txt");
-            if (m == "" && !File.Exists(FilePath("profile.txt"))) m = "single";   // 第一次（還沒設定）：預設只要一隻
+            if (m == "") m = "shelf";   // 沒有 mode.txt（設定精靈沒按完、或是舊版）＝整櫃。以前沒設定完預設「只要一隻」，結果有人一直不知道有櫃子；存過 mode.txt 的照舊
             Single = m.StartsWith("single");
             singleId = Single && m.Length > 6 ? m.Substring(6).Trim() : "";
         }
@@ -7932,42 +8123,39 @@ namespace DeskPals
         // 只要一隻的那隻（換到沒有他的那一櫃：用那一櫃預設的那隻）
         public string SinglePet() { return Get(singleId) != null ? singleId : defaultPet; }
 
-        // 只要一隻：點蛋＝叫他出來／回蛋裡
+        // 只要一隻：點收起來的小紙箱＝叫他出來／回去。第一次點：說明一下（整櫃模式點小紙箱是打開櫃子，這裡不一樣）
         public void EggClick()
         {
             Pet p = Get(SinglePet());
             if (p == null) return;
+            bool hint = ReadText("egg-hint.txt") == "";
             if (p.Out) { if (p.state != "stowfly" && p.state != "enter" && p.state != "exit") p.StowToShelf(true); }
             else BringOut(p, true);
+            if (!hint) return;
+            WriteText("egg-hint.txt", "1");
+            App.Log("egg: first click hint (single)");
+            Later(1.6, delegate { (p.Out ? p : Lead()).Say("點" + MiniName + "叫我出來、再點一下回去～要整櫃：右鍵 → 重新設定", 6); });
         }
 
         // ---- 公仔小屋選單：開關＋小幫手＋公仔們 ----
         public void HouseMenu() { HouseMenu(Cursor.Position); }
+        // 最上層只留最常用的（打開／收起櫃子、叫出來、回家），其他照類型分成四個子選單（點一下在選單裡展開，同一層一次開一個）：
+        //   我的公仔：換一櫃（個人版的同人櫃也在這裡）、做公仔、我的公仔、我的櫃放誰、匯入、分享短片、躲起來
+        //   娛樂：串門子、午餐、閒聊、跟著視窗跑、節日、煙火、搗蛋（子選單）
+        //   工作：下班時間、早上點名、沒電連動、喝水提醒、小幫手（專注／安靜／提醒）
+        //   設定：重新設定、讀書小幫手設定（學校行事曆、熬夜）、匿名回報（公開版有 ID 才有）、開機自動出現（Store 版）
+        // 每個項目只出現在一個地方；開關（FeatureList）不在 WorkFeats 裡的都算娛樂，新加的開關不會漏掉。收工在最下面。
+        static readonly string[] WorkFeats = { "night", "rollcall", "bat_link", "wb_water" };
         public void HouseMenu(Point at)
         {
             ContextMenuStrip m = new ContextMenuStrip();
-            m.Items.Add(new ToolStripLabel("開關（打勾＝開著）"));
-            foreach (string[] f in FeatureList)
-            {
-                string key = f[0];
-                ToolStripMenuItem mi = new ToolStripMenuItem(f[1]);
-                mi.CheckOnClick = true;
-                mi.Checked = Feat(key);
-                mi.Click += delegate { SetFeat(key, !Feat(key)); mi.Checked = Feat(key); };
-                m.Items.Add(mi);
-            }
-            MisHouseMenu(m);  // 搗蛋的開關、把推走的視窗叫回來（DeskPals.Mischief.cs）
-            StatsHouseMenu(m);   // 匿名回報的開關（公開版、有 ID 才有；DeskPals.Stats.cs）
-            StartupHouseMenu(m);   // 開機自動出現（只有 Microsoft Store 版）
-            m.Items.Add(new ToolStripSeparator());
-            ToolStripMenuItem help = new ToolStripMenuItem("小幫手（專注、安靜、提醒）");
-            AddHelpers(help.DropDownItems);
-            m.Items.Add(help);
-            m.Items.Add(new ToolStripSeparator());
-            m.Items.Add(new ToolStripLabel(Single ? "我的公仔" : "公仔們"));
-            if (!Single) m.Items.Add(shelf.Collapsed ? "打開公仔櫃" : "收合成蛋 🥚", null, delegate { ToggleEgg(!shelf.Collapsed); });
+            if (!Single) m.Items.Add(shelf.Collapsed ? "打開公仔櫃" : MenuFold, null, delegate { ToggleEgg(!shelf.Collapsed); });
             m.Items.Add(Single ? "叫" + Get(SinglePet()).P.Name + "出來" : "全部出來", null, delegate { AllOut(); });
-            m.Items.Add(Single ? "回蛋裡" : "全部回家", null, delegate { AllHome(); });
+            m.Items.Add(Single ? "回" + MiniName + "裡" : "全部回家", null, delegate { AllHome(); });
+            MisRestoreMenu(m.Items);   // 把推走的視窗叫回來（有推走的才有；DeskPals.Mischief.cs）
+            m.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem mine = new ToolStripMenuItem("我的公仔");
             ToolStripMenuItem sw = new ToolStripMenuItem("換一櫃");
             foreach (string lu in Pal.LineupsNow())
             {
@@ -7976,18 +8164,47 @@ namespace DeskPals
                 li.Checked = lu == lineup;
                 sw.DropDownItems.Add(li);
             }
-            m.Items.Add(sw);
-            m.Items.Add("重新設定…", null, delegate { ShowSetup(false); });
-            m.Items.Add("讀書小幫手設定（學校行事曆、熬夜）…", null, delegate { ShowStudySettings(); });
-            m.Items.Add("躲起來（Ctrl+Alt+S）", null, delegate { ToggleHide(); });
-            CuHouseMenu(m);   // 自己做的公仔、分享短片（DeskPals.Custom.cs）
+            mine.DropDownItems.Add(sw);
+            CuHouseMenu(mine.DropDownItems);   // 做公仔、我的公仔、我的櫃放誰、匯入、分享短片（DeskPals.Custom.cs）
+            mine.DropDownItems.Add("躲起來（Ctrl+Alt+S）", null, delegate { ToggleHide(); });
+            m.Items.Add(mine);
+
+            ToolStripMenuItem fun = new ToolStripMenuItem("娛樂");
+            foreach (string[] f in FeatureList) if (Array.IndexOf(WorkFeats, f[0]) < 0) fun.DropDownItems.Add(FeatItem(f[0], f[1]));
+            MisHouseMenu(fun.DropDownItems);  // 搗蛋的開關（DeskPals.Mischief.cs）
+            m.Items.Add(fun);
+
+            ToolStripMenuItem work = new ToolStripMenuItem("工作");
+            foreach (string[] f in FeatureList) if (Array.IndexOf(WorkFeats, f[0]) >= 0) work.DropDownItems.Add(FeatItem(f[0], f[1]));
+            ToolStripMenuItem help = new ToolStripMenuItem("小幫手（專注、安靜、提醒）");
+            AddHelpers(help.DropDownItems);
+            work.DropDownItems.Add(help);
+            m.Items.Add(work);
+
+            ToolStripMenuItem set = new ToolStripMenuItem("設定");
+            set.DropDownItems.Add("重新設定…", null, delegate { ShowSetup(false); });
+            set.DropDownItems.Add("讀書小幫手設定（學校行事曆、熬夜）…", null, delegate { ShowStudySettings(); });
+            StatsHouseMenu(set.DropDownItems);   // 匿名回報的開關（公開版、有 ID 才有；DeskPals.Stats.cs）
+            StartupHouseMenu(set.DropDownItems);   // 開機自動出現（只有 Microsoft Store 版）
+            m.Items.Add(set);
+
             m.Items.Add(new ToolStripSeparator());
             m.Items.Add("收工（關掉 Desk Pals）", null, delegate { QuitAll(); });
             ShowMenu(m, "公仔小屋", true, at);
         }
 
+        // 小屋的一個開關（打勾＝開著；按了選單不關）
+        ToolStripMenuItem FeatItem(string key, string text)
+        {
+            ToolStripMenuItem mi = new ToolStripMenuItem(text);
+            mi.CheckOnClick = true;
+            mi.Checked = Feat(key);
+            mi.Click += delegate { SetFeat(key, !Feat(key)); mi.Checked = Feat(key); };
+            return mi;
+        }
+
         // Microsoft Store 版：開機自動出現（StartupTask）。在 Windows 設定裡關掉的，要回那邊才開得回來
-        void StartupHouseMenu(ContextMenuStrip m)
+        void StartupHouseMenu(ToolStripItemCollection items)
         {
             if (App.StartupEnable == null || App.StartupState == null) return;
             int st = App.StartupState();
@@ -8001,7 +8218,7 @@ namespace DeskPals
                 App.StartupEnable(on);
                 Lead().Say(on ? "好～開機時我會自動出現" : "好～開機時不自動出現了", 2);
             };
-            m.Items.Add(mi);
+            items.Add(mi);
         }
 
         // 測試用：act menu pet｜house（開在公仔／蛋旁邊，不看游標）
@@ -8024,7 +8241,7 @@ namespace DeskPals
         public void ShowSetup(bool first)
         {
             if (setupForm == null || setupForm.IsDisposed)
-                setupForm = new SetupForm(this, first, lineup, Single || first, Single ? SinglePet() : "");
+                setupForm = new SetupForm(this, first, lineup, Single, Single ? SinglePet() : "");   // 第一次也先選「整櫃」
             Rectangle wa = App.Offscreen ? screens[0].WorkingArea : Screen.FromPoint(Cursor.Position).WorkingArea;
             setupForm.Location = new Point(wa.Left + (wa.Width - setupForm.Width) / 2, wa.Top + Math.Max(0, (wa.Height - setupForm.Height) / 2));
             setupForm.Show();
@@ -8052,7 +8269,7 @@ namespace DeskPals
                 if (lu != lineup) SwitchLineup(lu, pet);
                 else { Pet p = Get(pet); if (p != null) SelectOnly(p); }
                 Pet sp = Get(SinglePet());
-                if (sp != null) Later(1.6, delegate { sp.Say("以後我住在右下角的蛋裡～點一下蛋就叫我 🥚", 3.5); });
+                if (sp != null) Later(1.6, delegate { sp.Say("以後我住在右下角的" + MiniName + "裡～點一下" + MiniName + "就叫我出來", 3.5); });
             }
             else
             {
@@ -8311,6 +8528,19 @@ namespace DeskPals
         }
 
         public void SetHover(int i) { hover = i >= 0 && i < rows.Count && Selectable(i) ? i : -1; Invalidate(); }
+        // 測試用（pipe menu-info）：每一列「row 第幾列 深度 子選單 展開 打勾 文字」
+        public string Info()
+        {
+            StringBuilder sb = new StringBuilder("menu " + (House ? "house" : "pet") + " " + rows.Count + " " + Bounds.X + " " + Bounds.Y + " " + Bounds.Width + " " + Bounds.Height + "\n");
+            for (int i = 0; i < rows.Count; i++)
+            {
+                Row r = rows[i];
+                ToolStripMenuItem mi = r.It as ToolStripMenuItem;
+                string kind = r.Sep ? "sep" : (r.Header ? "header" : "item");
+                sb.Append("row " + i + " " + r.Depth + " " + kind + " " + (r.Sub ? 1 : 0) + " " + (opened.Contains(r.It) ? 1 : 0) + " " + (mi != null && mi.Checked ? 1 : 0) + " " + RowText(r) + "\n");
+            }
+            return sb.ToString();
+        }
 
         void MoveHover(int dir)
         {
@@ -8708,7 +8938,7 @@ namespace DeskPals
             {
                 EnsurePics(lu);
                 int cw = Sc(240), ch = Sc(116), gap = Sc(24), x0 = (W0 - 2 * cw - gap) / 2;
-                Add("mode:single", "只要一隻", "沒有櫃子，他住在右下角的蛋裡", new Rectangle(x0, top, cw, ch), 0, mode == "single");
+                Add("mode:single", "只要一隻", "沒有櫃子，他住在右下角的" + ShelfArt.For(lu).MiniName + "裡", new Rectangle(x0, top, cw, ch), 0, mode == "single");
                 Add("mode:shelf", lu == Pal.Pikmin ? "整櫃（三隻＋花）" : "整櫃", lu == Pal.Pikmin ? "三隻皮克敏和休息花住在櫃子裡" : "大家住在公仔櫃裡，點格子叫他們出來", new Rectangle(x0 + cw + gap, top, cw, ch), 0, mode == "shelf");   //@fan
                 // <public> Add("mode:shelf", "整櫃", "大家住在公仔櫃裡，點格子叫他們出來", new Rectangle(x0 + cw + gap, top, cw, ch), 0, mode == "shelf");
                 if (mode == "single")
@@ -8814,7 +9044,7 @@ namespace DeskPals
             Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.Right + 4 * U, pr.Y + plh / 2 - 2 * U, U);
             Steps(g, W0, Sc(68));
             string q = step == 0 ? "選你的公仔" : "怎麼擺？";
-            string hint = step == 0 ? "兩櫃原創公仔選一櫃，或用自己的照片做一隻（之後在小屋、選單都能換櫃）" : (mode == "single" ? "選一隻，他會住在右下角的蛋裡" : "公仔櫃放在右下角，點格子就叫他們出來");
+            string hint = step == 0 ? "兩櫃原創公仔選一櫃，或用自己的照片做一隻（之後在小屋、選單都能換櫃）" : (mode == "single" ? "選一隻，他會住在右下角的" + ShelfArt.For(lu).MiniName + "裡" : "公仔櫃放在右下角，點格子就叫他們出來");
             TextRenderer.DrawText(g, q, qF, new Rectangle(0, Sc(100), W0, Sc(30)), Pix.TextC, Pix.Mid);
             TextRenderer.DrawText(g, hint, subF, new Rectangle(0, Sc(130), W0, Sc(18)), Pix.C(0x9A6338), Pix.Mid);
             if (step == 0)
@@ -8959,6 +9189,15 @@ namespace DeskPals
                     g.DrawImage(pic, ix + (iconW - pw) / 2, r.Y + Sc(12), pw, ph);
                     g.InterpolationMode = im;
                 }
+            }
+            else if (ShelfArt.For(lu).Mini(2, false) != null)
+            {
+                Bitmap mi = ShelfArt.For(lu).Mini(2, false);   // 收起來的小紙箱／小書包
+                int mh = Math.Min(r.Height - Sc(30), Sc(66)), mw = mi.Width * mh / mi.Height;
+                InterpolationMode im = g.InterpolationMode;
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.DrawImage(mi, ix + (iconW - mw) / 2, r.Y + (r.Height - mh) / 2, mw, mh);
+                g.InterpolationMode = im;
             }
             else
             {

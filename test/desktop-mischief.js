@@ -220,6 +220,8 @@ s.on("connect", async () => {
 	await check("打字太兇：你自己在小屋打開開關才問一次權限，掛鉤裝回去", () => { assert.equal(field(d, "typing"), "1"); assert.equal(fake(d, "asked"), "1"); assert.equal(fake(d, "watching"), "1"); });
 
 	// ---------- 下班清場 ----------
+	send("act feature night=1");   // 「下班時間」預設關（很多人裝在家裡的電腦上）；下班清場跟它同一套，要先打開
+	await sleep(500);
 	send("mischief-fake win 60 80 520 340 期末報告.docx - Word");
 	send("mischief-fake win 380 160 560 360 收件匣 - Outlook");
 	send("mischief-fake idle 0");
