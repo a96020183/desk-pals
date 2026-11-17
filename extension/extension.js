@@ -655,12 +655,16 @@ class Desktop {
 			if (fs.existsSync(lnk)) return;
 			const ps1 = path.join(this.home, this.ps1);
 			const script = [
-				"$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:DESKPALS_LNK)",
+				// WScript.Shell 存檔走系統 ANSI 字碼頁：英文 Windows 存不了中文檔名 → 先存成英文暫存名，再改名
+				"$d = Split-Path -LiteralPath $env:DESKPALS_LNK; New-Item -ItemType Directory -Force -Path $d | Out-Null",
+				"$t = Join-Path $d ('desk-pals-' + $PID + '.lnk')",
+				"$s = (New-Object -ComObject WScript.Shell).CreateShortcut($t)",
 				"$s.TargetPath = \"$env:SystemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\"",
 				"$s.Arguments = '-NoProfile -WindowStyle Hidden -File \"' + $env:DESKPALS_PS1 + '\" -PipeName ' + $env:DESKPALS_PIPE",
 				"$s.WindowStyle = 7",
 				"$s.Description = '公仔櫃 Desk Pals（整個螢幕的像素公仔）'",
 				"$s.Save()",
+				"Move-Item -LiteralPath $t -Destination $env:DESKPALS_LNK -Force",
 			].join("; ");
 			cp.execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
 				windowsHide: true,

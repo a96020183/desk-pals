@@ -108,41 +108,88 @@ namespace DeskPals
 
     // VS Code 擴充套件附的 exe（放在 %LOCALAPPDATA%\DeskPals\app）：開機捷徑由 exe 自己建，擴充套件不用再叫 PowerShell。
     // 舊版擴充套件留下的捷徑（指著 powershell.exe ＋ desk-pals.ps1）同名，直接改成指著這支 exe；資料夾、資料都不動。
+    // 用 Shell 的 IShellLinkW／IPersistFile（全程 Unicode）。不用 WScript.Shell：它存捷徑時走系統的 ANSI 字碼頁，
+    // 英文 Windows（cp1252）上「公仔櫃 Desk Pals.lnk」這種中文檔名會存不了（舊版擴充套件用 PowerShell 建捷徑也是同一個問題）。
     static class Autostart
     {
+        [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+        class ShellLink { }
+
+        [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("000214F9-0000-0000-C000-000000000046")]
+        interface IShellLinkW
+        {
+            void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile, int cch, IntPtr pfd, uint fFlags);
+            void GetIDList(out IntPtr ppidl);
+            void SetIDList(IntPtr pidl);
+            void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszName, int cch);
+            void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+            void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszDir, int cch);
+            void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+            void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszArgs, int cch);
+            void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+            void GetHotkey(out ushort pwHotkey);
+            void SetHotkey(ushort wHotkey);
+            void GetShowCmd(out int piShowCmd);
+            void SetShowCmd(int iShowCmd);
+            void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszIconPath, int cch, out int piIcon);
+            void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
+            void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, uint dwReserved);
+            void Resolve(IntPtr hwnd, uint fFlags);
+            void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
+        }
+
         public static bool Ensure(string lnk, string pipe)
         {
+            object o = null;
             try
             {
                 string exe = Path.GetFullPath(Assembly.GetExecutingAssembly().Location);
                 string args = "--pipe " + pipe;
-                Type t = Type.GetTypeFromProgID("WScript.Shell");
-                object sh = Activator.CreateInstance(t);
-                try
+                o = new ShellLink();
+                IShellLinkW sl = (IShellLinkW)o;
+                System.Runtime.InteropServices.ComTypes.IPersistFile pf = (System.Runtime.InteropServices.ComTypes.IPersistFile)o;
+                if (File.Exists(lnk))
                 {
-                    object s = t.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, sh, new object[] { lnk });
-                    Type st = s.GetType();
-                    if (File.Exists(lnk))
+                    string have = "", haveArgs = "";
+                    try
                     {
-                        string have = (string)st.InvokeMember("TargetPath", BindingFlags.GetProperty, null, s, null);
-                        string haveArgs = (string)st.InvokeMember("Arguments", BindingFlags.GetProperty, null, s, null);
-                        if (string.Equals(have, exe, StringComparison.OrdinalIgnoreCase) && haveArgs == args) return true;
-                        App.Log("autostart: " + Path.GetFileName(have) + " -> " + exe);
+                        pf.Load(lnk, 0);
+                        StringBuilder sb = new StringBuilder(1024);
+                        sl.GetPath(sb, sb.Capacity, IntPtr.Zero, 0x4);   // SLGP_RAWPATH
+                        have = sb.ToString();
+                        sb = new StringBuilder(1024);
+                        sl.GetArguments(sb, sb.Capacity);
+                        haveArgs = sb.ToString();
                     }
-                    else App.Log("autostart: new " + exe);
-                    Directory.CreateDirectory(Path.GetDirectoryName(lnk));
-                    st.InvokeMember("TargetPath", BindingFlags.SetProperty, null, s, new object[] { exe });
-                    st.InvokeMember("Arguments", BindingFlags.SetProperty, null, s, new object[] { args });
-                    st.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, s, new object[] { Path.GetDirectoryName(exe) });
-                    st.InvokeMember("IconLocation", BindingFlags.SetProperty, null, s, new object[] { exe + ",0" });
-                    st.InvokeMember("Description", BindingFlags.SetProperty, null, s, new object[] { "公仔櫃 Desk Pals（整個螢幕的像素公仔）" });
-                    st.InvokeMember("Save", BindingFlags.InvokeMethod, null, s, null);
-                    Marshal.FinalReleaseComObject(s);
+                    catch (Exception ex) { App.Log("autostart: could not read the old shortcut: " + Why(ex)); }
+                    if (string.Equals(have, exe, StringComparison.OrdinalIgnoreCase) && haveArgs == args) return true;
+                    App.Log("autostart: " + Path.GetFileName(have) + " -> " + exe);
+                    Marshal.FinalReleaseComObject(o);
+                    o = new ShellLink();   // 新的一個，不帶舊捷徑的其他設定（隱藏視窗、PowerShell 的圖示）
+                    sl = (IShellLinkW)o;
+                    pf = (System.Runtime.InteropServices.ComTypes.IPersistFile)o;
                 }
-                finally { Marshal.FinalReleaseComObject(sh); }
+                else App.Log("autostart: new " + exe);
+                Directory.CreateDirectory(Path.GetDirectoryName(lnk));
+                sl.SetPath(exe);
+                sl.SetArguments(args);
+                sl.SetWorkingDirectory(Path.GetDirectoryName(exe));
+                sl.SetIconLocation(exe, 0);
+                sl.SetDescription("公仔櫃 Desk Pals（整個螢幕的像素公仔）");
+                pf.Save(lnk, true);
+                if (!File.Exists(lnk)) { App.Log("autostart: saved but the shortcut is not there: " + lnk); return false; }
                 return true;
             }
-            catch (Exception ex) { App.Log("autostart: " + ex.Message); return false; }
+            catch (Exception ex) { App.Log("autostart: " + Why(ex)); return false; }
+            finally { if (o != null) Marshal.FinalReleaseComObject(o); }
+        }
+
+        // 例外的真正原因（反射／COM 包了一層的話，最裡面那個）＋ HRESULT
+        static string Why(Exception ex)
+        {
+            Exception b = ex.GetBaseException();
+            string s = b.GetType().Name + " 0x" + Marshal.GetHRForException(b).ToString("X8") + ": " + b.Message;
+            return b == ex ? s : s + " (via " + ex.GetType().Name + ")";
         }
     }
 

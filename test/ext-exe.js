@@ -106,16 +106,38 @@ function procs(pipe) {
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch (e) { return false; } };
 async function waitGone(pid, ms) { const end = Date.now() + ms; while (Date.now() < end && alive(pid)) await sleep(250); return !alive(pid); }
 
+// 讀／建捷徑用 WScript.Shell，但它只認系統 ANSI 字碼頁：英文 Windows（CI）上中文檔名讀寫都會失敗。
+// 所以一律在同一個資料夾用純英文的暫存檔名操作，再改名（捷徑的內容跟檔名無關）
+function asciiTmp(lnk) { return path.join(path.dirname(lnk), "tmp-" + process.pid + "-" + Date.now() + ".lnk"); }
 function lnkInfo(lnk) {
+	if (!fs.existsSync(lnk)) return {};
+	const tmp = asciiTmp(lnk);
+	fs.copyFileSync(lnk, tmp);
 	const ps = "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:L); [pscustomobject]@{ target = $s.TargetPath; args = $s.Arguments } | ConvertTo-Json -Compress";
-	const r = cp.spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { env: Object.assign({}, process.env, { L: lnk }), encoding: "utf8", windowsHide: true });
+	const r = cp.spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { env: Object.assign({}, process.env, { L: tmp }), encoding: "utf8", windowsHide: true });
+	fs.unlinkSync(tmp);
 	try { return JSON.parse(r.stdout.trim()); } catch (e) { return {}; }
 }
 // 舊版擴充套件建的捷徑（同一個寫法：powershell.exe -File desk-pals.ps1）
 function oldLnk(lnk, ps1, pipe) {
 	fs.mkdirSync(path.dirname(lnk), { recursive: true });
+	const tmp = asciiTmp(lnk);
 	const ps = "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:L); $s.TargetPath = \"$env:SystemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\"; $s.Arguments = '-NoProfile -WindowStyle Hidden -File \"' + $env:S + '\" -PipeName ' + $env:Q; $s.WindowStyle = 7; $s.Save()";
-	cp.spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { env: Object.assign({}, process.env, { L: lnk, S: ps1, Q: pipe }), windowsHide: true });
+	cp.spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { env: Object.assign({}, process.env, { L: tmp, S: ps1, Q: pipe }), windowsHide: true });
+	fs.renameSync(tmp, lnk);
+}
+// 「開機」資料夾不存在、檔名有任何 ANSI 字碼頁都沒有的字（泰文、拉丁擴充）：exe --autostart 還是要建得出來（本機重現英文 Windows 上的情況）
+function autostartUnicode(exe, W, pipe) {
+	const lnk = path.join(W, "no-such-dir", "Startup", "公仔櫃 \u0e01 \u0109 Desk Pals.lnk");
+	const run = () => cp.spawnSync(exe, ["--autostart", lnk, "--pipe", pipe], { windowsHide: true, timeout: 30000 }).status;
+	check(run() === 0 && fs.existsSync(lnk), "exe --autostart creates a shortcut with a non-ANSI name in a missing folder");
+	const li = lnkInfo(lnk);
+	check(path.resolve(li.target || "x") === exe && li.args === "--pipe " + pipe, "  … pointing to the exe (" + li.target + " " + li.args + ")");
+	const before = fs.statSync(lnk).mtimeMs;
+	check(run() === 0 && fs.statSync(lnk).mtimeMs === before, "  … second run leaves it alone");
+	oldLnk(lnk, "C:\\old\\desk-pals.ps1", pipe);
+	check(/powershell\.exe$/i.test(lnkInfo(lnk).target || ""), "  … (old PowerShell shortcut put back)");
+	check(run() === 0 && path.resolve(lnkInfo(lnk).target || "x") === exe, "  … and an old PowerShell one under that name gets repointed");
 }
 
 function ask(pipe, line, wantRe, ms) {
@@ -190,6 +212,7 @@ async function main() {
 		const li = lnkInfo(lnk);
 		check(path.resolve(li.target || "x") === exe && li.args === "--pipe " + pipe, "startup shortcut now points to the exe (" + li.target + " " + li.args + ")");
 		check(fs.readdirSync(startupDir(W)).length === 1, "still one startup shortcut");
+		autostartUnicode(exe, W, pipe);
 		for (const [f, v] of Object.entries(data)) if (f !== "lineup.txt") check(read(path.join(home, f), "utf8") === v, "data untouched: " + f);
 		check(Buffer.compare(read(exe), read(path.join(src, "DeskPals.exe"))) === 0, "app\\DeskPals.exe is the vsix's exe");
 		check(!(s1.warnings || []).length, "no warnings " + JSON.stringify(s1.warnings || []));
@@ -234,6 +257,9 @@ async function main() {
 		check(s4.connected && !s4.useExe, "connected through desk-pals.ps1");
 		check((s4.calls || []).some((c) => /powershell/i.test(c.file)), "used powershell.exe");
 		check(!fs.existsSync(path.join(W4, "local", "DeskPals", "app")), "no app folder");
+		const lnk4 = path.join(startupDir(W4), LNK);   // 「開機」資料夾本來不存在；中文檔名（英文 Windows 上也要建得出來）
+		for (let i = 0; i < 40 && !fs.existsSync(lnk4); i++) await sleep(250);
+		check(/powershell\.exe$/i.test(lnkInfo(lnk4).target || ""), "PowerShell version created its startup shortcut (" + LNK + ")");
 		procs(pipe4);
 		await ask(pipe4, "quit", null, 1500);
 		await sleep(3000);
@@ -243,6 +269,9 @@ async function main() {
 		for (const pid of mine) if (pid !== process.pid && alive(pid)) { try { process.kill(pid); console.log("stopped leftover pid " + pid); } catch (e) {} }
 		const lg = read(log, "utf8");
 		if (lg) console.log("---- desk-pals.log (last lines)\n" + lg.trim().split("\n").slice(-15).join("\n"));
+		// 台詞 key 對不起來、圖讀不到：都算失敗（log 是這個測試自己的 TEMP，只有這次的）
+		const bad = (lg || "").split("\n").filter((l) => /missing line|art missing|lineups\.txt missing|autostart: (?!new |\S+ -> )/.test(l));
+		check(!bad.length, "desk-pals.log has no missing lines / missing art / autostart errors" + (bad.length ? "\n       " + bad.slice(0, 8).join("\n       ") : ""));
 	}
 	console.log(problems ? `ext-exe: ${problems} problem(s)` : "ext-exe: all ok");
 	process.exit(problems ? 1 : 0);

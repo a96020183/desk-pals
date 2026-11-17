@@ -489,10 +489,10 @@ jobs:
           if ((Get-Content "$env:DESKPALS_DATA_DIR\lineup.txt") -ne "original") { throw "fresh install did not start in original" }
           if (-not (Test-Path public-ps1-shots\shot-original.png)) { throw "no snapshot" }
       # 搗蛋四個玩法（公開版＋個人版）：離屏模式一定用假的游標／視窗／按鍵計數（MisFake），不會動到 runner 的滑鼠、視窗、鍵盤
-      - name: Mischief tests (public + personal, offscreen, fake side effects) + VS Code settings unit test
+      - name: Mischief tests (public + personal, offscreen, fake side effects) + VS Code settings unit test + line keys
         shell: powershell
         run: |
-          node --test test/mischief.test.js
+          node --test test/mischief.test.js test/lines.test.js
           if ($LASTEXITCODE -ne 0) { throw "mischief unit test failed" }
           $runs = @(@{ n = "pub"; ps1 = "build\public\extension\desktop\desk-pals.ps1"; out = "public-ps1-shots\mischief" }, @{ n = "per"; ps1 = "extension\desktop\desk-pals.ps1"; out = "ps1-shots\mischief" })
           foreach ($v in $runs) {

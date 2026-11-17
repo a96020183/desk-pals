@@ -958,7 +958,13 @@ extension Pet {
     func DrawOrigFront(_ g: Graphics, _ f: Fr, _ bx: Int, _ by: Int, _ ps: Int, _ fx: Bool) { }
 
     // ---------- 午餐：躲躲吃網購的便當、沒電吃飯＝人類的充電、刺刺吃飯（嘴硬）----------
-    func OrigLunchLine(_ phase: String) -> String { return L("lunch_" + phase) }   // lunch_start／nap／end／eat（每隻自己的台詞）
+    // 每隻自己的台詞：lunch_start／nap／end；其他（拿著便當閒聊的 talk）＝lunch_eat（同 DeskPals.Original.cs）
+    func OrigLunchLine(_ phase: String) -> String {
+        if phase == "start" { return L("lunch_start") }
+        if phase == "nap" { return L("lunch_nap") }
+        if phase == "end" { return L("lunch_end") }
+        return L("lunch_eat")
+    }
 
     func DrawOrigLunch(_ g: Graphics, _ f: Fr, _ bx: Int, _ by: Int, _ ps: Int, _ fx: Bool, _ bite: Int) {
         DrawAt(g, Pet.BENTO, 8.5, Double(P.BodyTop + bite) + cuPose.Y, bx, by, ps, fx, false, true)
