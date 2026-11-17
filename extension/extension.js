@@ -576,8 +576,7 @@ class PetView {
 			const text = await requestPikminReply(key, history);
 			this.post({ type: "chatReply", text });
 		} catch (error) {
-			const reason = error && error.message ? error.message : "未知錯誤";
-			this.post({ type: "chatError", text: "我現在連不上 AI 服務，請檢查網路、API 金鑰與 API 帳務後再試。(" + reason.slice(0, 180) + ")" });
+			this.post({ type: "chatError", text: "我現在連不上 AI 服務，請檢查網路、API 金鑰與 API 帳務後再試。" });
 		}
 	}
 	resolveWebviewView(view) {
