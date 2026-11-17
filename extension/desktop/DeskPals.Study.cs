@@ -1342,6 +1342,8 @@ namespace DeskPals
             int i = Array.IndexOf(keys, kind);
             if (i < 0) return null;
             string[] a;
+            Pal sp = Pal.Get(id);
+            if (sp != null && sp.Lines.TryGetValue("sf_" + kind, out a) && a.Length > 0) return a[0];   // 角色自己的（翻翻：sf_<種類>）
             switch (id)
             {
                 // <fan>

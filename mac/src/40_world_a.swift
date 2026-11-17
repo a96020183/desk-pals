@@ -131,8 +131,8 @@ extension World {
     func DefaultPetFor(_ pet: String) -> String {
         for id in Pal.LineupIds(lineup) { if id == pet { return pet } }
         if lineup == Pal.Mine { let mi = Pal.MineIds(); if mi.count > 0 { return mi[0] } }
-        return lineup == Pal.Teletubbies ? "po" : (lineup == Pal.Pikmin ? "pkred" : (lineup == Pal.Original ? "duoduo" : "spidey"))   //@fan
-        // <public> return "duoduo"
+        return lineup == Pal.Teletubbies ? "po" : (lineup == Pal.Pikmin ? "pkred" : (Pal.IsSquad(lineup) ? Pal.SqIds(lineup)[0] : "spidey"))   //@fan
+        // <public> return Pal.IsSquad(lineup) ? Pal.SqIds(lineup)[0] : "duoduo"
     }
 
     // 每一櫃各自記：誰在外面、最近一隻、最愛（經典一櫃沿用原本的檔名）
@@ -167,6 +167,7 @@ extension World {
         LoadState()
         var seed = Environment.TickCount
         for p in Pal.Lineup(lineup) { Pets.Add(Pet(self, p, S, seed)); seed += 1 }
+        if shelf != nil { shelf.Place(ShelfWA()) }   // 每櫃各自的櫃子（窩伴小世界＝書包小屋），大小不一樣
         RenderShelf()
         var ids: List<String>
         if Get(pet) != nil { ids = List<String>(); ids.Add(pet) } else { ids = LoadOutIds() }
@@ -179,8 +180,8 @@ extension World {
             delay += 0.5
         }
         active = Get(ids.Count > 0 ? ids[ids.Count - 1] : defaultPet) ?? Get(defaultPet)
-        if ids.Count == 0 && active != nil { active.Say(OrigLineup ? "續命小隊，報到！🥤" : (TubbyLineup ? "Eh-oh! 天線寶寶一櫃 ☀" : (CuLineup ? "我的櫃！大家都在 🧸" : "經典一櫃回來囉！")), 2.4) }   //@fan
-        // <public> if ids.Count == 0 && active != nil { active.Say(CuLineup ? "我的櫃！大家都在 🧸" : "續命小隊，報到！🥤", 2.4) }
+        if ids.Count == 0 && active != nil { active.Say(OrigLineup ? Pal.SqName(lineup) + "，報到！" + (WobanLineup ? "🎒" : "🥤") : (TubbyLineup ? "Eh-oh! 天線寶寶一櫃 ☀" : (CuLineup ? "我的櫃！大家都在 🧸" : "經典一櫃回來囉！")), 2.4) }   //@fan
+        // <public> if ids.Count == 0 && active != nil { active.Say(CuLineup ? "我的櫃！大家都在 🧸" : Pal.SqName(lineup) + "，報到！" + (WobanLineup ? "🎒" : "🥤"), 2.4) }
         Broadcast()
         lock(clients) { for c in clients { World.Send(c, "lineup " + lineup + "\n") } }   // 在桌面換櫃（小屋、設定）：VS Code 跟著改設定
         App.Log("lineup " + lineup)
@@ -818,8 +819,8 @@ extension World {
         if !sysIdle && now - sessionStart >= restMin * 60 {
             sessionStart = now
             if HoldIfQuiet("rest", "該起來動一動了") { return }
-            if PikLineup { PikWiltAlarm() } else { Lead().Rest(restMin) }   //@fan
-            // <public> Lead().Rest(restMin)
+            if PikLineup { PikWiltAlarm() } else { WbRest(RestPet(), restMin) }   //@fan
+            // <public> WbRest(RestPet(), restMin)
         }
     }
 
@@ -1333,6 +1334,9 @@ extension World {
             let si: String = shelf == nil ? "" : shelf.Info()
             let mk: Bool = maker != nil && !maker.IsDisposed && maker.VVisible
             World.Send(c, si + "maker " + (mk ? "1" : "0") + "\nend\n")
+        case "setup-info":   // 測試用（test/desktop-woban.js）：設定視窗現在有哪些按鈕
+            let sv: Bool = setupForm != nil && !setupForm.IsDisposed && (setupForm.VVisible || setupForm.Visible)
+            World.Send(c, (sv ? setupForm.Info() : "setup none\n") + "end\n")
         case "notify":
             if p.count >= 4 {
                 // 文字可以有空白：取第三個空白之後全部

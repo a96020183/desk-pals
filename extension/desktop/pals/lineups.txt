@@ -1,0 +1,6 @@
+# 圖片公仔櫃：一櫃＝pals 底下一個資料夾。程式（DeskPals.Original.cs 的 SqArt）照這份找圖，不寫死角色在哪個資料夾。
+# lineup id  資料夾  名稱  角色 id…（順序＝櫃子格子的順序；第一隻是大格）
+# 每個資料夾裡：<資料夾>.txt（每隻每個解析度一行：畫布、腳底、身體範圍）、<角色>/<1x|2x>/<動作>.png（16 張）、<角色>/icon.png（VS Code 側邊欄）
+#   有 <動作>.liquid.png 的那隻會在執行時上色（沒電的電量）；有 shelf/shelf.txt 的櫃子用自己的櫃子圖，沒有就用紙箱櫃（pals/shelf）
+original squad 續命小隊 duoduo meidian cici
+woban woban 窩伴小世界 fanfan bobo mian

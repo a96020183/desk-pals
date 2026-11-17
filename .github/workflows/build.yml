@@ -137,6 +137,50 @@ jobs:
           sleep 2
           if kill -0 $PID 2>/dev/null; then echo "::error::public shelf: desktop did not quit"; kill $PID; RC=1; fi
           exit $RC
+      # 窩伴小世界（翻翻・破破・綿綿）：全新安裝的設定第一頁（兩櫃二選一、選了只記在本機 log）、三隻 16 張動作圖、招牌動作、串場、換櫃、書包小屋
+      - name: Public woban test (窩伴小世界：設定第一頁、動作圖、書包小屋)
+        run: |
+          export DESKPALS_OFFSCREEN=1 DESKPALS_ISOLATED=1
+          RC=0
+          for MODE in setup pals; do
+            export DESKPALS_DATA_DIR="$RUNNER_TEMP/dp-pub-woban-$MODE"
+            mkdir -p "$DESKPALS_DATA_DIR"
+            SOCK="$RUNNER_TEMP/dp-pub-woban-$MODE.sock"
+            if [ "$MODE" = pals ]; then
+              printf done > "$DESKPALS_DATA_DIR/profile.txt"; printf shelf > "$DESKPALS_DATA_DIR/mode.txt"; printf woban > "$DESKPALS_DATA_DIR/lineup.txt"
+              build/public/extension/desktop/DeskPals "$SOCK" fanfan woban > "run-public-woban-$MODE.log" 2>&1 &
+            else
+              build/public/extension/desktop/DeskPals "$SOCK" "" "" > "run-public-woban-$MODE.log" 2>&1 &
+            fi
+            PID=$!
+            sleep 8
+            kill -0 $PID || { echo "::error::public woban ($MODE): died at startup"; cat "run-public-woban-$MODE.log"; exit 1; }
+            set +e
+            WOBAN_MODE=$MODE node test/desktop-woban.js "$SOCK" "$GITHUB_WORKSPACE/public-shots/woban" "$HOME/Library/Logs/desk-pals.log" || RC=1
+            set -e
+            sleep 2
+            if kill -0 $PID 2>/dev/null; then echo "::error::public woban ($MODE): desktop did not quit"; kill $PID; RC=1; fi
+          done
+          grep -E "woban|setup:|shelf art|pal art" "$HOME/Library/Logs/desk-pals.log" | tail -n 30 || true
+          exit $RC
+      - name: Public shelf test (書包小屋)
+        run: |
+          export DESKPALS_OFFSCREEN=1 DESKPALS_ISOLATED=1
+          export DESKPALS_DATA_DIR="$RUNNER_TEMP/dp-pub-shelf-woban"
+          mkdir -p "$DESKPALS_DATA_DIR"
+          printf done > "$DESKPALS_DATA_DIR/profile.txt"; printf shelf > "$DESKPALS_DATA_DIR/mode.txt"; printf woban > "$DESKPALS_DATA_DIR/lineup.txt"
+          SOCK="$RUNNER_TEMP/dp-pub-shelf-woban.sock"
+          build/public/extension/desktop/DeskPals "$SOCK" fanfan woban > run-public-shelf-woban.log 2>&1 &
+          PID=$!
+          sleep 8
+          kill -0 $PID || { echo "::error::public shelf (woban): died at startup"; cat run-public-shelf-woban.log; exit 1; }
+          set +e
+          SHELF_LINEUP=woban node test/desktop-shelf.js "$SOCK" "$GITHUB_WORKSPACE/public-shots/shelf-woban"
+          RC=$?
+          set -e
+          sleep 2
+          if kill -0 $PID 2>/dev/null; then echo "::error::public shelf (woban): desktop did not quit"; kill $PID; RC=1; fi
+          exit $RC
       # ---------- 個人版（全部角色，含同人）：跟以前一樣的測試，截圖只放 personal-mac-result ----------
       - name: Personal smoke run (offscreen, all pets, snapshot, quit)
         run: |
@@ -508,6 +552,40 @@ jobs:
             $env:SHELF_LINEUP = $v.lu
             node test/desktop-shelf.js $pipe (Resolve-Path $v.out).Path
             if ($LASTEXITCODE -ne 0) { throw ("shelf test failed (" + $v.n + ")") }
+          }
+      # 窩伴小世界（翻翻・破破・綿綿）：設定第一頁（公開版兩櫃二選一；個人版另外有三櫃）、三隻 16 張動作圖、串場、換櫃、書包小屋、搗蛋（破破）
+      - name: Woban test (setup first page public + personal, pals, 書包小屋, mischief; desk-pals.ps1)
+        shell: powershell
+        run: |
+          $runs = @(
+            @{ n = "setup-pub"; ps1 = "build\public\extension\desktop\desk-pals.ps1"; mode = "setup"; per = "0"; fresh = $true; test = "woban" },
+            @{ n = "setup-per"; ps1 = "extension\desktop\desk-pals.ps1"; mode = "setup"; per = "1"; fresh = $true; test = "woban" },
+            @{ n = "pals-pub"; ps1 = "build\public\extension\desktop\desk-pals.ps1"; mode = "pals"; per = "0"; fresh = $false; test = "woban" },
+            @{ n = "shelf-pub"; ps1 = "build\public\extension\desktop\desk-pals.ps1"; mode = ""; per = "0"; fresh = $false; test = "shelf" },
+            @{ n = "mis-pub"; ps1 = "build\public\extension\desktop\desk-pals.ps1"; mode = ""; per = "0"; fresh = $false; test = "mischief" })
+          foreach ($v in $runs) {
+            $env:DESKPALS_OFFSCREEN = "1"; $env:DESKPALS_ISOLATED = "1"
+            $env:DESKPALS_DATA_DIR = "$env:RUNNER_TEMP\dp-woban-" + $v.n
+            New-Item -ItemType Directory -Force $env:DESKPALS_DATA_DIR | Out-Null
+            $a = "-NoProfile -File `"" + (Resolve-Path $v.ps1).Path + "`" -PipeName desk-pals-woban-" + $v.n
+            if (-not $v.fresh) {
+              Set-Content "$env:DESKPALS_DATA_DIR\profile.txt" "done" -NoNewline
+              Set-Content "$env:DESKPALS_DATA_DIR\mode.txt" "shelf" -NoNewline
+              Set-Content "$env:DESKPALS_DATA_DIR\lineup.txt" "woban" -NoNewline
+              $a += " -Pet bobo -Lineup woban"
+            }
+            $pipe = "desk-pals-woban-" + $v.n
+            Start-Process powershell.exe -ArgumentList $a
+            node .github/ping.js $pipe
+            if ($LASTEXITCODE -ne 0) { throw ("desktop did not start (woban " + $v.n + ")") }
+            $out = "public-ps1-shots\woban-" + $v.n
+            if ($v.per -eq "1") { $out = "ps1-shots\woban-" + $v.n }
+            New-Item -ItemType Directory -Force $out | Out-Null
+            $env:WOBAN_MODE = $v.mode; $env:WOBAN_PERSONAL = $v.per; $env:SHELF_LINEUP = "woban"; $env:MIS_PET = "bobo"
+            if ($v.test -eq "woban") { node test/desktop-woban.js $pipe (Resolve-Path $out).Path "$env:TEMP\desk-pals.log" }
+            elseif ($v.test -eq "shelf") { node test/desktop-shelf.js $pipe (Resolve-Path $out).Path }
+            else { node test/desktop-mischief.js $pipe (Resolve-Path $out).Path "$env:TEMP\desk-pals.log" }
+            if ($LASTEXITCODE -ne 0) { throw ("woban test failed (" + $v.n + ")") }
           }
       # 舊版「Spidey 小夥伴」升級接手（個人版）＋全新安裝不會建出舊名字的東西：都在臨時資料夾，不碰 runner 的 %LOCALAPPDATA%、「啟動」資料夾
       - name: Legacy upgrade takeover (personal) + fresh installs create nothing old (personal, public)

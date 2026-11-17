@@ -6576,7 +6576,8 @@ final class Pal
     // ---- from 50_pikmin.swift ----
     var Pik: Bool = false                      // 皮克敏（頭上的葉子／花苞／花會長大）
     // ---- from 51_original.swift ----
-    var Orig: Bool = false                     // 續命小隊
+    var Orig: Bool = false                     // 圖片公仔（續命小隊、窩伴小世界）：行為走 Pet 的 Orig* 掛點
+    var Squad: String = ""                     // 在哪一櫃圖片公仔（pals/lineups.txt 的 lineup id）
     // ---- from 53_custom.swift ----
     var Cu: Bool = false                       // 自己做的公仔
     var Meta: CuMeta! = nil
@@ -6610,15 +6611,15 @@ final class Pal
     static let Classic = "classic", Teletubbies = "teletubbies"   //@fan
     static let Fallback = Classic                      // 找不到的櫃子、還沒選過：回到這一櫃 //@fan
     // <public> static let Fallback = Original
-    static func NormLineup(_ s: String!) -> String { let t = s == nil ? "" : s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); return t == Teletubbies || t == Pikmin || t == Original || (t == Mine && HasCustom()) ? t : Fallback }   //@fan
-    // <public> static func NormLineup(_ s: String!) -> String { let t = s == nil ? "" : s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); return t == Original || (t == Mine && HasCustom()) ? t : Fallback }
+    static func NormLineup(_ s: String!) -> String { let t = s == nil ? "" : s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); return t == Teletubbies || t == Pikmin || IsSquad(t) || (t == Mine && HasCustom()) ? t : Fallback }   //@fan
+    // <public> static func NormLineup(_ s: String!) -> String { let t = s == nil ? "" : s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); return IsSquad(t) || (t == Mine && HasCustom()) ? t : Fallback }
     static func LineupIds(_ lineup: String!) -> [String]
     {
         if NormLineup(lineup) == Pikmin { return PikminIds }   // 皮克敏一櫃：大格是休息花（50_pikmin.swift）   //@fan
-        if NormLineup(lineup) == Original { return OrigLineupIds() }   // 續命小隊（51_original.swift；第 4 格放你自己做的公仔）
+        if IsSquad(NormLineup(lineup)) { return SqLineupIds(NormLineup(lineup)) }   // 圖片公仔櫃（續命小隊、窩伴小世界：pals/lineups.txt；櫃子有空格就放你自己做的公仔）
         if NormLineup(lineup) == Mine { return MineIds() }                       // 我的櫃：自己做的公仔（53_custom.swift）
         return NormLineup(lineup) == Teletubbies ? ["tinky", "dipsy", "laalaa", "po"] : ["spidey", "po", "stitch", "hangyodon"]   //@fan
-        // <public> return OrigLineupIds()
+        // <public> return SqLineupIds(Original)
     }
     static func Lineup(_ lineup: String!) -> List<Pal>
     {
@@ -6627,13 +6628,13 @@ final class Pal
         return l
     }
     // 這一櫃預設放在大格的（經典一櫃照用最久的那隻）
-    static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Teletubbies ? "po" : (NormLineup(lineup) == Original ? "duoduo" : nil) }   //@fan
-    // <public> static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Original ? "duoduo" : nil }
-    // 設定視窗、小屋「換一櫃」列出來的櫃子（之後新增一櫃：這裡加一個 id、LineupIds／LineupName 加一行）
-    static let Lineups: [String] = [Original, Classic, Teletubbies, Pikmin]   //@fan
-    // <public> static let Lineups: [String] = [Original]
-    static func LineupName(_ lineup: String) -> String { let n = NormLineup(lineup); return n == Original ? OriginalName : (n == Teletubbies ? "天線寶寶一櫃" : (n == Pikmin ? "皮克敏一櫃" : (n == Mine ? "我的櫃" : "經典一櫃"))) }   //@fan
-    // <public> static func LineupName(_ lineup: String) -> String { let n = NormLineup(lineup); return n == Mine ? "我的櫃" : OriginalName }
+    static func LineupFav(_ lineup: String!) -> String! { let n = NormLineup(lineup); return n == Teletubbies ? "po" : (IsSquad(n) ? SqIds(n)[0] : nil) }   //@fan
+    // <public> static func LineupFav(_ lineup: String!) -> String! { let n = NormLineup(lineup); return IsSquad(n) ? SqIds(n)[0] : nil }
+    // 設定視窗、小屋「換一櫃」列出來的櫃子：圖片公仔櫃照 pals/lineups.txt（之後新增一櫃圖片公仔：加一個資料夾、lineups.txt 加一行）
+    static var Lineups: [String] { var l: [String] = SqLineupList(); l.append(contentsOf: [Classic, Teletubbies, Pikmin]); return l }   //@fan
+    // <public> static var Lineups: [String] { return SqLineupList() }
+    static func LineupName(_ lineup: String) -> String { let n = NormLineup(lineup); return IsSquad(n) ? SqName(n) : (n == Teletubbies ? "天線寶寶一櫃" : (n == Pikmin ? "皮克敏一櫃" : (n == Mine ? "我的櫃" : "經典一櫃"))) }   //@fan
+    // <public> static func LineupName(_ lineup: String) -> String { let n = NormLineup(lineup); return n == Mine ? "我的櫃" : SqName(n) }
 
     func Shared()
     {
@@ -7449,9 +7450,8 @@ extension Pet {
         case "laalaa": line = "進球！🏀 啦啦啦～"
         case "pkred", "pkyellow", "pkblue": line = PikLine("goal")
         // </fan>
-        case "duoduo", "meidian", "cici": line = OrigLine("goal")
-        default: line = P.Cu ? L("x_goal") : "進球！🏀 Thwip!"   //@fan
-        // <public> default: line = P.Cu ? L("x_goal") : "進球！🏀"
+        default: line = P.Orig ? OrigLine("goal") : (P.Cu ? L("x_goal") : "進球！🏀 Thwip!")   //@fan
+        // <public> default: line = P.Orig ? OrigLine("goal") : (P.Cu ? L("x_goal") : "進球！🏀")
         }
         Say(line, 2.4)
         Burst(14)
@@ -7472,8 +7472,7 @@ extension Pet {
         case "laalaa": line = "啦啦～進了！"
         case "pkred", "pkyellow", "pkblue": line = PikLine("cheer")
         // </fan>
-        case "duoduo", "meidian", "cici": line = OrigLine("cheer")
-        default: line = P.Cu ? L("x_cheer") : "好球！"
+        default: line = P.Orig ? OrigLine("cheer") : (P.Cu ? L("x_cheer") : "好球！")
         }
         Say(line, 1.4)
         Mark(0)
@@ -7481,6 +7480,7 @@ extension Pet {
     }
 
     func MissLine() -> String {
+        if P.Orig { return OrigLine("miss") }
         switch P.Id {
         // <fan>
         case "po": return "差一點點！再來一次！"
@@ -7491,7 +7491,6 @@ extension Pet {
         case "laalaa": return "差一點！再來一次！"
         case "pkred", "pkyellow", "pkblue": return PikLine("miss")
         // </fan>
-        case "duoduo", "meidian", "cici": return OrigLine("miss")
         default: break
         }
         return P.Cu ? L("x_miss") : "差一點！再一次？"
@@ -7849,8 +7848,8 @@ extension Pet {
         case "dipsy": if Grounded() { HatToss(true) }; Say(line, 4); Burst(8)
         case "laalaa": if Grounded() { SetState("twirl", 2.4) }; Say(line, 4); for _ in 0..<4 { Mark(0) }; Burst(8)
         // </fan>
-        case "duoduo", "meidian", "cici": OrigCelebrate(line, lead)
         default:
+            if P.Orig { OrigCelebrate(line, lead); break }
             if lead { w.Fireworks(w.WA(Cx, y + Double(SH) / 2.0), 10, -1) }
             if Grounded() { SetState("dance", 3.5) }
             Say(line, 4); Burst(10)
@@ -9074,30 +9073,49 @@ extension Pet
     }
 }
 
-// ================= 紙箱櫃的圖（extension/desktop/pals/shelf，tools/shelf_art/shelf_art.py 產生）=================
+// ================= 櫃子的圖：每一櫃可以有自己的櫃子（pals/<資料夾>/shelf：窩伴小世界的書包小屋），沒有就用紙箱櫃（pals/shelf，tools/shelf_art/shelf_art.py 產生）=================
 // shelf.txt 的座標是 2x 圖的像素（1x 圖剛好一半）；櫃子用 S/8 換算（100% 縮放 S=4＝1x 圖原尺寸）。
 // 晚上版不另外存圖：整張往深藍紫混一半（跟以前木頭櫃晚上的背板同一個顏色）。圖讀不到就用程式畫一個簡單的紙箱，不要當掉。
 // mac：一律用 2x 圖（櫃子的 Bitmap 是 Retina，畫進邏輯大小剛好 1:1）
-enum ShelfArt
+final class ShelfArt
 {
-    // 跟 shelf.txt 一樣的預設值（檔案讀不到時用）
-    static var W2 = 512, H2 = 668, Crown = 88
-    static var Tab: [Int] = [382, 60, 44, 22]
-    static var Cells: [[Int]] = [
+    var Dir = "shelf", ImageName = "box.png"   // pals 底下哪個資料夾、圖的檔名（shelf.txt 的 image）
+    // 跟紙箱櫃 shelf.txt 一樣的預設值（檔案讀不到時用）
+    var W2 = 512, H2 = 668, Crown = 88, N = 4      // N＝幾格（紙箱櫃 4 格；書包小屋 3 間）
+    var Pedestal = true, Note = true               // 格 0 的展示台、大格背板的便利貼（shelf.txt 的 pedestal 0／note 0 關掉）
+    var Tab: [Int] = [382, 60, 44, 22]
+    var Cells: [[Int]] = [
         [248, 106, 178, 508, 282, 107, 144, 477, 586, 614, 344, 603, 288, 620, 98, 20],
         [48, 106, 164, 132, 82, 106, 130, 108, 216, 238, 137, 230, 83, 244, 97, 20],
         [48, 293, 164, 131, 82, 294, 130, 106, 403, 424, 137, 416, 83, 430, 97, 20],
         [48, 479, 164, 135, 82, 480, 130, 105, 587, 614, 137, 603, 83, 619, 97, 21] ]
-    static var loaded = false
-    static var imgs = [String: Bitmap]()
-    static var tried = Set<String>()
+    var imgs = [String: Bitmap]()
+    var tried = Set<String>()
+    static var kits = [String: ShelfArt]()
+    static var dirOf = [String: String]()
+    init() {}
 
-    static func Load()
+    // 這一櫃用哪個櫃子：圖片公仔櫃的資料夾裡有 shelf/shelf.txt 就用它；沒有（或其他櫃）用紙箱櫃
+    static func For(_ lineup: String) -> ShelfArt
     {
-        if loaded { return }
-        loaded = true
-        let root = SqArt.Root()
-        guard !root.isEmpty, let meta = try? File.ReadAllText(Path.Combine(Path.Combine(root, "shelf"), "shelf.txt")) else { App.LogAlways("shelf art missing: shelf.txt"); return }
+        var dir: String = "shelf"
+        if let d0 = dirOf[lineup] { dir = d0 }
+        else {
+            if let q = SqArt.Lineup(lineup), SqArt.ReadText(q.Dir + "/shelf/shelf.txt") != nil { dir = q.Dir + "/shelf" }
+            dirOf[lineup] = dir
+        }
+        if let k0 = kits[dir] { return k0 }
+        let k = ShelfArt()
+        k.Dir = dir
+        k.Load()
+        kits[dir] = k
+        return k
+    }
+
+    func Load()
+    {
+        guard let meta = SqArt.ReadText(Dir + "/shelf.txt") else { App.LogAlways("shelf art missing: " + Dir + "/shelf.txt"); return }
+        var n = 0
         for line in meta.components(separatedBy: "\n")
         {
             let a = line.Trim().components(separatedBy: " ")
@@ -9106,21 +9124,24 @@ enum ShelfArt
             if a[0] == "size" && a.count >= 3 { W2 = v[1]; H2 = v[2] }
             else if a[0] == "crown" && a.count >= 2 { Crown = v[1] }
             else if a[0] == "tab" && a.count >= 5 { Tab = [v[1], v[2], v[3], v[4]] }
-            else if a[0] == "cell" && a.count >= 18 && v[1] >= 0 && v[1] < 4 { Cells[v[1]] = Array(v[2..<18]) }
+            else if a[0] == "image" && a.count >= 2 && a[1] != "" { ImageName = a[1] }
+            else if a[0] == "pedestal" && a.count >= 2 { Pedestal = v[1] != 0 }
+            else if a[0] == "note" && a.count >= 2 { Note = v[1] != 0 }
+            else if a[0] == "cell" && a.count >= 18 && v[1] >= 0 && v[1] < 4 { Cells[v[1]] = Array(v[2..<18]); n = Swift.max(n, v[1] + 1) }
         }
+        if n > 0 { N = n }
     }
 
     // r：1＝1x 圖、2＝2x 圖；night：晚上版（第一次用到才算）。讀不到＝nil
-    static func Image(_ r: Int, _ night: Bool) -> Bitmap!
+    func Image(_ r: Int, _ night: Bool) -> Bitmap!
     {
-        Load()
         let key = String(r) + (night ? "n" : "d")
         if let b = imgs[key] { return b }
         if tried.contains(key) { return nil }
         tried.insert(key)
         var b: Bitmap! = nil
-        if night { if let d = ShelfArt.Image(r, false) { b = ShelfArt.Night(d) } }
-        else { b = SqArt.Png("shelf/" + String(r) + "x/box.png"); if b == nil { App.LogAlways("shelf art missing: " + String(r) + "x/box.png") } }
+        if night { if let d = Image(r, false) { b = ShelfArt.Night(d) } }
+        else { b = SqArt.Png(Dir + "/" + String(r) + "x/" + ImageName); if b == nil { App.LogAlways("shelf art missing: " + Dir + "/" + String(r) + "x/" + ImageName) } }
         if b != nil { imgs[key] = b }
         return b
     }
@@ -9150,6 +9171,7 @@ final class ShelfForm: OverlayForm
     let k: Double
     var Hot = false, Over = false, Night = false
     var Tubby = false                   // 天線寶寶一櫃：格子裡是藍天綠山丘，大格有太陽寶寶   //@fan
+    var Kit: ShelfArt = ShelfArt.For("")   // 這一櫃的櫃子（Place 時照 World 現在的櫃換）
     // ---- from 50_pikmin.swift ----
     var Pik = false                     // 皮克敏一櫃：格子底下是土和草，大格種一朵休息花
     // ---- from 51_original.swift ----
@@ -9194,6 +9216,8 @@ final class ShelfForm: OverlayForm
     func EggLocal() -> Rectangle { let ps = EggPs; let ew = 18 * ps, eh = 19 * ps; return Rectangle(Area.Width - ew - 4, Area.Height - eh - 2, ew, eh) }
     func EggScreen() -> Rectangle { let r = EggLocal(); return Rectangle(r.X + Area.X, r.Y + Area.Y, r.Width, r.Height) }
     func TabLocal() -> Rectangle { return tab }
+    // 點擊範圍：收合鈕太扁（書包小屋提把下那條只有 5 px）就上下各放大，至少 3 格高
+    func TabHit() -> Rectangle { var t = tab; let need = 3 * TU - t.Height; if need > 0 { t.Inflate(0, (need + 1) / 2) }; return t }
     func Gulp() { gulp = 0.5; wobT = 0.7 }
     func SnapFold() { fold = Collapsed ? 1 : 0 }
     func Step(_ dt: Double)
@@ -9232,7 +9256,7 @@ final class ShelfForm: OverlayForm
         _ = try? File.WriteAllText(PosFile, String(OffX) + " " + String(OffY))
     }
     // 蛋或櫃頂（不是收合鈕、不是格子）可以拖
-    func DragSpot(_ local: Point) -> Bool { return Collapsed ? EggLocal().Contains(local) : (local.Y < crown && !TabLocal().Contains(local)) }
+    func DragSpot(_ local: Point) -> Bool { return Collapsed ? EggLocal().Contains(local) : (local.Y < crown && !TabHit().Contains(local)) }
 
     init(_ w: World, _ S: Int)
     {
@@ -9249,20 +9273,20 @@ final class ShelfForm: OverlayForm
 
     func Place(_ wa: Rectangle)
     {
-        ShelfArt.Load()
-        let W = Sc(ShelfArt.W2), H = Sc(ShelfArt.H2)
+        Kit = ShelfArt.For(w.LineupNow)
+        let W = Sc(Kit.W2), H = Sc(Kit.H2)
         defX = wa.Right - W - 6; defY = wa.Bottom - H; lastWa = wa
         let ax = Math.Max(wa.Left, Math.Min(defX, defX + OffX)), ay = Math.Max(wa.Top, Math.Min(defY, defY + OffY))
         area = Rectangle(ax, ay, W, H)
         for i in 0..<4
         {
-            let v = ShelfArt.Cells[i]
+            let v = Kit.Cells[i]
             opening[i] = Rc(v, 0); back[i] = Rc(v, 4); plate[i] = Rc(v, 12)
             foot[i] = Point(Sc(v[10]), Sc(v[11]))
             cells[i] = Rectangle.Union(opening[i], plate[i])
         }
-        tab = Rc(ShelfArt.Tab, 0)
-        crown = Sc(ShelfArt.Crown)
+        tab = Rc(Kit.Tab, 0)
+        crown = Sc(Kit.Crown)
     }
     // shelf.txt 的 2x 座標 → 這個櫃子的像素（S=4 剛好一半）
     func Sc(_ v: Int) -> Int { return CInt(Math.Floor(Double(v * TU) / 8.0 + 0.5)) }
@@ -9282,14 +9306,14 @@ final class ShelfForm: OverlayForm
     func CellScreen(_ i: Int) -> Rectangle { let c = cells[i]; return Rectangle(c.X + Area.X, c.Y + Area.Y, c.Width, c.Height) }
     // 公仔腳踩的位置（螢幕座標）：地板中間；高格站在展示台上
     func Foot(_ i: Int) -> Point { return Point(Area.X + foot[i].X, Area.Y + foot[i].Y - (i == 0 ? PedH() : 0)) }
-    func PedH() -> Int { return CInt(Double(opening[0].Height) * 0.13) }
+    func PedH() -> Int { return Kit.Pedestal ? CInt(Double(opening[0].Height) * 0.13) : 0 }
     // 測試用（pipe「shelf-info」）：櫃子、每一格的開口和名牌、腳底、收合鈕（螢幕座標）
     func Info() -> String
     {
-        let col: String = Collapsed ? "1" : "0", hasArt: String = ShelfArt.Image(2, false) != nil ? "1" : "0"
+        let col: String = Collapsed ? "1" : "0", hasArt: String = Kit.Image(2, false) != nil ? "1" : "0"
         var sb: String = "shelf " + String(Area.X) + " " + String(Area.Y) + " " + String(Area.Width) + " " + String(Area.Height)
-        sb += " " + col + " " + String(TU) + " " + hasArt + "\n"
-        for i in 0..<4
+        sb += " " + col + " " + String(TU) + " " + hasArt + " " + String(Kit.N) + " " + Kit.Dir + "\n"
+        for i in 0..<Kit.N
         {
             let f = Foot(i)
             let o = opening[i], pl = plate[i]
@@ -9304,7 +9328,7 @@ final class ShelfForm: OverlayForm
     func CellAt(_ screen: Point) -> Int
     {
         if Collapsed { return -1 }
-        for i in 0..<4 { if CellScreen(i).Contains(screen) { return i } }
+        for i in 0..<Kit.N { if CellScreen(i).Contains(screen) { return i } }
         return -1
     }
 
@@ -9342,7 +9366,7 @@ final class ShelfForm: OverlayForm
             else if b == MouseButtons.Right { w.HouseMenu() }   // 蛋＝公仔小屋：開關、設定
             return
         }
-        if b == MouseButtons.Left && TabLocal().Contains(p) { w.ToggleEgg(true); return }
+        if b == MouseButtons.Left && TabHit().Contains(p) { w.ToggleEgg(true); return }
         let c = CellAt(screen)
         if c < 0 { return }
         if b == MouseButtons.Left { w.ShelfClick(c) }
@@ -9394,7 +9418,7 @@ final class ShelfForm: OverlayForm
         defer { g.Dispose() }
         g.Clear(Color.Transparent)
         g.SmoothingMode = SmoothingMode.AntiAlias
-        let art: Bitmap! = ShelfArt.Image(2, Night)   // mac：一律 2x
+        let art: Bitmap! = Kit.Image(2, Night)   // mac：一律 2x
         if art != nil
         {
             let ia = ImageAttributes()
@@ -9406,17 +9430,17 @@ final class ShelfForm: OverlayForm
         }
         else { DrawPlainBox(g) }
         // 每一格
-        for i in 0..<4
+        for i in 0..<Kit.N
         {
             let pet = who[i]
             let c = opening[i]
             if Tubby { DrawHills(g, RectangleF(c), i == 0) }   //@fan
             if Pik { DrawSoil(g, RectangleF(c), i == 0) }   //@fan
-            if Orig && i == 0 { DrawStickyNote(g, back[0]) }
+            if Orig && Kit.Note && i == 0 { DrawStickyNote(g, back[0]) }
             if Night { DrawLamp(g, c) }
             if i == 0 && Pik { DrawFlowerBed(g, c) }   //@fan
-            else if i == 0 { DrawPedestal(g, c) }   //@fan
-            // <public> if i == 0 { DrawPedestal(g, c) }
+            else if i == 0 && Kit.Pedestal { DrawPedestal(g, c) }   //@fan
+            // <public> if i == 0 && Kit.Pedestal { DrawPedestal(g, c) }
             // 名牌
             let name = pet == nil ? (i == 0 && Pik ? "★ 休息花" : (Orig ? "＋ 做公仔" : "？")) : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)   //@fan
             // <public> let name = pet == nil ? (Orig ? "＋ 做公仔" : "？") : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)
@@ -9434,7 +9458,7 @@ final class ShelfForm: OverlayForm
         let dcrown = Double(crown)
         let bp = RoundRect(RectangleF(lw, dcrown * 0.5, Double(Area.Width) - 2 * lw, Double(Area.Height) - dcrown * 0.5 - lw), Double(3 * U))
         g.FillPath(cb, bp); g.DrawPath(ink, bp)
-        for i in 0..<4
+        for i in 0..<Kit.N
         {
             g.FillRectangle(wb, opening[i])
             g.DrawRectangle(ink, opening[i].X, opening[i].Y, opening[i].Width, opening[i].Height)
@@ -9734,8 +9758,8 @@ final class ShelfForm: OverlayForm
 
     func Cabinet(_ who: [Pet?], _ outNow: [Bool], _ t: Double) -> Bitmap
     {
-        var key = "\(Night)|\(Tubby)|\(Pik)|\(Orig)|\(Area.Width)x\(Area.Height)"   //@fan
-        // <public> var key = "\(Night)|\(Orig)|\(Area.Width)x\(Area.Height)"
+        var key = "\(Night)|\(Tubby)|\(Pik)|\(Orig)|\(Kit.Dir)|\(Area.Width)x\(Area.Height)"   //@fan
+        // <public> var key = "\(Night)|\(Orig)|\(Kit.Dir)|\(Area.Width)x\(Area.Height)"
         for i in 0..<4 { key += "|" + (who[i] == nil ? "-" : who[i]!.P.Id) }
         if key != bgKey || bg == nil { bgKey = key; BuildBg(who, outNow) }
         if bmp == nil || bmp.Width != bg.Width || bmp.Height != bg.Height { if bmp != nil { bmp.Dispose() }; bmp = Bitmap(bg.Width, bg.Height) }
@@ -9745,7 +9769,7 @@ final class ShelfForm: OverlayForm
         g.Clear(Color.Transparent)
         g.DrawImageUnscaled(bg, 0, 0)
         g.SmoothingMode = SmoothingMode.AntiAlias
-        for i in 0..<4
+        for i in 0..<Kit.N
         {
             let c = opening[i]
             let pet = who[i]
@@ -9950,9 +9974,8 @@ extension Pet
             case "pkred", "pkyellow", "pkblue":
                 DrawPikShelf(g, fx, bx, by, ps, flip, tt, blink, cell)
                 // </fan>
-            case "duoduo", "meidian", "cici":
-                DrawOrigShelf(g, fx, bx, by, ps, flip, tt, blink, cell)
             default:
+                if P.Orig { DrawOrigShelf(g, fx, bx, by, ps, flip, tt, blink, cell); break }
                 if blink { ReplaceFace(&head, "SLEEPY") }
                 do { let rows = Pal.Stack(head, A("BODY"), A("LEGS_A")); DrawPix(g, rows, bx - (rows[0].utf8.count - 12) / 2 * ps, by + (16 - rows.count) * ps, ps, flip, false, true) }
                 DrawAccessories(g, bx, by, ps, flip, 0, true)
@@ -10294,14 +10317,16 @@ final class World: Form {
     var misWa = Rectangle(0, 0, 0, 0)
     var misPh = 0, misPushDir = 1, misDone = 0
     var misT: Double = 0, misJx0: Double = 0, misJy0: Double = 0, misJx1: Double = 0, misJy1: Double = 0
+    // ---- from 60_woban.swift ----
+    var wbWater: Double = 0
 }
 
 extension World {
     func DefaultPetFor(_ pet: String) -> String {
         for id in Pal.LineupIds(lineup) { if id == pet { return pet } }
         if lineup == Pal.Mine { let mi = Pal.MineIds(); if mi.count > 0 { return mi[0] } }
-        return lineup == Pal.Teletubbies ? "po" : (lineup == Pal.Pikmin ? "pkred" : (lineup == Pal.Original ? "duoduo" : "spidey"))   //@fan
-        // <public> return "duoduo"
+        return lineup == Pal.Teletubbies ? "po" : (lineup == Pal.Pikmin ? "pkred" : (Pal.IsSquad(lineup) ? Pal.SqIds(lineup)[0] : "spidey"))   //@fan
+        // <public> return Pal.IsSquad(lineup) ? Pal.SqIds(lineup)[0] : "duoduo"
     }
 
     // 每一櫃各自記：誰在外面、最近一隻、最愛（經典一櫃沿用原本的檔名）
@@ -10336,6 +10361,7 @@ extension World {
         LoadState()
         var seed = Environment.TickCount
         for p in Pal.Lineup(lineup) { Pets.Add(Pet(self, p, S, seed)); seed += 1 }
+        if shelf != nil { shelf.Place(ShelfWA()) }   // 每櫃各自的櫃子（窩伴小世界＝書包小屋），大小不一樣
         RenderShelf()
         var ids: List<String>
         if Get(pet) != nil { ids = List<String>(); ids.Add(pet) } else { ids = LoadOutIds() }
@@ -10348,8 +10374,8 @@ extension World {
             delay += 0.5
         }
         active = Get(ids.Count > 0 ? ids[ids.Count - 1] : defaultPet) ?? Get(defaultPet)
-        if ids.Count == 0 && active != nil { active.Say(OrigLineup ? "續命小隊，報到！🥤" : (TubbyLineup ? "Eh-oh! 天線寶寶一櫃 ☀" : (CuLineup ? "我的櫃！大家都在 🧸" : "經典一櫃回來囉！")), 2.4) }   //@fan
-        // <public> if ids.Count == 0 && active != nil { active.Say(CuLineup ? "我的櫃！大家都在 🧸" : "續命小隊，報到！🥤", 2.4) }
+        if ids.Count == 0 && active != nil { active.Say(OrigLineup ? Pal.SqName(lineup) + "，報到！" + (WobanLineup ? "🎒" : "🥤") : (TubbyLineup ? "Eh-oh! 天線寶寶一櫃 ☀" : (CuLineup ? "我的櫃！大家都在 🧸" : "經典一櫃回來囉！")), 2.4) }   //@fan
+        // <public> if ids.Count == 0 && active != nil { active.Say(CuLineup ? "我的櫃！大家都在 🧸" : Pal.SqName(lineup) + "，報到！" + (WobanLineup ? "🎒" : "🥤"), 2.4) }
         Broadcast()
         lock(clients) { for c in clients { World.Send(c, "lineup " + lineup + "\n") } }   // 在桌面換櫃（小屋、設定）：VS Code 跟著改設定
         App.Log("lineup " + lineup)
@@ -10987,8 +11013,8 @@ extension World {
         if !sysIdle && now - sessionStart >= restMin * 60 {
             sessionStart = now
             if HoldIfQuiet("rest", "該起來動一動了") { return }
-            if PikLineup { PikWiltAlarm() } else { Lead().Rest(restMin) }   //@fan
-            // <public> Lead().Rest(restMin)
+            if PikLineup { PikWiltAlarm() } else { WbRest(RestPet(), restMin) }   //@fan
+            // <public> WbRest(RestPet(), restMin)
         }
     }
 
@@ -11502,6 +11528,9 @@ extension World {
             let si: String = shelf == nil ? "" : shelf.Info()
             let mk: Bool = maker != nil && !maker.IsDisposed && maker.VVisible
             World.Send(c, si + "maker " + (mk ? "1" : "0") + "\nend\n")
+        case "setup-info":   // 測試用（test/desktop-woban.js）：設定視窗現在有哪些按鈕
+            let sv: Bool = setupForm != nil && !setupForm.IsDisposed && (setupForm.VVisible || setupForm.Visible)
+            World.Send(c, (sv ? setupForm.Info() : "setup none\n") + "end\n")
         case "notify":
             if p.count >= 4 {
                 // 文字可以有空白：取第三個空白之後全部
@@ -12787,8 +12816,8 @@ extension World {
         focusEnd = Now + Double(focusMin * 60)
         AbortScene()
         for p in OutPets() { p.QuietDown() }
-        let l: Pet = Lead()
-        l.Say(ExamNear() ? String(focusMin) + " 分鐘讀書開始 📚 我們安靜陪你" : String(focusMin) + " 分鐘專注開始 🍅 我們安靜陪你", 2.4)
+        let l: Pet = FocusPet()   // 窩伴小世界：翻翻陪你（60_woban.swift）
+        l.Say(ExamNear() ? String(focusMin) + " 分鐘讀書開始 📚 我們安靜陪你" : (l.P.Lines.ContainsKey("focus_start") ? l.L("focus_start", "n", String(focusMin)) : String(focusMin) + " 分鐘專注開始 🍅 我們安靜陪你"), 2.4)
         lastFocusLeft = FocusLeft()
         BroadcastFocus()
     }
@@ -12797,7 +12826,7 @@ extension World {
         if !focusOn { return }
         focusOn = false
         BroadcastFocus()
-        let l: Pet = Lead()
+        let l: Pet = FocusPet()
         if !done { l.Say("好，先不專注了～", 1.6); FlushFocusHeld(1); return }
         let n = BumpTomato()
         var end: String
@@ -12810,10 +12839,11 @@ extension World {
         case "dipsy": end = "專注結束。休息 5 分鐘 ☕ 你很酷"
         case "laalaa": end = "專注結束！休息 5 分鐘 ☕ 啦啦啦～好棒棒"
         // </fan>
-        default: end = l.P.Cu ? l.L("x_focus_end") : "專注結束！休息 5 分鐘 ☕ 你超強的"
+        default: end = l.P.Cu ? l.L("x_focus_end") : (l.P.Lines.ContainsKey("focus_end") ? l.L("focus_end") : "專注結束！休息 5 分鐘 ☕ 你超強的")
         }
         l.Knock((ExamNear() ? end.Replace("專注結束", "讀書結束") : end) + "　今天第 " + String(n) + " 顆 🍅", "high")
         for p in OutPets() { if p !== l { p.React() } }
+        WbFocusDone()   // 翻翻撒花：又完成一段
         breakOn = true; breakEnd = Now + 300
         FlushFocusHeld(5)
     }
@@ -14069,7 +14099,8 @@ extension World {
         ["season", "節日造型"],
         ["fireworks", "煙火"],
         ["chatter", "閒聊泡泡（自己閒晃時講話）"],
-        ["bat_link", "沒電的電量跟工作時間連動"]]
+        ["bat_link", "沒電的電量跟工作時間連動"],
+        ["wb_water", "破破提醒喝水（窩伴小世界）"]]
     func Feat(_ key: String) -> Bool { var on = false; return feats.TryGetValue(key, &on) ? on : !World.MisDefaultOff(key) }   // 搶游標預設關（59_mischief.swift）
 
     func LoadFeatures() {
@@ -14672,7 +14703,7 @@ class PixelMenu: OverlayForm {
 // 一個視窗、三步：你是？→ 選一櫃 → 怎麼擺（整櫃／只要一隻）。全部自己畫（木框＋大按鈕），點哪裡自己算。
 // mac: FormBorderStyle 不是 None → shim 的對話框（有標題列、不搶前景但拿得到鍵盤和滑鼠）
 class SetupForm: Form {
-    final class Btn { var Id = "", Text = "", Sub = ""; var R = Rectangle(0, 0, 0, 0); var Kind = 0; var On = false, Enabled = true }   // Kind：0 大卡片 1 公仔小卡 2 普通按鈕 3 主要按鈕
+    final class Btn { var Id = "", Text = "", Sub = ""; var Note: String? = nil; var R = Rectangle(0, 0, 0, 0); var Kind = 0; var On = false, Enabled = true }   // Kind：0 大卡片 1 公仔小卡 2 普通按鈕 3 主要按鈕
     let w: World
     let first: Bool
     let d: Double
@@ -14704,9 +14735,24 @@ class SetupForm: Form {
         "kwwwwwwwwwwwwwwk",
         "kkkkkkkkkkkkkkkk"]
 
+    // 第一頁的兩櫃主打（原創）：pals/lineups.txt 的前兩櫃；其他櫃（個人版的同人櫃、我的櫃）在下面一排小的
+    let featured: [String]
+    static func Featured(_ swap: Bool) -> [String] {
+        var l: [String] = Pal.SqLineupList()
+        if l.count > 2 { l = Array(l[0..<2]) }
+        if swap && l.count == 2 { l.reverse() }
+        return l
+    }
+    func MoreLineups() -> [String] {
+        var l: [String] = []
+        for id in Pal.LineupsNow() { if !featured.contains(id) { l.append(id) } }
+        return l
+    }
+
     init(_ w: World, _ first: Bool, _ lu: String, _ single: Bool, _ pet: String?) {
         self.w = w; self.first = first
-        self.lu = first ? Pal.Original : Pal.NormLineup(lu)   // 第一次：先選好續命小隊（上面還有「做一隻自己的」）
+        self.lu = first ? "" : Pal.NormLineup(lu)   // 第一次：兩櫃都不先選，讓你自己挑
+        featured = SetupForm.Featured(first && !App.Offscreen && Int.random(in: 0...1) == 1)   // 第一次：左右順序隨機（避免誰在左邊比較多人選）
         mode = single ? "single" : "shelf"
         self.pet = pet ?? ""
         d = Double(w.S) / 4.0
@@ -14724,7 +14770,8 @@ class SetupForm: Form {
         bigF = FontT("Microsoft JhengHei UI", 13, FontStyle.Bold)
         subF = FontT("Microsoft JhengHei UI", 9, FontStyle.Bold)
         btnF = FontT("Microsoft JhengHei UI", 11, FontStyle.Bold)
-        ClientSize = SizeT(Sc(620), Sc(560))
+        if first { App.LogAlways("setup: first-run page, order " + featured.joined(separator: ",")) }
+        ClientSize = SizeT(Sc(620), Sc(MoreLineups().count > 0 ? 720 : 590))
         KeyPreview = true
         KeyDown = { [unowned self] (e: KeyEventArgs) in if e.KeyCode == Keys.Escape { self.Close() } }
         LayoutBtns()
@@ -14766,17 +14813,26 @@ class SetupForm: Form {
         btns.Clear()
         let W0 = ClientSize.Width, H0 = ClientSize.Height, top = Sc(154), bottom = H0 - Sc(72)
         if step == 0 {
-            // 主打：用自己的照片做一隻；下面是現成的幾櫃
-            let hero = Rectangle(Sc(30), top, W0 - Sc(60), Sc(108))
-            Add("make", "把你家的貓狗（或任何照片）變成桌面公仔", "選一張照片 → 去背 → 取名字、選個性，一分鐘做好。照片只存在你的電腦裡。", hero, 0, false)
-            Add("import", "匯入朋友的公仔…", "", Rectangle(W0 - Sc(30) - Sc(190), hero.Bottom + Sc(10), Sc(190), Sc(32)), 2, false)
-            let lus = Pal.LineupsNow()
-            let n = lus.count, gap = Sc(16), ly = hero.Bottom + Sc(52), cw = (W0 - Sc(60) - (n - 1) * gap) / n, ch = bottom - ly - Sc(6)
-            let x0 = (W0 - n * cw - (n - 1) * gap) / 2
-            for i in 0..<n {
-                let id = lus[i]
+            // 主打：兩櫃原創大大的二選一；下面：用自己的照片做一隻、匯入朋友的公仔；（個人版、做過公仔）再一排其他櫃
+            let more = MoreLineups()
+            let gap = Sc(16), fw = (W0 - Sc(60) - gap) / 2, fh = Sc(more.count > 0 ? 236 : 262)
+            for i in 0..<featured.count {
+                let id = featured[i]
                 EnsurePics(id)
-                Add("lu:" + id, Pal.LineupName(id), SetupForm.Members(id), Rectangle(x0 + i * (cw + gap), ly, cw, ch), 0, lu == id)
+                let fb = Add("lu:" + id, Pal.LineupName(id), SetupForm.Members(id), Rectangle(Sc(30) + i * (fw + gap), top, fw, fh), 0, lu == id)
+                fb.Note = Pal.SqBlurb(id)
+            }
+            let make = Rectangle(Sc(30), top + fh + Sc(14), W0 - Sc(60) - Sc(190) - Sc(12), Sc(74))
+            Add("make", "用自己的照片做一隻", "貓狗、任何照片都行，一分鐘做好（照片只存在你的電腦裡）", make, 0, false)
+            Add("import", "匯入朋友的公仔…", "", Rectangle(make.Right + Sc(12), make.Y + (make.Height - Sc(36)) / 2, Sc(190), Sc(36)), 2, false)
+            if more.count > 0 {
+                let n = more.count, ly = make.Bottom + Sc(36), cw = (W0 - Sc(60) - (n - 1) * gap) / n, ch = bottom - ly - Sc(6)
+                let x0 = (W0 - n * cw - (n - 1) * gap) / 2
+                for i in 0..<n {
+                    let id = more[i]
+                    EnsurePics(id)
+                    Add("lu:" + id, Pal.LineupName(id), SetupForm.Members(id), Rectangle(x0 + i * (cw + gap), ly, cw, ch), 0, lu == id)
+                }
             }
         }
         else {
@@ -14811,6 +14867,17 @@ class SetupForm: Form {
     }
 
     func Find(_ id: String) -> Btn? { for b in btns { if b.Id == id { return b } }; return nil }
+
+    // 測試用（pipe「setup-info」）：第幾步、選了哪櫃、主打兩櫃的順序、每個按鈕（id x y 寬 高 選了沒 能不能按）
+    func Info() -> String {
+        var sb: String = "setup step=" + String(step) + " first=" + (first ? "1" : "0") + " lu=" + (lu == "" ? "-" : lu) + " mode=" + mode
+        sb += " w=" + String(ClientSize.Width) + " h=" + String(ClientSize.Height) + " featured=" + featured.joined(separator: ",") + "\n"
+        for b in btns {
+            let a: String = "btn " + b.Id + " " + String(b.R.X) + " " + String(b.R.Y) + " " + String(b.R.Width) + " " + String(b.R.Height)
+            sb += a + " " + (b.On ? "1" : "0") + " " + (b.Enabled ? "1" : "0") + "\n"
+        }
+        return sb
+    }
     func At(_ p: Point) -> Btn? { for b in btns { if b.R.Contains(p) { return b } }; return nil }
 
     // 按按鈕（滑鼠、測試用的 act setup <按鈕> 都走這裡）
@@ -14824,7 +14891,13 @@ class SetupForm: Form {
         else if id == "mode:single" { mode = "single"; if !InLineup(pet) { pet = Pal.LineupIds(lu)[0] } }
         else if id.StartsWith("pet:") { pet = id.Substring(4); mode = "single" }
         else if id == "back" { if step > 0 { step -= 1 } }
-        else if id == "next" { if step < 1 { step += 1 } else { w.ApplySetup(lu, mode == "single", pet, first); Close(); return } }
+        else if id == "next" {
+            if step < 1 { step += 1 }
+            else {
+                if first { App.LogAlways("setup: first-run pick " + lu + " (" + mode + ", order " + featured.joined(separator: ",") + ")") }   // 只記在本機 log，不回報
+                w.ApplySetup(lu, mode == "single", pet, first); Close(); return
+            }
+        }
         else if id == "skip" || id == "close" { Close(); return }
         else { return }
         LayoutBtns()
@@ -14861,12 +14934,12 @@ class SetupForm: Form {
         Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.Right + 4 * U, pr.Y + plh / 2 - 2 * U, U)
         Steps(g, W0, Sc(68))
         let q = step == 0 ? "選你的公仔" : "怎麼擺？"
-        let hint = step == 0 ? "用自己的照片做一隻，或選一櫃現成的（之後在小屋都能換、能再做）" : (mode == "single" ? "選一隻，他會住在右下角的蛋裡" : "公仔櫃放在右下角，點格子就叫他們出來")
+        let hint = step == 0 ? "兩櫃原創公仔選一櫃，或用自己的照片做一隻（之後在小屋、選單都能換櫃）" : (mode == "single" ? "選一隻，他會住在右下角的蛋裡" : "公仔櫃放在右下角，點格子就叫他們出來")
         TextRenderer.DrawText(g, q, qF, Rectangle(0, Sc(100), W0, Sc(30)), Pix.TextC, Pix.Mid)
         TextRenderer.DrawText(g, hint, subF, Rectangle(0, Sc(130), W0, Sc(18)), Pix.C(0x9A6338), Pix.Mid)
         if step == 0 {
-            let im = Find("import")
-            if im != nil { TextRenderer.DrawText(g, "或選一櫃現成的：", btnF, Rectangle(Sc(32), im!.R.Y, Sc(300), im!.R.Height), Pix.TextC, Pix.LeftMid) }
+            let mk = Find("make")
+            if mk != nil && MoreLineups().count > 0 { TextRenderer.DrawText(g, "其他櫃：", btnF, Rectangle(Sc(32), mk!.R.Bottom + Sc(6), Sc(300), Sc(26)), Pix.TextC, Pix.LeftMid) }
         }
         if step == 1 && mode == "single" {
             let first2 = Find("mode:shelf")
@@ -14946,11 +15019,11 @@ class SetupForm: Form {
         let r = b.R
         let pal = Dict<Character, Color>()
         pal["k"] = Pix.Ink; pal["w"] = Pix.C(0xFFFDF7); pal["b"] = Pix.C(0xBFE3F2); pal["p"] = Pix.C(0xF27A90)
-        let c = Math.Max(3, Sc(5)), aw = SetupForm.MAKE[0].count * c, ah = SetupForm.MAKE.count * c, ix = r.X + Sc(22)
+        let c = Math.Max(2, Math.Min(Sc(5), (r.Height - Sc(18)) / SetupForm.MAKE.count)), aw = SetupForm.MAKE[0].count * c, ah = SetupForm.MAKE.count * c, ix = r.X + Sc(16)
         Pix.Art(g, SetupForm.MAKE, pal, ix, r.Y + (r.Height - ah) / 2, c)
-        let tx = ix + aw + Sc(18)
-        TextRenderer.DrawText(g, b.Text, bigF, Rectangle(tx, r.Y + Sc(18), r.Right - tx - Sc(12), Sc(30)), Pix.TextC, Pix.LeftMid)
-        TextRenderer.DrawText(g, b.Sub, subF, Rectangle(tx, r.Y + Sc(52), r.Right - tx - Sc(16), Sc(40)), Pix.C(0x9A6338), [TextFormatFlags.Left, TextFormatFlags.Top, TextFormatFlags.WordBreak, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix])
+        let tx = ix + aw + Sc(14)
+        TextRenderer.DrawText(g, b.Text, bigF, Rectangle(tx, r.Y + Sc(8), r.Right - tx - Sc(12), Sc(26)), Pix.TextC, Pix.LeftMid)
+        TextRenderer.DrawText(g, b.Sub, subF, Rectangle(tx, r.Y + Sc(34), r.Right - tx - Sc(12), r.Height - Sc(38)), Pix.C(0x9A6338), [TextFormatFlags.Left, TextFormatFlags.Top, TextFormatFlags.WordBreak, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix])
     }
 
     func DrawShelfCard(_ g: Graphics, _ b: Btn, _ id: String) {
@@ -14958,7 +15031,7 @@ class SetupForm: Form {
         var pic: Bitmap! = nil
         var textY = r.Y + Sc(12)
         if shelfPics.TryGetValue(id, &pic) {
-            let avail = r.Height - Sc(86)
+            let avail = r.Height - Sc(b.Note != nil ? 104 : 86)
             var ph = Math.Min(pic.Height, avail), pw = pic.Width * ph / pic.Height
             if pw > r.Width - Sc(16) { pw = r.Width - Sc(16); ph = pic.Height * pw / pic.Width }
             let im = g.InterpolationMode
@@ -14969,6 +15042,7 @@ class SetupForm: Form {
         }
         TextRenderer.DrawText(g, b.Text, bigF, Rectangle(r.X, textY, r.Width, Sc(30)), Pix.TextC, Pix.Mid)
         TextRenderer.DrawText(g, b.Sub, subF, Rectangle(r.X + Sc(6), textY + Sc(28), r.Width - Sc(12), Sc(38)), Pix.C(0x9A6338), [TextFormatFlags.HorizontalCenter, TextFormatFlags.Top, TextFormatFlags.WordBreak, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix])   // 四櫃並排時名單換行，不要被切掉
+        if let note = b.Note { TextRenderer.DrawText(g, note, subF, Rectangle(r.X + Sc(10), textY + Sc(48), r.Width - Sc(20), r.Bottom - textY - Sc(52)), Pix.C(0x6A5A48), [TextFormatFlags.HorizontalCenter, TextFormatFlags.Top, TextFormatFlags.WordBreak, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix]) }   // 兩櫃主打：一句介紹
     }
 
     func DrawModeCard(_ g: Graphics, _ b: Btn) {
@@ -16259,6 +16333,7 @@ extension World {
 // 沒電＝一顆很累的電池（身體裡的電量跟你的工作時間連動：一直工作就掉、休息就充，充電時是綠的）、
 // 刺刺＝嘴硬心軟的盆栽仙人掌（被拆穿就開花、生氣就炸毛）。
 // 圖是一張一張的 PNG（extension/desktop/pals/squad/<id>/<1x|2x>/<動作>.png，tools/squad_art 產生），用「自己做的公仔」那套畫法（53_custom.swift 的 CuDraw）。
+// 一櫃＝pals 底下一個資料夾（pals/lineups.txt 列出有哪幾櫃）；窩伴小世界（翻翻・破破・綿綿）的專屬行為在 60_woban.swift。
 // mac：圖一律用 2x（cuOut 是裝置像素，Retina 剛好 1:1）；圖的資料夾：Contents/Resources/pals（.app）或執行檔旁邊的 pals（VS Code 擴充套件）。
 import Foundation
 import AppKit
@@ -16266,19 +16341,56 @@ import AppKit
 // mac：C# 的 [DeskPals.SqAssets]::Root（desk-pals.ps1 設的）；這裡給測試用（DESKPALS_ASSETS 也可以）
 enum SqAssets { static var Root = "" }
 
-// ================= 圖：讀 pals/squad =================
+// 一櫃圖片公仔（pals/lineups.txt 的一行）：lineup id、資料夾、名稱、角色（順序＝格子順序）
+final class SqLineup { var Id = "", Dir = "", Name = ""; var Ids: [String] = []; var Placeholder = false; init() {} }
+
+// ================= 圖：一櫃＝pals 底下一個資料夾（pals/lineups.txt 列出有哪幾櫃）=================
 enum SqArt
 {
     static let Keys: [String] = ["stand", "walk1", "walk2", "jump", "sleep", "happy", "held", "sit", "grab", "push", "cry", "blown", "sig1", "sig2", "surprised", "pout"]
+    // lineups.txt 讀不到（整包圖不見了）時用：跟檔案內容一樣，角色還是建得出來（畫成圓圓的佔位）
+    static let BuiltinLineups: [String] = ["original squad 續命小隊 duoduo meidian cici", "woban woban 窩伴小世界 fanfan bobo mian"]
+    static var lineups: List<SqLineup>! = nil
 
     static func Root() -> String
     {
         var cands: [String] = [SqAssets.Root, ProcessInfo.processInfo.environment["DESKPALS_ASSETS"] ?? "", Path.Combine(Application.StartupPath, "pals")]
         if let rp = Bundle.main.resourcePath { cands.append(Path.Combine(rp, "pals")) }
         cands.append(Path.Combine(Application.StartupPath, "../Resources/pals"))
-        for d in cands { if !d.isEmpty && File.Exists(Path.Combine(Path.Combine(d, "squad"), "squad.txt")) { return d } }
+        for d in cands { if !d.isEmpty && File.Exists(Path.Combine(d, "lineups.txt")) { return d } }
         return ""
     }
+
+    // 讀一個文字檔（pals 底下的相對路徑）；讀不到＝nil
+    static func ReadText(_ rel: String) -> String? {
+        let root = Root()
+        if root.isEmpty { return nil }
+        let f = Path.Combine(root, rel)
+        if !File.Exists(f) { return nil }
+        return try? File.ReadAllText(f)
+    }
+
+    static func Lineups() -> List<SqLineup> {
+        if let l0 = lineups { return l0 }
+        let l = List<SqLineup>()
+        let txt: String? = ReadText("lineups.txt")
+        if txt == nil { App.LogAlways("pals/lineups.txt missing (root=" + Root() + "): built-in list") }
+        let rows: [String] = txt == nil ? BuiltinLineups : txt!.components(separatedBy: "\n")
+        for row in rows {
+            let t = row.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\u{FEFF}", with: "")
+            if t.isEmpty || t.hasPrefix("#") { continue }
+            let a: [String] = t.components(separatedBy: CharacterSet(charactersIn: " \t")).filter { !$0.isEmpty }
+            if a.count < 4 { continue }
+            let q = SqLineup()
+            q.Id = a[0]; q.Dir = a[1]; q.Name = a[2]
+            q.Ids = Array(a[3...])
+            l.Add(q)
+        }
+        lineups = l
+        return l
+    }
+    static func Lineup(_ lu: String) -> SqLineup? { for q in Lineups() { if q.Id == lu { return q } }; return nil }
+    static func LineupOf(_ id: String) -> SqLineup? { for q in Lineups() { if q.Ids.contains(id) { return q } }; return nil }
 
     static func Png(_ rel: String) -> Bitmap!
     {
@@ -16295,28 +16407,32 @@ enum SqArt
     static func Load(_ id: String) -> CuSprite
     {
         if let s = Load(id, Res()) { return s }
-        App.LogAlways("squad art missing: " + id + " (root=" + Root() + ")")
+        App.LogAlways("pal art missing: " + id + " (root=" + Root() + ")")
         return Placeholder()
     }
 
+    // <資料夾>/<資料夾>.txt：id 倍率 畫布寬 畫布高 腳底中心x 腳底y 身體頂y 身體高 身體左x 身體寬；「placeholder 1」＝暫代圖、「shadow 1」＝腳下畫淡淡的落地陰影
     static func Load(_ id: String, _ r: Int) -> CuSprite?
     {
-        let root = Root()
-        if root.isEmpty { return nil }
-        guard let meta = try? File.ReadAllText(Path.Combine(Path.Combine(root, "squad"), "squad.txt")) else { return nil }
+        guard let q = LineupOf(id) else { return nil }
+        guard let meta = ReadText(q.Dir + "/" + q.Dir + ".txt") else { return nil }
         var m: [Int]? = nil
+        var shadow = false
         for line in meta.components(separatedBy: "\n") {
             let a = line.Trim().components(separatedBy: " ")
+            if a[0] == "placeholder" && !q.Placeholder { q.Placeholder = true; App.LogAlways(q.Dir + " art is placeholder") }
+            if a[0] == "shadow" && a.count >= 2 { shadow = a[1] == "1" }
             if a.count < 8 || a[0] != id || a[1] != String(r) { continue }
             var mm = [Int](repeating: 0, count: 8)
             for i in 0..<8 where i + 2 < a.count { mm[i] = Int(a[i + 2]) ?? 0 }
             m = mm
         }
         guard let mv = m else { return nil }
+        let dir: String = q.Dir + "/" + id + "/" + String(r) + "x/"
         let s = CuSprite()
-        s.Pixel = false; s.R = r == 1 ? 4 : 8; s.Rig = false; s.NoHalo = true
+        s.Pixel = false; s.R = r == 1 ? 4 : 8; s.Rig = false; s.NoHalo = true; s.Shadow = shadow
         for k in Keys {
-            guard let b = Png("squad/" + id + "/" + String(r) + "x/" + k + ".png") else { return nil }
+            guard let b = Png(dir + k + ".png") else { return nil }
             s.Frames[k] = b
         }
         s.Stand = s.Frames["stand"]; s.W = s.Stand.Width; s.H = s.Stand.Height
@@ -16324,17 +16440,13 @@ enum SqArt
         if mv[7] > 0 { s.BodyLeft = mv[6]; s.BodyW = mv[7] }
         s.HeadTop = s.BodyTop; s.HeadCx = mv[2]; s.HeadW = s.W / 4; s.NeckCx = mv[2]; s.NeckW = s.W / 4
         s.Neck = s.BodyTop + s.BodyH / 3; s.Hip = s.BodyTop + s.BodyH * 3 / 4; s.Split = mv[2]
-        if id == "duoduo" { s.Main = Color.FromArgb(0xD8, 0xA8, 0x6C) }
-        else if id == "meidian" { s.Main = Color.FromArgb(0xFB, 0xF0, 0xDF) }
-        else { s.Main = Color.FromArgb(0x90, 0xC0, 0x78) }
+        s.Main = Color.FromArgb(0xE0, 0xD8, 0xC8)   // 只有自己做的公仔用到（Pal.MakeCu）
         s.Outline = Color.FromArgb(0x1E, 0x1E, 0x24)
-        if id == "meidian" {
-            let liq = Dict<String, SqLiquid>()
-            for k in Keys {
-                guard let mb = Png("squad/" + id + "/" + String(r) + "x/" + k + ".liquid.png") else { continue }
-                liq[k] = SqLiquid.Make(k, CuImg.Pixels(s.Frames[k]), CuImg.Pixels(mb), s.W, s.H)
-            }
-            s.Liquid = liq
+        // 有液體遮罩（<動作>.liquid.png）的那隻：執行時依電量上色（沒電）；其他隻沒有遮罩，照原圖畫
+        for k in Keys {
+            guard let mb = Png(dir + k + ".liquid.png") else { continue }
+            if s.Liquid == nil { s.Liquid = Dict<String, SqLiquid>() }
+            s.Liquid[k] = SqLiquid.Make(k, CuImg.Pixels(s.Frames[k]), CuImg.Pixels(mb), s.W, s.H)
         }
         return s
     }
@@ -16492,17 +16604,56 @@ enum SqBattery
 extension Pal {
     static let Original = "original"
     static let OriginalName = "續命小隊"
+    static let Woban = "woban"                                  // 窩伴小世界（60_woban.swift）
     static let OriginalIds: [String] = ["duoduo", "meidian", "cici"]
     static let OldOriginalIds: [String] = ["boba", "coffee", "onigiri", "sticky"]   // 舊的像素版（資料轉給新三隻）
 
-    static func OrigPals() -> List<Pal> { return List<Pal>([Duoduo(), Meidian(), Cici()]) }
-
-    // 這一櫃有誰：三隻＋（做過自己的公仔的話）第 4 格放你的公仔（我的櫃排第一的那隻）
-    static func OrigLineupIds() -> [String] {
-        var l: [String] = OriginalIds
-        for id in MineIds() { if CuStore.Get(id) != nil { l.append(id); break } }
+    // pals/lineups.txt 列的每一隻都建一個（角色的個性、台詞在程式裡：續命小隊在這個檔、窩伴小世界在 60_woban.swift）
+    static func OrigPals() -> List<Pal> {
+        let l = List<Pal>()
+        for q in SqArt.Lineups() {
+            for id in q.Ids {
+                guard let p = SqMake(id) else { App.LogAlways("pals/lineups.txt: no character code for " + id); continue }
+                p.Squad = q.Id
+                l.Add(p)
+            }
+        }
         return l
     }
+    static func SqMake(_ id: String) -> Pal? {
+        switch id {
+        case "duoduo": return Duoduo()
+        case "meidian": return Meidian()
+        case "cici": return Cici()
+        default: return WobanMake(id)
+        }
+    }
+
+    // 圖片公仔櫃（pals/lineups.txt）：有哪幾櫃、這櫃的角色、名字
+    static func SqLineupList() -> [String] { var l: [String] = []; for q in SqArt.Lineups() { l.append(q.Id) }; return l }
+    static func IsSquad(_ lineup: String) -> Bool { return SqArt.Lineup(lineup) != nil }
+    static func SqIds(_ lineup: String) -> [String] { guard let q = SqArt.Lineup(lineup) else { return [] }; return q.Ids }
+    static func SqName(_ lineup: String) -> String { guard let q = SqArt.Lineup(lineup) else { return OriginalName }; return q.Name }
+    // 設定視窗第一頁兩櫃主打的一句介紹
+    static func SqBlurb(_ lineup: String) -> String? {
+        if lineup == Original { return "累到不行也要一起撐：躲在紙箱裡、電量跟你一起掉、嘴硬心軟。無厘頭續命梗" }
+        if lineup == Woban { return "住在書包小屋：陪你讀書專注、提醒喝水吃飯、帶你休息放鬆。溫柔療癒系" }
+        return nil
+    }
+
+    // 這一櫃有誰：資料夾列的那幾隻＋（櫃子還有空格、做過自己的公仔的話）空格放你的公仔（我的櫃排第一的那隻）
+    static func SqLineupIds(_ lineup: String) -> [String] {
+        var l: [String] = SqIds(lineup)
+        if l.count < ShelfArt.For(lineup).N { for id in MineIds() { if CuStore.Get(id) != nil { l.append(id); break } } }
+        return l
+    }
+
+    // 通知的開場白（fl_<種類>）：照 World.OrigFlavor 的順序一句一句給
+    static let FlavorKeys: [String] = ["ci-run", "ci-ok", "ci-fail", "cmd-ok", "cmd-fail", "meeting", "meeting-now", "jira", "worklog",
+                                       "remind", "pc-cpu", "pc-ram", "pc-disk", "net-down", "net-up", "vpn", "download"]
+    func Flavors(_ a: String...) { var i = 0; while i < a.count && i < Pal.FlavorKeys.count { Say("fl_" + Pal.FlavorKeys[i], a[i]); i += 1 } }
+    // 搶票倒數五段（tk_0～tk_4；{n}＝名稱、{h}＝還有多久）
+    func Tickets(_ a: String...) { var i = 0; while i < a.count { Say("tk_" + String(i), a[i]); i += 1 } }
 
     // 共用：圖、頭頂超出 16 格的列數、配件不戴
     static func OrigBase(_ id: String, _ name: String) -> Pal
@@ -16590,6 +16741,14 @@ extension Pal {
         p.Say("react", "嚇！", "（咻一下縮進去）", "什、什麼？")
         p.Say("o_hide", "我不在我不在我不在", "（箱子蓋起來了）", "這裡只有一個普通的箱子")
         p.Say("o_run", "被、被發現了——撤！", "箱子長腳了！跑！", "我不是躲躲！我是路過的箱子！")
+        p.Say("o_goal", "進、進了！🏀（探頭）"); p.Say("o_cheer", "好、好球！"); p.Say("o_miss", "沒進…我先躲一下")
+        p.Say("lunch_start", "午餐！便當…是網購送來的嗎 🔔"); p.Say("lunch_nap", "吃飽了…躲進箱子睡一下"); p.Say("lunch_end", "下午了…（打開箱子）")
+        p.Say("lunch_eat", "（躲在箱子裡吃）", "便當好好吃…不要看我吃", "便當的盒子也可以住嗎")
+        p.Say("sc_tea", "點心…可以帶回箱子吃嗎"); p.Say("sc_tea_lead", "三點了…有、有點心嗎 ⚡"); p.Say("sc_tea_end", "續、續命成功…乾杯（小聲）")
+        p.Say("sc_lunch", "我躲在箱子裡吃…"); p.Say("sc_photo", "我、我有拍到嗎…（躲）"); p.Say("sc_roll", "躲躲…到（小聲）📦"); p.Say("sc_bye", "回箱子…不是，回櫃子囉")
+        p.Flavors("CI 開始跑了…（偷看）", "CI 過了！我出來一下下！", "CI 失敗了…我先躲：", "跑完了…：", "沒成功…（縮）：", "等等要開會…好緊張：", "開會了！快去（我躲好了）", "有新的 Jira…：", "今天的日誌好了：",
+                  "⏰ 躲躲提醒你（小聲）：", "電腦好燙…箱子要融化了：", "記憶體快滿了…像塞爆的箱子：", "硬碟快滿了…：", "網路斷了…包裹送不到了", "網路回來了！", "連不到公司網路（VPN 斷了？）", "下載好了…是新的包裹嗎：")
+        p.Tickets("🎫 {n} 還有 {h}開賣…先登入、綁好付款喔", "🎫 {n} 再 30 分鐘…好緊張", "🎫 {n} 剩 10 分鐘！我躲好了", "🎫 準、準備…", "🎫 開搶！！（衝出箱子）")
         p.Shared()
         return p
     }
@@ -16666,6 +16825,14 @@ extension Pal {
         p.Say("o_flop", "……（靈魂在說）我沒電了，你去休息我才能充", "沒電了…（攤平）", "（鬼魂飄出來）充…電…")
         p.Say("o_charge", "插上了……嗯……這就是天堂", "充電中，請勿打擾（請打擾我，我很孤單）", "充電中…你也休息一下")
         p.Say("o_full", "100%！……好，我再睡五分鐘", "充飽了！可以再撐一小時（大概）")
+        p.Say("o_goal", "進了…省電投籃 🏀"); p.Say("o_cheer", "好球…（拍手耗電 1%）"); p.Say("o_miss", "沒電了，沒投好")
+        p.Say("lunch_start", "午餐！吃飯＝人類的充電 🔔"); p.Say("lunch_nap", "吃飽了…邊睡邊充電"); p.Say("lunch_end", "充、充好了…大概")
+        p.Say("lunch_eat", "（嚼）……電量 +5%", "吃飽會想睡，這是定律", "這便當幾瓦？")
+        p.Say("sc_tea", "續命！電量 +10%（心理上）"); p.Say("sc_tea_lead", "三點了…下午的電最難撐 ⚡"); p.Say("sc_tea_end", "續命成功！乾杯～")
+        p.Say("sc_lunch", "吃飯＝充電，開動"); p.Say("sc_photo", "閃光燈好耗電…"); p.Say("sc_roll", "沒電，到…（剩 {p}%）🔋"); p.Say("sc_bye", "關機囉…明天見")
+        p.Flavors("CI 開跑…好耗電：", "CI 過了！電量 +1%", "CI 掛了…我也快掛了：", "跑完了：", "失敗了…先充電再看：", "等等開會…我撐得住（騙人）：", "開會了…待機模式啟動：", "新的 Jira：", "日誌好了，可以關機了：",
+                  "⏰ 沒電提醒你（剩 {p}%）：", "電腦好燙…我也好燙：", "記憶體快滿了：", "硬碟快滿了：", "網路斷了…正好省電", "網路回來了…", "連不到公司網路（VPN 斷了？）", "下載好了：")
+        p.Tickets("🎫 {n} 還有 {h}開賣。先登入、綁好付款", "🎫 {n} 30 分鐘後開賣…我先充電", "🎫 {n} 剩 10 分鐘！電量全開", "🎫 準備。手指放好。", "🎫 開搶！！用掉我最後的電！")
         p.Shared()
         return p
     }
@@ -16740,12 +16907,20 @@ extension Pal {
         p.Say("react", "幹嘛！嚇我一跳", "（刺豎起來）", "什麼啦")
         p.Say("o_bloom", "這、這是花粉過敏！", "花是自己開的，跟你沒關係", "不准看！（花開得更大）")
         p.Say("o_bristle", "別碰我！", "現在很刺，請稍後再摸", "哼！！（刺全部豎起來）")
+        p.Say("o_goal", "進了。…還好啦 🏀"); p.Say("o_cheer", "好球。哼，還行"); p.Say("o_miss", "沒進！是球的問題")
+        p.Say("lunch_start", "午餐時間。…我才不餓 🔔"); p.Say("lunch_nap", "吃飽了…閉目養神"); p.Say("lunch_end", "下午了。…加油（小聲）")
+        p.Say("lunch_eat", "才不是因為好吃才吃很快", "你也要吃飯喔。…我隨便說的", "（偷偷多吃一口）")
+        p.Say("sc_tea", "我不用續命。…一口就好"); p.Say("sc_tea_lead", "三點了。…要不要吃點東西 ⚡"); p.Say("sc_tea_end", "續命完畢。…還行")
+        p.Say("sc_lunch", "我才不餓。…開動"); p.Say("sc_photo", "我才沒有笑。"); p.Say("sc_roll", "刺刺。到。🌵"); p.Say("sc_bye", "下班。…路上小心（小聲）")
+        p.Flavors("CI 開跑了。看什麼：", "CI 過了。…還行啦", "CI 掛了？又不是我寫的：", "跑完了：", "失敗了。哼：", "等等要開會。別遲到：", "開會了！快去！", "新的 Jira。去看：", "日誌好了。不用謝：",
+                  "⏰ 提醒你（才不是關心）：", "電腦好燙！你在幹嘛：", "記憶體快滿了：", "硬碟快滿了，東西要收：", "網路斷了！…不是我拔的", "網路回來了。哼", "連不到公司網路（VPN 斷了？）", "下載好了：")
+        p.Tickets("🎫 {n} 還有 {h}開賣。先登入、綁好付款，別到時候哭", "🎫 {n} 再 30 分鐘。我才沒有很期待", "🎫 {n} 剩 10 分鐘！刺都豎起來了", "🎫 準備！", "🎫 開搶！！快啊！")
         p.Shared()
         return p
     }
 }
 
-// ================= 一隻續命小隊 =================
+// ================= 一隻圖片公仔（續命小隊；窩伴小世界的專屬行為在 60_woban.swift 的 Wb*）=================
 
 extension Pet {
     func OrigDo(_ act: String, _ dur: Double) {
@@ -16756,12 +16931,14 @@ extension Pet {
     func OPose(_ frame: String, _ dur: Double) { if !Grounded() && state != "air" { return }; oPose = frame; OrigDo("pose", dur) }
 
     var BatLink: Bool { return Is("meidian") && SqBattery.Link }
+    var Wb: Bool { return P.Squad == Pal.Woban }   // 窩伴小世界
     var Flat: Bool { return BatLink && SqBattery.Level <= 0.001 && !SqBattery.Charging }
 
     // ---------- 連點三下 ----------
     func OrigCombo() {
         Say(L("tickle"), 1.8)
         if !Grounded() || state == "dizzy" { return }
+        if Wb { WbCombo(); return }
         switch P.Id {
         case "duoduo": OrigDo("hide", 2.4)                                        // 縮回箱子
         case "meidian": OPose("surprised", 1.4); if BatLink { SqBattery.Level = Math.Max(0, SqBattery.Level - 0.01) }
@@ -16772,6 +16949,7 @@ extension Pet {
     // ---------- 招牌動作 ----------
     func OrigSignature() {
         if !Grounded() { return }
+        if Wb { WbSignature(); return }
         switch P.Id {
         case "duoduo": OrigDo("hide", R(2.6, 4)); Say(L("o_hide"), 1.6)
         case "meidian":
@@ -16807,7 +16985,7 @@ extension Pet {
         case "sq_battery": Say(SqBattery.Link ? L("hover") : "電量連動關著：我永遠滿電 🔋", 2.2); return true
         case "sq_bloom": if Grounded() && Is("cici") { OrigDo("bloom", 3); Say(L("o_bloom"), 1.8) }; return true
         case "sq_bristle": if Grounded() && Is("cici") { OrigDo("bristle", 2.2); Say(L("o_bristle"), 1.6) }; return true
-        default: return false
+        default: return Wb && WbAct(a)
         }
     }
 
@@ -16819,6 +16997,7 @@ extension Pet {
         if r < 0.48 { if !JumpToPlatform() { Hop() }; return }
         if r < 0.55 { OrigSignature(); return }
         if r < 0.62 {
+            if Wb { WbChat(); return }
             switch P.Id {
             case "duoduo": OPose("surprised", 1.4); Say(L("talk"), 2.2)
             case "meidian": if SqBattery.Pct < 25 && BatLink { OPose("pout", 2); Say(L("o_low"), 2.2) } else { OPose("sit", 2.6); Say(L("talk"), 2.4) }
@@ -16836,7 +17015,7 @@ extension Pet {
 
     // 走到視窗邊：0 照預設跳、1 回頭、2 換狀態了
     func OrigEdge(_ right: Bool) -> Int {
-        if Is("meidian") || rnd.NextDouble() < 0.45 { dir = -dir; return 1 }   // 沒電：跳太耗電
+        if Is("meidian") || Is("mian") || rnd.NextDouble() < 0.45 { dir = -dir; return 1 }   // 沒電：跳太耗電；綿綿：慢慢來，不跳
         x += Double(dir) * 4 * k; Jump(Double(dir) * 120 * k, -260 * k); Say(L("jump"), 0.8)
         return 2
     }
@@ -16860,18 +17039,19 @@ extension Pet {
     func OrigExit() {
         switch P.Id {
         case "duoduo": if rnd.NextDouble() < 0.6 { afterLand = "opeek" }
-        case "cici": if rnd.NextDouble() < 0.4 { afterLand = "ohappy" }
+        case "cici", "fanfan", "bobo", "mian": if rnd.NextDouble() < 0.4 { afterLand = "ohappy" }
         default: break
         }
     }
 
     func OrigNewWindow(_ win: WinInfo) {
         if Is("duoduo") && rnd.NextDouble() < 0.6 { OrigDo("hide", 2.4); Say(L("newwin"), 1.5); return }   // 新視窗跳出來：先躲
-        if !GoToWindow(win, L("newwin"), Is("cici") ? "ohappy" : "opeek") { Say(L("newwin"), 1.5) }
+        if !GoToWindow(win, L("newwin"), Is("cici") || Is("bobo") || Is("mian") ? "ohappy" : "opeek") { Say(L("newwin"), 1.5) }
     }
 
     // 錯誤變多：躲躲躲起來、沒電嚇到、刺刺炸毛
     func OrigReact(_ why: String) {
+        if Wb { WbReact(why); return }
         switch P.Id {
         case "duoduo": OrigDo("hide", 2.6)
         case "meidian": OPose("surprised", 2.2); Mark(1)
@@ -16882,19 +17062,13 @@ extension Pet {
     // 慶祝（上版、做完）：刺刺被拆穿＝開花
     func OrigCelebrate(_ line: String, _ lead: Bool) {
         if lead { w.Fireworks(w.WA(Cx, y + Double(SH) / 2.0), 10, -1) }
-        if Grounded() { if Is("cici") { OrigDo("bloom", 3.2) } else { OPose("happy", 3.2) } }
+        if Grounded() { if Is("cici") { OrigDo("bloom", 3.2) } else if Is("fanfan") { OrigDo("s2", 3.2) } else { OPose("happy", 3.2) } }   // 翻翻：慶祝小進步
         Say(line, 4)
         Burst(8)
     }
 
-    func OrigLine(_ kind: String) -> String {
-        switch kind {
-        case "goal": return Is("duoduo") ? "進、進了！🏀（探頭）" : (Is("meidian") ? "進了…省電投籃 🏀" : "進了。…還好啦 🏀")
-        case "cheer": return Is("duoduo") ? "好、好球！" : (Is("meidian") ? "好球…（拍手耗電 1%）" : "好球。哼，還行")
-        case "miss": return Is("duoduo") ? "沒進…我先躲一下" : (Is("meidian") ? "沒電了，沒投好" : "沒進！是球的問題")
-        default: return "！"
-        }
-    }
+    // 進球、加油、沒進（o_goal／o_cheer／o_miss，每隻自己的台詞）
+    func OrigLine(_ kind: String) -> String { let l = L("o_" + kind); return l == "" ? "！" : l }
 
     // ---------- 球 ----------
     func OrigBall() {
@@ -17017,9 +17191,12 @@ extension Pet {
             case "bloom": return "sig1"
             case "bristle": return "sig2"
             case "catch": return "grab"
+            case "s1": return "sig1"    // 窩伴小世界的招牌動作（60_woban.swift）
+            case "s2": return "sig2"
             default: return "stand"
             }
         }
+        if Wb, let wf = WbFrame() { return wf }
         if Is("meidian") && SqBattery.Charging && (state == "sleep" || state == "idle") && BatLink { return "sig1" }   // 你去休息了：他在充電
         if Flat && (state == "idle" || state == "sleep") { return "sig2" }
         switch state {
@@ -17041,7 +17218,7 @@ extension Pet {
         case "leap", "fall": return "jump"
         case "hold": return Is("duoduo") ? "sig1" : "grab"                      // 躲躲：游標收進紙箱
         case "run": return Is("duoduo") ? "sig2" : (step ? "walk2" : "walk1")    // 躲躲：箱子長腳逃跑
-        case "drop": return Is("meidian") ? "sleep" : (Is("cici") ? "sig1" : "happy")   // 沒電：抱著游標當枕頭
+        case "drop": return Is("meidian") || Is("mian") ? "sleep" : (Is("cici") ? "sig1" : "happy")   // 沒電、綿綿：抱著游標當枕頭
         case "caught": return Is("cici") ? "sig2" : "surprised"
         case "brace", "push": return "push"
         case "cry": return "cry"
@@ -17073,35 +17250,32 @@ extension Pet {
 
     // 畫一隻：圖＋手上的球、午餐
     func DrawFigureOrig(_ g: Graphics, _ f: Fr, _ sbx: Int, _ sby: Int, _ sps: Int, _ fx: Bool, _ extras: Bool) {
+        if P.Spr.Shadow && extras && Grounded() && !Dragging { DrawSqShadow(g, sbx + 6 * sps, sby + 16 * sps, sps) }
         CuDraw(g, cuPose, Double(sbx + 6 * sps), Double(sby + 16 * sps), sps, fx)
         if !extras { return }
         if w.Holder === self { DrawAt(g, w.BallKind == "baseball" ? Pet.BALLART : Pet.TBALL, 8.0, Double(P.BodyTop - 1) + cuPose.Y, sbx, sby, sps, fx, false, true) }
         DrawLunch(g, f, sbx, sby, sps, fx)
     }
 
+    // 很淡的落地陰影（腳底正中間一個扁橢圓，邊緣再淡一圈）：沒有白邊的圖在淺色桌布上比較站得住
+    func DrawSqShadow(_ g: Graphics, _ fx: Int, _ fy: Int, _ ps: Int) {
+        let s: CuSprite = P.Spr
+        let bw: Double = s.BodyW > 0 ? Double(s.BodyW) : Double(s.W)
+        let w: Double = bw / Double(s.R) * Double(ps) * 0.78
+        let h: Double = Math.Max(2.0, Double(ps) * 1.6)
+        let was = g.SmoothingMode
+        g.SmoothingMode = SmoothingMode.AntiAlias
+        let cx = Double(fx), cy = Double(fy), pd = Double(ps)
+        g.FillEllipse(SolidBrush(Color.FromArgb(Night ? 22 : 30, 20, 24, 40)), cx - w / 2 - pd, cy - h / 2 - pd * 0.2, w + 2 * pd, h + pd * 0.6)
+        g.FillEllipse(SolidBrush(Color.FromArgb(Night ? 26 : 38, 20, 24, 40)), cx - w / 2, cy - h / 2, w, h)
+        g.SmoothingMode = was
+    }
+
     func DrawOrigBehind(_ g: Graphics, _ f: Fr, _ bx: Int, _ by: Int, _ ps: Int, _ fx: Bool) { }
     func DrawOrigFront(_ g: Graphics, _ f: Fr, _ bx: Int, _ by: Int, _ ps: Int, _ fx: Bool) { }
 
     // ---------- 午餐：躲躲吃網購的便當、沒電吃飯＝人類的充電、刺刺吃飯（嘴硬）----------
-    func OrigLunchLine(_ phase: String) -> String {
-        switch P.Id {
-        case "duoduo":
-            if phase == "start" { return "午餐！便當…是網購送來的嗎 🔔" }
-            if phase == "nap" { return "吃飽了…躲進箱子睡一下" }
-            if phase == "end" { return "下午了…（打開箱子）" }
-            return Pick(["（躲在箱子裡吃）", "便當好好吃…不要看我吃", "便當的盒子也可以住嗎"])
-        case "meidian":
-            if phase == "start" { return "午餐！吃飯＝人類的充電 🔔" }
-            if phase == "nap" { return "吃飽了…邊睡邊充電" }
-            if phase == "end" { return "充、充好了…大概" }
-            return Pick(["（嚼）……電量 +5%", "吃飽會想睡，這是定律", "這便當幾瓦？"])
-        default:
-            if phase == "start" { return "午餐時間。…我才不餓 🔔" }
-            if phase == "nap" { return "吃飽了…閉目養神" }
-            if phase == "end" { return "下午了。…加油（小聲）" }
-            return Pick(["才不是因為好吃才吃很快", "你也要吃飯喔。…我隨便說的", "（偷偷多吃一口）"])
-        }
-    }
+    func OrigLunchLine(_ phase: String) -> String { return L("lunch_" + phase) }   // lunch_start／nap／end／eat（每隻自己的台詞）
 
     func DrawOrigLunch(_ g: Graphics, _ f: Fr, _ bx: Int, _ by: Int, _ ps: Int, _ fx: Bool, _ bite: Int) {
         DrawAt(g, Pet.BENTO, 8.5, Double(P.BodyTop + bite) + cuPose.Y, bx, by, ps, fx, false, true)
@@ -17122,6 +17296,7 @@ extension Pet {
         else if Is("meidian") && SqBattery.Link && SqBattery.Pct == 0 { fr = "sig2" }
         else if Is("duoduo") && tt.truncatingRemainder(dividingBy: 11) < 2.5 { fr = "sig1" }
         else if Is("cici") && tt.truncatingRemainder(dividingBy: 13) < 2 { fr = "pout" }
+        else if Wb, let wf = WbShelfFrame(tt) { fr = wf }
         else if tt.truncatingRemainder(dividingBy: 9) < 0.9 { fr = "happy" }
         if w.Lunch && !Night { fr = "sit" }
         p.Frame = fr
@@ -17185,10 +17360,12 @@ extension ShelfForm {
     }
 }
 
-// ================= World：續命小隊的串場、點名、大合照、下班、電量 =================
+// ================= World：圖片公仔櫃的串場、點名、大合照、下班；沒電的電量 =================
 
 extension World {
-    var OrigLineup: Bool { return lineup == Pal.Original }
+    var OrigLineup: Bool { return Pal.IsSquad(lineup) }            // 圖片公仔櫃（續命小隊、窩伴小世界；pals/lineups.txt）
+    var WobanLineup: Bool { return lineup == Pal.Woban }          // 窩伴小世界（60_woban.swift）
+    var LineupNow: String { return lineup }
 
     // 沒指定哪一櫃時：照上次的；全新安裝（什麼都還沒存過）就是續命小隊。舊使用者完全不變。
     // mac: World.init 在 super.init 之前就要用，所以是 static（只用到 static 的 ReadText／WriteText／FilePath）
@@ -17244,7 +17421,7 @@ extension World {
 
     func OrigOrder(_ l: List<Pet>) -> List<Pet> {
         let o = List<Pet>()
-        for id in Pal.OriginalIds { for p in l { if p.P.Id == id { o.Add(p) } } }
+        for id in Pal.SqIds(lineup) { for p in l { if p.P.Id == id { o.Add(p) } } }
         return o
     }
 
@@ -17260,6 +17437,7 @@ extension World {
             return [[bat, "sq_battery"],
                     ["抱抱 ♥", "hug"], ["打招呼", "hi"], ["敲敲螢幕", "knock"], ["插上充電", "sq_charge"],
                     ["攤平給你看", "sq_flop"], ["待機（睡覺）", "sleep"], ["丟球給他 ⚾", "ball"]]
+        case "fanfan", "bobo", "mian": return WbMenuItems(p)
         default:
             return [["抱抱 ♥", "hug"], ["打招呼", "hi"], ["敲敲螢幕", "knock"], ["開花（被拆穿）", "sq_bloom"],
                     ["炸毛", "sq_bristle"], ["跳到別的視窗上", "jump"], ["睡覺", "sleep"], ["丟球給她 ⚾", "ball"]]
@@ -17267,8 +17445,8 @@ extension World {
     }
 
     func AddOrigMenu(_ m: ContextMenuStrip) {
-        let grp = ToolStripMenuItem("續命小隊一起…")
-        let gs: [[String]] = [["下午三點續命 ⚡", "teatime"], ["大合照 📷", "photo"], ["點名", "rollcall"], ["下班說再見", "byebye"]]
+        let grp = ToolStripMenuItem(Pal.SqName(lineup) + "一起…")
+        let gs: [[String]] = [[WobanLineup ? "下午茶，伸展一下 🍵" : "下午三點續命 ⚡", "teatime"], ["大合照 📷", "photo"], ["點名", "rollcall"], ["下班說再見", "byebye"]]
         for gi in gs { let key = gi[1]; grp.DropDownItems.Add(gi[0], nil, { [self] in OrigScene(key) }) }
         m.Items.Add(grp)
     }
@@ -17331,6 +17509,7 @@ extension World {
         if batForceCharge { SqBattery.Charging = true; SqBattery.Level = Math.Min(1.0, SqBattery.Level + dt / 600) }
         else { BatTick(dt) }
         if !OrigLineup { return }
+        if WobanLineup { WbTick(dt) }
         if LunchState != oLunchSeen {
             if LunchState == "eat" && oLunchSeen == "" && OutCount() >= 2 { Later(4) { [self] in if scene == nil && OrigLineup { OrigScene("lunch") } } }
             oLunchSeen = LunchState
@@ -17358,7 +17537,7 @@ extension World {
         case "rollcall":
             let ids = List<String>()
             for p in outs { ids.Add(p.P.Id) }
-            if ids.Count == 0 { ids.AddRange(Pal.OriginalIds) }
+            if ids.Count == 0 { ids.AddRange(Pal.SqIds(lineup)) }
             OrigRollCall(ids)
         case "byebye": OrigNight(false)
         default: break
@@ -17371,7 +17550,7 @@ extension World {
         case "cici-meidian": if let c = c, let m = m { ScenePlugPot(m, c) }
         case "duoduo-meidian": if let d = d, let m = m { SceneBoxBed(d, m) }
         case "cici-duoduo": if let c = c, let d = d { SceneWhereDidHeGo(d, c) }
-        default: break
+        default: WbPairScene(key)
         }
     }
 
@@ -17419,20 +17598,22 @@ extension World {
 
     // ---------- 大家：下午三點續命 ----------
     func SceneTeaTime(_ outs: List<Pet>) {
-        let m: Pet? = Get("meidian")
-        let lead: Pet = (m != nil && outs.Contains(m!)) ? m! : outs[0]
+        var lead0: Pet = outs[0]
+        for p in outs { if p.P.Id == "meidian" || p.P.Id == "mian" { lead0 = p; break } }   // 沒電、綿綿帶頭
+        let lead: Pet = lead0
         Begin(outs.ToArray())
         _ = LineUp(outs, Lead(), 2.7)
-        At(0) { lead.Say("三點了…下午的電最難撐 ⚡", 2.2) }
+        let leadLine = lead.L("sc_tea_lead"), endLine = lead.L("sc_tea_end")
+        At(0) { lead.Say(leadLine, 2.2) }
         At(4.4) { for p in outs { p.FaceTo(lead); p.ScenePose("idle", 30) } }
         var d = 4.8
         for p in outs {
             let pp = p
-            let line = pp.P.Id == "duoduo" ? "點心…可以帶回箱子吃嗎" : (pp.P.Id == "meidian" ? "續命！電量 +10%（心理上）" : "我不用續命。…一口就好")
-            At(d) { pp.OPose(pp.P.Id == "meidian" ? "sig1" : "happy", 1.6); pp.Say(line, 1.8); if pp.P.Id == "meidian" && SqBattery.Link { SqBattery.Level = Math.Min(1.0, SqBattery.Level + 0.02) } }
+            let line = pp.L("sc_tea")
+            At(d) { pp.OPose(pp.P.Id == "meidian" || pp.P.Id == "bobo" || pp.P.Id == "mian" ? "sig1" : "happy", 1.6); pp.Say(line, 1.8); if pp.P.Id == "meidian" && SqBattery.Link { SqBattery.Level = Math.Min(1.0, SqBattery.Level + 0.02) } }
             d += 2.0
         }
-        At(d + 0.4) { for p in outs { p.OPose("happy", 2.4); p.AddHeart(); p.Burst(5) }; lead.Say("續命成功！乾杯～", 2.2) }
+        At(d + 0.4) { for p in outs { p.OPose("happy", 2.4); p.AddHeart(); p.Burst(5) }; lead.Say(endLine, 2.2) }
         At(d + 3.2) { for p in outs { p.ScenePose("wave", 1.6) } }
         At(d + 5.0) { }
     }
@@ -17445,7 +17626,7 @@ extension World {
         var d = 4.6
         for p in outs {
             let pp = p
-            let line = pp.P.Id == "duoduo" ? "我躲在箱子裡吃…" : (pp.P.Id == "meidian" ? "吃飯＝充電，開動" : "我才不餓。…開動")
+            let line = pp.L("sc_lunch")
             At(d) { pp.OPose("sit", 30); pp.Say(line, 2.3) }
             d += 2.5
         }
@@ -17461,7 +17642,8 @@ extension World {
         Begin(outs.ToArray())
         let lr = LineUp(outs, l, 2.7)
         let left = lr[0], right = lr[1], foot = lr[2]
-        At(0) { l.Say("續命小隊，來拍照～排好排好！", 2) }
+        let name = Pal.SqName(lineup)
+        At(0) { l.Say(name + "，來拍照～排好排好！", 2) }
         At(5.2) {
             for p in outs {
                 p.dir = p.Cx < (left + right) / 2 ? 1 : -1
@@ -17473,8 +17655,8 @@ extension World {
         var d = 7.4
         for p in outs {
             let pp = p
-            let line = pp.P.Id == "duoduo" ? "我、我有拍到嗎…（躲）" : (pp.P.Id == "meidian" ? "閃光燈好耗電…" : "我才沒有笑。")
-            At(d) { if pp.P.Id == "duoduo" { pp.OrigDo("hide", 2) } else if pp.P.Id == "cici" { pp.OrigDo("bloom", 2) }; pp.Say(line, 1.4) }
+            let line = pp.L("sc_photo")
+            At(d) { if pp.P.Id == "duoduo" { pp.OrigDo("hide", 2) } else if pp.P.Id == "cici" { pp.OrigDo("bloom", 2) } else if pp.P.Id == "fanfan" { pp.OrigDo("s2", 2) }; pp.Say(line, 1.4) }
             d += 1.4
         }
         At(d + 0.4) { }
@@ -17483,27 +17665,26 @@ extension World {
     // ---------- 早上點名：一隻一隻出來 ----------
     func OrigRollCall(_ ids: List<String>) {
         let order = List<Pet>()
-        for id in Pal.OriginalIds { if ids.Contains(id) && Get(id) != nil { order.Add(Get(id)) } }
+        for id in Pal.SqIds(lineup) { if ids.Contains(id) && Get(id) != nil { order.Add(Get(id)) } }
         var d = 0.4
         for p in order {
             let pp = p
-            var line = "刺刺。到。🌵"
-            if pp.P.Id == "duoduo" { line = "躲躲…到（小聲）📦" }
-            if pp.P.Id == "meidian" { line = "沒電，到…（剩 " + String(SqBattery.Pct) + "%）🔋" }
+            let line = pp.L("sc_roll")
             Later(d) { [self] in if !pp.Out { BringOut(pp, false) } }
             Later(d + 1.0) { pp.Say(line, 1.8) }
             d += 1.6
         }
         Later(d + 1.0) { [self] in
             for p in order { if p.Out && p.Grounded() { p.ScenePose("wave", 1.8) } }
-            if order.Count > 0 { Lead().Say("續命小隊，報到！", 2.6) }
+            if order.Count > 0 { Lead().Say(Pal.SqName(lineup) + "，報到！", 2.6) }
         }
     }
 
     // ---------- 下班：一個一個回櫃子（沒電最後，因為走最慢）----------
     func OrigNight(_ nag: Bool) {
         let outs = OrigOrder(OutPets())
-        if outs.Count == 0 { Lead().Say("續命小隊…下班囉～", 2.4); return }
+        let name = Pal.SqName(lineup)
+        if outs.Count == 0 { Lead().Say(name + "…下班囉～", 2.4); return }
         outs.Sort { a, b in let ka = a.P.Id == "meidian" ? 1 : 0, kb = b.P.Id == "meidian" ? 1 : 0; return ka < kb ? -1 : (ka == kb ? 0 : 1) }
         Begin(outs.ToArray())
         for p in outs { if p.Grounded() { p.ScenePose("idle", 60) } }
@@ -17511,38 +17692,28 @@ extension World {
         if nag { for p in outs { let pp = p; At(d) { pp.Say(pp.L("nag"), 2.6) }; d += 2.8 } }
         for p in outs {
             let pp = p
-            let line = pp.P.Id == "duoduo" ? "回箱子…不是，回櫃子囉" : (pp.P.Id == "cici" ? "下班。…路上小心（小聲）" : "關機囉…明天見")
+            let line = pp.L("sc_bye")
             At(d) { pp.ScenePose("wave", 2); pp.Say(line, 2.2) }
             At(d + 1.6) { pp.InScene = false; if pp.Out { pp.StowToShelf(false) } }
             d += 2.6
         }
-        At(d + 0.6) { let last = outs[outs.Count - 1]; last.Say("續命小隊，下班！明天見～", 2.6) }
+        At(d + 0.6) { let last = outs[outs.Count - 1]; last.Say(name + "，下班！明天見～", 2.6) }
         At(d + 3.4) { }
     }
 
-    // ---------- 通知的開場白、搶票 ----------
+    // ---------- 通知的開場白、搶票：每隻自己的台詞（fl_<種類>、tk_<階段>，Pal.Flavors／Tickets 給的）----------
     static func OrigFlavor(_ id: String, _ kind: String) -> String? {
-        if id != "duoduo" && id != "meidian" && id != "cici" { return nil }
-        let keys: [String] = ["ci-run", "ci-ok", "ci-fail", "cmd-ok", "cmd-fail", "meeting", "meeting-now", "jira", "worklog",
-                              "remind", "pc-cpu", "pc-ram", "pc-disk", "net-down", "net-up", "vpn", "download"]
-        let i = keys.IndexOf(kind)
-        if i < 0 { return nil }
-        let dd: [String] = ["CI 開始跑了…（偷看）", "CI 過了！我出來一下下！", "CI 失敗了…我先躲：", "跑完了…：", "沒成功…（縮）：", "等等要開會…好緊張：", "開會了！快去（我躲好了）", "有新的 Jira…：", "今天的日誌好了：",
-                            "⏰ 躲躲提醒你（小聲）：", "電腦好燙…箱子要融化了：", "記憶體快滿了…像塞爆的箱子：", "硬碟快滿了…：", "網路斷了…包裹送不到了", "網路回來了！", "連不到公司網路（VPN 斷了？）", "下載好了…是新的包裹嗎："]
-        let md: [String] = ["CI 開跑…好耗電：", "CI 過了！電量 +1%", "CI 掛了…我也快掛了：", "跑完了：", "失敗了…先充電再看：", "等等開會…我撐得住（騙人）：", "開會了…待機模式啟動：", "新的 Jira：", "日誌好了，可以關機了：",
-                            "⏰ 沒電提醒你（剩 {p}%）：", "電腦好燙…我也好燙：", "記憶體快滿了：", "硬碟快滿了：", "網路斷了…正好省電", "網路回來了…", "連不到公司網路（VPN 斷了？）", "下載好了："]
-        let cc: [String] = ["CI 開跑了。看什麼：", "CI 過了。…還行啦", "CI 掛了？又不是我寫的：", "跑完了：", "失敗了。哼：", "等等要開會。別遲到：", "開會了！快去！", "新的 Jira。去看：", "日誌好了。不用謝：",
-                            "⏰ 提醒你（才不是關心）：", "電腦好燙！你在幹嘛：", "記憶體快滿了：", "硬碟快滿了，東西要收：", "網路斷了！…不是我拔的", "網路回來了。哼", "連不到公司網路（VPN 斷了？）", "下載好了："]
-        let s = id == "duoduo" ? dd[i] : (id == "meidian" ? md[i] : cc[i])
-        return s.Replace("{p}", String(SqBattery.Pct))
+        guard let p = Pal.Get(id), p.Orig else { return nil }
+        var a: [String] = []
+        if !p.Lines.TryGetValue("fl_" + kind, &a) || a.count == 0 { return nil }
+        return a[0].Replace("{p}", String(SqBattery.Pct))
     }
 
     static func OrigTicket(_ id: String, _ stage: Int, _ n: String, _ h: String) -> String? {
-        if id != "duoduo" && id != "meidian" && id != "cici" { return nil }
-        let dd: [String] = ["🎫 " + n + " 還有 " + h + "開賣…先登入、綁好付款喔", "🎫 " + n + " 再 30 分鐘…好緊張", "🎫 " + n + " 剩 10 分鐘！我躲好了", "🎫 準、準備…", "🎫 開搶！！（衝出箱子）"]
-        let md: [String] = ["🎫 " + n + " 還有 " + h + "開賣。先登入、綁好付款", "🎫 " + n + " 30 分鐘後開賣…我先充電", "🎫 " + n + " 剩 10 分鐘！電量全開", "🎫 準備。手指放好。", "🎫 開搶！！用掉我最後的電！"]
-        let cc: [String] = ["🎫 " + n + " 還有 " + h + "開賣。先登入、綁好付款，別到時候哭", "🎫 " + n + " 再 30 分鐘。我才沒有很期待", "🎫 " + n + " 剩 10 分鐘！刺都豎起來了", "🎫 準備！", "🎫 開搶！！快啊！"]
-        return id == "duoduo" ? dd[stage] : (id == "meidian" ? md[stage] : cc[stage])
+        guard let p = Pal.Get(id), p.Orig else { return nil }
+        var a: [String] = []
+        if !p.Lines.TryGetValue("tk_" + String(Math.Max(0, Math.Min(4, stage))), &a) || a.count == 0 { return nil }
+        return a[0].Replace("{n}", n).Replace("{h}", h)
     }
 }
 
@@ -18839,6 +19010,7 @@ extension World {
         let keys: [String] = ["class", "class-now", "exam-soon", "exam-now", "event", "event-now", "deadline", "deadline-hot"]
         let i = keys.firstIndex(of: kind) ?? -1
         if i < 0 { return nil }
+        if let sp = Pal.Get(id) { var sa: [String] = []; if sp.Lines.TryGetValue("sf_" + kind, &sa) && sa.count > 0 { return sa[0] } }   // 角色自己的（翻翻：sf_<種類>）
         var a: [String]
         switch id {
         // <fan>
@@ -19481,6 +19653,7 @@ final class CuSprite
     // 身體的範圍（BodyTop／BodyH，stand 的不透明範圍；泡泡、櫃子高度用）、沒電的電量液體（Liquid）
     var AnchorX: Double = -1, AnchorY: Double = -1
     var NoHalo = false
+    var Shadow = false          // 腳下畫一層很淡的落地陰影（窩伴小世界：圖沒有白邊，淺色桌布上輪廓偏弱；<資料夾>.txt 的 shadow 1）
     var BodyTop = -1, BodyH = -1, BodyLeft = -1, BodyW = -1
     var Liquid: Dict<String, SqLiquid>! = nil
     var AX: Double { return AnchorX >= 0 ? AnchorX : Double(W) / 2.0 }
@@ -19880,8 +20053,8 @@ enum CuStore
 extension Pal
 {
     static let Mine = "mine"
-    static let Guests: [String] = ["duoduo", "meidian", "cici", "spidey", "po", "stitch", "hangyodon", "tinky", "dipsy", "laalaa"]   // 可以來我的櫃作客的內建公仔   //@fan
-    // <public> static let Guests: [String] = ["duoduo", "meidian", "cici"]
+    static let Guests: [String] = ["duoduo", "meidian", "cici", "fanfan", "bobo", "mian", "spidey", "po", "stitch", "hangyodon", "tinky", "dipsy", "laalaa"]   // 可以來我的櫃作客的內建公仔   //@fan
+    // <public> static let Guests: [String] = ["duoduo", "meidian", "cici", "fanfan", "bobo", "mian"]
 
     static func CuReset() { all = nil }
     static func GetBuiltin(_ id: String) -> Pal! { if all == nil { return nil }; for p in all! { if p.Id == id && !p.Cu { return p } }; return nil }
@@ -26627,6 +26800,32 @@ extension World {
         d["cici.shop"] = ["買那個幹嘛…（偷看）多少錢", "{site}？…錢包在哭，我才沒有"]
         d["cici.typing"] = ["再打那麼大力我要炸毛了", "盆、盆要翻了！"]
         d["cici.typing_back"] = ["哼，我自己走回來的", "土都灑出來了…"]
+        // 窩伴小世界（溫柔版的搗蛋）
+        d["fanfan.grab_start"] = ["游標借我當書籤一下下", "你休息一下，游標我幫你顧著", "（把游標夾進書裡）"]
+        d["fanfan.grab_drop"] = ["游標還你～剛剛有好好休息嗎", "書籤用完了，還你"]
+        d["fanfan.grab_caught"] = ["被找到了～還你還你", "我只是想讓你休息一下"]
+        d["fanfan.clear_start"] = ["下班了，書闔起來，視窗也收一收", "今天的頁數夠了，我們收工"]
+        d["fanfan.clear_done"] = ["桌面整理好了，今天辛苦了", "收好了，明天從這裡繼續"]
+        d["fanfan.shop"] = ["{site}…這個真的需要嗎？先放購物車一晚", "要不要先想一下下再買？"]
+        d["fanfan.typing"] = ["哇，書頁被吹走了～", "打字好用力，手會痛喔"]
+        d["fanfan.typing_back"] = ["書籤撿回來了，我回來了", "（抱著書走回來）輕輕打就好"]
+        d["bobo.grab_start"] = ["游標先放旁邊，喝口水吧", "（把游標收進圍裙口袋）休息一下", "游標我先保管，你去倒杯水"]
+        d["bobo.grab_drop"] = ["喝完水了嗎？游標還你", "放這裡了～"]
+        d["bobo.grab_caught"] = ["被發現了～還你，記得喝水", "好啦還你"]
+        d["bobo.clear_start"] = ["下班了，視窗們也該吃晚餐了", "收工囉，去吃飯吧"]
+        d["bobo.clear_done"] = ["收好了，快去吃飯", "桌面乾乾淨淨，晚餐吃什麼呢"]
+        d["bobo.shop"] = ["{site}…錢包說它有點累", "買之前先喝口水，冷靜一下"]
+        d["bobo.shop_n"] = ["這個月第{n}次了，錢包也要休息喔", "第{n}次了…今天先不要好不好"]
+        d["bobo.typing"] = ["哇，水杯差點翻了～", "輕一點點，手腕會酸"]
+        d["bobo.typing_back"] = ["水沒灑，我回來了", "（端著水杯走回來）慢慢打"]
+        d["mian.grab_start"] = ["游標也想休息一下", "（抱著游標）一起放空一分鐘", "游標借我抱一下下"]
+        d["mian.grab_drop"] = ["游標休息好了，還你", "抱完了～還你"]
+        d["mian.grab_caught"] = ["被找到了～還你", "好，還你，記得深呼吸"]
+        d["mian.clear_start"] = ["下班了，讓視窗也休息吧", "今天就到這裡，慢慢收"]
+        d["mian.clear_done"] = ["都收好了，好好休息", "桌面空空的，心也輕輕的"]
+        d["mian.shop"] = ["{site}…想買的話，明天再看一次好嗎", "深呼吸～真的需要嗎"]
+        d["mian.typing"] = ["哇～被吹得軟軟地飛走了", "打字好用力，肩膀放鬆"]
+        d["mian.typing_back"] = ["飄回來了～輕輕打就好", "（慢慢飄回來）呼…"]
         return d
     }
     static func MisLinesFor(_ id: String, _ key: String) -> [String] {
@@ -27092,6 +27291,454 @@ extension World {
                 g.FillRectangle(c == "k" ? Brushes.Black : Brushes.White, fk.Cur.X + rx * ps, fk.Cur.Y + ry * ps, ps, ps)
             }
         }
+    }
+}
+
+// ===== 60_woban.swift =====
+// 60_woban.swift — port of extension/desktop/DeskPals.Woban.cs
+// Desk Pals：窩伴小世界（翻翻・破破・綿綿）——原創角色（朋友設計），住在一個書包小屋裡，三間一樣大的房間並排。
+// 翻翻＝讀書夥伴（陪你專注、記得你要做的事、慶祝每個小進步；番茄鐘的時候在旁邊翻書陪你）、
+// 破破＝照顧日常（提醒喝水、吃飯；午餐時間端飯來）、
+// 綿綿＝提醒休息、放鬆、調整心情（用太久電腦的休息提醒由她來講；不跳視窗，慢慢來）。
+// 語氣溫柔療癒（跟續命小隊的無厘頭不一樣）。
+// 圖跟續命小隊同一套（DeskPals.Original.cs 的 SqArt：pals/lineups.txt → pals/woban/…；書包小屋＝pals/woban/shelf），
+// 行為走續命小隊的 Orig* 掛點（P.Orig＝true），這個檔只放窩伴小世界不一樣的地方（Wb*）。
+// sig1／sig2（素材線 C:\tmp\dp\woban\PLAN.md §3）：翻翻＝專心看書／完成任務撒花、破破＝抱水壺喝水／打筆電、綿綿＝蓋毯子抱月亮枕／捧熱可可放空。
+// 觸發：翻翻 sig1＝番茄鐘專注中、sig2＝專注做完、錯誤清光、上版；破破 sig1＝喝水提醒、sig2＝專注中陪你一起工作；綿綿 sig1＝休息提醒、sig2＝閒晃時放空。
+// 圖沒有白邊（NoHalo）、腳下有很淡的落地陰影（woban.txt 的 shadow 1）。設計者署名先不放進 app（等使用者確認）。
+import Foundation
+import AppKit
+
+// ================= 角色資料 =================
+extension Pal {
+    static let WobanName = "窩伴小世界"
+
+    static func WobanMake(_ id: String) -> Pal? {
+        switch id {
+        case "fanfan": return Fanfan()
+        case "bobo": return Bobo()
+        case "mian": return Mian()
+        default: return nil
+        }
+    }
+
+    // ---------------- 翻翻：讀書夥伴。陪你專注、記得你要做的事、慶祝每個小進步 ----------------
+    static func Fanfan() -> Pal
+    {
+        let p = OrigBase("fanfan", "翻翻")
+        p.Move = "shuffle"; p.NightStyle = "sleepy"; p.NightBubble = 2
+        p.Accent = C(0x4E86B8); p.Panel = C(0xE4F0FB)
+        p.Speed = 38
+        p.Say("talk", "今天想先完成哪一件事呢？我幫你記著", "一次做一點點就好，我陪你", "剛剛那一段做得很好喔", "累了就停一下，書不會跑掉的", "你專心的樣子，我很喜歡", "把大事切小一點，就不可怕了", "我在旁邊翻書，你慢慢來", "今天也有往前一點點，真好")
+        p.Say("talk_d", "晚上了，今天的進度已經很棒了", "剩下的，明天的你會接住的", "收工吧，我幫你把今天的書籤夾好")
+        p.Say("save", "存好了，進度都在 ✓", "存檔完成～又往前一步", "好，記下來了")
+        p.Say("save_d", "存好了，今天就到這裡吧", "存了。晚安，明天見")
+        p.Say("pats", "嘿嘿，被摸頭了", "謝謝你～我會繼續陪你", "（書頁沙沙地翻了一下）", "這樣很安心", "再一下下就好", "你的手好溫暖")
+        p.Say("pats_d", "晚安摸摸，收到了", "嗯…今天辛苦了")
+        p.Say("pats_hi", "跟你一起讀書是我最喜歡的時間", "你是我書裡最喜歡的那一頁", "謝謝你每天都來")
+        p.Say("hugs", "抱抱～充電完成", "抱一下，再繼續加油", "（把書夾在腋下抱你）")
+        p.Say("hugs_d", "晚安抱抱", "抱完就去休息吧")
+        p.Say("knock", "叩叩，進度還順利嗎？", "嗨～我在這裡陪你", "（輕輕敲兩下）要不要看一下待辦？")
+        p.Say("knock_d", "叩叩，很晚了喔", "今天就到這裡好嗎")
+        p.Say("newwin", "新的視窗？我去看看是什麼資料", "這個看起來要好好讀")
+        p.Say("newwin_d", "這個明天再看也來得及")
+        p.Say("hi", "嗨，我是翻翻。我們一起慢慢前進吧"); p.Say("hi_d", "嗨…晚上了，今天也辛苦了")
+        p.Say("wake", "（揉眼睛）你回來了，我們繼續吧"); p.Say("wake_d", "嗯…還在忙嗎？")
+        p.Say("dizzy", "頁、頁數都轉亂了…"); p.Say("dizzy_d", "暈暈的…該睡了")
+        p.Say("dizzy_ok", "好了，書籤還在"); p.Say("dizzy_ok_d", "好了…休息吧")
+        p.Say("tickle", "哈哈，好癢", "不要翻我的頁啦～", "（笑到書掉了）"); p.Say("tickle_d", "最後一下喔")
+        p.Say("pat10", "今天第 {n} 次了，你也記得摸摸自己"); p.Say("pat10_d", "第 {n} 次了，晚安")
+        p.Say("levelup", "好感度 Lv{n}！拿到「{u}」，夾進我的書裡"); p.Say("levelup_d", "Lv{n}…「{u}」明天再戴")
+        p.Say("missed", "好久不見，我一直幫你留著書籤"); p.Say("missed_d", "好久不見…明天見喔")
+        p.Say("hover", "嗨～", "在想下一步嗎？", "我在這裡")
+        p.Say("seek", "那是什麼？…是重點嗎"); p.Say("seek_lost", "跑掉了，沒關係"); p.Say("seek_got", "抓到了！先畫個重點")
+        p.Say("drag", "哇，飛起來了"); p.Say("throw", "書、書籤要掉了～")
+        p.Say("shelf_in", "我回房間整理筆記"); p.Say("shelf_in_d", "回房間睡了，晚安")
+        p.Say("shelf_out", "（抱著書走出來）我來了"); p.Say("shelf_out_d", "出來了…可是晚上了耶")
+        p.Say("ball_go", "球！我去撿～", "等我一下"); p.Say("ball_go_d", "最後一顆喔")
+        p.Say("ball_catch", "接到了！還你～", "嘿！丟回去"); p.Say("ball_catch_d", "還你，該休息了")
+        p.Say("ball_end", "不玩了嗎？好，回去讀書"); p.Say("ball_end_d", "不玩了，晚安")
+        p.Say("ball_far", "好遠喔…我慢慢走過去")
+        p.Say("back", "我回來了"); p.Say("back_d", "回來了…")
+        p.Say("share_end", "分享完了嗎？我回來囉")
+        p.Say("welcome", "歡迎回來！我們從剛剛那裡繼續"); p.Say("welcome_d", "你回來了，今天還要做嗎？")
+        p.Say("rest", "{n} 分鐘了，休息一下，大腦才記得住"); p.Say("rest_d", "{n} 分鐘了，今天就到這裡吧")
+        p.Say("night_on", "下班時間到了，把書籤夾好吧"); p.Say("night_off", "早安！今天想先完成哪一件？☀")
+        p.Say("sleep", "我先閉上眼睛…"); p.Say("sleep_d", "晚安…（書蓋在臉上）")
+        p.Say("jump", "嘿！"); p.Say("nojump", "附近沒地方跳，那我繼續看書")
+        p.Say("errors", "有 {n} 個錯誤，我們一個一個來"); p.Say("errors_d", "{n} 個錯誤…明天精神好再看")
+        p.Say("errors_ok", "錯誤都清掉了！這是個小進步 ✨"); p.Say("errors_ok_d", "修好了，可以安心休息了")
+        p.Say("typing", "你好專心喔", "寫得好順～", "我在旁邊安靜陪你"); p.Say("typing_d", "這麼晚還在打字，辛苦了")
+        p.Say("done", "{who} 做好了！又完成一件 ✓"); p.Say("done_d", "{who} 做好了，今天收工吧")
+        p.Say("wait", "{who} 在等你回覆喔"); p.Say("wait_d", "{who} 在等你，回完就休息")
+        p.Say("ask", "{who} 有問題想問你"); p.Say("ask_d", "{who} 在問你，回完就下班")
+        p.Say("stuck_tool", "{who} 停在「{tool}」{n} 分鐘了，要按允許嗎？"); p.Say("stuck_tool_d", "{who} 停了 {n} 分鐘，按一下就好")
+        p.Say("stuck", "{who} 好像卡住了，{n} 分鐘沒動"); p.Say("stuck_d", "{who} 卡住 {n} 分鐘了，看一眼就好")
+        p.Say("unstuck", "{who} 又動起來了！"); p.Say("unstuck_d", "{who} 動了～")
+        p.Say("tag", "上版成功！這一步走得很穩 🎉"); p.Say("tag_dev", "測試機好了，再一步就完成"); p.Say("tag_prod", "正式機上線了！為你撒花 🎉"); p.Say("tag_d", "上版成功，今天到這裡就好")
+        p.Say("late23", "很晚了，把書闔上吧 🌙"); p.Say("late12", "午餐時間了，吃完再繼續"); p.Say("late15", "三點了，伸個懶腰再讀")
+        p.Say("late_d", "已經下班囉"); p.Say("late_dd", "這麼晚了，去睡吧")
+        p.Say("g_late", "這麼晚還在？我陪你，但別太久喔"); p.Say("g_morning", "早安！今天也一點一點來 ☀"); p.Say("g_noon", "午安，吃飯了嗎？")
+        p.Say("g_evening", "晚上了，今天辛苦了"); p.Say("g_day", "翻翻來了，今天一起加油"); p.Say("g_d", "下班時間了，你怎麼還在")
+        p.Say("app_browser", "在查資料嗎？記得做筆記"); p.Say("app_code", "寫程式呀，一行一行來"); p.Say("app_excel", "好多格子，慢慢對"); p.Say("app_ppt", "做簡報～重點放大一點")
+        p.Say("app_word", "在寫報告，先寫完再修"); p.Say("app_chat", "有人找你，回完再回來"); p.Say("app_files", "在找檔案嗎？"); p.Say("app_other", "這是什麼？我也想學")
+        p.Say("app_code_d", "還在寫…明天再寫好不好"); p.Say("app_chat_d", "明天再回也可以"); p.Say("app_office_d", "這份明天再做"); p.Say("app_other_d", "下班時間到了")
+        p.Say("s_birthday", "生日快樂！今天的你也很棒 🎂", "生日快樂～這一頁要好好收藏")
+        p.Say("s_cny", "新年快樂！今年也一起前進 🧧"); p.Say("s_xmas", "聖誕快樂！送你一張書籤 🎄"); p.Say("s_newyear", "新年快樂，新的一本開始了 ✨")
+        p.Say("s_halloween", "萬聖節快樂！不給糖就…陪我讀一頁 🎃"); p.Say("s_friday", "星期五了，這週完成好多事")
+        p.Say("morning", "翻翻，到！📖", "到～今天也一起")
+        p.Say("goodnight", "晚安，今天的書籤夾好了 🌙"); p.Say("nag", "下班了，休息吧", "今天已經很努力了，回家吧")
+        p.Say("react", "咦？", "嚇了一跳", "怎麼了？")
+        p.Say("o_sig1", "（翻書）我在這裡陪你", "一頁一頁慢慢來", "嗯…這段寫得真好")
+        p.Say("o_sig2", "完成一件了！撒花 ✨", "小進步也要慶祝！", "你看，又往前一步了")
+        p.Say("focus_start", "{n} 分鐘專注開始，我在旁邊翻書陪你 📖"); p.Say("focus_end", "專注結束！又完成一段 ✨ 休息 5 分鐘 ☕")
+        p.Say("sf_class", "🎒 翻翻提醒你上課："); p.Say("sf_class-now", "🎒 上課囉，我幫你記重點："); p.Say("sf_exam-soon", "📚 要考試了，我們一起複習："); p.Say("sf_exam-now", "📚 考試加油，你準備好了：")
+        p.Say("sf_event", "等一下有事喔："); p.Say("sf_event-now", "時間到囉："); p.Say("sf_deadline", "📝 翻翻幫你記著："); p.Say("sf_deadline-hot", "📝 快到了，先做最小的一步：")
+        p.Say("o_goal", "進了！🏀 小進步！"); p.Say("o_cheer", "好球～"); p.Say("o_miss", "沒進也沒關係，再試一次")
+        p.Say("lunch_start", "午餐時間！吃飽才讀得進去 🔔"); p.Say("lunch_nap", "吃飽了…書蓋在臉上睡一下"); p.Say("lunch_end", "下午了，我們繼續")
+        p.Say("lunch_eat", "（邊吃邊翻一頁）", "好吃～", "吃飯的時候就專心吃飯")
+        p.Say("sc_tea", "我想要一塊餅乾配書"); p.Say("sc_tea_lead", "三點了，大家休息一下 🍵"); p.Say("sc_tea_end", "休息好了，繼續加油～")
+        p.Say("sc_lunch", "開動～吃完再讀"); p.Say("sc_photo", "拍好了嗎？夾進相簿"); p.Say("sc_roll", "翻翻，到！📖"); p.Say("sc_bye", "今天辛苦了，明天見")
+        p.Flavors("CI 開始跑了，我們等等看：", "CI 過了！小進步 ✨", "CI 沒過，沒關係，一起看看：", "跑完了：", "沒成功，我們再試一次：", "等一下要開會，資料準備好了嗎：", "開會了！去吧，我等你", "有新的 Jira，我幫你記著：", "今天的日誌好了：",
+                  "⏰ 翻翻提醒你：", "電腦好燙，讓它也休息一下：", "記憶體快滿了：", "硬碟快滿了，整理一下：", "網路斷了，先看手邊的資料", "網路回來了！", "連不到公司網路（VPN 斷了？）", "下載好了：")
+        p.Tickets("🎫 {n} 還有 {h}開賣，先登入、綁好付款喔", "🎫 {n} 再 30 分鐘，我幫你記著", "🎫 {n} 剩 10 分鐘！準備好了嗎", "🎫 準備…深呼吸", "🎫 開搶！！加油！")
+        p.Shared()
+        return p
+    }
+
+    // ---------------- 破破：照顧日常。提醒你喝水、吃飯，把生活的小事放在心上 ----------------
+    static func Bobo() -> Pal
+    {
+        let p = OrigBase("bobo", "破破")
+        p.Move = "shuffle"; p.NightStyle = "sleepy"; p.NightBubble = 2
+        p.Accent = C(0xD47A5E); p.Panel = C(0xFDE8DF)
+        p.Speed = 34
+        p.Say("talk", "今天有好好喝水嗎？", "肚子餓了要跟我說喔", "我幫你倒了一杯溫水", "坐久了，腳也要動一動", "小事我幫你記著，你專心就好", "吃點東西，心情會比較好", "今天的你，有好好照顧自己嗎", "慢慢來，不用急")
+        p.Say("talk_d", "晚上了，喝杯溫的就去休息吧", "今天也照顧自己了，很棒", "晚餐吃了嗎？")
+        p.Say("save", "存好了，放心", "幫你存起來了～", "好，收好了")
+        p.Say("save_d", "存好了，收工吧", "存了，晚安")
+        p.Say("pats", "嘿嘿，謝謝你", "被摸摸了，好開心", "我也想摸摸你的頭", "（暖暖的）", "你今天辛苦了", "再一下下")
+        p.Say("pats_d", "晚安摸摸", "嗯…該休息了")
+        p.Say("pats_hi", "有你在，每天都很踏實", "照顧你是我最喜歡的事", "你也要記得照顧自己喔")
+        p.Say("hugs", "抱抱～", "給你一個暖暖的抱抱", "（抱緊）今天也辛苦了")
+        p.Say("hugs_d", "晚安抱抱", "抱完就去睡喔")
+        p.Say("knock", "叩叩，喝口水吧", "嗨～吃點東西了嗎？", "（輕輕敲）我來看看你")
+        p.Say("knock_d", "叩叩，很晚了", "今天就到這裡吧")
+        p.Say("newwin", "新的視窗？我去看看", "那是什麼呀")
+        p.Say("newwin_d", "明天再看也可以喔")
+        p.Say("hi", "嗨，我是破破。喝水、吃飯，交給我提醒"); p.Say("hi_d", "嗨…晚上了，吃飯了嗎")
+        p.Say("wake", "你回來了！先喝口水"); p.Say("wake_d", "嗯…還要忙嗎？")
+        p.Say("dizzy", "轉、轉圈圈了…"); p.Say("dizzy_d", "暈暈的…想睡了")
+        p.Say("dizzy_ok", "好了，沒事"); p.Say("dizzy_ok_d", "好了…休息吧")
+        p.Say("tickle", "哈哈哈好癢", "不要啦～", "（笑出來了）"); p.Say("tickle_d", "最後一下喔")
+        p.Say("pat10", "今天第 {n} 次了，記得也喝第 {n} 口水"); p.Say("pat10_d", "第 {n} 次了，晚安")
+        p.Say("levelup", "好感度 Lv{n}！拿到「{u}」，好可愛"); p.Say("levelup_d", "Lv{n}…「{u}」明天再戴")
+        p.Say("missed", "好久不見，有好好吃飯嗎？"); p.Say("missed_d", "好久不見…明天見")
+        p.Say("hover", "嗨～", "要喝水嗎？", "我在這裡")
+        p.Say("seek", "那是什麼？"); p.Say("seek_lost", "跑掉了～"); p.Say("seek_got", "抓到了！要不要順便喝口水")
+        p.Say("drag", "哇～飛起來了"); p.Say("throw", "水、水杯要灑了～")
+        p.Say("shelf_in", "我回房間收拾一下"); p.Say("shelf_in_d", "回房間睡了，晚安")
+        p.Say("shelf_out", "（端著水杯走出來）我來了"); p.Say("shelf_out_d", "出來了…晚上了耶")
+        p.Say("ball_go", "球！我去撿～", "等我～"); p.Say("ball_go_d", "最後一顆喔")
+        p.Say("ball_catch", "接到了！還你～", "嘿咻！丟回去"); p.Say("ball_catch_d", "還你，該休息了")
+        p.Say("ball_end", "不玩了嗎？那喝口水吧"); p.Say("ball_end_d", "不玩了，晚安")
+        p.Say("ball_far", "好遠～我慢慢走過去")
+        p.Say("back", "我回來了"); p.Say("back_d", "回來了…")
+        p.Say("share_end", "分享完了嗎？我回來囉")
+        p.Say("welcome", "歡迎回來！先喝口水"); p.Say("welcome_d", "你回來了，吃過了嗎？")
+        p.Say("rest", "{n} 分鐘了，起來走走，順便裝杯水"); p.Say("rest_d", "{n} 分鐘了，休息吧")
+        p.Say("night_on", "下班時間到了，記得吃晚餐"); p.Say("night_off", "早安！先喝一杯溫水吧 ☀")
+        p.Say("sleep", "我先睡一下…"); p.Say("sleep_d", "晚安…zZ")
+        p.Say("jump", "嘿！"); p.Say("nojump", "附近沒地方跳，沒關係")
+        p.Say("errors", "有 {n} 個錯誤，先喝口水再慢慢看"); p.Say("errors_d", "{n} 個錯誤…明天再看吧")
+        p.Say("errors_ok", "錯誤都不見了！來，喝口水慶祝"); p.Say("errors_ok_d", "修好了，可以休息了")
+        p.Say("typing", "打好快，手腕要休息喔", "好認真～", "我幫你倒杯水"); p.Say("typing_d", "這麼晚還在打字，辛苦了")
+        p.Say("done", "{who} 做好了！吃點東西犒賞自己"); p.Say("done_d", "{who} 做好了，收工吧")
+        p.Say("wait", "{who} 在等你喔"); p.Say("wait_d", "{who} 在等你，回完就休息")
+        p.Say("ask", "{who} 有問題想問你"); p.Say("ask_d", "{who} 在問你，回完就下班")
+        p.Say("stuck_tool", "{who} 停在「{tool}」{n} 分鐘了，要按允許嗎？"); p.Say("stuck_tool_d", "{who} 停了 {n} 分鐘，按一下就好")
+        p.Say("stuck", "{who} 好像卡住了，{n} 分鐘沒動"); p.Say("stuck_d", "{who} 卡住 {n} 分鐘了，看一眼就好")
+        p.Say("unstuck", "{who} 又動了！"); p.Say("unstuck_d", "{who} 動了～")
+        p.Say("tag", "上版成功！晚餐加個菜 🎉"); p.Say("tag_dev", "測試機好了，先喝口水"); p.Say("tag_prod", "正式機上線了！辛苦了 🎉"); p.Say("tag_d", "上版成功，快去休息")
+        p.Say("late23", "很晚了，喝杯溫水就去睡 🌙"); p.Say("late12", "午餐時間到了！先去吃飯"); p.Say("late15", "三點了，喝水、吃點點心")
+        p.Say("late_d", "已經下班囉"); p.Say("late_dd", "這麼晚了，去睡吧")
+        p.Say("g_late", "這麼晚還在？吃宵夜了嗎"); p.Say("g_morning", "早安！早餐吃了嗎 ☀"); p.Say("g_noon", "午安，吃飯了嗎？")
+        p.Say("g_evening", "晚上了，晚餐吃什麼？"); p.Say("g_day", "破破來了，今天也照顧好自己"); p.Say("g_d", "下班時間了，你怎麼還在")
+        p.Say("app_browser", "在逛什麼？看到好吃的嗎"); p.Say("app_code", "寫程式呀，手邊放杯水"); p.Say("app_excel", "好多格子，眼睛要休息"); p.Say("app_ppt", "做簡報～辛苦了")
+        p.Say("app_word", "在寫報告，慢慢來"); p.Say("app_chat", "有人找你，回完喝口水"); p.Say("app_files", "在找檔案嗎？"); p.Say("app_other", "這是什麼呀？")
+        p.Say("app_code_d", "還在寫…明天再寫好不好"); p.Say("app_chat_d", "明天再回也可以"); p.Say("app_office_d", "這份明天再做"); p.Say("app_other_d", "下班時間到了")
+        p.Say("s_birthday", "生日快樂！今天要吃好吃的 🎂", "生日快樂～我幫你點了蠟燭")
+        p.Say("s_cny", "新年快樂！年夜飯要吃飽 🧧"); p.Say("s_xmas", "聖誕快樂！熱可可來了 🎄"); p.Say("s_newyear", "新年快樂，今年也要好好吃飯 ✨")
+        p.Say("s_halloween", "萬聖節快樂！糖果分你一顆 🎃"); p.Say("s_friday", "星期五了，週末好好吃一頓")
+        p.Say("morning", "破破，到！🥛", "到～早餐吃了嗎")
+        p.Say("goodnight", "晚安，蓋好被子喔 🌙"); p.Say("nag", "下班了，回家吃飯吧", "今天到這裡，休息囉")
+        p.Say("react", "咦？", "嚇了一跳", "怎麼了？")
+        p.Say("o_sig1", "來，喝口水 💧", "水杯給你，慢慢喝", "喝水時間到囉 💧")
+        p.Say("o_sig2", "我也來工作一下～（打筆電）💻", "一起專心，做完一起吃點心", "（噠噠噠）破破也在努力喔")
+        p.Say("o_water", "坐好久了，喝口水吧 💧", "破破送水來了～喝一點點也好 💧", "嘴巴乾乾的嗎？喝口水 💧")
+        p.Say("o_goal", "進了！🏀 好厲害"); p.Say("o_cheer", "好球～"); p.Say("o_miss", "沒進～沒關係")
+        p.Say("lunch_start", "午餐時間！破破端飯來了 🍚🔔"); p.Say("lunch_nap", "吃飽了…睡一下下"); p.Say("lunch_end", "下午了，喝口水再開始")
+        p.Say("lunch_eat", "慢慢吃，多嚼幾下", "（端來一碗湯）", "吃飽飽～")
+        p.Say("sc_tea", "我泡了熱茶，小心燙 🍵"); p.Say("sc_tea_lead", "三點了，喝茶吃點心 🍵"); p.Say("sc_tea_end", "吃飽喝足，繼續加油～")
+        p.Say("sc_lunch", "開動！要吃飽喔"); p.Say("sc_photo", "拍好了嗎？大家都很可愛"); p.Say("sc_roll", "破破，到！🥛"); p.Say("sc_bye", "回家記得吃晚餐，明天見")
+        p.Flavors("CI 開始跑了，先喝口水：", "CI 過了！吃塊點心慶祝", "CI 沒過，別急，喝口水再看：", "跑完了：", "沒成功，休息一下再試：", "等一下要開會，先喝口水：", "開會了！水杯帶著去", "有新的 Jira：", "今天的日誌好了：",
+                  "⏰ 破破提醒你：", "電腦好燙，你也要補充水分：", "記憶體快滿了：", "硬碟快滿了：", "網路斷了，剛好喝口水", "網路回來了！", "連不到公司網路（VPN 斷了？）", "下載好了：")
+        p.Tickets("🎫 {n} 還有 {h}開賣，先登入、綁好付款喔", "🎫 {n} 再 30 分鐘，先喝口水", "🎫 {n} 剩 10 分鐘！放輕鬆", "🎫 準備…", "🎫 開搶！！加油！")
+        p.Shared()
+        return p
+    }
+
+    // ---------------- 綿綿：提醒休息、放鬆、調整心情。軟軟的，慢慢來 ----------------
+    static func Mian() -> Pal
+    {
+        let p = OrigBase("mian", "綿綿")
+        p.Move = "shuffle"; p.NightStyle = "sleepy"; p.NightBubble = 2
+        p.Accent = C(0x8E78C0); p.Panel = C(0xEEE6F8)
+        p.Speed = 28
+        p.Say("talk", "深呼吸～吸氣…吐氣…", "肩膀放鬆，下巴放鬆", "不用每件事都做到完美", "累了就休息，不是偷懶喔", "眼睛看看遠方，讓它休息一下", "你已經做得很好了", "心情不好的時候，可以跟我說", "慢慢來，我們不趕")
+        p.Say("talk_d", "晚上了，讓今天輕輕地結束吧", "把煩惱放在這裡，明天再拿", "早點睡，夢裡會軟軟的")
+        p.Say("save", "存好了，可以放心", "存起來了～鬆一口氣", "好，安心了")
+        p.Say("save_d", "存好了，該休息了", "存了，晚安")
+        p.Say("pats", "（軟軟地陷下去）", "好舒服～", "被摸了，心情變好了", "再摸一下下", "你也放鬆一點喔", "嗯～")
+        p.Say("pats_d", "晚安摸摸", "嗯…好想睡")
+        p.Say("pats_hi", "跟你在一起，好放鬆", "你是我最安心的地方", "謝謝你陪我發呆")
+        p.Say("hugs", "抱抱～軟軟的", "給你一個棉花糖抱抱", "（整個抱住）放鬆～")
+        p.Say("hugs_d", "晚安抱抱", "抱完就去睡")
+        p.Say("knock", "叩叩，休息一下好嗎", "嗨～深呼吸一下", "（輕輕地）我在這裡")
+        p.Say("knock_d", "叩叩，很晚了", "去睡吧，我也要睡了")
+        p.Say("newwin", "新的視窗…慢慢看就好", "那是什麼呀")
+        p.Say("newwin_d", "明天再看吧")
+        p.Say("hi", "嗨，我是綿綿。累了就來找我"); p.Say("hi_d", "嗨…晚上了，放鬆一下")
+        p.Say("wake", "嗯…你回來了，休息得好嗎"); p.Say("wake_d", "嗯…還不睡嗎")
+        p.Say("dizzy", "轉、轉圈圈…軟掉了…"); p.Say("dizzy_d", "暈…想睡了")
+        p.Say("dizzy_ok", "好了，深呼吸"); p.Say("dizzy_ok_d", "好了…睡吧")
+        p.Say("tickle", "呼呼，好癢", "不要啦～會軟掉", "（笑到滾一圈）"); p.Say("tickle_d", "最後一下喔")
+        p.Say("pat10", "今天第 {n} 次了，你也放鬆了嗎"); p.Say("pat10_d", "第 {n} 次了，晚安")
+        p.Say("levelup", "好感度 Lv{n}！拿到「{u}」，軟軟的好喜歡"); p.Say("levelup_d", "Lv{n}…「{u}」明天再戴")
+        p.Say("missed", "好久不見，最近有好好休息嗎"); p.Say("missed_d", "好久不見…明天見")
+        p.Say("hover", "嗨～", "要休息一下嗎？", "深呼吸～")
+        p.Say("seek", "那是什麼…"); p.Say("seek_lost", "跑掉了，沒關係"); p.Say("seek_got", "抓到了～抱著好軟")
+        p.Say("drag", "哇～飄起來了"); p.Say("throw", "軟、軟著陸～")
+        p.Say("shelf_in", "我回房間放空一下"); p.Say("shelf_in_d", "回房間睡了，晚安")
+        p.Say("shelf_out", "（慢慢飄出來）我來了"); p.Say("shelf_out_d", "出來了…晚上了耶")
+        p.Say("ball_go", "球…我慢慢去", "等我一下"); p.Say("ball_go_d", "最後一顆喔")
+        p.Say("ball_catch", "接到了～還你", "嘿～丟回去"); p.Say("ball_catch_d", "還你，該睡了")
+        p.Say("ball_end", "不玩了嗎？那我們發呆一下"); p.Say("ball_end_d", "不玩了，晚安")
+        p.Say("ball_far", "好遠…慢慢走")
+        p.Say("back", "我回來了"); p.Say("back_d", "回來了…")
+        p.Say("share_end", "分享完了嗎？我回來囉")
+        p.Say("welcome", "歡迎回來，休息得好嗎？"); p.Say("welcome_d", "你回來了，今天還要忙嗎？")
+        p.Say("rest", "{n} 分鐘了，休息一下吧～我蓋好毯子陪你", "{n} 分鐘了，眼睛閉起來休息一下下"); p.Say("rest_d", "{n} 分鐘了，今天就到這裡吧")
+        p.Say("night_on", "下班時間到了，讓自己慢下來"); p.Say("night_off", "早安～今天也慢慢來 ☀")
+        p.Say("sleep", "我先睡一下…"); p.Say("sleep_d", "晚安…zZ")
+        p.Say("jump", "嘿～"); p.Say("nojump", "不跳了，慢慢走就好")
+        p.Say("errors", "有 {n} 個錯誤，先深呼吸，不急"); p.Say("errors_d", "{n} 個錯誤…明天再看吧")
+        p.Say("errors_ok", "錯誤都不見了，鬆一口氣～"); p.Say("errors_ok_d", "修好了，好好休息")
+        p.Say("typing", "打好快…手指也要休息喔", "好認真～", "放鬆肩膀再打"); p.Say("typing_d", "這麼晚還在打字，辛苦了")
+        p.Say("done", "{who} 做好了，喘口氣吧"); p.Say("done_d", "{who} 做好了，收工吧")
+        p.Say("wait", "{who} 在等你喔"); p.Say("wait_d", "{who} 在等你，回完就休息")
+        p.Say("ask", "{who} 有問題想問你"); p.Say("ask_d", "{who} 在問你，回完就下班")
+        p.Say("stuck_tool", "{who} 停在「{tool}」{n} 分鐘了，要按允許嗎？"); p.Say("stuck_tool_d", "{who} 停了 {n} 分鐘，按一下就好")
+        p.Say("stuck", "{who} 好像卡住了，{n} 分鐘沒動"); p.Say("stuck_d", "{who} 卡住 {n} 分鐘了，看一眼就好")
+        p.Say("unstuck", "{who} 又動了～"); p.Say("unstuck_d", "{who} 動了～")
+        p.Say("tag", "上版成功！可以放鬆一下了 🎉"); p.Say("tag_dev", "測試機好了，深呼吸"); p.Say("tag_prod", "正式機上線了！辛苦了，抱抱 🎉"); p.Say("tag_d", "上版成功，快去休息")
+        p.Say("late23", "很晚了，關燈睡覺吧 🌙"); p.Say("late12", "午餐時間到了，吃完瞇一下"); p.Say("late15", "三點了，起來伸個懶腰")
+        p.Say("late_d", "已經下班囉"); p.Say("late_dd", "這麼晚了，去睡吧")
+        p.Say("g_late", "這麼晚還在？別太累了"); p.Say("g_morning", "早安～慢慢醒來就好 ☀"); p.Say("g_noon", "午安，吃完可以瞇一下")
+        p.Say("g_evening", "晚上了，今天辛苦了"); p.Say("g_day", "綿綿來了，今天也放輕鬆"); p.Say("g_d", "下班時間了，你怎麼還在")
+        p.Say("app_browser", "在逛什麼？看點可愛的東西也好"); p.Say("app_code", "寫程式呀，記得放鬆肩膀"); p.Say("app_excel", "好多格子，眼睛休息一下"); p.Say("app_ppt", "做簡報～不要太緊張")
+        p.Say("app_word", "在寫報告，慢慢寫"); p.Say("app_chat", "有人找你，慢慢回就好"); p.Say("app_files", "在找檔案嗎？"); p.Say("app_other", "這是什麼呀？")
+        p.Say("app_code_d", "還在寫…明天再寫好不好"); p.Say("app_chat_d", "明天再回也可以"); p.Say("app_office_d", "這份明天再做"); p.Say("app_other_d", "下班時間到了")
+        p.Say("s_birthday", "生日快樂！今天什麼都不用趕 🎂", "生日快樂～送你一個軟軟的抱抱")
+        p.Say("s_cny", "新年快樂！好好放個假 🧧"); p.Say("s_xmas", "聖誕快樂！窩在毯子裡最幸福 🎄"); p.Say("s_newyear", "新年快樂，今年也對自己溫柔一點 ✨")
+        p.Say("s_halloween", "萬聖節快樂！我扮成一朵雲 🎃"); p.Say("s_friday", "星期五了，週末好好放鬆")
+        p.Say("morning", "綿綿，到～☁", "到～慢慢醒來")
+        p.Say("goodnight", "晚安，做個軟軟的夢 🌙"); p.Say("nag", "下班了，讓自己休息吧", "今天到這裡，慢慢回家")
+        p.Say("react", "咦？", "嚇了一跳", "怎麼了？")
+        p.Say("o_sig1", "蓋好毯子，抱著月亮枕…休息一下下 🌙", "閉上眼睛，深呼吸…吸…吐…", "（窩在毯子裡）好舒服～")
+        p.Say("o_sig2", "捧著熱可可，放空一下下 ☕", "暖暖的…什麼都不想", "（呼～）熱可可好香")
+        p.Say("o_goal", "進了～🏀"); p.Say("o_cheer", "好球～"); p.Say("o_miss", "沒進～沒關係")
+        p.Say("lunch_start", "午餐時間～吃完可以瞇一下 🔔"); p.Say("lunch_nap", "吃飽了…一起午睡"); p.Say("lunch_end", "下午了，慢慢醒來")
+        p.Say("lunch_eat", "慢慢吃～", "（小口小口地吃）", "好好吃，好幸福")
+        p.Say("sc_tea", "茶好香，先聞一下 🍵"); p.Say("sc_tea_lead", "三點了，大家一起伸懶腰喝茶 🍵"); p.Say("sc_tea_end", "休息好了，慢慢回去吧～")
+        p.Say("sc_lunch", "開動～慢慢吃"); p.Say("sc_photo", "拍好了嗎？笑得好放鬆"); p.Say("sc_roll", "綿綿，到～☁"); p.Say("sc_bye", "今天辛苦了，好好休息")
+        p.Flavors("CI 開始跑了，先放鬆等它：", "CI 過了！鬆一口氣～", "CI 沒過，深呼吸，再看看：", "跑完了：", "沒成功，休息一下再試：", "等一下要開會，先深呼吸：", "開會了！放輕鬆去", "有新的 Jira：", "今天的日誌好了：",
+                  "⏰ 綿綿提醒你：", "電腦好燙，讓它也休息一下：", "記憶體快滿了：", "硬碟快滿了：", "網路斷了，剛好休息一下", "網路回來了～", "連不到公司網路（VPN 斷了？）", "下載好了：")
+        p.Tickets("🎫 {n} 還有 {h}開賣，先登入、綁好付款喔", "🎫 {n} 再 30 分鐘，先放輕鬆", "🎫 {n} 剩 10 分鐘！深呼吸", "🎫 準備…吸氣…", "🎫 開搶！！加油～")
+        p.Shared()
+        return p
+    }
+}
+
+// ================= 一隻窩伴小世界：跟續命小隊不一樣的地方（51_original.swift 的 Orig* 會先問這裡）=================
+extension Pet {
+    // 連點三下
+    func WbCombo() {
+        if Is("fanfan") { OPose("surprised", 1.4) }
+        else { OPose("happy", 1.6) }
+    }
+
+    // 招牌動作：sig1（看書／喝水／蓋毯子）、sig2（撒花／打筆電／熱可可）
+    func WbSignature() {
+        let one = rnd.NextDouble() < 0.6
+        OrigDo(one ? "s1" : "s2", R(2.6, 4))
+        Say(L(one ? "o_sig1" : "o_sig2"), 2)
+    }
+
+    // 閒晃時講一句：翻翻坐著講、破破開心地講、綿綿捧熱可可放空（sig2）
+    func WbChat() {
+        if Is("mian") { OrigDo("s2", 2.8) }
+        else { OPose(Is("bobo") ? "happy" : "sit", 2.4) }
+        Say(L("talk"), 2.4)
+    }
+
+    // 錯誤變多：翻翻皺眉（我們一個一個來），破破、綿綿嚇一跳
+    func WbReact(_ why: String) {
+        if Is("fanfan") { OPose("pout", 2.2) }
+        else { OPose("surprised", 2.0) }
+    }
+
+    // 選單、測試用的動作
+    func WbAct(_ a: String) -> Bool {
+        switch a {
+        case "wb_sig1": if Grounded() { OrigDo("s1", 3.2); Say(L("o_sig1"), 2) }; return true
+        case "wb_sig2": if Grounded() { OrigDo("s2", 3.2); Say(L("o_sig2"), 2) }; return true
+        case "wb_water": if Is("bobo") { WbWater() }; return true
+        case "wb_focus": w.WbFocus(); return true
+        default: return false
+        }
+    }
+
+    // 破破：喝水提醒（World.WbTick 定時叫）
+    func WbWater() {
+        WakeIfSleep()
+        if Grounded() { OrigDo("s1", 3.4) }
+        Say(L("o_water"), 4)
+        App.Log("woban: water reminder")
+    }
+
+    // 狀態 → 哪一張圖（nil＝照續命小隊那套）：番茄鐘專注中，翻翻在旁邊專心看書、破破打筆電陪你一起工作
+    func WbFrame() -> String? {
+        if w.focusOn && (state == "idle" || state == "sleep") && (Is("fanfan") || Is("bobo")) { return Is("fanfan") ? "sig1" : "sig2" }
+        return nil
+    }
+
+    // 綿綿：用太久電腦的休息提醒（蓋毯子抱月亮枕）
+    func WbRestNow(_ restMin: Double) {
+        WakeIfSleep()
+        if Grounded() { OrigDo("s1", 6) }
+        Say(L("rest", "n", restMin.ToString()), 8)
+    }
+
+    // 櫃子裡：翻翻偶爾翻書、破破偶爾喝水、綿綿偶爾瞇一下
+    func WbShelfFrame(_ tt: Double) -> String? {
+        if Is("fanfan") && tt.truncatingRemainder(dividingBy: 11) < 2.5 { return "sig1" }
+        if Is("bobo") && tt.truncatingRemainder(dividingBy: 13) < 2 { return "sig1" }
+        if Is("mian") && tt.truncatingRemainder(dividingBy: 10) < 3 { return "sleep" }
+        return nil
+    }
+}
+
+// ================= World：喝水提醒、休息由綿綿講、專注由翻翻陪；選單；兩兩串場 =================
+
+extension World {
+    static let WbWaterMin: Double = 45   // 破破：連續用電腦幾分鐘提醒喝一次水（離開電腦就重算）
+
+    func WbTick(_ dt: Double) {
+        if sysIdle { wbWater = 0; return }
+        wbWater += dt
+        if wbWater < World.WbWaterMin * 60 { return }
+        if scene != nil || Hidden || focusOn || quietOn || !Feat("wb_water") { return }   // 忙的時候先不吵：等一下再講
+        guard let b = Get("bobo"), b.Out, b.Grounded(), !b.InScene else { return }
+        wbWater = 0
+        b.WbWater()
+    }
+
+    // 用太久電腦的休息提醒：窩伴小世界由綿綿講（她在外面的話；蓋毯子抱月亮枕），其他櫃照舊
+    func RestPet() -> Pet {
+        if WobanLineup, let m = Get("mian"), m.Out { return m }
+        return Lead()
+    }
+    func WbRest(_ p: Pet, _ restMin: Double) {
+        if WobanLineup && p.P.Id == "mian" { p.WbRestNow(restMin) }
+        else { p.Rest(restMin) }
+    }
+
+    // 番茄鐘：窩伴小世界由翻翻開場、收尾（她在外面的話）；做完一段，翻翻撒花慶祝小進步
+    func FocusPet() -> Pet {
+        if WobanLineup, let f = Get("fanfan"), f.Out { return f }
+        return Lead()
+    }
+    func WbFocus() { if !focusOn { StartFocus(focusMin) } }
+    func WbFocusDone() {
+        if !WobanLineup { return }
+        guard let f = Get("fanfan"), f.Out, f.Grounded() else { return }
+        f.OrigDo("s2", 3.2)
+        f.Burst(6)
+    }
+
+    func WbMenuItems(_ p: Pet) -> [[String]] {
+        switch p.P.Id {
+        case "fanfan":
+            return [["抱抱 ♥", "hug"], ["打招呼", "hi"], ["敲敲螢幕", "knock"], ["翻書陪你 📖", "wb_sig1"],
+                    ["慶祝小進步 ✨", "wb_sig2"], ["陪我專注 " + String(focusMin) + " 分鐘 🍅", "wb_focus"], ["睡覺", "sleep"], ["丟球給他 ⚾", "ball"]]
+        case "bobo":
+            return [["抱抱 ♥", "hug"], ["打招呼", "hi"], ["敲敲螢幕", "knock"], ["提醒我喝水 💧", "wb_water"],
+                    ["陪你一起工作 💻", "wb_sig2"], ["跳到別的視窗上", "jump"], ["睡覺", "sleep"], ["丟球給他 ⚾", "ball"]]
+        default:
+            return [["抱抱 ♥", "hug"], ["打招呼", "hi"], ["敲敲螢幕", "knock"], ["蓋毯子休息一下 🌙", "wb_sig1"],
+                    ["捧熱可可放空 ☕", "wb_sig2"], ["睡覺", "sleep"], ["丟球給她 ⚾", "ball"]]
+        }
+    }
+
+    // ---------- 兩兩串場 ----------
+    func WbPairScene(_ key: String) {
+        let f: Pet? = Get("fanfan"), b: Pet? = Get("bobo"), m: Pet? = Get("mian")
+        switch key {
+        case "bobo-fanfan": if let f = f, let b = b { SceneStudySnack(f, b) }
+        case "fanfan-mian": if let f = f, let m = m { SceneBookmark(f, m) }
+        case "bobo-mian": if let b = b, let m = m { SceneTeaNap(b, m) }
+        default: break
+        }
+    }
+
+    // 翻翻 × 破破：讀書補給（卡關時先喝口水，想通了一起慶祝）
+    func SceneStudySnack(_ f: Pet, _ b: Pet) {
+        Begin(f, b)
+        At(0) { [self] in Face(f, b); f.OrigDo("s1", 30); b.ScenePose("idle", 30); f.Say("這一題好難喔…", 2) }
+        At(2.4) { b.OPose("surprised", 1.4); b.Say("卡住了嗎？先喝口水 💧", 2) }
+        At(4.6) { b.OrigDo("s1", 30); f.OPose("happy", 30); f.Say("謝謝破破…（咕嚕）", 1.8) }
+        At(7.0) { f.OPose("surprised", 1.4); f.Say("啊！我想通了！", 1.8); f.Mark(0) }
+        At(9.0) { f.OrigDo("s2", 30); f.Say("小進步，撒花 ✨", 2); f.Burst(6) }
+        At(11.4) { b.OPose("happy", 30); b.Say("小進步也要慶祝～", 2) }
+        At(14.0) { [self] in Face(f, b); f.ScenePose("hug", 2.4); b.ScenePose("hug", 2.4) }
+        At(16.6) { }
+    }
+
+    // 翻翻 × 綿綿：書籤（讀很久了，綿綿拉翻翻一起伸懶腰）
+    func SceneBookmark(_ f: Pet, _ m: Pet) {
+        Begin(f, m)
+        At(0) { [self] in Face(f, m); f.OrigDo("s1", 30); m.ScenePose("idle", 30); f.Say("再一頁…再一頁就好…", 2) }
+        At(2.6) { m.OPose("sit", 30); m.Say("翻翻，已經讀很久囉", 2) }
+        At(4.8) { m.OrigDo("s1", 30); m.Say("要不要一起蓋毯子瞇一下～", 1.8) }
+        At(7.0) { f.OPose("pout", 30); f.Say("可是還有一點點…", 1.8) }
+        At(9.2) { m.OPose("happy", 30); m.Say("書不會跑掉的，書籤夾著就好", 2.2) }
+        At(11.8) { f.OPose("sit", 30); f.Say("…好，休息五分鐘", 1.8); m.Mark(2) }
+        At(14.0) { [self] in Face(f, m); f.ScenePose("hug", 2.4); m.ScenePose("hug", 2.4); m.Say("你今天很努力了", 1.8) }
+        At(16.6) { }
+    }
+
+    // 破破 × 綿綿：破破工作到一半，綿綿端熱可可來，一起放空
+    func SceneTeaNap(_ b: Pet, _ m: Pet) {
+        Begin(b, m)
+        At(0) { [self] in Face(b, m); b.OrigDo("s2", 30); m.ScenePose("idle", 30); b.Say("（噠噠噠）還有一點點就做完了…", 2) }
+        At(2.4) { m.OrigDo("s2", 30); m.Say("破破，先喝口熱可可吧 ☕", 1.8) }
+        At(4.6) { b.OPose("happy", 30); b.Say("好香喔…那休息一下", 1.6) }
+        At(6.6) { b.OrigDo("s1", 30); m.Say("一起放空一下下～", 2) }
+        At(9.0) { b.OPose("sleep", 30); b.Say("我也要…zZ", 1.6); b.Mark(3) }
+        At(11.6) { m.OPose("happy", 2.4); b.OPose("happy", 2.4); m.Say("好幸福的下午", 2) }
+        At(14.0) { [self] in Face(b, m); b.ScenePose("hug", 2.4); m.ScenePose("hug", 2.4) }
+        At(16.6) { }
     }
 }
 

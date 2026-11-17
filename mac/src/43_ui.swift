@@ -23,7 +23,8 @@ extension World {
         ["season", "節日造型"],
         ["fireworks", "煙火"],
         ["chatter", "閒聊泡泡（自己閒晃時講話）"],
-        ["bat_link", "沒電的電量跟工作時間連動"]]
+        ["bat_link", "沒電的電量跟工作時間連動"],
+        ["wb_water", "破破提醒喝水（窩伴小世界）"]]
     func Feat(_ key: String) -> Bool { var on = false; return feats.TryGetValue(key, &on) ? on : !World.MisDefaultOff(key) }   // 搶游標預設關（59_mischief.swift）
 
     func LoadFeatures() {
@@ -629,7 +630,7 @@ class PixelMenu: OverlayForm {
 // 一個視窗、三步：你是？→ 選一櫃 → 怎麼擺（整櫃／只要一隻）。全部自己畫（木框＋大按鈕），點哪裡自己算。
 // mac: FormBorderStyle 不是 None → shim 的對話框（有標題列、不搶前景但拿得到鍵盤和滑鼠）
 class SetupForm: Form {
-    final class Btn { var Id = "", Text = "", Sub = ""; var R = Rectangle(0, 0, 0, 0); var Kind = 0; var On = false, Enabled = true }   // Kind：0 大卡片 1 公仔小卡 2 普通按鈕 3 主要按鈕
+    final class Btn { var Id = "", Text = "", Sub = ""; var Note: String? = nil; var R = Rectangle(0, 0, 0, 0); var Kind = 0; var On = false, Enabled = true }   // Kind：0 大卡片 1 公仔小卡 2 普通按鈕 3 主要按鈕
     let w: World
     let first: Bool
     let d: Double
@@ -661,9 +662,24 @@ class SetupForm: Form {
         "kwwwwwwwwwwwwwwk",
         "kkkkkkkkkkkkkkkk"]
 
+    // 第一頁的兩櫃主打（原創）：pals/lineups.txt 的前兩櫃；其他櫃（個人版的同人櫃、我的櫃）在下面一排小的
+    let featured: [String]
+    static func Featured(_ swap: Bool) -> [String] {
+        var l: [String] = Pal.SqLineupList()
+        if l.count > 2 { l = Array(l[0..<2]) }
+        if swap && l.count == 2 { l.reverse() }
+        return l
+    }
+    func MoreLineups() -> [String] {
+        var l: [String] = []
+        for id in Pal.LineupsNow() { if !featured.contains(id) { l.append(id) } }
+        return l
+    }
+
     init(_ w: World, _ first: Bool, _ lu: String, _ single: Bool, _ pet: String?) {
         self.w = w; self.first = first
-        self.lu = first ? Pal.Original : Pal.NormLineup(lu)   // 第一次：先選好續命小隊（上面還有「做一隻自己的」）
+        self.lu = first ? "" : Pal.NormLineup(lu)   // 第一次：兩櫃都不先選，讓你自己挑
+        featured = SetupForm.Featured(first && !App.Offscreen && Int.random(in: 0...1) == 1)   // 第一次：左右順序隨機（避免誰在左邊比較多人選）
         mode = single ? "single" : "shelf"
         self.pet = pet ?? ""
         d = Double(w.S) / 4.0
@@ -681,7 +697,8 @@ class SetupForm: Form {
         bigF = FontT("Microsoft JhengHei UI", 13, FontStyle.Bold)
         subF = FontT("Microsoft JhengHei UI", 9, FontStyle.Bold)
         btnF = FontT("Microsoft JhengHei UI", 11, FontStyle.Bold)
-        ClientSize = SizeT(Sc(620), Sc(560))
+        if first { App.LogAlways("setup: first-run page, order " + featured.joined(separator: ",")) }
+        ClientSize = SizeT(Sc(620), Sc(MoreLineups().count > 0 ? 720 : 590))
         KeyPreview = true
         KeyDown = { [unowned self] (e: KeyEventArgs) in if e.KeyCode == Keys.Escape { self.Close() } }
         LayoutBtns()
@@ -723,17 +740,26 @@ class SetupForm: Form {
         btns.Clear()
         let W0 = ClientSize.Width, H0 = ClientSize.Height, top = Sc(154), bottom = H0 - Sc(72)
         if step == 0 {
-            // 主打：用自己的照片做一隻；下面是現成的幾櫃
-            let hero = Rectangle(Sc(30), top, W0 - Sc(60), Sc(108))
-            Add("make", "把你家的貓狗（或任何照片）變成桌面公仔", "選一張照片 → 去背 → 取名字、選個性，一分鐘做好。照片只存在你的電腦裡。", hero, 0, false)
-            Add("import", "匯入朋友的公仔…", "", Rectangle(W0 - Sc(30) - Sc(190), hero.Bottom + Sc(10), Sc(190), Sc(32)), 2, false)
-            let lus = Pal.LineupsNow()
-            let n = lus.count, gap = Sc(16), ly = hero.Bottom + Sc(52), cw = (W0 - Sc(60) - (n - 1) * gap) / n, ch = bottom - ly - Sc(6)
-            let x0 = (W0 - n * cw - (n - 1) * gap) / 2
-            for i in 0..<n {
-                let id = lus[i]
+            // 主打：兩櫃原創大大的二選一；下面：用自己的照片做一隻、匯入朋友的公仔；（個人版、做過公仔）再一排其他櫃
+            let more = MoreLineups()
+            let gap = Sc(16), fw = (W0 - Sc(60) - gap) / 2, fh = Sc(more.count > 0 ? 236 : 262)
+            for i in 0..<featured.count {
+                let id = featured[i]
                 EnsurePics(id)
-                Add("lu:" + id, Pal.LineupName(id), SetupForm.Members(id), Rectangle(x0 + i * (cw + gap), ly, cw, ch), 0, lu == id)
+                let fb = Add("lu:" + id, Pal.LineupName(id), SetupForm.Members(id), Rectangle(Sc(30) + i * (fw + gap), top, fw, fh), 0, lu == id)
+                fb.Note = Pal.SqBlurb(id)
+            }
+            let make = Rectangle(Sc(30), top + fh + Sc(14), W0 - Sc(60) - Sc(190) - Sc(12), Sc(74))
+            Add("make", "用自己的照片做一隻", "貓狗、任何照片都行，一分鐘做好（照片只存在你的電腦裡）", make, 0, false)
+            Add("import", "匯入朋友的公仔…", "", Rectangle(make.Right + Sc(12), make.Y + (make.Height - Sc(36)) / 2, Sc(190), Sc(36)), 2, false)
+            if more.count > 0 {
+                let n = more.count, ly = make.Bottom + Sc(36), cw = (W0 - Sc(60) - (n - 1) * gap) / n, ch = bottom - ly - Sc(6)
+                let x0 = (W0 - n * cw - (n - 1) * gap) / 2
+                for i in 0..<n {
+                    let id = more[i]
+                    EnsurePics(id)
+                    Add("lu:" + id, Pal.LineupName(id), SetupForm.Members(id), Rectangle(x0 + i * (cw + gap), ly, cw, ch), 0, lu == id)
+                }
             }
         }
         else {
@@ -768,6 +794,17 @@ class SetupForm: Form {
     }
 
     func Find(_ id: String) -> Btn? { for b in btns { if b.Id == id { return b } }; return nil }
+
+    // 測試用（pipe「setup-info」）：第幾步、選了哪櫃、主打兩櫃的順序、每個按鈕（id x y 寬 高 選了沒 能不能按）
+    func Info() -> String {
+        var sb: String = "setup step=" + String(step) + " first=" + (first ? "1" : "0") + " lu=" + (lu == "" ? "-" : lu) + " mode=" + mode
+        sb += " w=" + String(ClientSize.Width) + " h=" + String(ClientSize.Height) + " featured=" + featured.joined(separator: ",") + "\n"
+        for b in btns {
+            let a: String = "btn " + b.Id + " " + String(b.R.X) + " " + String(b.R.Y) + " " + String(b.R.Width) + " " + String(b.R.Height)
+            sb += a + " " + (b.On ? "1" : "0") + " " + (b.Enabled ? "1" : "0") + "\n"
+        }
+        return sb
+    }
     func At(_ p: Point) -> Btn? { for b in btns { if b.R.Contains(p) { return b } }; return nil }
 
     // 按按鈕（滑鼠、測試用的 act setup <按鈕> 都走這裡）
@@ -781,7 +818,13 @@ class SetupForm: Form {
         else if id == "mode:single" { mode = "single"; if !InLineup(pet) { pet = Pal.LineupIds(lu)[0] } }
         else if id.StartsWith("pet:") { pet = id.Substring(4); mode = "single" }
         else if id == "back" { if step > 0 { step -= 1 } }
-        else if id == "next" { if step < 1 { step += 1 } else { w.ApplySetup(lu, mode == "single", pet, first); Close(); return } }
+        else if id == "next" {
+            if step < 1 { step += 1 }
+            else {
+                if first { App.LogAlways("setup: first-run pick " + lu + " (" + mode + ", order " + featured.joined(separator: ",") + ")") }   // 只記在本機 log，不回報
+                w.ApplySetup(lu, mode == "single", pet, first); Close(); return
+            }
+        }
         else if id == "skip" || id == "close" { Close(); return }
         else { return }
         LayoutBtns()
@@ -818,12 +861,12 @@ class SetupForm: Form {
         Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.Right + 4 * U, pr.Y + plh / 2 - 2 * U, U)
         Steps(g, W0, Sc(68))
         let q = step == 0 ? "選你的公仔" : "怎麼擺？"
-        let hint = step == 0 ? "用自己的照片做一隻，或選一櫃現成的（之後在小屋都能換、能再做）" : (mode == "single" ? "選一隻，他會住在右下角的蛋裡" : "公仔櫃放在右下角，點格子就叫他們出來")
+        let hint = step == 0 ? "兩櫃原創公仔選一櫃，或用自己的照片做一隻（之後在小屋、選單都能換櫃）" : (mode == "single" ? "選一隻，他會住在右下角的蛋裡" : "公仔櫃放在右下角，點格子就叫他們出來")
         TextRenderer.DrawText(g, q, qF, Rectangle(0, Sc(100), W0, Sc(30)), Pix.TextC, Pix.Mid)
         TextRenderer.DrawText(g, hint, subF, Rectangle(0, Sc(130), W0, Sc(18)), Pix.C(0x9A6338), Pix.Mid)
         if step == 0 {
-            let im = Find("import")
-            if im != nil { TextRenderer.DrawText(g, "或選一櫃現成的：", btnF, Rectangle(Sc(32), im!.R.Y, Sc(300), im!.R.Height), Pix.TextC, Pix.LeftMid) }
+            let mk = Find("make")
+            if mk != nil && MoreLineups().count > 0 { TextRenderer.DrawText(g, "其他櫃：", btnF, Rectangle(Sc(32), mk!.R.Bottom + Sc(6), Sc(300), Sc(26)), Pix.TextC, Pix.LeftMid) }
         }
         if step == 1 && mode == "single" {
             let first2 = Find("mode:shelf")
@@ -903,11 +946,11 @@ class SetupForm: Form {
         let r = b.R
         let pal = Dict<Character, Color>()
         pal["k"] = Pix.Ink; pal["w"] = Pix.C(0xFFFDF7); pal["b"] = Pix.C(0xBFE3F2); pal["p"] = Pix.C(0xF27A90)
-        let c = Math.Max(3, Sc(5)), aw = SetupForm.MAKE[0].count * c, ah = SetupForm.MAKE.count * c, ix = r.X + Sc(22)
+        let c = Math.Max(2, Math.Min(Sc(5), (r.Height - Sc(18)) / SetupForm.MAKE.count)), aw = SetupForm.MAKE[0].count * c, ah = SetupForm.MAKE.count * c, ix = r.X + Sc(16)
         Pix.Art(g, SetupForm.MAKE, pal, ix, r.Y + (r.Height - ah) / 2, c)
-        let tx = ix + aw + Sc(18)
-        TextRenderer.DrawText(g, b.Text, bigF, Rectangle(tx, r.Y + Sc(18), r.Right - tx - Sc(12), Sc(30)), Pix.TextC, Pix.LeftMid)
-        TextRenderer.DrawText(g, b.Sub, subF, Rectangle(tx, r.Y + Sc(52), r.Right - tx - Sc(16), Sc(40)), Pix.C(0x9A6338), [TextFormatFlags.Left, TextFormatFlags.Top, TextFormatFlags.WordBreak, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix])
+        let tx = ix + aw + Sc(14)
+        TextRenderer.DrawText(g, b.Text, bigF, Rectangle(tx, r.Y + Sc(8), r.Right - tx - Sc(12), Sc(26)), Pix.TextC, Pix.LeftMid)
+        TextRenderer.DrawText(g, b.Sub, subF, Rectangle(tx, r.Y + Sc(34), r.Right - tx - Sc(12), r.Height - Sc(38)), Pix.C(0x9A6338), [TextFormatFlags.Left, TextFormatFlags.Top, TextFormatFlags.WordBreak, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix])
     }
 
     func DrawShelfCard(_ g: Graphics, _ b: Btn, _ id: String) {
@@ -915,7 +958,7 @@ class SetupForm: Form {
         var pic: Bitmap! = nil
         var textY = r.Y + Sc(12)
         if shelfPics.TryGetValue(id, &pic) {
-            let avail = r.Height - Sc(86)
+            let avail = r.Height - Sc(b.Note != nil ? 104 : 86)
             var ph = Math.Min(pic.Height, avail), pw = pic.Width * ph / pic.Height
             if pw > r.Width - Sc(16) { pw = r.Width - Sc(16); ph = pic.Height * pw / pic.Width }
             let im = g.InterpolationMode
@@ -926,6 +969,7 @@ class SetupForm: Form {
         }
         TextRenderer.DrawText(g, b.Text, bigF, Rectangle(r.X, textY, r.Width, Sc(30)), Pix.TextC, Pix.Mid)
         TextRenderer.DrawText(g, b.Sub, subF, Rectangle(r.X + Sc(6), textY + Sc(28), r.Width - Sc(12), Sc(38)), Pix.C(0x9A6338), [TextFormatFlags.HorizontalCenter, TextFormatFlags.Top, TextFormatFlags.WordBreak, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix])   // 四櫃並排時名單換行，不要被切掉
+        if let note = b.Note { TextRenderer.DrawText(g, note, subF, Rectangle(r.X + Sc(10), textY + Sc(48), r.Width - Sc(20), r.Bottom - textY - Sc(52)), Pix.C(0x6A5A48), [TextFormatFlags.HorizontalCenter, TextFormatFlags.Top, TextFormatFlags.WordBreak, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix]) }   // 兩櫃主打：一句介紹
     }
 
     func DrawModeCard(_ g: Graphics, _ b: Btn) {

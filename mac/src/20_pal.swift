@@ -60,15 +60,15 @@ final class Pal
     static let Classic = "classic", Teletubbies = "teletubbies"   //@fan
     static let Fallback = Classic                      // 找不到的櫃子、還沒選過：回到這一櫃 //@fan
     // <public> static let Fallback = Original
-    static func NormLineup(_ s: String!) -> String { let t = s == nil ? "" : s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); return t == Teletubbies || t == Pikmin || t == Original || (t == Mine && HasCustom()) ? t : Fallback }   //@fan
-    // <public> static func NormLineup(_ s: String!) -> String { let t = s == nil ? "" : s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); return t == Original || (t == Mine && HasCustom()) ? t : Fallback }
+    static func NormLineup(_ s: String!) -> String { let t = s == nil ? "" : s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); return t == Teletubbies || t == Pikmin || IsSquad(t) || (t == Mine && HasCustom()) ? t : Fallback }   //@fan
+    // <public> static func NormLineup(_ s: String!) -> String { let t = s == nil ? "" : s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); return IsSquad(t) || (t == Mine && HasCustom()) ? t : Fallback }
     static func LineupIds(_ lineup: String!) -> [String]
     {
         if NormLineup(lineup) == Pikmin { return PikminIds }   // 皮克敏一櫃：大格是休息花（50_pikmin.swift）   //@fan
-        if NormLineup(lineup) == Original { return OrigLineupIds() }   // 續命小隊（51_original.swift；第 4 格放你自己做的公仔）
+        if IsSquad(NormLineup(lineup)) { return SqLineupIds(NormLineup(lineup)) }   // 圖片公仔櫃（續命小隊、窩伴小世界：pals/lineups.txt；櫃子有空格就放你自己做的公仔）
         if NormLineup(lineup) == Mine { return MineIds() }                       // 我的櫃：自己做的公仔（53_custom.swift）
         return NormLineup(lineup) == Teletubbies ? ["tinky", "dipsy", "laalaa", "po"] : ["spidey", "po", "stitch", "hangyodon"]   //@fan
-        // <public> return OrigLineupIds()
+        // <public> return SqLineupIds(Original)
     }
     static func Lineup(_ lineup: String!) -> List<Pal>
     {
@@ -77,13 +77,13 @@ final class Pal
         return l
     }
     // 這一櫃預設放在大格的（經典一櫃照用最久的那隻）
-    static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Teletubbies ? "po" : (NormLineup(lineup) == Original ? "duoduo" : nil) }   //@fan
-    // <public> static func LineupFav(_ lineup: String!) -> String! { return NormLineup(lineup) == Original ? "duoduo" : nil }
-    // 設定視窗、小屋「換一櫃」列出來的櫃子（之後新增一櫃：這裡加一個 id、LineupIds／LineupName 加一行）
-    static let Lineups: [String] = [Original, Classic, Teletubbies, Pikmin]   //@fan
-    // <public> static let Lineups: [String] = [Original]
-    static func LineupName(_ lineup: String) -> String { let n = NormLineup(lineup); return n == Original ? OriginalName : (n == Teletubbies ? "天線寶寶一櫃" : (n == Pikmin ? "皮克敏一櫃" : (n == Mine ? "我的櫃" : "經典一櫃"))) }   //@fan
-    // <public> static func LineupName(_ lineup: String) -> String { let n = NormLineup(lineup); return n == Mine ? "我的櫃" : OriginalName }
+    static func LineupFav(_ lineup: String!) -> String! { let n = NormLineup(lineup); return n == Teletubbies ? "po" : (IsSquad(n) ? SqIds(n)[0] : nil) }   //@fan
+    // <public> static func LineupFav(_ lineup: String!) -> String! { let n = NormLineup(lineup); return IsSquad(n) ? SqIds(n)[0] : nil }
+    // 設定視窗、小屋「換一櫃」列出來的櫃子：圖片公仔櫃照 pals/lineups.txt（之後新增一櫃圖片公仔：加一個資料夾、lineups.txt 加一行）
+    static var Lineups: [String] { var l: [String] = SqLineupList(); l.append(contentsOf: [Classic, Teletubbies, Pikmin]); return l }   //@fan
+    // <public> static var Lineups: [String] { return SqLineupList() }
+    static func LineupName(_ lineup: String) -> String { let n = NormLineup(lineup); return IsSquad(n) ? SqName(n) : (n == Teletubbies ? "天線寶寶一櫃" : (n == Pikmin ? "皮克敏一櫃" : (n == Mine ? "我的櫃" : "經典一櫃"))) }   //@fan
+    // <public> static func LineupName(_ lineup: String) -> String { let n = NormLineup(lineup); return n == Mine ? "我的櫃" : SqName(n) }
 
     func Shared()
     {

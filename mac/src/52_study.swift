@@ -1322,6 +1322,7 @@ extension World {
         let keys: [String] = ["class", "class-now", "exam-soon", "exam-now", "event", "event-now", "deadline", "deadline-hot"]
         let i = keys.firstIndex(of: kind) ?? -1
         if i < 0 { return nil }
+        if let sp = Pal.Get(id) { var sa: [String] = []; if sp.Lines.TryGetValue("sf_" + kind, &sa) && sa.count > 0 { return sa[0] } }   // 角色自己的（翻翻：sf_<種類>）
         var a: [String]
         switch id {
         // <fan>

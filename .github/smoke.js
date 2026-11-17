@@ -39,7 +39,7 @@ const pikmin = [
 const W = (n) => Array(n).fill("wait");
 const original = [
 	"hello", "wait", "snap " + out + "/shot-original-setup.png",
-	"act setup next", "act setup mode:shelf", "act setup next", "wait",
+	"act setup lu:original", "act setup next", "act setup mode:shelf", "act setup next", "wait",
 	"act all", ...W(3), "act scene teatime", ...W(8), "snap " + out + "/shot-original.png", "where",
 	"act scene cici-meidian", ...W(6), "snap " + out + "/shot-original-plug.png",
 	"battery-set 15", "act f_sig2 meidian", "wait", "snap " + out + "/shot-original-battery.png", "battery-set 100",
