@@ -6,6 +6,7 @@ const fs = require("fs");
 const os = require("os");
 const net = require("net");
 const cp = require("child_process");
+const https = require("https");
 const path = require("path");
 
 // 各角色在狀態列／通知用的圖示和名字；lineup＝在哪一櫃（小波兩櫃都有）
@@ -174,6 +175,7 @@ function activate(context) {
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand("deskPals.show", () => vscode.commands.executeCommand("deskPals.view.focus")),
+		vscode.commands.registerCommand("deskPals.aiSetup", () => configureAiKey(context)),
 		vscode.commands.registerCommand("deskPals.hi", () => provider.post({ type: "hi" })),
 		vscode.commands.registerCommand("deskPals.restNow", remindRest),
 		vscode.commands.registerCommand("deskPals.desktopOn", async () => {
@@ -562,6 +564,22 @@ class PetView {
 	post(msg) {
 		if (this.view) this.view.webview.postMessage(msg);
 	}
+	async replyToChat(message) {
+		const key = await this.context.secrets.get("deskPals.openaiApiKey");
+		if (!key) {
+			this.post({ type: "chatError", text: "先點「設定 AI」加入 OpenAI API 金鑰，皮克敏才能用 AI 回覆。金鑰會安全地保存在 VS Code。" });
+			return;
+		}
+		const history = Array.isArray(message.history) ? message.history.slice(-8).filter((item) => item && (item.role === "user" || item.role === "assistant") && typeof item.content === "string").map((item) => ({ role: item.role, content: item.content.slice(0, 1200) })) : [];
+		if (!history.length) return;
+		try {
+			const text = await requestPikminReply(key, history);
+			this.post({ type: "chatReply", text });
+		} catch (error) {
+			const reason = error && error.message ? error.message : "未知錯誤";
+			this.post({ type: "chatError", text: "我現在連不上 AI 服務，請檢查網路、API 金鑰與 API 帳務後再試。(" + reason.slice(0, 180) + ")" });
+		}
+	}
 	resolveWebviewView(view) {
 		this.view = view;
 		view.webview.options = { enableScripts: true };
@@ -572,11 +590,65 @@ class PetView {
 			.replace(/\{\{nonce\}\}/g, nonce)
 			.replace(/\{\{csp\}\}/g, view.webview.cspSource)
 			.replace(/\{\{character\}\}/g, current);
+		view.webview.onDidReceiveMessage(async (message) => {
+			if (message && message.type === "setupAi") {
+				await vscode.commands.executeCommand("deskPals.aiSetup");
+				return;
+			}
+			if (message && message.type === "chat") await this.replyToChat(message);
+		});
 		setTimeout(() => this.post({ type: "character", id: current }), 300);
 		view.onDidDispose(() => {
 			if (this.view === view) this.view = undefined;
 		});
 	}
+}
+
+async function configureAiKey(context) {
+	const action = await vscode.window.showQuickPick(["設定或更新 API 金鑰", "刪除已保存的 API 金鑰"], { title: "皮克敏 AI 設定", placeHolder: "AI 回覆會使用 OpenAI API，依你的 API 帳務計費" });
+	if (!action) return;
+	if (action === "刪除已保存的 API 金鑰") {
+		await context.secrets.delete("deskPals.openaiApiKey");
+		vscode.window.showInformationMessage("已刪除皮克敏 AI 金鑰。");
+		return;
+	}
+	const key = await vscode.window.showInputBox({ password: true, ignoreFocusOut: true, title: "輸入 OpenAI API 金鑰", prompt: "金鑰只會存進 VS Code SecretStorage，不會寫入設定檔或聊天記錄。", placeHolder: "sk-…" , validateInput: value => value && !value.startsWith("sk-") ? "請輸入有效格式的 OpenAI API 金鑰（sk-…）" : null });
+	if (!key) return;
+	await context.secrets.store("deskPals.openaiApiKey", key.trim());
+	vscode.window.showInformationMessage("皮克敏 AI 已設定完成。");
+}
+
+function requestPikminReply(apiKey, history) {
+	const payload = JSON.stringify({
+		model: "gpt-4.1-mini",
+		instructions: "你是陪伴大學生的皮克敏夥伴，請用繁體中文、溫柔真誠又不說教的語氣回應。先理解對方的感受，再給一個小而實際的下一步。不要假裝是心理師或醫療專業人員；遇到危險或嚴重困擾時，鼓勵對方找可信任的人或專業協助。回答精簡，通常不超過 120 字。",
+		input: history,
+		max_output_tokens: 240
+	});
+	return new Promise((resolve, reject) => {
+		const req = https.request({
+			hostname: "api.openai.com", path: "/v1/responses", method: "POST",
+			headers: { Authorization: "Bearer " + apiKey, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(payload) },
+		}, (res) => {
+			let body = "";
+			res.setEncoding("utf8");
+			res.on("data", (chunk) => { body += chunk; });
+			res.on("end", () => {
+				let data;
+				try { data = JSON.parse(body); } catch (e) { reject(new Error("AI 回傳格式無法讀取")); return; }
+				if (res.statusCode < 200 || res.statusCode >= 300) {
+					const detail = data.error && data.error.message ? data.error.message : "HTTP " + res.statusCode;
+					reject(new Error(detail)); return;
+				}
+				const answer = (data.output || []).flatMap((item) => item.content || []).filter((item) => item.type === "output_text").map((item) => item.text || "").join("\n").trim();
+				if (!answer) { reject(new Error("AI 沒有產生文字回覆")); return; }
+				resolve(answer.slice(0, 2000));
+			});
+		});
+		req.setTimeout(45000, () => req.destroy(new Error("AI 連線逾時")));
+		req.on("error", reject);
+		req.write(payload); req.end();
+	});
 }
 
 function deactivate() {}
