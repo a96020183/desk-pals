@@ -1338,6 +1338,11 @@ extension World {
             let si: String = shelf == nil ? "" : shelf.Info()
             let mk: Bool = maker != nil && !maker.IsDisposed && maker.VVisible
             World.Send(c, si + "maker " + (mk ? "1" : "0") + "\nend\n")
+        case "feat-info":   // 測試用（test/desktop-egg.js）
+            var fb = "feat"
+            for f in World.FeatureList { fb += " " + f[0] + "=" + (Feat(f[0]) ? "1" : "0") }
+            let nn: String = NightNow() ? "1" : "0"
+            World.Send(c, fb + " nightnow=" + nn + " set=" + featSet.ToArray().joined(separator: ",") + "\nend\n")
         case "mode-info":   // 測試用（test/desktop-egg.js）
             let md: String = Single ? "single " + SinglePet() : "shelf -"
             let col: String = shelf != nil && shelf.Collapsed ? "1" : "0", prof: String = File.Exists(World.FilePath("profile.txt")) ? "1" : "0", hint: String = World.ReadText("egg-hint.txt") == "" ? "0" : "1"

@@ -2,6 +2,7 @@
 //   沒有 mode.txt（全新安裝、設定精靈沒按完）＝整櫃，櫃子是打開的；以前預設「只要一隻」，有人一直不知道有櫃子。
 //   存過 mode.txt 的照舊（single 的還是只要一隻）。
 //   只要一隻：左鍵點收起來的小紙箱＝叫那隻出來（第一次會說明一下，只說一次）；整櫃：左鍵點它＝打開櫃子。
+//   「下班時間」（晚上黑化、催下班）預設關：全新安裝關、舊版存檔時順手寫進去的 night=1（沒自己動過）也當作關；自己打開過的（set=night）照舊。
 //
 // 用法：node test/desktop-egg.js <endpoint 開頭> <工作資料夾> <截圖資料夾> -- <開桌面版的指令…>
 //   指令裡的 {ep} 換成這次的 endpoint（Windows：pipe 名稱 <開頭>-<情境>；Mac：socket 路徑 <開頭>-<情境>.sock）
@@ -70,6 +71,7 @@ function fresh(name, files) {
 	return d;
 }
 async function mode(app) { const d = await app.block("mode-info"); return (/mode .*/.exec(d) || [""])[0]; }
+async function feat(app) { const d = await app.block("feat-info"); return (/feat .*/.exec(d) || [""])[0]; }
 async function shelfInfo(app) {
 	const out = await app.block("shelf-info");
 	const o = { raw: out };
@@ -93,13 +95,39 @@ const field = (line, k) => (new RegExp(`\\b${k}=(\\S*)`).exec(line) || [])[1];
 	{
 		const app = await launch("fresh", fresh("fresh"));
 		await sleep(2500);
-		const m = await mode(app), I = await shelfInfo(app);
+		const m = await mode(app), I = await shelfInfo(app), f = await feat(app);
 		await check("全新安裝（還沒設定）：整櫃、櫃子打開", () => {
 			assert.ok(m.startsWith("mode shelf "), m);
 			assert.equal(field(m, "profile"), "0", m);
 			assert.equal(I.collapsed, 0, I.raw);
 		});
+		await check("全新安裝：「下班時間」是關的（其他開關照舊是開的）", () => {
+			assert.equal(field(f, "night"), "0", f);
+			assert.equal(field(f, "nightnow"), "0", f);
+			assert.equal(field(f, "scenes"), "1", f);
+		});
 		await app.quit();
+	}
+	// 舊版存的 features.txt（存檔時把每個開關都寫進去，night=1 不代表你打開過）→ 關；自己打開過的（set=night）照舊開
+	{
+		const app = await launch("oldfeat", fresh("oldfeat", { "profile.txt": "done", "mode.txt": "shelf", "lineup.txt": "original", "features.txt": "scenes=1\nlunch=0\nnight=1\nrollcall=1\n" }));
+		const f = await feat(app);
+		await check("舊版存的 night=1（沒自己動過）：下班時間當作關，其他開關照存的", () => {
+			assert.equal(field(f, "night"), "0", f);
+			assert.equal(field(f, "lunch"), "0", f);
+			assert.equal(field(f, "scenes"), "1", f);
+		});
+		app.send("act feature night=1");   // 在小屋自己打開
+		await sleep(800);
+		await app.quit();
+		const app2 = await launch("oldfeat2", path.join(work, "oldfeat"));
+		const f2 = await feat(app2);
+		await check("自己在小屋打開下班時間：重開還是開的（features.txt 記 set=night）", () => {
+			assert.equal(field(f2, "night"), "1", f2);
+			assert.ok(/(^|,)night(,|$)/.test(field(f2, "set") || ""), f2);
+			assert.ok(/set=.*night/.test(fs.readFileSync(path.join(work, "oldfeat", "features.txt"), "utf8")));
+		});
+		await app2.quit();
 	}
 	// 2. 設定精靈沒按完（有別的檔案、沒有 profile.txt 也沒有 mode.txt）→ 整櫃
 	{

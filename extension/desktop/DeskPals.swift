@@ -10404,6 +10404,7 @@ final class World: Form {
     var lunchChecked = -1
     // ---- from 43_ui.swift ----
     let feats = Dict<String, Bool>()
+    let featSet = List<String>()   // 自己動過的開關（features.txt 的 set=…，逗號隔開）
     // ---- 設定過了沒（profile.txt）、擺法（mode.txt：shelf｜single <id>）----
     var Single = false                            // 只要一隻：沒有櫃子，那隻的家是收起來的小紙箱（以前是蛋），其他隻不出來
     var singleId = ""
@@ -11709,6 +11710,11 @@ extension World {
             let si: String = shelf == nil ? "" : shelf.Info()
             let mk: Bool = maker != nil && !maker.IsDisposed && maker.VVisible
             World.Send(c, si + "maker " + (mk ? "1" : "0") + "\nend\n")
+        case "feat-info":   // 測試用（test/desktop-egg.js）
+            var fb = "feat"
+            for f in World.FeatureList { fb += " " + f[0] + "=" + (Feat(f[0]) ? "1" : "0") }
+            let nn: String = NightNow() ? "1" : "0"
+            World.Send(c, fb + " nightnow=" + nn + " set=" + featSet.ToArray().joined(separator: ",") + "\nend\n")
         case "mode-info":   // 測試用（test/desktop-egg.js）
             let md: String = Single ? "single " + SinglePet() : "shelf -"
             let col: String = shelf != nil && shelf.Collapsed ? "1" : "0", prof: String = File.Exists(World.FilePath("profile.txt")) ? "1" : "0", hint: String = World.ReadText("egg-hint.txt") == "" ? "0" : "1"
@@ -14280,7 +14286,7 @@ import AppKit
 // ================= 公仔小屋（蛋的右鍵）：娛樂功能開關、重新設定；只要一隻；第一次設定 =================
 
 extension World {
-    // 小屋的開關（features.txt：一行一個 key=0/1；沒寫的＝開，跟以前一樣）
+    // 小屋的開關（features.txt：一行一個 key=0/1；沒寫的＝開，下班時間和搗蛋除外（FeatDefaultOff）；set=…＝自己動過的）
     static let FeatureList: [[String]] = [
         ["scenes", "串門子劇情"],
         ["lunch", "午餐變身"],
@@ -14292,25 +14298,37 @@ extension World {
         ["chatter", "閒聊泡泡（自己閒晃時講話）"],
         ["bat_link", "沒電的電量跟工作時間連動"],
         ["wb_water", "破破提醒喝水（窩伴小世界）"]]
-    func Feat(_ key: String) -> Bool { var on = false; return feats.TryGetValue(key, &on) ? on : !World.MisDefaultOff(key) }   // 搶游標預設關（59_mischief.swift）
+    func Feat(_ key: String) -> Bool { var on = false; return feats.TryGetValue(key, &on) ? on : !World.FeatDefaultOff(key) }
+    // 預設關的：下班時間（很多人裝在家裡的電腦上，晚上黑化、催下班反而怪）、搗蛋那幾個（59_mischief.swift）
+    static func FeatDefaultOff(_ key: String) -> Bool { return key == "night" || World.MisDefaultOff(key) }
 
     func LoadFeatures() {
         feats.Clear()
+        featSet.Clear()
         for line in World.ReadText("features.txt").components(separatedBy: "\n") {
             let a = line.Trim().components(separatedBy: "=")
-            if a.count == 2 && a[0].Trim() != "" { feats[a[0].Trim()] = a[1].Trim() != "0" }
+            if a.count != 2 || a[0].Trim() == "" { continue }
+            if a[0].Trim() == "set" {
+                for k2 in a[1].components(separatedBy: ",") { let kk = k2.Trim(); if kk != "" && !featSet.Contains(kk) { featSet.Add(kk) } }
+                continue
+            }
+            feats[a[0].Trim()] = a[1].Trim() != "0"
         }
+        // 下班時間以前預設開，存檔時跟著寫成 night=1：沒自己動過的（set 裡沒有 night）一律當作沒寫＝關；自己打開過的照舊
+        if !featSet.Contains("night") { feats.Remove("night") }
     }
 
     func SaveFeatures() {
         let sb = StringBuilder()
         for f in World.FeatureList { sb.Append(f[0] + "=" + (Feat(f[0]) ? "1" : "0") + "\n") }
         for f in World.MisFeatureList { sb.Append(f[0] + "=" + (Feat(f[0]) ? "1" : "0") + "\n") }   // 搗蛋的開關
+        if featSet.Count > 0 { sb.Append("set=" + featSet.ToArray().joined(separator: ",") + "\n") }
         World.WriteText("features.txt", sb.ToString())
     }
 
     func SetFeat(_ key: String, _ on: Bool) {
         feats[key] = on
+        if !featSet.Contains(key) { featSet.Add(key) }
         SaveFeatures()
         App.Log("feature " + key + "=" + (on ? "1" : "0"))
         if key == "night" || key == "season" { nightChecked = -1; CheckNight() }   // 馬上換樣子（黑化、節日帽子）

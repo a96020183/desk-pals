@@ -5432,6 +5432,7 @@ namespace DeskPals
                     }
                     break;
                 case "shelf-info": Send(c, (shelf == null ? "" : shelf.Info()) + "maker " + (maker != null && !maker.IsDisposed && maker.VVisible ? 1 : 0) + "\nend\n"); break;   // 測試用（test/desktop-shelf.js）
+                case "feat-info": { StringBuilder fb = new StringBuilder("feat"); foreach (string[] f in FeatureList) fb.Append(" " + f[0] + "=" + (Feat(f[0]) ? 1 : 0)); Send(c, fb + " nightnow=" + (NightNow() ? 1 : 0) + " set=" + string.Join(",", featSet.ToArray()) + "\nend\n"); } break;   // 測試用（test/desktop-egg.js）
                 case "mode-info": Send(c, "mode " + (Single ? "single" : "shelf") + " " + (Single ? SinglePet() : "-") + " collapsed=" + (shelf != null && shelf.Collapsed ? 1 : 0) + " profile=" + (File.Exists(FilePath("profile.txt")) ? 1 : 0) + " hint=" + (ReadText("egg-hint.txt") == "" ? 0 : 1) + "\nend\n"); break;   // 測試用（test/desktop-egg.js）
                 case "setup-info": Send(c, (setupForm != null && !setupForm.IsDisposed && (setupForm.VVisible || setupForm.Visible) ? setupForm.Info() : "setup none\n") + "end\n"); break;   // 測試用（test/desktop-woban.js）：設定視窗現在有哪些按鈕
                 case "notify":
@@ -8046,7 +8047,7 @@ namespace DeskPals
     // ================= 公仔小屋（蛋的右鍵）：娛樂功能開關、重新設定；只要一隻；第一次設定 =================
     partial class World
     {
-        // 小屋的開關（features.txt：一行一個 key=0/1；沒寫的＝開，跟以前一樣）
+        // 小屋的開關（features.txt：一行一個 key=0/1；沒寫的＝開，下班時間和搗蛋除外（FeatDefaultOff）；set=…＝自己動過的）
         public static readonly string[][] FeatureList = {
             new string[] { "scenes", "串門子劇情" },
             new string[] { "lunch", "午餐變身" },
@@ -8059,16 +8060,24 @@ namespace DeskPals
             new string[] { "bat_link", "沒電的電量跟工作時間連動" },
             new string[] { "wb_water", "破破提醒喝水（窩伴小世界）" } };
         readonly Dictionary<string, bool> feats = new Dictionary<string, bool>();
-        public bool Feat(string key) { bool on; return feats.TryGetValue(key, out on) ? on : !MisDefaultOff(key); }   // 搶游標預設關（DeskPals.Mischief.cs）
+        readonly List<string> featSet = new List<string>();   // 自己動過的開關（features.txt 的 set=…，逗號隔開）
+        public bool Feat(string key) { bool on; return feats.TryGetValue(key, out on) ? on : !FeatDefaultOff(key); }
+        // 預設關的：下班時間（很多人裝在家裡的電腦上，晚上黑化、催下班反而怪）、搗蛋那幾個（DeskPals.Mischief.cs）
+        static bool FeatDefaultOff(string key) { return key == "night" || MisDefaultOff(key); }
 
         void LoadFeatures()
         {
             feats.Clear();
+            featSet.Clear();
             foreach (string line in ReadText("features.txt").Split('\n'))
             {
                 string[] a = line.Trim().Split('=');
-                if (a.Length == 2 && a[0].Trim() != "") feats[a[0].Trim()] = a[1].Trim() != "0";
+                if (a.Length != 2 || a[0].Trim() == "") continue;
+                if (a[0].Trim() == "set") { foreach (string k2 in a[1].Split(',')) if (k2.Trim() != "" && !featSet.Contains(k2.Trim())) featSet.Add(k2.Trim()); continue; }
+                feats[a[0].Trim()] = a[1].Trim() != "0";
             }
+            // 下班時間以前預設開，存檔時跟著寫成 night=1：沒自己動過的（set 裡沒有 night）一律當作沒寫＝關；自己打開過的照舊
+            if (!featSet.Contains("night")) feats.Remove("night");
         }
 
         void SaveFeatures()
@@ -8076,12 +8085,14 @@ namespace DeskPals
             StringBuilder sb = new StringBuilder();
             foreach (string[] f in FeatureList) sb.Append(f[0] + "=" + (Feat(f[0]) ? "1" : "0") + "\n");
             foreach (string[] f in MisFeatureList) sb.Append(f[0] + "=" + (Feat(f[0]) ? "1" : "0") + "\n");   // 搗蛋的開關
+            if (featSet.Count > 0) sb.Append("set=" + string.Join(",", featSet.ToArray()) + "\n");
             WriteText("features.txt", sb.ToString());
         }
 
         public void SetFeat(string key, bool on)
         {
             feats[key] = on;
+            if (!featSet.Contains(key)) featSet.Add(key);
             SaveFeatures();
             App.Log("feature " + key + "=" + (on ? "1" : "0"));
             if (key == "night" || key == "season") { nightChecked = -1; CheckNight(); }   // 馬上換樣子（黑化、節日帽子）
