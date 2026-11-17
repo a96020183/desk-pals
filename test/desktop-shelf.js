@@ -1,5 +1,6 @@
 // 紙箱櫃（公仔櫃的外觀，extension/desktop/pals/shelf）的離屏截圖測試：圖讀得到、大小對、三隻在格子裡、名牌上有字、
-// 第 4 格是「做一隻你的公仔」入口（點了開做公仔視窗）、晚上變暗偏藍、外出中、點格子叫公仔出來、收合鈕收成蛋。
+// 第 4 格是「做一隻你的公仔」入口（點了開做公仔視窗）、晚上稍微暗一點但不灰、外出中、點格子叫公仔出來、
+// 收合鈕（看得出來是按鈕的貼紙：夠大、點擊範圍比按鈕大一圈、滑過會變色）、收起來是小紙箱／小書包（mini.png）、左鍵點它就打開櫃子。
 // 用法：先用離屏模式（DESKPALS_OFFSCREEN=1、DESKPALS_ISOLATED=1、profile.txt＝done、mode.txt＝shelf）啟動桌面版，再
 //   node test/desktop-shelf.js <pipe 或 socket> <截圖資料夾>
 //   SHELF_LINEUP=pikmin：個人版的皮克敏一櫃（大格是休息花、沒有第 4 格入口）。
@@ -16,7 +17,10 @@ const shots = (process.argv[3] || path.join(__dirname, "..", "shots-shelf")).spl
 const lineup = process.env.SHELF_LINEUP || "original";
 const pik = lineup === "pikmin";
 const wb = lineup === "woban";
-const shelfTxt = path.join(__dirname, "..", "extension", "desktop", "pals", ...(wb ? ["woban", "shelf"] : ["shelf"]), "shelf.txt");
+const shelfDir = path.join(__dirname, "..", "extension", "desktop", "pals", ...(wb ? ["woban", "shelf"] : ["shelf"]));
+const shelfTxt = path.join(shelfDir, "shelf.txt");
+const miniPng = fs.readFileSync(path.join(shelfDir, "2x", "mini.png"));
+const MINI2 = { w: miniPng.readUInt32BE(16), h: miniPng.readUInt32BE(20) };   // 收起來的樣子（2x 圖的大小）
 fs.mkdirSync(shots, { recursive: true });
 
 const s = net.connect(pipe.includes("/") ? pipe : ["", "", ".", "pipe", pipe].join(String.fromCharCode(92)));
@@ -42,6 +46,10 @@ async function info() {
 		o.cells[+c[1]] = { open: { x: +c[2], y: +c[3], w: +c[4], h: +c[5] }, plate: { x: +c[6], y: +c[7], w: +c[8], h: +c[9] }, foot: { x: +c[10], y: +c[11] } };
 	const t = /tab (-?\d+) (-?\d+) (\d+) (\d+)/.exec(out);
 	if (t) o.tab = { x: +t[1], y: +t[2], w: +t[3], h: +t[4] };
+	const th = /tabhit (-?\d+) (-?\d+) (\d+) (\d+) (\d)/.exec(out);
+	if (th) o.tabhit = { x: +th[1], y: +th[2], w: +th[3], h: +th[4], hover: +th[5] };
+	const mi = /mini (-?\d+) (-?\d+) (\d+) (\d+) (\d) (\d) (\S+)/.exec(out);
+	if (mi) o.mini = { x: +mi[1], y: +mi[2], w: +mi[3], h: +mi[4], art: +mi[5], hover: +mi[6], name: mi[7] };
 	o.maker = /maker 1/.test(out);
 	o.raw = out;
 	return o;
@@ -92,13 +100,23 @@ const palColor = (r, g, b) => (g > r + 20 && g > b + 10) || (b > r + 25 && b > g
 const ink = (r, g, b) => r + g + b < 330;              // 名牌上的字（深色）
 const plus = (r, g, b) => r > 200 && g > 130 && g < 200 && b < 140 && r - b > 90;   // 第 4 格的橘色加號圓
 function stats(im, ox, oy, a) {
-	let n = 0, lum = 0, blue = 0;
+	let n = 0, lum = 0, blue = 0, chroma = 0;
 	for (let y = 0; y < im.h; y++) for (let x = 0; x < im.w; x++) {
 		const i = (y * im.w + x) * 4, r = im.px[i], g = im.px[i + 1], b = im.px[i + 2];
 		if (!notDesk(r, g, b)) continue;
-		n++; lum += 0.3 * r + 0.59 * g + 0.11 * b; blue += b - r;
+		n++; lum += 0.3 * r + 0.59 * g + 0.11 * b; blue += b - r; chroma += Math.max(r, g, b) - Math.min(r, g, b);
 	}
-	return { cover: n / (im.w * im.h), lum: lum / Math.max(1, n), blue: blue / Math.max(1, n) };
+	return { cover: n / (im.w * im.h), lum: lum / Math.max(1, n), blue: blue / Math.max(1, n), chroma: chroma / Math.max(1, n) };
+}
+// 兩張同樣大小的截圖，在一塊矩形（螢幕座標）裡差很多的像素有幾個
+function diffIn(a, b, ox, oy, r) {
+	let n = 0;
+	for (let y = Math.max(0, r.y - oy); y < Math.min(a.h, r.y - oy + r.h); y++)
+		for (let x = Math.max(0, r.x - ox); x < Math.min(a.w, r.x - ox + r.w); x++) {
+			const i = (y * a.w + x) * 4;
+			if (Math.abs(a.px[i] - b.px[i]) + Math.abs(a.px[i + 1] - b.px[i + 1]) + Math.abs(a.px[i + 2] - b.px[i + 2]) > 60) n++;
+		}
+	return n;
 }
 
 const results = [];
@@ -172,9 +190,10 @@ async function check(name, fn) {
 	await sleep(4500);   // 「天黑了」的泡泡
 	const night = await snap("shelf-night", area);
 	const nightS = stats(night, area.x, area.y);
-	await check("晚上：櫃子變暗、偏藍（程式調色，不是另一張圖）", () => {
-		assert.ok(nightS.lum < dayS.lum * 0.8, "不夠暗: " + JSON.stringify({ dayS, nightS }));
-		assert.ok(nightS.blue > dayS.blue + (wb ? 2 : 10), "沒有偏藍: " + JSON.stringify({ dayS, nightS }));   // 書包小屋本來就是薄荷綠（偏藍），夜色混進去差得比較少
+	await check("晚上：櫃子暗一點、帶一點夜色，但顏色不變灰（程式調色，不是另一張圖）", () => {
+		assert.ok(nightS.lum < dayS.lum * 0.92 && nightS.lum > dayS.lum * 0.6, "暗得不對: " + JSON.stringify({ dayS, nightS }));
+		assert.ok(nightS.blue > dayS.blue + 2, "沒有夜色: " + JSON.stringify({ dayS, nightS }));
+		assert.ok(nightS.chroma > dayS.chroma * 0.7, "變灰了（顏色掉太多）: " + JSON.stringify({ dayS, nightS }));
 		assert.ok(nightS.cover > 0.6, "櫃子不見了: " + JSON.stringify(nightS));
 	});
 	send("act light");
@@ -224,15 +243,64 @@ async function check(name, fn) {
 		await sleep(800);
 	}
 
-	// 收合鈕「－」：收成蛋；再打開
-	send(`act click ${I.tab.x + Math.round(I.tab.w / 2)},${I.tab.y + Math.round(I.tab.h / 2)}`);
-	await sleep(1500);
+	// 收合鈕：看得出來是按鈕（夠大），點擊範圍比按鈕大一圈但不蓋到格子；滑過會變色
+	await check("收合鈕夠大（至少 12×4.5 格），點擊範圍比按鈕大一圈、不蓋到格子開口", () => {
+		const t = I.tab, h = I.tabhit;
+		assert.ok(t && h, I.raw);
+		assert.ok(t.w >= 12 * I.S && t.h >= 4.5 * I.S, "按鈕太小 " + JSON.stringify(t));
+		assert.ok(h.x < t.x && h.y < t.y && h.x + h.w > t.x + t.w && h.w >= t.w + 2 * I.S, "點擊範圍沒有比按鈕大 " + JSON.stringify({ t, h }));
+		assert.ok(t.x >= I.x && t.y >= I.y && t.x + t.w <= I.x + I.w, "按鈕跑出櫃子 " + JSON.stringify(t));
+		for (const c of I.cells) assert.ok(h.y + h.h <= c.open.y, "點擊範圍蓋到格子 " + JSON.stringify({ h, c: c.open }));
+	});
+	const topBand = { x: area.x, y: area.y, w: area.w, h: Math.min(area.h, I.tabhit.y + I.tabhit.h - area.y + 8 * I.S) };
+	const tabOff = await snap("shelf-tab", area);
+	send(`act shelfhover ${I.tab.x + Math.round(I.tab.w / 2)},${I.tab.y + Math.round(I.tab.h / 2)}`);
+	await sleep(400);
+	const hovI = await info();
+	const tabOn = await snap("shelf-tab-hover", area);
+	await check("滑過收合鈕：按鈕變色、浮起來（下面出現「收成" + (wb ? "小書包" : "小紙箱") + "」）", () => {
+		assert.equal(hovI.tabhit.hover, 1, hovI.raw);
+		assert.ok(diffIn(tabOff, tabOn, area.x, area.y, topBand) > 150, "畫面沒變: " + diffIn(tabOff, tabOn, area.x, area.y, topBand));
+	});
+	send(`act shelfhover ${area.x + Math.round(area.w / 2)},${area.y + area.h - 4}`);
+	await sleep(300);
+
+	// 點在按鈕外面、點擊範圍裡面（按鈕左邊一點點）：也算點到 → 收起來
+	send(`act click ${I.tab.x - 2},${I.tab.y + Math.round(I.tab.h / 2)}`);
+	await sleep(1800);
 	const egg = await info();
-	await check("點收合鈕：收成蛋", () => assert.equal(egg.collapsed, 1, egg.raw));
-	send("act unegg");
+	await check("點收合鈕旁邊（點擊範圍裡、按鈕外）：收起來", () => assert.equal(egg.collapsed, 1, egg.raw));
+	await sleep(1200);
+	await check("收起來是" + (wb ? "小書包" : "小紙箱") + "（mini.png，大小＝2x 圖 × S/8），在櫃子右下角", () => {
+		const m = egg.mini;
+		assert.ok(m, egg.raw);
+		assert.equal(m.art, 1, egg.raw);
+		assert.equal(m.name, wb ? "小書包" : "小紙箱", egg.raw);
+		assert.equal(m.w, Math.floor(MINI2.w * egg.S / 8 + 0.5), egg.raw);
+		assert.equal(m.h, Math.floor(MINI2.h * egg.S / 8 + 0.5), egg.raw);
+		assert.ok(m.x + m.w <= egg.x + egg.w && m.y + m.h <= egg.y + egg.h && m.x > egg.x + egg.w / 2, egg.raw);
+	});
+	const mini = await snap("shelf-mini", { x: egg.mini.x - 8, y: egg.mini.y - 8, w: egg.mini.w + 16, h: egg.mini.h + 10 });
+	await check("收起來的圖畫出來了（大部分不是桌布）", () => {
+		const m = egg.mini, n = count(mini, m.x - 8, m.y - 8, m, notDesk);
+		assert.ok(n > m.w * m.h * 0.6, "只有 " + n + " / " + m.w * m.h);
+	});
+	send("act dark");
 	await sleep(1500);
+	await snap("shelf-mini-night", { x: egg.mini.x - 8, y: egg.mini.y - 8, w: egg.mini.w + 16, h: egg.mini.h + 10 });
+	send("act light");
+	await sleep(800);
+	// 整櫃模式：左鍵點收起來的小紙箱／小書包＝打開櫃子（不是叫公仔出來）
+	send(`act click ${egg.mini.x + Math.round(egg.mini.w / 2)},${egg.mini.y + Math.round(egg.mini.h / 2)}`);
+	await sleep(1800);
 	const back = await info();
-	await check("再打開：櫃子回來", () => assert.equal(back.collapsed, 0, back.raw));
+	pos = await where();
+	await check("左鍵點收起來的" + (wb ? "小書包" : "小紙箱") + "：櫃子打開、沒有公仔被叫出來", () => {
+		assert.equal(back.collapsed, 0, back.raw);
+		assert.deepEqual(Object.keys(pos), [], JSON.stringify(pos));
+	});
+	await sleep(1500);
+	await snap("shelf-reopened", area);
 
 	const bad = results.filter((r) => !r[0]);
 	console.log(`\n${results.length - bad.length}/${results.length} passed`);

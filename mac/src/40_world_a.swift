@@ -206,7 +206,7 @@ extension World {
         nightChecked = DateTime.Now.Minute
         shelf = ShelfForm(self, S)
         shelf.Night = Night
-        shelf.Collapsed = Single || World.ReadText("shelf-state.txt") == "egg"   // 只要一隻：沒有櫃子，蛋就是家
+        shelf.Collapsed = Single || World.ReadText("shelf-state.txt") == "egg"   // 只要一隻：沒有櫃子，收起來的小紙箱就是家
         if shelf.Collapsed { shelf.SnapFold() }
         shelf.Place(ShelfWA())
         lastT = clock.Elapsed.TotalSeconds; Now = lastT
@@ -1053,7 +1053,7 @@ extension World {
             m.Items.Add("全部回櫃子", nil, { self.AllHome() })
             m.Items.Add(favPin == p.P.Id ? "取消最愛" : "設為最愛 ★", nil, { self.SetFav(p) })
         }
-        m.Items.Add(Single ? "回蛋裡待著" : "回櫃子裡待著", nil, { p.StowToShelf(true) })
+        m.Items.Add(Single ? "回" + MiniName + "裡待著" : "回櫃子裡待著", nil, { p.StowToShelf(true) })
         m.Items.Add("躲起來（⌃⌥S）", nil, { self.ToggleHide() })
         m.Items.Add(ToolStripSeparator())
         m.Items.Add("收工（關掉 Desk Pals）", nil, { self.QuitAll() })
@@ -1079,17 +1079,20 @@ extension World {
         items.Add(q)
     }
 
-    // 收合成蛋／打開公仔櫃
+    // 收起公仔櫃（變成小紙箱／小書包）／打開公仔櫃（shelf-state.txt 的值沿用以前的 egg／open）
     func ToggleEgg(_ collapse: Bool) {
         if shelf.Collapsed == collapse { return }
-        if Single && !collapse { Lead().Say("現在是「只要一隻」，蛋就是我家～（小屋 → 重新設定 可以換）", 3); return }
+        if Single && !collapse { Lead().Say("現在是「只要一隻」，" + MiniName + "就是我家～（小屋 → 重新設定 可以換成整櫃）", 3); return }
         shelf.Collapsed = collapse
         World.WriteText("shelf-state.txt", collapse ? "egg" : "open")
         let l: Pet = Lead()
-        if collapse { l.Say(Pick2("公仔櫃收起來囉～變成一顆蛋 🥚", "收合！大家住進蛋裡"), 1.8) }
-        else { l.Say(Pick2("蛋打開了！公仔櫃登場 ✨", "喀啦喀啦～櫃子打開囉"), 1.8) }
+        if collapse { l.Say(Pick2("公仔櫃收起來囉～變成" + MiniName + " 📦", "收合！大家住進" + MiniName + "裡"), 1.8) }
+        else { l.Say(Pick2("打開了！公仔櫃登場 ✨", "喀啦喀啦～櫃子打開囉"), 1.8) }
         RenderShelf()
     }
+    // 收起來叫什麼（選單、泡泡用）：紙箱櫃＝小紙箱、書包小屋＝小書包
+    var MiniName: String { return shelf != nil ? shelf.Kit.MiniName : "小紙箱" }
+    var MenuFold: String { return "收起公仔櫃（變成" + MiniName + "）" }
     func Pick2(_ a: String, _ b: String) -> String { return rnd.NextDouble() < 0.5 ? a : b }
 
     // 蛋上的小紅點：專注／安靜時存著的通知，加上 10 分鐘內要到的提醒、搶票
@@ -1164,7 +1167,7 @@ extension World {
             m.Items.Add(ToolStripSeparator())
         }
         if PikLineup { m.Items.Add("休息花：還能撐多久？🌸", nil, { self.FlowerClicked() }) }   //@fan
-        m.Items.Add(shelf.Collapsed ? "打開公仔櫃" : "收合成蛋 🥚", nil, { self.ToggleEgg(!self.shelf.Collapsed) })
+        m.Items.Add(shelf.Collapsed ? "打開公仔櫃" : MenuFold, nil, { self.ToggleEgg(!self.shelf.Collapsed) })
         m.Items.Add("全部放出來", nil, { self.AllOut() })
         m.Items.Add("全部回櫃子", nil, { self.AllHome() })
         let help = ToolStripMenuItem("小幫手（專注、安靜、提醒）")
@@ -1335,6 +1338,10 @@ extension World {
             let si: String = shelf == nil ? "" : shelf.Info()
             let mk: Bool = maker != nil && !maker.IsDisposed && maker.VVisible
             World.Send(c, si + "maker " + (mk ? "1" : "0") + "\nend\n")
+        case "mode-info":   // 測試用（test/desktop-egg.js）
+            let md: String = Single ? "single " + SinglePet() : "shelf -"
+            let col: String = shelf != nil && shelf.Collapsed ? "1" : "0", prof: String = File.Exists(World.FilePath("profile.txt")) ? "1" : "0", hint: String = World.ReadText("egg-hint.txt") == "" ? "0" : "1"
+            World.Send(c, "mode " + md + " collapsed=" + col + " profile=" + prof + " hint=" + hint + "\nend\n")
         case "setup-info":   // 測試用（test/desktop-woban.js）：設定視窗現在有哪些按鈕
             let sv: Bool = setupForm != nil && !setupForm.IsDisposed && (setupForm.VVisible || setupForm.Visible)
             World.Send(c, (sv ? setupForm.Info() : "setup none\n") + "end\n")
@@ -1398,6 +1405,10 @@ extension World {
         case "lunch": forceLunch = 1; LunchTick(true); return
         case "egg": ToggleEgg(true); return
         case "unegg": ToggleEgg(false); return
+        case "shelfhover":   // 測試用：滑鼠移到櫃子上的這一點
+            let q = arg.components(separatedBy: ",")
+            if shelf != nil, q.count == 2, let hx = Int(q[0]), let hy = Int(q[1]) { shelf.SimHover(Point(hx, hy)) }
+            return
         case "lunchnap": forceLunch = 2; LunchTick(true); return
         case "lunchsoon": forceLunch = -1; LunchState = "nap"; for x in OutPets() { x.WakeIfSleep() }; LunchState = "soon"; Lead().Say("午休快結束囉～", 3); return
         case "lunchend": forceLunch = 0; LunchTick(true); return

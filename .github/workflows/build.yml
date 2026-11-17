@@ -313,6 +313,12 @@ jobs:
           mkdir -p public-shots/store
           node test/desktop-store.js "$RUNNER_TEMP/dps" "$RUNNER_TEMP/dps-pub" public-shots/store public mac -- build/public/extension/desktop/DeskPals {ep} "" ""
           node test/desktop-store.js "$RUNNER_TEMP/dpsp" "$RUNNER_TEMP/dps-per" "$RUNNER_TEMP/dps-per-shots" personal mac -- extension/desktop/DeskPals {ep} "" ""
+      # 公仔櫃收起來（小紙箱）：沒有 mode.txt＝整櫃、存過 mode.txt 的照舊、左鍵點小紙箱（整櫃＝打開櫃子；只要一隻＝叫他出來＋第一次說明）
+      - name: Egg test (shelf by default, left-click the collapsed box; public + personal)
+        run: |
+          mkdir -p public-shots/egg
+          node test/desktop-egg.js "$RUNNER_TEMP/dpe" "$RUNNER_TEMP/dpe-pub" public-shots/egg -- build/public/extension/desktop/DeskPals {ep} duoduo original
+          node test/desktop-egg.js "$RUNNER_TEMP/dpep" "$RUNNER_TEMP/dpe-per" "$RUNNER_TEMP/dpe-per-shots" -- extension/desktop/DeskPals {ep} duoduo original
       # ---------- standalone Desk Pals.app / DMG ----------
       - name: Developer ID certificate (only if the secrets exist)
         env:
@@ -530,6 +536,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "store test failed (public)" }
           node test/desktop-store.js desk-pals-storep "$env:RUNNER_TEMP\dps-per" "$env:RUNNER_TEMP\dps-per-shots" personal win-vscode -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File $per -PipeName "{ep}"
           if ($LASTEXITCODE -ne 0) { throw "store test failed (personal)" }
+      # 公仔櫃收起來（小紙箱）：沒有 mode.txt＝整櫃、存過 mode.txt 的照舊、左鍵點小紙箱（整櫃＝打開櫃子；只要一隻＝叫他出來＋第一次說明）
+      - name: Egg test (shelf by default, left-click the collapsed box; public + personal, desk-pals.ps1)
+        shell: powershell
+        run: |
+          $pub = (Resolve-Path "build\public\extension\desktop\desk-pals.ps1").Path
+          $per = (Resolve-Path "extension\desktop\desk-pals.ps1").Path
+          New-Item -ItemType Directory -Force public-ps1-shots\egg | Out-Null
+          node test/desktop-egg.js desk-pals-egg "$env:RUNNER_TEMP\dpe-pub" public-ps1-shots\egg -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File $pub -PipeName "{ep}" -Pet duoduo -Lineup original
+          if ($LASTEXITCODE -ne 0) { throw "egg test failed (public)" }
+          node test/desktop-egg.js desk-pals-eggp "$env:RUNNER_TEMP\dpe-per" "$env:RUNNER_TEMP\dpe-per-shots" -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File $per -PipeName "{ep}" -Pet duoduo -Lineup original
+          if ($LASTEXITCODE -ne 0) { throw "egg test failed (personal)" }
       # 續命小隊（躲躲、沒電、刺刺）：圖讀得到（VS Code 的 desk-pals.ps1 路徑）、沒電的液面跟 levels.json 一樣、電量改顏色、舊的像素版資料轉過去
       - name: Squad test (public, desk-pals.ps1)
         shell: powershell

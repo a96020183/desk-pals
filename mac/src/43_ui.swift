@@ -6,7 +6,7 @@ import AppKit
 //@@IN World
     let feats = Dict<String, Bool>()
     // ---- 設定過了沒（profile.txt）、擺法（mode.txt：shelf｜single <id>）----
-    var Single = false                            // 只要一隻：沒有櫃子，那隻的家是蛋，其他隻不出來
+    var Single = false                            // 只要一隻：沒有櫃子，那隻的家是收起來的小紙箱（以前是蛋），其他隻不出來
     var singleId = ""
     // ---- 設定視窗 ----
     var setupForm: SetupForm! = nil
@@ -60,7 +60,7 @@ extension World {
 
     func LoadMode() {
         var m = World.ReadText("mode.txt")
-        if m == "" && !File.Exists(World.FilePath("profile.txt")) { m = "single" }   // 第一次（還沒設定）：預設只要一隻
+        if m == "" { m = "shelf" }   // 沒有 mode.txt（設定精靈沒按完、或是舊版）＝整櫃。以前沒設定完預設「只要一隻」，結果有人一直不知道有櫃子；存過 mode.txt 的照舊
         Single = m.StartsWith("single")
         singleId = Single && m.Length > 6 ? m.Substring(6).Trim() : ""
     }
@@ -68,12 +68,17 @@ extension World {
     // 只要一隻的那隻（換到沒有他的那一櫃：用那一櫃預設的那隻）
     func SinglePet() -> String { return Get(singleId) != nil ? singleId : defaultPet }
 
-    // 只要一隻：點蛋＝叫他出來／回蛋裡
+    // 只要一隻：點收起來的小紙箱＝叫他出來／回去。第一次點：說明一下（整櫃模式點小紙箱是打開櫃子，這裡不一樣）
     func EggClick() {
         let p: Pet! = Get(SinglePet())
         if p == nil { return }
+        let hint = World.ReadText("egg-hint.txt") == ""
         if p.Out { if p.state != "stowfly" && p.state != "enter" && p.state != "exit" { p.StowToShelf(true) } }
         else { BringOut(p, true) }
+        if !hint { return }
+        World.WriteText("egg-hint.txt", "1")
+        App.Log("egg: first click hint (single)")
+        Later(1.6) { let who: Pet = p.Out ? p : self.Lead(); who.Say("點" + self.MiniName + "叫我出來、再點一下回去～要整櫃：右鍵 → 重新設定", 6) }
     }
 
     // ---- 公仔小屋選單：開關＋小幫手＋公仔們 ----
@@ -98,9 +103,9 @@ extension World {
         m.Items.Add(help)
         m.Items.Add(ToolStripSeparator())
         m.Items.Add(ToolStripLabel(Single ? "我的公仔" : "公仔們"))
-        if !Single { m.Items.Add(shelf.Collapsed ? "打開公仔櫃" : "收合成蛋 🥚", nil, { self.ToggleEgg(!self.shelf.Collapsed) }) }
+        if !Single { m.Items.Add(shelf.Collapsed ? "打開公仔櫃" : MenuFold, nil, { self.ToggleEgg(!self.shelf.Collapsed) }) }
         m.Items.Add(Single ? "叫" + Get(SinglePet()).P.Name + "出來" : "全部出來", nil, { self.AllOut() })
-        m.Items.Add(Single ? "回蛋裡" : "全部回家", nil, { self.AllHome() })
+        m.Items.Add(Single ? "回" + MiniName + "裡" : "全部回家", nil, { self.AllHome() })
         let sw = ToolStripMenuItem("換一櫃")
         for lu in Pal.LineupsNow() {
             let l2 = lu
@@ -133,7 +138,7 @@ extension World {
 
     func ShowSetup(_ first: Bool) {
         if setupForm == nil || setupForm.IsDisposed {
-            setupForm = SetupForm(self, first, lineup, Single || first, Single ? SinglePet() : "")
+            setupForm = SetupForm(self, first, lineup, Single, Single ? SinglePet() : "")   // 第一次也先選「整櫃」
         }
         let wa: Rectangle = App.Offscreen ? screens[0].WorkingArea : Screen.FromPoint(Cursor.Position).WorkingArea
         setupForm.Location = Point(wa.Left + (wa.Width - setupForm.Width) / 2, wa.Top + Math.Max(0, (wa.Height - setupForm.Height) / 2))
@@ -160,7 +165,7 @@ extension World {
             if lu != lineup { SwitchLineup(lu, pet) }
             else { let p: Pet! = Get(pet); if p != nil { SelectOnly(p) } }
             let sp: Pet! = Get(SinglePet())
-            if sp != nil { Later(1.6) { sp.Say("以後我住在右下角的蛋裡～點一下蛋就叫我 🥚", 3.5) } }
+            if sp != nil { Later(1.6) { sp.Say("以後我住在右下角的" + self.MiniName + "裡～點一下" + self.MiniName + "就叫我出來", 3.5) } }
         }
         else {
             if lu != lineup { SwitchLineup(lu, "") }
@@ -775,7 +780,7 @@ class SetupForm: Form {
         else {
             EnsurePics(lu)
             let cw = Sc(240), ch = Sc(116), gap = Sc(24), x0 = (W0 - 2 * cw - gap) / 2
-            Add("mode:single", "只要一隻", "沒有櫃子，他住在右下角的蛋裡", Rectangle(x0, top, cw, ch), 0, mode == "single")
+            Add("mode:single", "只要一隻", "沒有櫃子，他住在右下角的" + ShelfArt.For(lu).MiniName + "裡", Rectangle(x0, top, cw, ch), 0, mode == "single")
             Add("mode:shelf", lu == Pal.Pikmin ? "整櫃（三隻＋花）" : "整櫃", lu == Pal.Pikmin ? "三隻皮克敏和休息花住在櫃子裡" : "大家住在公仔櫃裡，點格子叫他們出來", Rectangle(x0 + cw + gap, top, cw, ch), 0, mode == "shelf")   //@fan
             // <public> Add("mode:shelf", "整櫃", "大家住在公仔櫃裡，點格子叫他們出來", Rectangle(x0 + cw + gap, top, cw, ch), 0, mode == "shelf")
             if mode == "single" {
@@ -872,7 +877,8 @@ class SetupForm: Form {
         Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.Right + 4 * U, pr.Y + plh / 2 - 2 * U, U)
         Steps(g, W0, Sc(68))
         let q = step == 0 ? "選你的公仔" : "怎麼擺？"
-        let hint = step == 0 ? "兩櫃原創公仔選一櫃，或用自己的照片做一隻（之後在小屋、選單都能換櫃）" : (mode == "single" ? "選一隻，他會住在右下角的蛋裡" : "公仔櫃放在右下角，點格子就叫他們出來")
+        let singleHint: String = "選一隻，他會住在右下角的" + ShelfArt.For(lu).MiniName + "裡"
+        let hint: String = step == 0 ? "兩櫃原創公仔選一櫃，或用自己的照片做一隻（之後在小屋、選單都能換櫃）" : (mode == "single" ? singleHint : "公仔櫃放在右下角，點格子就叫他們出來")
         TextRenderer.DrawText(g, q, qF, Rectangle(0, Sc(100), W0, Sc(30)), Pix.TextC, Pix.Mid)
         TextRenderer.DrawText(g, hint, subF, Rectangle(0, Sc(130), W0, Sc(18)), Pix.C(0x9A6338), Pix.Mid)
         if step == 0 {
@@ -996,6 +1002,14 @@ class SetupForm: Form {
                 g.DrawImage(pic, ix + (iconW - pw) / 2, r.Y + Sc(12), pw, ph)
                 g.InterpolationMode = im
             }
+        }
+        else if ShelfArt.For(lu).Mini(2, false) != nil {
+            let mi: Bitmap! = ShelfArt.For(lu).Mini(2, false)   // 收起來的小紙箱／小書包
+            let mh = Math.Min(r.Height - Sc(30), Sc(66)), mw = mi.Width * mh / mi.Height
+            let im = g.InterpolationMode
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic
+            g.DrawImage(mi, ix + (iconW - mw) / 2, r.Y + (r.Height - mh) / 2, mw, mh)
+            g.InterpolationMode = im
         }
         else {
             let pal = Dict<Character, Color>()

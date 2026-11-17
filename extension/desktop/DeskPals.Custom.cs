@@ -877,7 +877,8 @@ namespace DeskPals
                 for (int i = 0; i < n; i++)
                 {
                     int v = cuBuf[i], a = (v >> 24) & 255, r = (v >> 16) & 255, gg = (v >> 8) & 255, bb = v & 255;
-                    if (night && a > 0) { r = r * 58 / 100 + a * 5 / 255; gg = gg * 60 / 100 + a * 5 / 255; bb = bb * 78 / 100 + a * 18 / 255; }
+                    // 晚上：程式畫的公仔（有加白邊的）整隻暗下來偏藍；圖片公仔（續命小隊、窩伴小世界，圖本身有白邊或沒有邊）顏色照白天，只暗一點點，晚上靠動作、台詞
+                    if (night && a > 0) { if (ring) { r = r * 58 / 100 + a * 5 / 255; gg = gg * 60 / 100 + a * 5 / 255; bb = bb * 78 / 100 + a * 18 / 255; } else { r = r * 93 / 100; gg = gg * 93 / 100; bb = bb * 94 / 100; } }
                     if (ring && cuMask[i] != 0 && a < 255) { int inv = 255 - a; r += hr * inv / 255; gg += hg * inv / 255; bb += hb * inv / 255; a = 255; }
                     cuBuf[i] = (a << 24) | (Math.Min(255, r) << 16) | (Math.Min(255, gg) << 8) | Math.Min(255, bb);
                 }
