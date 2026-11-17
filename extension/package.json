@@ -1,8 +1,8 @@
 {
 	"name": "desk-pals",
 	"displayName": "公仔櫃 Desk Pals",
-	"description": "大學生桌面小夥伴：皮克敏陪你專注、喝水、安排課業與搶票提醒，也能使用 OpenAI API 聊聊。",
-	"version": "0.7.0",
+	"description": "大學生桌面小夥伴：皮克敏陪你專注、喝水、安排課業與搶票提醒，也能聊天和設計自己的公仔。",
+	"version": "0.8.0",
 	"publisher": "local",
 	"engines": {
 		"vscode": "^1.70.0"
