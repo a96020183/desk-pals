@@ -1,5 +1,8 @@
 // Desk Pals：搗蛋（四個惡作劇）——搶游標、下班清場、購物警察、打字太兇。會讓人想錄螢幕分享的那種瞬間。
-// 開關在公仔小屋 →「搗蛋（惡作劇開關）」（VS Code 設定 deskPals.mischief.* 有填的話以 VS Code 為準）；搶游標預設關著。
+// 開關在公仔小屋 →「搗蛋（惡作劇開關）」（VS Code 設定 deskPals.mischief.* 有填的話以 VS Code 為準）；搶游標、打字太兇預設關著。
+// 公開版（App.Public，上架／公開下載）：四個全部預設關；你在小屋第一次打開某一個時，先跳說明（MisAskForm：會做什麼、怎麼叫回來、
+//   不會記錄什麼），按「好，打開」才真的打開。打開過（或 VS Code 設定裡自己打開）的記在 mischief-consent.txt，之後不再問。
+//   舊使用者（這一版之前就裝了）第一次開這一版時照原本的開關狀態寫進去（原本開著的照開、也不再問），不會被打擾。個人版維持原樣。
 //
 // 安全（寫死的規則，測試也照這個驗）：
 // - 不關閉、不結束任何程式。下班清場只把視窗「縮小」（Mac：隱藏那個 App），點公仔／點泡泡／小屋選單一鍵全部叫回來；
@@ -245,6 +248,129 @@ namespace DeskPals
             foreach (MisWin m in Wins) sb.Append("win " + m.R.X + "," + m.R.Y + "," + m.R.Width + "," + m.R.Height + " min=" + (m.Min ? 1 : 0) + " " + m.Title + "\n");
             foreach (string c in Calls) sb.Append("call " + c + "\n");
             return sb.ToString();
+        }
+    }
+
+    // 公開版：搗蛋第一次打開前的說明（像素風，跟第一次設定視窗同一套）。按「好，打開」才打開；「先不要」、Esc、關掉視窗＝不打開
+    class MisAskForm : Form
+    {
+        readonly World w;
+        public readonly string Key;
+        readonly string name;
+        readonly string[][] parts;
+        readonly double d;
+        readonly int U;
+        readonly Font titleF, qF, headF, bodyF, btnF;
+        readonly Rectangle okR, noR;
+        string hoverId = "";
+        bool done;
+        public bool VVisible;
+
+        public MisAskForm(World w, string key, string name, string[][] parts)
+        {
+            this.w = w; Key = key; this.name = name; this.parts = parts;
+            d = w.S / 4.0;
+            U = Math.Max(2, (int)Math.Round(2 * d));
+            Text = "公仔櫃・搗蛋說明";
+            FormBorderStyle = FormBorderStyle.FixedSingle;
+            MaximizeBox = false; MinimizeBox = false;
+            ShowInTaskbar = true; TopMost = true;
+            StartPosition = FormStartPosition.Manual;
+            BackColor = Pix.Cream;
+            DoubleBuffered = true;
+            titleF = new Font("Microsoft JhengHei UI", 12f, FontStyle.Bold);
+            qF = new Font("Microsoft JhengHei UI", 15f, FontStyle.Bold);
+            headF = new Font("Microsoft JhengHei UI", 10f, FontStyle.Bold);
+            bodyF = new Font("Microsoft JhengHei UI", 10f, FontStyle.Regular);
+            btnF = new Font("Microsoft JhengHei UI", 11f, FontStyle.Bold);
+            ClientSize = new Size(Sc(540), Sc(500));
+            int by = ClientSize.Height - Sc(64), bh = Sc(44);
+            noR = new Rectangle(Sc(30), by, Sc(150), bh);
+            okR = new Rectangle(ClientSize.Width - Sc(30) - Sc(180), by, Sc(180), bh);
+            KeyPreview = true;
+            KeyDown += delegate(object s, KeyEventArgs e) { if (e.KeyCode == Keys.Escape) Press("no"); };
+            FormClosed += delegate { if (!done) { done = true; w.MisAskDone(this, false); } };   // 按右上角關掉＝先不要
+        }
+
+        int Sc(int v) { return (int)Math.Round(v * d); }
+
+        // ---- 離屏測試模式：不真的顯示，snap 時畫到虛擬螢幕上 ----
+        protected override void SetVisibleCore(bool value)
+        {
+            if (App.Offscreen) { VVisible = value; base.SetVisibleCore(false); return; }
+            base.SetVisibleCore(value);
+        }
+        public void PaintTo(Graphics g)
+        {
+            Size cs = ClientSize;
+            if (cs.Width <= 0 || cs.Height <= 0) return;
+            using (Bitmap b = new Bitmap(cs.Width, cs.Height, PixelFormat.Format24bppRgb))
+            {
+                using (Graphics gg = Graphics.FromImage(b)) OnPaint(new PaintEventArgs(gg, new Rectangle(0, 0, cs.Width, cs.Height)));
+                g.DrawImageUnscaled(b, Left, Top);
+            }
+        }
+
+        // ok＝好，打開；no＝先不要（滑鼠、Esc、測試的 act mischief consent:ok|no）
+        public void Press(string id)
+        {
+            if (done) return;
+            done = true;
+            Close();
+            w.MisAskDone(this, id == "ok");
+        }
+
+        string At(Point p) { return okR.Contains(p) ? "ok" : (noR.Contains(p) ? "no" : ""); }
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            string h = At(e.Location);
+            if (h != hoverId) { hoverId = h; Cursor = h != "" ? Cursors.Hand : Cursors.Default; Invalidate(); }
+        }
+        protected override void OnMouseLeave(EventArgs e) { base.OnMouseLeave(e); if (hoverId != "") { hoverId = ""; Invalidate(); } }
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            if (e.Button != MouseButtons.Left) return;
+            string h = At(e.Location);
+            if (h != "") Press(h);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.None;
+            int W0 = ClientSize.Width, H0 = ClientSize.Height, F = 4 * U, crown = Sc(56);
+            Pix.Wood(g, 0, 0, W0, H0, U, false, 23);
+            Pix.Panel(g, F, crown, W0 - 2 * F, H0 - crown - F, U, false);
+            string t = "搗蛋說明";
+            int tw = Pix.TextW(t, titleF), plw = tw + 14 * U, plh = Sc(34);
+            Pix.Plate(g, t, titleF, new Rectangle((W0 - plw) / 2, (crown - plh) / 2 + U / 2, plw, plh), U);
+            TextRenderer.DrawText(g, "打開「" + name + "」？", qF, new Rectangle(0, Sc(72), W0, Sc(32)), Pix.TextC, Pix.Mid);
+            int y = Sc(116);
+            foreach (string[] part in parts)
+            {
+                int hw = Pix.TextW(part[0], headF) + Sc(20);
+                Pix.Round(g, Pix.C(0x8A5A2A), Sc(34), y, hw, Sc(26), U);
+                Pix.Box(g, Pix.C(0xF6C453), Sc(34) + U, y + U, hw - 2 * U, Sc(26) - 2 * U);
+                TextRenderer.DrawText(g, part[0], headF, new Rectangle(Sc(34), y, hw, Sc(26)), Pix.TextC, Pix.Mid);
+                TextRenderer.DrawText(g, part[1], bodyF, new Rectangle(Sc(38), y + Sc(32), W0 - Sc(76), Sc(66)), Pix.TextC, TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+                y += Sc(104);
+            }
+            DrawButton(g, noR, "先不要", false, hoverId == "no");
+            DrawButton(g, okR, "好，打開", true, hoverId == "ok");
+        }
+
+        // 有厚度的像素按鈕（主要按鈕是蜂蜜色；跟設定視窗一樣）
+        void DrawButton(Graphics g, Rectangle r, string text, bool main, bool hot)
+        {
+            Color face = main ? (hot ? Pix.C(0xFFD36A) : Pix.C(0xF6C453)) : (hot ? Pix.C(0xFFF3D6) : Pix.C(0xFFFBF0));
+            Color shade = main ? Pix.C(0xC8902C) : Pix.C(0xDCC6A2);
+            Pix.Round(g, Pix.Ink, r.X, r.Y, r.Width, r.Height, U);
+            Pix.Box(g, face, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U);
+            Pix.Box(g, shade, r.X + U, r.Bottom - 3 * U, r.Width - 2 * U, 2 * U);
+            Pix.Box(g, Pix.Mix(face, Color.White, 0.6), r.X + 2 * U, r.Y + U, r.Width - 4 * U, U);
+            TextRenderer.DrawText(g, text, btnF, new Rectangle(r.X, r.Y, r.Width, r.Height - 2 * U), Pix.TextC, Pix.Mid);
         }
     }
 
@@ -568,7 +694,8 @@ namespace DeskPals
             new string[] { "mis_clear", "下班清場（把視窗推出螢幕）" },
             new string[] { "mis_shop", "購物警察（逛購物網站會哭）" },
             new string[] { "mis_typing", "打字太兇（會被震飛）" } };
-        static bool MisDefaultOff(string key) { return key == "mis_grab" || key == "mis_typing"; }   // 搶游標、打字太兇預設關
+        static bool MisDefaultOff(string key) { return key.StartsWith("mis_") && (App.Public || key == "mis_grab" || key == "mis_typing"); }   // 搶游標、打字太兇預設關；公開版四個都關
+        static bool MisOldDefaultOff(string key) { return key == "mis_grab" || key == "mis_typing"; }   // 這一版以前的預設（舊使用者照這個轉）
 
         // 購物網站：{ 顯示的名字, 視窗標題裡會出現的字… }（不分大小寫、不看空白；要加網站就加一行）
         public static readonly string[][] MisShops = {
@@ -700,6 +827,8 @@ namespace DeskPals
         int misBucket;
         double misBucketT;
         string misPending = ""; double misPendingT;     // 測試指令要演但公仔還在半空中：等一下再試
+        readonly HashSet<string> misAck = new HashSet<string>();   // 公開版：看過說明、自己打開過的搗蛋（mischief-consent.txt）
+        MisAskForm misAsk;                                         // 公開版：第一次打開時的說明視窗
         // 下班清場
         readonly List<MisWin> misPushed = new List<MisWin>();     // 縮小了的（還原用）
         readonly List<MisWin> misQueue = new List<MisWin>();
@@ -714,6 +843,7 @@ namespace DeskPals
             bool real = !App.Offscreen || Environment.GetEnvironmentVariable("DESKPALS_MISCHIEF_REAL") == "1";
             mis = real ? new MisSys() : new MisFake();
             MisLoad();
+            MisConsentLoad();
             App.Log("mischief: " + (real ? "real" : "fake") + " grab=" + (Feat("mis_grab") ? 1 : 0) + " clear=" + (Feat("mis_clear") ? 1 : 0)
                 + " shop=" + (Feat("mis_shop") ? 1 : 0) + " typing=" + (Feat("mis_typing") ? 1 : 0) + " grabmin=" + misGrabMin);
         }
@@ -747,10 +877,113 @@ namespace DeskPals
             WriteText("mischief.txt", "grabmin=" + misGrabMin + "\nclearday=" + misClearDay + "\nshopmonth=" + misShopMonth + "\nshopn=" + misShopN + "\n");
         }
 
+        // ---- 公開版：打開前先說明（mischief-consent.txt：第一行 v1，之後一行一個看過說明、打開過的開關）----
+        void MisConsentLoad()
+        {
+            misAck.Clear();
+            if (!App.Public) return;
+            string t = ReadText("mischief-consent.txt");
+            if (t != "")
+            {
+                foreach (string line in t.Split('\n')) { string k2 = line.Trim(); if (k2.StartsWith("mis_")) misAck.Add(k2); }
+                return;
+            }
+            // 第一次跑這一版：舊使用者（已經有設定）照原本的開關狀態寫死，原本開著的算你打開過（不再問）；全新安裝＝四個都關
+            bool old = File.Exists(FilePath("profile.txt")) || File.Exists(FilePath("features.txt")) || File.Exists(FilePath("out.txt"));
+            if (old)
+            {
+                foreach (string[] f in MisFeatureList)
+                {
+                    bool on;
+                    if (!feats.TryGetValue(f[0], out on)) on = !MisOldDefaultOff(f[0]);
+                    feats[f[0]] = on;
+                    if (on) misAck.Add(f[0]);
+                }
+                SaveFeatures();
+            }
+            MisConsentSave();
+            App.Log("mischief: consent " + (old ? "migrated" : "fresh") + " ack=" + MisAckList());
+        }
+        void MisConsentSave()
+        {
+            StringBuilder sb = new StringBuilder("v1\n");
+            foreach (string[] f in MisFeatureList) if (misAck.Contains(f[0])) sb.Append(f[0] + "\n");
+            WriteText("mischief-consent.txt", sb.ToString());
+        }
+        string MisAckList()
+        {
+            List<string> l = new List<string>();
+            foreach (string[] f in MisFeatureList) if (misAck.Contains(f[0])) l.Add(f[0].Substring(4));
+            return l.Count == 0 ? "-" : string.Join(",", l.ToArray());
+        }
+
+        // 小屋選單按搗蛋的開關（測試：act mischief toggle:grab|clear|shop|typing）：公開版第一次打開先跳說明
+        public void MisToggle(string key)
+        {
+            bool on = !Feat(key);
+            if (on && App.Public && !misAck.Contains(key)) { MisAskOpen(key); return; }
+            SetFeat(key, on);
+        }
+        void MisAskOpen(string key)
+        {
+            MisAskClose();
+            string name = key;
+            foreach (string[] f in MisFeatureList) if (f[0] == key) name = f[1];
+            int cut = name.IndexOf('（');
+            if (cut > 0) name = name.Substring(0, cut);
+            misAsk = new MisAskForm(this, key, name, MisAskText(key));
+            Rectangle wa = App.Offscreen ? screens[0].WorkingArea : Screen.FromPoint(Cursor.Position).WorkingArea;
+            misAsk.Location = new Point(wa.Left + (wa.Width - misAsk.Width) / 2, wa.Top + Math.Max(0, (wa.Height - misAsk.Height) / 2));
+            misAsk.Show();
+            App.Log("mischief: ask " + key);
+            if (App.Offscreen) return;
+            ActivateForm(misAsk);
+        }
+        void MisAskClose() { if (misAsk != null) { MisAskForm f = misAsk; misAsk = null; if (!f.IsDisposed) f.Close(); } }
+        // 說明視窗的按鈕（滑鼠、Esc、測試的 act mischief consent:ok|no）；ok＝好，打開
+        public void MisAskDone(MisAskForm f, bool ok)
+        {
+            if (f != misAsk) return;
+            string key = f.Key;
+            misAsk = null;   // 視窗自己已經關了
+            if (!ok) { App.Log("mischief: ask " + key + " declined"); return; }
+            misAck.Add(key);
+            MisConsentSave();
+            SetFeat(key, true);
+        }
+        // 每一種：會做什麼、怎麼停／怎麼叫回來、不會做的事
+        static string[][] MisAskText(string key)
+        {
+            switch (key)
+            {
+                case "mis_grab":
+                    return new string[][] {
+                        new string[] { "會做什麼", "滑鼠和鍵盤都沒動一陣子（預設 3 分鐘），公仔會跑來把滑鼠游標「叼走」，拖著移動一小段，最多幾秒。" },
+                        new string[] { "怎麼停", "你一動滑鼠或按任何鍵，他就立刻放手。全螢幕、簡報、分享螢幕、按著滑鼠鍵、躲起來時都不會開始。" },
+                        new string[] { "不會做的事", "只移動游標的位置：不會點任何東西、不會打字，也不記錄你在做什麼。" } };
+                case "mis_clear":
+                    return new string[][] {
+                        new string[] { "會做什麼", "平日 18:00 以後（一天一次），公仔把你最前面的幾個視窗（最多 3 個）縮小到工作列，演一段「推出螢幕」。動畫會在記憶體裡擷取那幾個視窗的畫面。" },
+                        new string[] { "怎麼叫回來", "點公仔或泡泡，或小屋選單「把推走的視窗叫回來」，一鍵全部回來；關掉 Desk Pals 前也會先全部叫回來。" },
+                        new string[] { "不會做的事", "不會關閉任何視窗或程式；擷取的畫面不存檔、不傳出去，演完就丟掉。" } };
+                case "mis_shop":
+                    return new string[][] {
+                        new string[] { "會做什麼", "會一直讀「最前面那個視窗的標題」，標題是購物網站時，公仔抱著錢包大哭（哭過 20 分鐘內不會再哭）。" },
+                        new string[] { "怎麼停", "回小屋選單把這個開關關掉就好。" },
+                        new string[] { "不會做的事", "視窗標題只在記憶體裡比對，不記錄、不存檔、不傳出去；只記「這個月哭了幾次」一個數字。" } };
+                default:
+                    return new string[][] {
+                        new string[] { "會做什麼", "連續好幾秒打字很快，公仔會被震飛再爬回來。為了知道你打多快，會在系統裡計算按鍵次數（鍵盤掛鉤，只在這個開關打開時才裝）。" },
+                        new string[] { "怎麼停", "回小屋選單把這個開關關掉，掛鉤馬上拿掉。全螢幕（遊戲）、躲起來時也不數。" },
+                        new string[] { "不會做的事", "只計算按鍵次數，不記錄按了哪個鍵，也不會傳出去。" } };
+            }
+        }
+
         // 開關改了（小屋＝你自己按的；VS Code 推的不算）
         void MisFeatChanged(string key, bool on, bool user)
         {
             if (!key.StartsWith("mis_") || mis == null) return;
+            if (on && App.Public && !misAck.Contains(key)) { misAck.Add(key); MisConsentSave(); }   // 自己打開的（VS Code 設定、測試指令）：之後不再問
             if (key == "mis_typing" && on && user) mis.AskKeyPermission();   // Mac：只在你自己打開時問一次「輸入監控」
             if (!on && MisKind != "" && "mis_" + MisKind == key) MisStop();
             misCheckT = 0;
@@ -791,6 +1024,10 @@ namespace DeskPals
                 case "cursor": case "grab": case "clear": case "shop": case "typing": misPending = arg; misPendingT = Now + 6; MisRunPending(); break;
                 case "restore": MisRestore(true); break;
                 case "stop": misPending = ""; MisStop(); break;
+                default:
+                    if (arg.StartsWith("toggle:")) { string fk = "mis_" + arg.Substring(7); foreach (string[] f in MisFeatureList) if (f[0] == fk) MisToggle(fk); }   // 測試：等於在小屋按這個開關
+                    else if (arg == "consent:ok" || arg == "consent:no") { if (misAsk != null) misAsk.Press(arg == "consent:ok" ? "ok" : "no"); }
+                    break;
             }
         }
 
@@ -857,7 +1094,8 @@ namespace DeskPals
             sb.Append("mischief backend=" + (mis.Fake ? "fake" : "real") + " kind=" + (MisKind == "" ? "-" : MisKind) + " grab=" + (Feat("mis_grab") ? 1 : 0) + " clear=" + (Feat("mis_clear") ? 1 : 0)
                 + " shop=" + (Feat("mis_shop") ? 1 : 0) + " typing=" + (Feat("mis_typing") ? 1 : 0) + " grabmin=" + misGrabMin + " pushed=" + misPushed.Count
                 + " form=" + (misForm != null ? 1 : 0) + " clearday=" + (misClearDay == "" ? "-" : misClearDay) + " shopn=" + misShopN + " notice=" + (current != null && current.Kind == "mis-restore" ? 1 : 0)
-                + " lead=" + (l != null ? l.P.Id + ":" + l.state + (l.MisBusy ? ":busy" : "") : "-") + "\n");
+                + " lead=" + (l != null ? l.P.Id + ":" + l.state + (l.MisBusy ? ":busy" : "") : "-")
+                + " edition=" + (App.Public ? "public" : "personal") + " ask=" + (misAsk != null ? misAsk.Key.Substring(4) : "-") + " ack=" + MisAckList() + "\n");
             sb.Append(mis.Dump());
             sb.Append("end\n");
             return sb.ToString();
@@ -1160,7 +1398,7 @@ namespace DeskPals
                 ToolStripMenuItem mi = new ToolStripMenuItem(f[1]);
                 mi.CheckOnClick = true;
                 mi.Checked = Feat(key);
-                mi.Click += delegate { SetFeat(key, !Feat(key)); mi.Checked = Feat(key); };
+                mi.Click += delegate { MisToggle(key); mi.Checked = Feat(key); };   // 公開版第一次打開：先跳說明
                 sub.DropDownItems.Add(mi);
             }
             ToolStripMenuItem gm = new ToolStripMenuItem("搶游標：滑鼠停多久（現在 " + misGrabMin + " 分）");
@@ -1192,6 +1430,8 @@ namespace DeskPals
                 }
             if (misForm != null && misForm.VVisible) misForm.PaintTo(g);
         }
+        // 說明視窗（離屏截圖畫在最上面）
+        void MisSnapAsk(Graphics g) { if (misAsk != null && !misAsk.IsDisposed && misAsk.VVisible) misAsk.PaintTo(g); }
         static readonly string[] MIS_ARROW = { "k.......", "kk......", "kwk.....", "kwwk....", "kwwwk...", "kwwwwk..", "kwwwwwk.", "kwwwkkkk", "kwkwk...", "kk.kwk..", "k...kwk.", "....kk.." };
         void MisSnapCursor(Graphics g)
         {

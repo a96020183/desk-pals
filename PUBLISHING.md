@@ -27,6 +27,10 @@ GitHub 的位置：repo →「Settings」→「Secrets and variables」→「Act
 | `APPLE_TEAM_ID` | Secret | 公證 | developer.apple.com →「Membership」的 Team ID（10 碼） |
 | `APPLE_APP_PASSWORD` | Secret | 公證 | appleid.apple.com →「登入與安全性」→「App 專用密碼」 |
 | `MAC_BUNDLE_ID` | Variable（可不設） | `.app` | 預設 `io.github.a96020183.deskpals`；要改就趁第一次正式發版前改（改了使用者要重新允許權限） |
+| `GA4_MEASUREMENT_ID` | Variable（可不設） | 公開版的匿名統計（exe、MSIX、安裝程式、vsix、`.app`） | GA4 →「管理 → 資料串流」→ 網頁串流的「評估 ID」（`G-` 開頭） |
+| `GA4_API_SECRET` | Secret（可不設） | 同上 | 同一個資料串流 →「Measurement Protocol API 密鑰」→ 建立 |
+
+**匿名統計**（只有公開版；個人版完全不送）：兩個都設了，打包時 `tools/variant.py` 會寫成 `pals/ga4.txt` 跟著 exe（內嵌）、vsix、`.app` 一起出去；沒設＝那一版不回報，程式裡沒有寫死任何 ID。只送 `lineup_pick`（第一次設定選了哪一櫃）和 `day7_active`（滿 7 天第一次打開時開著哪一櫃），每次的 client_id 都是新的亂數；小屋選單可以關。細節見 `extension/desktop/DeskPals.Stats.cs` 開頭，測試是 `test/desktop-store.js`（只送到本機假端點）。注意：api_secret 一定會跟著程式發出去（GA4 Measurement Protocol 的做法就是這樣），別人拿到可以往這個資料串流灌假資料，但看不到任何資料；被灌了就到 GA4 換一把新的密鑰。
 
 轉 base64：Windows PowerShell `[Convert]::ToBase64String([IO.File]::ReadAllBytes("cert.pfx")) | Set-Clipboard`；Mac `base64 -i cert.p12 | pbcopy`，貼進 Secret。
 
@@ -70,14 +74,15 @@ GitHub 的位置：repo →「Settings」→「Secrets and variables」→「Act
 4. **重新建置**：GitHub「Actions」→「build」→「Run workflow」（或推一個 commit）。從 Artifacts 的 `desk-pals-windows` 拿 `DeskPals-<版號>.msix`（公開版；**不要**用 `personal-build-windows` 裡的任何檔案）。建置記錄裡沒有出現「MSIX identity is a placeholder」就對了。
 5. **送審**（「開始提交」）：
    - **套件**：上傳 `.msix`。版本號來自 `extension/package.json`（`0.8.0` → `0.8.0.0`），每次送審都要比上一次大。
-   - **受限功能說明**（會問為什麼要 `runFullTrust`、`unvirtualizedResources`），可以照抄：
-     > Desk Pals is a classic Win32 (.NET Framework, WinForms) desktop companion that draws pixel characters on top of the user's desktop, so it needs runFullTrust. unvirtualizedResources (FileSystemWriteVirtualization disabled) is used so the Store version shares its settings folder %LOCALAPPDATA%\DeskPals with the same app installed through our VS Code extension; without it the user's characters and settings would be split into two copies. The app does not write anywhere else in AppData.
+   - **受限功能說明**（只剩 `runFullTrust`），可以照抄：
+     > Desk Pals is a classic Win32 (.NET Framework, WinForms) desktop companion that draws pixel characters on top of the user's desktop, so it needs runFullTrust. It does not require administrator rights and does not install drivers or services.
      
-     審核不給過 `unvirtualizedResources` 的話：把 AppxManifest 裡 `desktop6:FileSystemWriteVirtualization` 那行和 `unvirtualizedResources` 那行刪掉再建置。Store 版就改用自己的私人資料夾（VS Code 照樣連得上，只是設定各自一份）。
-   - **商店資訊（繁體中文）**：說明（README 開頭幾段可以用）、截圖至少一張（`docs/hero.png`、`docs/squad.png`、`docs/custom.png`；Store 要 1366×768 以上）、隱私權政策網址（公仔櫃不收集資料：照片、行事曆都只在本機處理——寫一頁說明放在 GitHub Pages 就可以）。
+     0.10.1 起**不再宣告** `unvirtualizedResources`（Store 很少核准）：Store 版在 `%LOCALAPPDATA%\DeskPals` 新建的檔案會放進它自己的私人資料夾（解除安裝時一起清掉），已經存在的檔案（VS Code 擴充套件那份）讀得到、改了會改原檔——所以設定大致上各自一份。VS Code 擴充套件改用 Store 版的執行別名 `%LOCALAPPDATA%\Microsoft\WindowsApps\DeskPals.exe` 判斷「裝了 Store 版」，照樣只連過去、不另外開一份、不建開機捷徑。Claude Code hooks 用的 `%LOCALAPPDATA%\DeskPals\claude-hook.js` 要靠 VS Code 擴充套件放（Store 版寫的那份只有它自己看得到）。
+   - **商店資訊（繁體中文）**：說明（README 開頭幾段可以用）、截圖至少一張（`docs/hero.png`、`docs/squad.png`、`docs/custom.png`；Store 要 1366×768 以上）、隱私權政策網址（照片、行事曆都只在本機處理；公開版另有可以關掉的匿名統計——政策裡要寫到，寫一頁說明放在 GitHub Pages 就可以）。
    - **年齡分級**：填問卷（沒有暴力、沒有使用者互動、沒有購買）。
    - **定價**：免費。
-6. Store 版的開機自動啟動是 MSIX 的 StartupTask（使用者第一次打開後生效，可在「設定 → 應用程式 → 啟動」關掉）。
+6. Store 版的開機自動啟動是 MSIX 的 StartupTask（第一次打開後生效）。第一次設定第二頁有「開機時自動出現」勾選（沒勾＝`StartupTask.Disable()`），之後小屋選單、「設定 → 應用程式 → 啟動」都能開關。「啟動」資料夾裡指著自家 `DeskPals.exe`／`desk-pals.ps1` 的舊捷徑會被拿掉（泡泡會說），別的捷徑不動。
+7. 公開版的搗蛋四個都預設關，第一次打開某一個時先跳說明（`DeskPals.Mischief.cs` 的 `MisAskForm`）；從舊版升級的使用者維持原本的開關。
 
 另一條路：Partner Center 也收「EXE／MSI 安裝程式」（直接上架 `DeskPals-Setup-<版號>.exe`），但那條**要先有程式碼簽章憑證**（下一段），而且更新要自己處理，所以先走 MSIX。
 

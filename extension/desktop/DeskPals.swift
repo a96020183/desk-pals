@@ -5746,6 +5746,10 @@ enum App {
     static let Offscreen = ProcessInfo.processInfo.environment["DESKPALS_OFFSCREEN"] == "1"
     // 測試用：離屏＋DESKPALS_ISOLATED=1 時不看真的視窗（不跳上你的視窗、你全螢幕也不會躲起來），截圖比較乾淨
     static let Isolated = Offscreen && ProcessInfo.processInfo.environment["DESKPALS_ISOLATED"] == "1"
+    // 公開版（上架、公開下載）＝true：搗蛋全部預設關＋第一次打開先說明、匿名回報（61_stats.swift）。個人版維持原樣、完全不回報
+    static let Public = false   // 個人版   //@fan
+    // <public> static let Public = true
+    // mac: C# 的 StartupState／StartupEnable／StartNote 是 Microsoft Store（MSIX）版的開機啟動，Mac 沒有（.app 用 LaunchAgent，95_standalone.swift）
 
     // mac: ~/Library/Logs/desk-pals.log
     static let LogPath: String = (NSHomeDirectory() as NSString).appendingPathComponent("Library/Logs/desk-pals.log")
@@ -10309,6 +10313,8 @@ final class World: Form {
     var misBucket = 0
     var misBucketT: Double = 0
     var misPending = ""; var misPendingT: Double = 0   // 測試指令要演但公仔還在半空中：等一下再試
+    let misAck = HashSet<String>()     // 公開版：看過說明、自己打開過的搗蛋（mischief-consent.txt）
+    var misAsk: MisAskForm! = nil      // 公開版：第一次打開時的說明視窗
     // 下班清場
     let misPushed = List<MisWin>()       // 縮小（mac：隱藏）了的（還原用）
     let misQueue = List<MisWin>()
@@ -10319,6 +10325,8 @@ final class World: Form {
     var misT: Double = 0, misJx0: Double = 0, misJy0: Double = 0, misJx1: Double = 0, misJy1: Double = 0
     // ---- from 60_woban.swift ----
     var wbWater: Double = 0
+    // ---- from 61_stats.swift ----
+    let statsState = Dict<String, String>()
 }
 
 extension World {
@@ -10393,6 +10401,7 @@ extension World {
         LoadState()
         LoadFeatures()
         MisStart()   // 搗蛋（59_mischief.swift）
+        StatsStart()   // 匿名回報：滿 7 天那次（61_stats.swift；個人版什麼都不做）
         LoadMode()
         SeasonNow = Season()
         Night = NightNow()
@@ -11566,7 +11575,7 @@ extension World {
                 }
             }
         case "quit": QuitAll()
-        default: if !MisMsg(c, p, line) && !OrigMsg(c, p, line) { StudyMsg(c, p, line) }   // mischief-…（59_mischief.swift）；course／exam／study-…（52_study.swift）
+        default: if !MisMsg(c, p, line) && !OrigMsg(c, p, line) && !StatsMsg(c, p, line) { StudyMsg(c, p, line) }   // mischief-…（59_mischief.swift）；stats-…（61_stats.swift）；course／exam／study-…（52_study.swift）
         }
     }
 
@@ -11631,6 +11640,7 @@ extension World {
         case "setup": if arg == "" { ShowSetup(false) } else if setupForm != nil && !setupForm.IsDisposed { setupForm.Press(arg) }; return
         case "feature": do { let q = arg.components(separatedBy: "="); if q.count == 2 { SetFeat(q[0], q[1] == "1") } }; return
         case "mischief": MisAct(arg); return   // 搗蛋：act mischief cursor|clear|shop|typing|restore|stop（59_mischief.swift）
+        case "stats": StatsAct(arg); return   // 匿名回報的開關：act stats 0|1（61_stats.swift）
         default: break
         }
         if target != nil && arg != "" { target!.Act(a) } else { l.Act(a) }
@@ -12500,6 +12510,7 @@ extension World {
         if flowerBub != nil && flowerBub.VVisible { flowerBub.PaintTo(g) }   //@fan
         if flash != nil && flash.VVisible { flash.PaintTo(g) }
         if setupForm != nil && !setupForm.IsDisposed && setupForm.VVisible { setupForm.PaintTo(g) }
+        MisSnapAsk(g)   // 搗蛋第一次打開的說明（公開版）
         StudySnap(g)
         CuSnap(g)
         if pmenu != nil && pmenu.VVisible { pmenu.PaintTo(g) }
@@ -14166,6 +14177,8 @@ extension World {
             m.Items.Add(mi)
         }
         MisHouseMenu(m)  // 搗蛋的開關、把推走的視窗叫回來（59_mischief.swift）
+        StatsHouseMenu(m)   // 匿名回報的開關（公開版、有 ID 才有；61_stats.swift）
+        // mac: C# 這裡還有 StartupHouseMenu（Microsoft Store 版的開機啟動），Mac 沒有
         m.Items.Add(ToolStripSeparator())
         let help = ToolStripMenuItem("小幫手（專注、安靜、提醒）")
         AddHelpers(help.DropDownItems)
@@ -14220,6 +14233,7 @@ extension World {
 
     // 設定好了：馬上套用（不用重開）
     func ApplySetup(_ lu0: String, _ single: Bool, _ pet: String, _ first: Bool) {
+        let firstPick = first && !File.Exists(World.FilePath("profile.txt"))   // 真的是第一次設定（匿名回報只算這一次）
         World.WriteText("profile.txt", "done")
         let lu = Pal.NormLineup(lu0)
         let wasSingle = Single
@@ -14227,6 +14241,7 @@ extension World {
         singleId = single ? pet : ""
         World.WriteText("mode.txt", single ? "single " + pet : "shelf")
         App.Log("setup lineup=" + lu + " mode=" + (single ? "single " + pet : "shelf"))
+        if firstPick { StatsPicked(lu) }   // 匿名回報 lineup_pick（公開版；61_stats.swift）
         if single {
             if !shelf.Collapsed { shelf.Collapsed = true; World.WriteText("shelf-state.txt", "egg") }
             if lu != lineup { SwitchLineup(lu, pet) }
@@ -14712,6 +14727,9 @@ class SetupForm: Form {
     var lu: String, mode: String, pet: String
     let btns = List<Btn>()
     var hoverId = ""
+    let statsNote: Bool                      // 第一頁最下面一行：匿名回報說明（公開版、有 ID、第一次）
+    // mac: C# 的 autoBox／autoOn（Microsoft Store 版第二頁「開機時自動出現」）Mac 沒有
+    static let StatsLine = "匿名回報你選了哪一櫃，幫我們決定下一櫃做什麼（小屋選單裡可以關）"
     var titleF: FontT! = nil, qF: FontT! = nil, bigF: FontT! = nil, subF: FontT! = nil, btnF: FontT! = nil
     let shelfPics = Dict<String, Bitmap>()
     let petPics = Dict<String, Bitmap>()
@@ -14757,6 +14775,7 @@ class SetupForm: Form {
         self.pet = pet ?? ""
         d = Double(w.S) / 4.0
         U = Math.Max(2, CInt(Math.Round(2 * d)))
+        statsNote = first && Stats.Available
         super.init()
         Text = first ? "歡迎來到公仔櫃" : "公仔櫃・重新設定"
         FormBorderStyle = FormBorderStyleT.FixedSingle
@@ -14771,7 +14790,8 @@ class SetupForm: Form {
         subF = FontT("Microsoft JhengHei UI", 9, FontStyle.Bold)
         btnF = FontT("Microsoft JhengHei UI", 11, FontStyle.Bold)
         if first { App.LogAlways("setup: first-run page, order " + featured.joined(separator: ",")) }
-        ClientSize = SizeT(Sc(620), Sc(MoreLineups().count > 0 ? 720 : 590))
+        let noteH: Int = statsNote ? Sc(26) : 0   // mac: 拆開寫（Swift 型別推斷）
+        ClientSize = SizeT(Sc(620), Sc(MoreLineups().count > 0 ? 720 : 590) + noteH)
         KeyPreview = true
         KeyDown = { [unowned self] (e: KeyEventArgs) in if e.KeyCode == Keys.Escape { self.Close() } }
         LayoutBtns()
@@ -14811,7 +14831,8 @@ class SetupForm: Form {
     // 這一步有哪些按鈕、擺在哪
     func LayoutBtns() {
         btns.Clear()
-        let W0 = ClientSize.Width, H0 = ClientSize.Height, top = Sc(154), bottom = H0 - Sc(72)
+        let noteH: Int = statsNote ? Sc(26) : 0
+        let W0 = ClientSize.Width, H0 = ClientSize.Height, top = Sc(154), bottom = H0 - Sc(72) - noteH
         if step == 0 {
             // 主打：兩櫃原創大大的二選一；下面：用自己的照片做一隻、匯入朋友的公仔；（個人版、做過公仔）再一排其他櫃
             let more = MoreLineups()
@@ -14871,7 +14892,8 @@ class SetupForm: Form {
     // 測試用（pipe「setup-info」）：第幾步、選了哪櫃、主打兩櫃的順序、每個按鈕（id x y 寬 高 選了沒 能不能按）
     func Info() -> String {
         var sb: String = "setup step=" + String(step) + " first=" + (first ? "1" : "0") + " lu=" + (lu == "" ? "-" : lu) + " mode=" + mode
-        sb += " w=" + String(ClientSize.Width) + " h=" + String(ClientSize.Height) + " featured=" + featured.joined(separator: ",") + "\n"
+        sb += " w=" + String(ClientSize.Width) + " h=" + String(ClientSize.Height) + " featured=" + featured.joined(separator: ",")
+        sb += " note=" + (statsNote ? "1" : "0") + "\n"
         for b in btns {
             let a: String = "btn " + b.Id + " " + String(b.R.X) + " " + String(b.R.Y) + " " + String(b.R.Width) + " " + String(b.R.Height)
             sb += a + " " + (b.On ? "1" : "0") + " " + (b.Enabled ? "1" : "0") + "\n"
@@ -14894,7 +14916,7 @@ class SetupForm: Form {
         else if id == "next" {
             if step < 1 { step += 1 }
             else {
-                if first { App.LogAlways("setup: first-run pick " + lu + " (" + mode + ", order " + featured.joined(separator: ",") + ")") }   // 只記在本機 log，不回報
+                if first { App.LogAlways("setup: first-run pick " + lu + " (" + mode + ", order " + featured.joined(separator: ",") + ")") }   // 本機 log；公開版另外匿名回報選了哪一櫃（61_stats.swift）
                 w.ApplySetup(lu, mode == "single", pet, first); Close(); return
             }
         }
@@ -14940,6 +14962,7 @@ class SetupForm: Form {
         if step == 0 {
             let mk = Find("make")
             if mk != nil && MoreLineups().count > 0 { TextRenderer.DrawText(g, "其他櫃：", btnF, Rectangle(Sc(32), mk!.R.Bottom + Sc(6), Sc(300), Sc(26)), Pix.TextC, Pix.LeftMid) }
+            if statsNote { TextRenderer.DrawText(g, SetupForm.StatsLine, subF, Rectangle(Sc(30), H0 - Sc(64) - Sc(28), W0 - Sc(60), Sc(22)), Pix.C(0x6A5A48), Pix.Mid) }
         }
         if step == 1 && mode == "single" {
             let first2 = Find("mode:shelf")
@@ -26282,6 +26305,7 @@ extension World {
 // - 打字太兇：低階鍵盤掛鉤 → 系統的「放開按鍵」計數器 CGEventSource.counterForEventType（只有次數，看不到哪個鍵）。
 //   macOS 可能要「輸入監控」權限：只在你自己從小屋打開開關時問一次（IOHIDRequestAccess）；沒權限數不到，就安靜地不觸發、不再彈窗。
 // - 購物警察：別的 App 的視窗標題要「螢幕錄影」權限才拿得到；沒有就只看得到 App 名稱（認不出購物網站，就不哭）。
+// - 公開版第一次打開的說明（MisAskForm）：下班清場、打字太兇的說明照 Mac 的做法寫（隱藏 App、不擷取畫面；系統按鍵計數＋輸入監控權限）。
 import Foundation
 import AppKit
 import IOKit.hid
@@ -26445,6 +26469,122 @@ final class MisFake: MisSys {
         }
         for c in Calls { sb.Append("call " + c + "\n") }
         return sb.ToString()
+    }
+}
+
+// 公開版：搗蛋第一次打開前的說明（像素風，跟第一次設定視窗同一套）。按「好，打開」才打開；「先不要」、Esc、關掉視窗＝不打開
+final class MisAskForm: Form {
+    let w: World
+    let Key: String
+    let name: String
+    let parts: [[String]]
+    let d: Double
+    let U: Int
+    var titleF: FontT! = nil, qF: FontT! = nil, headF: FontT! = nil, bodyF: FontT! = nil, btnF: FontT! = nil
+    var okR = Rectangle(0, 0, 0, 0)
+    var noR = Rectangle(0, 0, 0, 0)
+    var hoverId = ""
+    var done = false
+    var VVisible = false
+
+    init(_ w: World, _ key: String, _ name: String, _ parts: [[String]]) {
+        self.w = w; self.Key = key; self.name = name; self.parts = parts
+        d = Double(w.S) / 4.0
+        U = Math.Max(2, CInt(Math.Round(2 * d)))
+        super.init()
+        Text = "公仔櫃・搗蛋說明"
+        FormBorderStyle = FormBorderStyleT.FixedSingle
+        MaximizeBox = false; MinimizeBox = false
+        ShowInTaskbar = true; TopMost = true
+        StartPosition = FormStartPosition.Manual
+        BackColor = Pix.Cream
+        DoubleBuffered = true
+        titleF = FontT("Microsoft JhengHei UI", 12, FontStyle.Bold)
+        qF = FontT("Microsoft JhengHei UI", 15, FontStyle.Bold)
+        headF = FontT("Microsoft JhengHei UI", 10, FontStyle.Bold)
+        bodyF = FontT("Microsoft JhengHei UI", 10, FontStyle.Regular)
+        btnF = FontT("Microsoft JhengHei UI", 11, FontStyle.Bold)
+        ClientSize = SizeT(Sc(540), Sc(500))
+        let by = ClientSize.Height - Sc(64), bh = Sc(44)
+        noR = Rectangle(Sc(30), by, Sc(150), bh)
+        okR = Rectangle(ClientSize.Width - Sc(30) - Sc(180), by, Sc(180), bh)
+        KeyPreview = true
+        KeyDown = { [unowned self] (e: KeyEventArgs) in if e.KeyCode == Keys.Escape { self.Press("no") } }
+        FormClosed = { [weak self] in   // 按左上角關掉＝先不要
+            guard let me = self else { return }
+            if !me.done { me.done = true; me.w.MisAskDone(me, false) }
+        }
+    }
+
+    func Sc(_ v: Int) -> Int { return CInt(Math.Round(Double(v) * d)) }
+
+    // ---- 離屏測試模式：不真的顯示，snap 時畫到虛擬螢幕上 ----
+    override func SetVisibleCore(_ value: Bool) {
+        if App.Offscreen { VVisible = value; super.SetVisibleCore(false); return }
+        super.SetVisibleCore(value)
+    }
+    func PaintTo(_ g: Graphics) {
+        let cs = ClientSize
+        if cs.Width <= 0 || cs.Height <= 0 { return }
+        let b = Bitmap(cs.Width, cs.Height, PixelFormat.Format24bppRgb)
+        do { let gg = Graphics.FromImage(b); OnPaint(PaintEventArgs(gg, Rectangle(0, 0, cs.Width, cs.Height))) }
+        g.DrawImageUnscaled(b, Left, Top)
+    }
+
+    // ok＝好，打開；no＝先不要（滑鼠、Esc、測試的 act mischief consent:ok|no）
+    func Press(_ id: String) {
+        if done { return }
+        done = true
+        Close()
+        w.MisAskDone(self, id == "ok")
+    }
+
+    func At(_ p: Point) -> String { return okR.Contains(p) ? "ok" : (noR.Contains(p) ? "no" : "") }
+    override func OnMouseMove(_ e: MouseEventArgs) {
+        super.OnMouseMove(e)
+        let h = At(e.Location)
+        if h != hoverId { hoverId = h; Cursor = h != "" ? Cursors.Hand : Cursors.Default; Invalidate() }
+    }
+    override func OnMouseLeave(_ e: EventArgs) { super.OnMouseLeave(e); if hoverId != "" { hoverId = ""; Invalidate() } }
+    override func OnMouseUp(_ e: MouseEventArgs) {
+        super.OnMouseUp(e)
+        if e.Button != MouseButtons.Left { return }
+        let h = At(e.Location)
+        if h != "" { Press(h) }
+    }
+
+    override func OnPaint(_ e: PaintEventArgs) {
+        let g = e.Graphics
+        g.SmoothingMode = SmoothingMode.None
+        let W0 = ClientSize.Width, H0 = ClientSize.Height, F = 4 * U, crown = Sc(56)
+        Pix.Wood(g, 0, 0, W0, H0, U, false, 23)
+        Pix.Panel(g, F, crown, W0 - 2 * F, H0 - crown - F, U, false)
+        let t = "搗蛋說明"
+        let tw = Pix.TextW(t, titleF), plw = tw + 14 * U, plh = Sc(34)
+        Pix.Plate(g, t, titleF, Rectangle((W0 - plw) / 2, (crown - plh) / 2 + U / 2, plw, plh), U)
+        TextRenderer.DrawText(g, "打開「" + name + "」？", qF, Rectangle(0, Sc(72), W0, Sc(32)), Pix.TextC, Pix.Mid)
+        var y = Sc(116)
+        for part in parts {
+            let hw = Pix.TextW(part[0], headF) + Sc(20)
+            Pix.Round(g, Pix.C(0x8A5A2A), Sc(34), y, hw, Sc(26), U)
+            Pix.Box(g, Pix.C(0xF6C453), Sc(34) + U, y + U, hw - 2 * U, Sc(26) - 2 * U)
+            TextRenderer.DrawText(g, part[0], headF, Rectangle(Sc(34), y, hw, Sc(26)), Pix.TextC, Pix.Mid)
+            TextRenderer.DrawText(g, part[1], bodyF, Rectangle(Sc(38), y + Sc(32), W0 - Sc(76), Sc(66)), Pix.TextC, [TextFormatFlags.Left, TextFormatFlags.Top, TextFormatFlags.WordBreak, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix])
+            y += Sc(104)
+        }
+        DrawButton(g, noR, "先不要", false, hoverId == "no")
+        DrawButton(g, okR, "好，打開", true, hoverId == "ok")
+    }
+
+    // 有厚度的像素按鈕（主要按鈕是蜂蜜色；跟設定視窗一樣）
+    func DrawButton(_ g: Graphics, _ r: Rectangle, _ text: String, _ main: Bool, _ hot: Bool) {
+        let face: Color = main ? (hot ? Pix.C(0xFFD36A) : Pix.C(0xF6C453)) : (hot ? Pix.C(0xFFF3D6) : Pix.C(0xFFFBF0))
+        let shade: Color = main ? Pix.C(0xC8902C) : Pix.C(0xDCC6A2)
+        Pix.Round(g, Pix.Ink, r.X, r.Y, r.Width, r.Height, U)
+        Pix.Box(g, face, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U)
+        Pix.Box(g, shade, r.X + U, r.Bottom - 3 * U, r.Width - 2 * U, 2 * U)
+        Pix.Box(g, Pix.Mix(face, Color.White, 0.6), r.X + 2 * U, r.Y + U, r.Width - 4 * U, U)
+        TextRenderer.DrawText(g, text, btnF, Rectangle(r.X, r.Y, r.Width, r.Height - 2 * U), Pix.TextC, Pix.Mid)
     }
 }
 
@@ -26729,7 +26869,8 @@ extension World {
         ["mis_clear", "下班清場（把視窗推出螢幕）"],
         ["mis_shop", "購物警察（逛購物網站會哭）"],
         ["mis_typing", "打字太兇（會被震飛）"]]
-    static func MisDefaultOff(_ key: String) -> Bool { return key == "mis_grab" || key == "mis_typing" }   // 搶游標、打字太兇預設關
+    static func MisDefaultOff(_ key: String) -> Bool { return key.StartsWith("mis_") && (App.Public || key == "mis_grab" || key == "mis_typing") }   // 搶游標、打字太兇預設關；公開版四個都關
+    static func MisOldDefaultOff(_ key: String) -> Bool { return key == "mis_grab" || key == "mis_typing" }   // 這一版以前的預設（舊使用者照這個轉）
 
     // 購物網站：[ 顯示的名字, 視窗標題裡會出現的字… ]（不分大小寫、不看空白；要加網站就加一行）
     static let MisShops: [[String]] = [
@@ -26846,6 +26987,7 @@ extension World {
         let real = !App.Offscreen || ProcessInfo.processInfo.environment["DESKPALS_MISCHIEF_REAL"] == "1"
         mis = real ? MisSys() : (MisFake() as MisSys)
         MisLoad()
+        MisConsentLoad()
         App.Log("mischief: " + (real ? "real" : "fake") + MisFlags())
     }
 
@@ -26874,9 +27016,103 @@ extension World {
         World.WriteText("mischief.txt", "grabmin=" + String(misGrabMin) + "\nclearday=" + misClearDay + "\nshopmonth=" + misShopMonth + "\nshopn=" + String(misShopN) + "\n")
     }
 
+    // ---- 公開版：打開前先說明（mischief-consent.txt：第一行 v1，之後一行一個看過說明、打開過的開關）----
+    func MisConsentLoad() {
+        misAck.Clear()
+        if !App.Public { return }
+        let t = World.ReadText("mischief-consent.txt")
+        if t != "" {
+            for line in t.components(separatedBy: "\n") { let k2 = line.Trim(); if k2.StartsWith("mis_") { misAck.Add(k2) } }
+            return
+        }
+        // 第一次跑這一版：舊使用者（已經有設定）照原本的開關狀態寫死，原本開著的算你打開過（不再問）；全新安裝＝四個都關
+        let old = File.Exists(World.FilePath("profile.txt")) || File.Exists(World.FilePath("features.txt")) || File.Exists(World.FilePath("out.txt"))
+        if old {
+            for f in World.MisFeatureList {
+                var on = false
+                if !feats.TryGetValue(f[0], &on) { on = !World.MisOldDefaultOff(f[0]) }
+                feats[f[0]] = on
+                if on { misAck.Add(f[0]) }
+            }
+            SaveFeatures()
+        }
+        MisConsentSave()
+        App.Log("mischief: consent " + (old ? "migrated" : "fresh") + " ack=" + MisAckList())
+    }
+    func MisConsentSave() {
+        let sb = StringBuilder()
+        sb.Append("v1\n")
+        for f in World.MisFeatureList { if misAck.Contains(f[0]) { sb.Append(f[0] + "\n") } }
+        World.WriteText("mischief-consent.txt", sb.ToString())
+    }
+    func MisAckList() -> String {
+        var l: [String] = []
+        for f in World.MisFeatureList { if misAck.Contains(f[0]) { l.append(f[0].Substring(4)) } }
+        return l.count == 0 ? "-" : l.joined(separator: ",")
+    }
+
+    // 小屋選單按搗蛋的開關（測試：act mischief toggle:grab|clear|shop|typing）：公開版第一次打開先跳說明
+    func MisToggle(_ key: String) {
+        let on = !Feat(key)
+        if on && App.Public && !misAck.Contains(key) { MisAskOpen(key); return }
+        SetFeat(key, on)
+    }
+    func MisAskOpen(_ key: String) {
+        MisAskClose()
+        var name = key
+        for f in World.MisFeatureList { if f[0] == key { name = f[1] } }
+        let cut = name.IndexOf("（")
+        if cut > 0 { name = name.Substring(0, cut) }
+        let f = MisAskForm(self, key, name, World.MisAskText(key))
+        misAsk = f
+        let wa: Rectangle = App.Offscreen ? screens[0].WorkingArea : Screen.FromPoint(Cursor.Position).WorkingArea
+        f.Location = Point(wa.Left + (wa.Width - f.Width) / 2, wa.Top + Math.Max(0, (wa.Height - f.Height) / 2))
+        f.Show()
+        App.Log("mischief: ask " + key)
+        if App.Offscreen { return }
+        ActivateForm(f)
+    }
+    func MisAskClose() { if misAsk != nil { let f: MisAskForm = misAsk; misAsk = nil; if !f.IsDisposed { f.Close() } } }
+    // 說明視窗的按鈕（滑鼠、Esc、測試的 act mischief consent:ok|no）；ok＝好，打開
+    func MisAskDone(_ f: MisAskForm, _ ok: Bool) {
+        if misAsk == nil || f !== misAsk { return }
+        let key = f.Key
+        misAsk = nil   // 視窗自己已經關了
+        if !ok { App.Log("mischief: ask " + key + " declined"); return }
+        misAck.Add(key)
+        MisConsentSave()
+        SetFeat(key, true)
+    }
+    // 每一種：會做什麼、怎麼停／怎麼叫回來、不會做的事（mac: 下班清場、打字太兇照 Mac 的做法寫）
+    static func MisAskText(_ key: String) -> [[String]] {
+        switch key {
+        case "mis_grab":
+            return [
+                ["會做什麼", "滑鼠和鍵盤都沒動一陣子（預設 3 分鐘），公仔會跑來把滑鼠游標「叼走」，拖著移動一小段，最多幾秒。"],
+                ["怎麼停", "你一動滑鼠或按任何鍵，他就立刻放手。全螢幕、簡報、分享螢幕、按著滑鼠鍵、躲起來時都不會開始。"],
+                ["不會做的事", "只移動游標的位置：不會點任何東西、不會打字，也不記錄你在做什麼。"]]
+        case "mis_clear":
+            return [
+                ["會做什麼", "平日 18:00 以後（一天一次），公仔把你最前面的幾個 App（最多 3 個）隱藏起來，演一段「推出螢幕」。"],
+                ["怎麼叫回來", "點公仔或泡泡，或小屋選單「把推走的視窗叫回來」，一鍵全部回來；關掉 Desk Pals 前也會先全部叫回來。"],
+                ["不會做的事", "不會關閉任何視窗或 App，也不擷取畫面（動畫裡的視窗是畫出來的）。"]]
+        case "mis_shop":
+            return [
+                ["會做什麼", "會一直讀「最前面那個視窗的標題」，標題是購物網站時，公仔抱著錢包大哭（哭過 20 分鐘內不會再哭）。"],
+                ["怎麼停", "回小屋選單把這個開關關掉就好。"],
+                ["不會做的事", "視窗標題只在記憶體裡比對，不記錄、不存檔、不傳出去；只記「這個月哭了幾次」一個數字。"]]
+        default:
+            return [
+                ["會做什麼", "連續好幾秒打字很快，公仔會被震飛再爬回來。為了知道你打多快，會讀系統的按鍵計數（macOS 會問一次「輸入監控」權限）。"],
+                ["怎麼停", "回小屋選單把這個開關關掉就不再數。全螢幕（遊戲）、躲起來時也不數。"],
+                ["不會做的事", "只計算按鍵次數，不記錄按了哪個鍵，也不會傳出去。"]]
+        }
+    }
+
     // 開關改了（小屋＝你自己按的；VS Code 推的不算）
     func MisFeatChanged(_ key: String, _ on: Bool, _ user: Bool) {
         if !key.StartsWith("mis_") || mis == nil { return }
+        if on && App.Public && !misAck.Contains(key) { misAck.Add(key); MisConsentSave() }   // 自己打開的（VS Code 設定、測試指令）：之後不再問
         if key == "mis_typing" && on && user { mis.AskKeyPermission() }   // mac: 只在你自己打開時問一次「輸入監控」
         if !on && MisKind != "" && "mis_" + MisKind == key { MisStop() }
         misCheckT = 0
@@ -26912,7 +27148,9 @@ extension World {
         case "cursor", "grab", "clear", "shop", "typing": misPending = arg; misPendingT = Now + 6; MisRunPending()
         case "restore": MisRestore(true)
         case "stop": misPending = ""; MisStop()
-        default: break
+        default:
+            if arg.StartsWith("toggle:") { let fk = "mis_" + arg.Substring(7); for f in World.MisFeatureList { if f[0] == fk { MisToggle(fk) } } }   // 測試：等於在小屋按這個開關
+            else if arg == "consent:ok" || arg == "consent:no" { if misAsk != nil { misAsk.Press(arg == "consent:ok" ? "ok" : "no") } }
         }
     }
 
@@ -26984,7 +27222,10 @@ extension World {
         sb.Append(" pushed=" + String(misPushed.Count))
         sb.Append(" form=" + (misForm != nil ? "1" : "0"))
         sb.Append(" clearday=" + (misClearDay == "" ? "-" : misClearDay))
-        sb.Append(" shopn=" + String(misShopN) + " notice=" + notice + " lead=" + lead + "\n")
+        sb.Append(" shopn=" + String(misShopN) + " notice=" + notice + " lead=" + lead)
+        let ask: String = misAsk != nil ? misAsk.Key.Substring(4) : "-"
+        sb.Append(" edition=" + (App.Public ? "public" : "personal"))
+        sb.Append(" ask=" + ask + " ack=" + MisAckList() + "\n")
         sb.Append(mis.Dump())
         sb.Append("end\n")
         return sb.ToString()
@@ -27254,7 +27495,7 @@ extension World {
             let mi = ToolStripMenuItem(f[1])
             mi.CheckOnClick = true
             mi.Checked = Feat(key)
-            mi.Click = { [unowned mi] in self.SetFeat(key, !self.Feat(key)); mi.Checked = self.Feat(key) }
+            mi.Click = { [unowned mi] in self.MisToggle(key); mi.Checked = self.Feat(key) }   // 公開版第一次打開：先跳說明
             sub.DropDownItems.Add(mi)
         }
         let gm = ToolStripMenuItem("搶游標：滑鼠停多久（現在 " + String(misGrabMin) + " 分）")
@@ -27285,6 +27526,8 @@ extension World {
         }
         if misForm != nil && misForm.VVisible { misForm.PaintTo(g) }
     }
+    // 說明視窗（離屏截圖畫在最上面）
+    func MisSnapAsk(_ g: Graphics) { if misAsk != nil && !misAsk.IsDisposed && misAsk.VVisible { misAsk.PaintTo(g) } }
     static let MIS_ARROW = ["k.......", "kk......", "kwk.....", "kwwk....", "kwwwk...", "kwwwwk..", "kwwwwwk.", "kwwwkkkk", "kwkwk...", "kk.kwk..", "k...kwk.", "....kk.."]
     func MisSnapCursor(_ g: Graphics) {
         guard let fk = mis as? MisFake else { return }
@@ -27745,6 +27988,239 @@ extension World {
         At(11.6) { m.OPose("happy", 2.4); b.OPose("happy", 2.4); m.Say("好幸福的下午", 2) }
         At(14.0) { [self] in Face(b, m); b.ScenePose("hug", 2.4); m.ScenePose("hug", 2.4) }
         At(16.6) { }
+    }
+}
+
+// ===== 61_stats.swift =====
+// 61_stats.swift — port of DeskPals.Stats.cs（匿名回報：只有公開版；個人版 App.Public＝false，什麼都不送）
+// 只送 lineup_pick（第一次設定選了哪一櫃）、day7_active（滿 7 天第一次打開時開著哪一櫃，只一次）到 GA4 Measurement Protocol。
+// client_id 每次都是新的亂數（本機不存 ID）；ID 打包時注入 pals/ga4.txt（沒有＝停用）；送不出去就算了（不重試、不排隊、不卡畫面）。
+// 測試：DESKPALS_GA4_CONFIG＝另一份 ga4.txt、DESKPALS_GA4_URL＝假的端點（test/desktop-store.js）；離屏、CI 沒有假端點一律不送。
+// mac: HttpWebRequest → URLSession（ephemeral、5 秒逾時、不跟隨轉址）。URLSession 預設會帶 User-Agent（含 macOS 版本）和
+//   Accept-Language（你的語系）：這裡固定成 "DeskPals" 和 "*"，跟 Windows 一樣不帶系統資訊。Platform 一律 "mac"（.app、VS Code 擴充套件都是）。
+import Foundation
+import AppKit
+
+enum Stats {
+    static let DefaultUrl = "https://www.google-analytics.com/mp/collect"
+    static var Platform = "mac"
+    static var loaded = false
+    static var mid: String? = nil
+    static var secret: String? = nil
+    static var ver = ""
+
+    static func Matches(_ s: String, _ pattern: String) -> Bool { return s.range(of: pattern, options: .regularExpression) != nil }
+
+    // 打包時注入的 ID（pals/ga4.txt；測試可用 DESKPALS_GA4_CONFIG 指另一份）
+    static func Load() {
+        if loaded { return }
+        loaded = true
+        if !App.Public { return }
+        var text: String? = nil
+        let cfg: String = ProcessInfo.processInfo.environment["DESKPALS_GA4_CONFIG"] ?? ""
+        if !cfg.isEmpty { if File.Exists(cfg) { text = try? File.ReadAllText(cfg) } }
+        else { text = SqArt.ReadText("ga4.txt") }
+        guard let all = text else { return }
+        var m: String? = nil
+        var s: String? = nil
+        for line in all.components(separatedBy: "\n") {
+            let t: String = line.replacingOccurrences(of: "\u{FEFF}", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let eq = t.firstIndex(of: "=") else { continue }
+            if eq == t.startIndex { continue }
+            let k: String = String(t[t.startIndex..<eq]).trimmingCharacters(in: .whitespaces)
+            let v: String = String(t[t.index(after: eq)...]).trimmingCharacters(in: .whitespaces)
+            if k == "measurement_id" { m = v }
+            else if k == "api_secret" { s = v }
+            else if k == "version" { ver = v }
+        }
+        guard let mm = m, let ss = s, Matches(mm, "^G-[A-Z0-9]{4,20}$"), Matches(ss, "^[A-Za-z0-9_-]{8,64}$") else { App.Log("stats: ga4.txt incomplete, disabled"); return }
+        if !Matches(ver, "^[0-9A-Za-z.+-]{1,32}$") { ver = "unknown" }
+        mid = mm
+        secret = ss
+    }
+
+    // 這一份能回報嗎（公開版＋有 ID）
+    static var Available: Bool { Load(); return mid != nil }
+    static var AppVersion: String { Load(); return ver }
+
+    // 櫃的名字（只有這三種；其他一律 other）
+    static func LineupKey(_ lu: String) -> String {
+        if lu == Pal.Mine { return "custom" }
+        if lu == "original" || lu == "woban" { return lu }
+        return "other"
+    }
+
+    // 每次都是新的亂數（GA4 要的格式：數字.數字），不存。mac: SystemRandomNumberGenerator（系統的密碼學亂數）
+    static func NewClientId() -> String {
+        let a: UInt32 = UInt32.random(in: 0..<1000000000) + 100000000
+        let c: UInt32 = UInt32.random(in: 0..<1000000000) + 100000000
+        return String(a) + "." + String(c)
+    }
+
+    static func J(_ s: String) -> String {
+        var o = "\""
+        for u in s.unicodeScalars {
+            if u == "\"" || u == "\\" { o += "\\"; o.unicodeScalars.append(u) }
+            else if u.value < 0x20 { o += String(format: "\\u%04x", u.value) }
+            else { o.unicodeScalars.append(u) }
+        }
+        return o + "\""
+    }
+
+    // 要送的內容（全部就這些）
+    static func Payload(_ ev: String, _ lineup: String) -> String {
+        let a: String = "{\"client_id\":" + J(NewClientId()) + ",\"non_personalized_ads\":true,\"events\":[{\"name\":" + J(ev)
+        let b: String = ",\"params\":{\"lineup\":" + J(LineupKey(lineup)) + ",\"app_version\":" + J(AppVersion)
+        let c: String = ",\"platform\":" + J(Platform) + "}}]}"
+        return a + b + c
+    }
+
+    // 測試／CI 不能送到 Google：離屏模式、CI 上一定要指定假端點
+    static func Url() -> String? {
+        let env = ProcessInfo.processInfo.environment
+        let u: String = env["DESKPALS_GA4_URL"] ?? ""
+        if !u.isEmpty { return u }
+        let ci: Bool = !(env["GITHUB_ACTIONS"] ?? "").isEmpty || !(env["CI"] ?? "").isEmpty
+        if App.Offscreen || ci { return nil }
+        return DefaultUrl
+    }
+
+    final class NoRedirect: NSObject, URLSessionTaskDelegate {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
+    }
+    static let session: URLSession = {
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.timeoutIntervalForRequest = 5
+        cfg.timeoutIntervalForResource = 5
+        cfg.httpCookieStorage = nil
+        cfg.urlCache = nil
+        return URLSession(configuration: cfg, delegate: NoRedirect(), delegateQueue: nil)
+    }()
+
+    // 背景送一次；失敗就算了。回傳 false＝沒有送（沒有 ID、測試環境沒有假端點）
+    @discardableResult static func Send(_ ev: String, _ lineup: String) -> Bool {
+        if !Available { return false }
+        guard let base = Url() else { App.Log("stats: " + ev + " skipped (test environment)"); return false }
+        guard let m = mid, let s = secret else { return false }
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        let q: String = base.contains("?") ? "&" : "?"
+        let em: String = m.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
+        let es: String = s.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
+        let full: String = base + q + "measurement_id=" + em + "&api_secret=" + es
+        guard let url = URL(string: full) else { return false }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 5
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("DeskPals", forHTTPHeaderField: "User-Agent")
+        req.setValue("*", forHTTPHeaderField: "Accept-Language")
+        req.httpBody = Payload(ev, lineup).data(using: .utf8)
+        let task = session.dataTask(with: req) { _, resp, err in
+            if let h = resp as? HTTPURLResponse { App.Log("stats: " + ev + " sent (" + String(h.statusCode) + ")") }
+            else { let why: String = err != nil ? "error" : "no response"; App.Log("stats: " + ev + " not sent (" + why + ")") }
+        }
+        task.resume()
+        return true
+    }
+}
+
+
+extension World {
+    func StatsLoad() {
+        statsState.Clear()
+        for line in World.ReadText("anon-stats.txt").components(separatedBy: "\n") {
+            guard let eq = line.firstIndex(of: "=") else { continue }
+            if eq == line.startIndex { continue }
+            let k: String = String(line[line.startIndex..<eq]).trimmingCharacters(in: .whitespaces)
+            let v: String = String(line[line.index(after: eq)...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            statsState[k] = v
+        }
+    }
+    func StatsSave() {
+        let sb = StringBuilder()
+        for k in ["on", "installed", "pick", "day7"] {
+            var v = ""
+            if statsState.TryGetValue(k, &v) { sb.Append(k + "=" + v + "\n") }
+        }
+        World.WriteText("anon-stats.txt", sb.ToString())
+    }
+    func StatsGet(_ k: String) -> String { var v = ""; return statsState.TryGetValue(k, &v) ? v : "" }
+    var StatsOn: Bool { return Stats.Available && StatsGet("on") != "0" }
+
+    // mac: DateTime.ParseExact／ToString("yyyy-MM-dd") → DateFormatter（公曆、本地時間的那一天）
+    static func StatsFormatter() -> DateFormatter {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.calendar = Calendar(identifier: .gregorian)
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }
+
+    // Start 裡：滿 7 天後第一次打開 → day7_active（只送一次）
+    func StatsStart() {
+        if !App.Public { return }
+        StatsLoad()
+        if StatsGet("day7") != "" || StatsGet("pick") != "sent" { return }
+        guard let inst = World.StatsFormatter().date(from: StatsGet("installed")) else { return }
+        let cal = Calendar(identifier: .gregorian)
+        let days: Int = cal.dateComponents([.day], from: cal.startOfDay(for: inst), to: cal.startOfDay(for: Date())).day ?? 0
+        if days < 7 { return }
+        if StatsOn && !Stats.Send("day7_active", lineup) { return }   // 測試環境沒假端點：下次再看
+        statsState["day7"] = "done"
+        StatsSave()
+    }
+
+    // 第一次設定完成（ApplySetup）：記下日期、送 lineup_pick
+    func StatsPicked(_ lu: String) {
+        if !App.Public { return }
+        StatsLoad()
+        if StatsGet("installed") == "" { statsState["installed"] = World.StatsFormatter().string(from: Date()) }
+        if StatsGet("pick") == "" && StatsOn && Stats.Send("lineup_pick", lu) { statsState["pick"] = "sent" }
+        StatsSave()
+    }
+
+    // 小屋的開關（有 ID 的公開版才有）
+    func StatsHouseMenu(_ m: ContextMenuStrip) {
+        if !Stats.Available { return }
+        let mi = ToolStripMenuItem("匿名回報選了哪一櫃（幫我們決定下一櫃）")
+        mi.CheckOnClick = true
+        mi.Checked = StatsOn
+        mi.Click = { [unowned mi] in self.StatsSet(!self.StatsOn); mi.Checked = self.StatsOn }
+        m.Items.Add(mi)
+    }
+    func StatsSet(_ on: Bool) {
+        if !Stats.Available { return }
+        StatsLoad()
+        statsState["on"] = on ? "1" : "0"
+        StatsSave()
+        App.Log("stats: " + (on ? "on" : "off"))
+        Lead().Say(on ? "好～會匿名回報你選了哪一櫃" : "好～不回報了，什麼都不會送出去", 2)
+    }
+    func StatsAct(_ arg: String) { if arg == "0" || arg == "1" { StatsSet(arg == "1") } }
+
+    static func StatsDash(_ s: String) -> String { return s == "" ? "-" : s }
+
+    // 測試用：stats-dump、stats-payload <事件> <櫃>
+    func StatsMsg(_ c: Client, _ p: [String], _ line: String) -> Bool {
+        switch p[0] {
+        case "stats-dump":
+            StatsLoad()
+            // mac: 拆成好幾段（Swift 型別推斷吃不下一整串 + 和 ?:）
+            var s: String = "stats public=" + (App.Public ? "1" : "0")
+            s += " available=" + (Stats.Available ? "1" : "0")
+            s += " on=" + (StatsOn ? "1" : "0")
+            s += " installed=" + World.StatsDash(StatsGet("installed")) + " pick=" + World.StatsDash(StatsGet("pick")) + " day7=" + World.StatsDash(StatsGet("day7"))
+            let ver: String = Stats.Available ? Stats.AppVersion : "-"
+            s += " platform=" + Stats.Platform + " version=" + ver + "\nend\n"
+            World.Send(c, s)
+            return true
+        case "stats-payload":
+            let body: String = p.count >= 3 && Stats.Available ? Stats.Payload(p[1], p[2]) : "-"
+            World.Send(c, body + "\nend\n")
+            return true
+        default:
+            return false
+        }
     }
 }
 

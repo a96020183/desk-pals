@@ -15,6 +15,8 @@
 # 簽章（之後有憑證再開）：設了環境變數 DESKPALS_SIGN_PFX（.pfx 路徑）＋ DESKPALS_SIGN_PASSWORD 就會用 signtool 簽 exe、安裝程式（含解除安裝程式）；
 # 沒設就安靜略過。MSIX 一律不簽（上架時 Microsoft Store 會簽）。
 # MSIX 的身分（Partner Center 給的）：環境變數 MSIX_IDENTITY_NAME、MSIX_PUBLISHER、MSIX_PUBLISHER_DISPLAY_NAME；沒設＝佔位值（只能拿來檢查，不能上架）。
+# 匿名回報（只有公開版）：環境變數 GA4_MEASUREMENT_ID、GA4_API_SECRET（CI 的 repo variable／secret）→ tools/variant.py 寫成 pals\ga4.txt，
+#   跟其他 pals 檔一起內嵌進 exe（MSIX、安裝程式都是同一支 exe）。沒設＝這一版不回報（程式裡沒有寫死任何 ID）。
 param(
     [string[]]$Steps = @(),
     [string]$OutDir = "dist",
@@ -112,12 +114,20 @@ using System.Reflection;
 [assembly: AssemblyInformationalVersion("$Version")]
 "@
     [System.IO.File]::WriteAllText((Join-Path $Build "AssemblyInfo.g.cs"), $info, $utf8)
+    # Store 版的開機啟動（StartupTask）用 Windows 內建的 WinRT 中繼資料；找不到（很舊的 Windows）就不編那段
+    $winmd = Join-Path $env:WINDIR "System32\WinMetadata"
+    $facade = Join-Path (Split-Path $csc) "System.Runtime.dll"
+    $winrt = @()
+    if ((Test-Path "$winmd\Windows.ApplicationModel.winmd") -and (Test-Path "$winmd\Windows.Foundation.winmd") -and (Test-Path $facade)) {
+        $winrt = @("/r:$winmd\Windows.ApplicationModel.winmd", "/r:$winmd\Windows.Foundation.winmd", "/r:$facade")
+    } else { Write-Warning "WinMetadata not found: building without the Store startup switch (NO_WINRT)"; $winrt = @("/define:NO_WINRT") }
     $cscArgs = @(
         "/nologo", "/target:winexe", "/platform:anycpu", "/optimize+", "/codepage:65001", "/utf8output",
         "/out:$Exe",
         "/win32icon:$(Join-Path $Icons 'DeskPals.ico')",
         "/win32manifest:$(Join-Path $PSScriptRoot 'DeskPals.exe.manifest')",
-        "/r:System.Windows.Forms.dll", "/r:System.Drawing.dll", "/r:System.Web.Extensions.dll",
+        "/r:System.Windows.Forms.dll", "/r:System.Drawing.dll", "/r:System.Web.Extensions.dll"
+    ) + $winrt + @(
         (Join-Path $Build "DeskPals.all.cs"), (Join-Path $PSScriptRoot "DeskPals.Main.cs"), (Join-Path $Build "AssemblyInfo.g.cs")
     )
     # 續命小隊的圖（pals\squad\…）、紙箱櫃（pals\shelf\…）＋lineups.txt、窩伴小世界（pals\woban\…）放進 exe 的資源（名字＝pals/squad/<id>/<1x|2x>/<動作>.png、pals/shelf/<1x|2x>/box.png）：exe、安裝程式、MSIX 都不用另外帶檔案

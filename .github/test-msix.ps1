@@ -1,7 +1,9 @@
 # CI only (GitHub runner). Best-effort check that the MSIX really installs and runs:
 # sign a copy with a throw-away self-signed certificate whose subject = the manifest's Publisher, trust it,
 # Add-AppxPackage, start it through its execution alias (offscreen), check it answers on the pipe and wrote
-# standalone.json into the real %LOCALAPPDATA%\DeskPals (= unvirtualizedResources works), then remove it.
+# standalone.json — no unvirtualizedResources any more, so a new file lands in the package's private copy
+# (%LOCALAPPDATA%\Packages\<family>\LocalCache\Local\DeskPals) and the VS Code extension finds the Store app by its
+# execution alias instead — then remove it (Windows deletes the private copy with the package).
 # The real Store package is NOT signed by us — Microsoft signs it at submission.
 param([Parameter(Mandatory = $true)][string]$Msix)
 $ErrorActionPreference = "Stop"
@@ -39,9 +41,13 @@ $pipe = "desk-pals-msix"
 Start-Process $alias -ArgumentList "--pipe $pipe"
 node .github/ping.js $pipe quit
 Check ($LASTEXITCODE -eq 0) "packaged app answers on the pipe"
-$marker = Join-Path $env:LOCALAPPDATA "DeskPals\standalone.json"
-Check (Test-Path $marker) "packaged app wrote the real %LOCALAPPDATA%\DeskPals\standalone.json (unvirtualized)"
+$real = Join-Path $env:LOCALAPPDATA "DeskPals\standalone.json"
+$private = Join-Path $env:LOCALAPPDATA ("Packages\" + $pkg.PackageFamilyName + "\LocalCache\Local\DeskPals\standalone.json")
+$marker = @($private, $real) | Where-Object { Test-Path $_ } | Select-Object -First 1
+Check ($null -ne $marker) "packaged app wrote standalone.json ($marker)"
 Get-Content $marker
+Check (Test-Path $alias) "the VS Code extension can find the Store app by its execution alias"
+$realBefore = Test-Path $real
 Remove-AppxPackage -Package $pkg.PackageFullName
-Remove-Item $marker -Force
+if ($marker -eq $real -and $realBefore) { Remove-Item $real -Force }
 Write-Host "msix test OK"

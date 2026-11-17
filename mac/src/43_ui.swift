@@ -90,6 +90,8 @@ extension World {
             m.Items.Add(mi)
         }
         MisHouseMenu(m)  // 搗蛋的開關、把推走的視窗叫回來（59_mischief.swift）
+        StatsHouseMenu(m)   // 匿名回報的開關（公開版、有 ID 才有；61_stats.swift）
+        // mac: C# 這裡還有 StartupHouseMenu（Microsoft Store 版的開機啟動），Mac 沒有
         m.Items.Add(ToolStripSeparator())
         let help = ToolStripMenuItem("小幫手（專注、安靜、提醒）")
         AddHelpers(help.DropDownItems)
@@ -144,6 +146,7 @@ extension World {
 
     // 設定好了：馬上套用（不用重開）
     func ApplySetup(_ lu0: String, _ single: Bool, _ pet: String, _ first: Bool) {
+        let firstPick = first && !File.Exists(World.FilePath("profile.txt"))   // 真的是第一次設定（匿名回報只算這一次）
         World.WriteText("profile.txt", "done")
         let lu = Pal.NormLineup(lu0)
         let wasSingle = Single
@@ -151,6 +154,7 @@ extension World {
         singleId = single ? pet : ""
         World.WriteText("mode.txt", single ? "single " + pet : "shelf")
         App.Log("setup lineup=" + lu + " mode=" + (single ? "single " + pet : "shelf"))
+        if firstPick { StatsPicked(lu) }   // 匿名回報 lineup_pick（公開版；61_stats.swift）
         if single {
             if !shelf.Collapsed { shelf.Collapsed = true; World.WriteText("shelf-state.txt", "egg") }
             if lu != lineup { SwitchLineup(lu, pet) }
@@ -639,6 +643,9 @@ class SetupForm: Form {
     var lu: String, mode: String, pet: String
     let btns = List<Btn>()
     var hoverId = ""
+    let statsNote: Bool                      // 第一頁最下面一行：匿名回報說明（公開版、有 ID、第一次）
+    // mac: C# 的 autoBox／autoOn（Microsoft Store 版第二頁「開機時自動出現」）Mac 沒有
+    static let StatsLine = "匿名回報你選了哪一櫃，幫我們決定下一櫃做什麼（小屋選單裡可以關）"
     var titleF: FontT! = nil, qF: FontT! = nil, bigF: FontT! = nil, subF: FontT! = nil, btnF: FontT! = nil
     let shelfPics = Dict<String, Bitmap>()
     let petPics = Dict<String, Bitmap>()
@@ -684,6 +691,7 @@ class SetupForm: Form {
         self.pet = pet ?? ""
         d = Double(w.S) / 4.0
         U = Math.Max(2, CInt(Math.Round(2 * d)))
+        statsNote = first && Stats.Available
         super.init()
         Text = first ? "歡迎來到公仔櫃" : "公仔櫃・重新設定"
         FormBorderStyle = FormBorderStyleT.FixedSingle
@@ -698,7 +706,8 @@ class SetupForm: Form {
         subF = FontT("Microsoft JhengHei UI", 9, FontStyle.Bold)
         btnF = FontT("Microsoft JhengHei UI", 11, FontStyle.Bold)
         if first { App.LogAlways("setup: first-run page, order " + featured.joined(separator: ",")) }
-        ClientSize = SizeT(Sc(620), Sc(MoreLineups().count > 0 ? 720 : 590))
+        let noteH: Int = statsNote ? Sc(26) : 0   // mac: 拆開寫（Swift 型別推斷）
+        ClientSize = SizeT(Sc(620), Sc(MoreLineups().count > 0 ? 720 : 590) + noteH)
         KeyPreview = true
         KeyDown = { [unowned self] (e: KeyEventArgs) in if e.KeyCode == Keys.Escape { self.Close() } }
         LayoutBtns()
@@ -738,7 +747,8 @@ class SetupForm: Form {
     // 這一步有哪些按鈕、擺在哪
     func LayoutBtns() {
         btns.Clear()
-        let W0 = ClientSize.Width, H0 = ClientSize.Height, top = Sc(154), bottom = H0 - Sc(72)
+        let noteH: Int = statsNote ? Sc(26) : 0
+        let W0 = ClientSize.Width, H0 = ClientSize.Height, top = Sc(154), bottom = H0 - Sc(72) - noteH
         if step == 0 {
             // 主打：兩櫃原創大大的二選一；下面：用自己的照片做一隻、匯入朋友的公仔；（個人版、做過公仔）再一排其他櫃
             let more = MoreLineups()
@@ -798,7 +808,8 @@ class SetupForm: Form {
     // 測試用（pipe「setup-info」）：第幾步、選了哪櫃、主打兩櫃的順序、每個按鈕（id x y 寬 高 選了沒 能不能按）
     func Info() -> String {
         var sb: String = "setup step=" + String(step) + " first=" + (first ? "1" : "0") + " lu=" + (lu == "" ? "-" : lu) + " mode=" + mode
-        sb += " w=" + String(ClientSize.Width) + " h=" + String(ClientSize.Height) + " featured=" + featured.joined(separator: ",") + "\n"
+        sb += " w=" + String(ClientSize.Width) + " h=" + String(ClientSize.Height) + " featured=" + featured.joined(separator: ",")
+        sb += " note=" + (statsNote ? "1" : "0") + "\n"
         for b in btns {
             let a: String = "btn " + b.Id + " " + String(b.R.X) + " " + String(b.R.Y) + " " + String(b.R.Width) + " " + String(b.R.Height)
             sb += a + " " + (b.On ? "1" : "0") + " " + (b.Enabled ? "1" : "0") + "\n"
@@ -821,7 +832,7 @@ class SetupForm: Form {
         else if id == "next" {
             if step < 1 { step += 1 }
             else {
-                if first { App.LogAlways("setup: first-run pick " + lu + " (" + mode + ", order " + featured.joined(separator: ",") + ")") }   // 只記在本機 log，不回報
+                if first { App.LogAlways("setup: first-run pick " + lu + " (" + mode + ", order " + featured.joined(separator: ",") + ")") }   // 本機 log；公開版另外匿名回報選了哪一櫃（61_stats.swift）
                 w.ApplySetup(lu, mode == "single", pet, first); Close(); return
             }
         }
@@ -867,6 +878,7 @@ class SetupForm: Form {
         if step == 0 {
             let mk = Find("make")
             if mk != nil && MoreLineups().count > 0 { TextRenderer.DrawText(g, "其他櫃：", btnF, Rectangle(Sc(32), mk!.R.Bottom + Sc(6), Sc(300), Sc(26)), Pix.TextC, Pix.LeftMid) }
+            if statsNote { TextRenderer.DrawText(g, SetupForm.StatsLine, subF, Rectangle(Sc(30), H0 - Sc(64) - Sc(28), W0 - Sc(60), Sc(22)), Pix.C(0x6A5A48), Pix.Mid) }
         }
         if step == 1 && mode == "single" {
             let first2 = Find("mode:shelf")

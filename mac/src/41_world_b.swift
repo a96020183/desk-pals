@@ -859,6 +859,7 @@ extension World {
         if flowerBub != nil && flowerBub.VVisible { flowerBub.PaintTo(g) }   //@fan
         if flash != nil && flash.VVisible { flash.PaintTo(g) }
         if setupForm != nil && !setupForm.IsDisposed && setupForm.VVisible { setupForm.PaintTo(g) }
+        MisSnapAsk(g)   // 搗蛋第一次打開的說明（公開版）
         StudySnap(g)
         CuSnap(g)
         if pmenu != nil && pmenu.VVisible { pmenu.PaintTo(g) }

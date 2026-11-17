@@ -10,6 +10,8 @@
 # 其他：MAC_BUNDLE_ID（預設 io.github.a96020183.deskpals）、MAC_MIN_MACOS（預設 13.0：程式用到 macOS 13 的 API）
 # VARIANT=public（預設；公開下載、上架用：只有續命小隊＋自己做的公仔，tools/variant.py 產生並掃過同人字眼）
 #        personal（全部角色，含同人；自己用，不要公開）→ dist/DeskPals-<版號>-personal.dmg
+# 匿名回報（只有公開版）：GA4_MEASUREMENT_ID＋GA4_API_SECRET 有設的話，tools/variant.py public 會寫 pals/ga4.txt，
+#   跟著 pals 放進 .app 的 Contents/Resources/pals；沒設＝這個 .app 不回報（程式裡沒有寫死任何 ID）。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"

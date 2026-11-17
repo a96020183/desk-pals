@@ -9,6 +9,8 @@
                                                 擴充套件就直接執行它，不再用 PowerShell 即時編譯。一次只打一種版本（--public 或 --personal）。
                                                 沒有 --target＝通用版（Mac 用；不帶 exe，在 Windows 上會退回 desk-pals.ps1）。
 公開版是 tools/variant.py 從原始碼減掉同人角色產生的（build/public/extension），打包前、打包後都會掃一次同人字眼，有就失敗。
+公開版的匿名回報 ID：有設環境變數 GA4_MEASUREMENT_ID＋GA4_API_SECRET 就由 variant.build_public 寫進 desktop/pals/ga4.txt 一起打包
+（VS Code 擴充套件會把 pals 複製到桌面版旁邊；win32 版附的 exe 本身也內嵌了）；沒設＝這個 vsix 不回報。個人版不帶。
 """
 import json
 import os
