@@ -150,6 +150,7 @@ final class CuSprite
     // 身體的範圍（BodyTop／BodyH，stand 的不透明範圍；泡泡、櫃子高度用）、沒電的電量液體（Liquid）
     var AnchorX: Double = -1, AnchorY: Double = -1
     var NoHalo = false
+    var Shadow = false          // 腳下畫一層很淡的落地陰影（窩伴小世界：圖沒有白邊，淺色桌布上輪廓偏弱；<資料夾>.txt 的 shadow 1）
     var BodyTop = -1, BodyH = -1, BodyLeft = -1, BodyW = -1
     var Liquid: Dict<String, SqLiquid>! = nil
     var AX: Double { return AnchorX >= 0 ? AnchorX : Double(W) / 2.0 }
@@ -554,8 +555,8 @@ enum CuStore
 extension Pal
 {
     static let Mine = "mine"
-    static let Guests: [String] = ["duoduo", "meidian", "cici", "spidey", "po", "stitch", "hangyodon", "tinky", "dipsy", "laalaa"]   // 可以來我的櫃作客的內建公仔   //@fan
-    // <public> static let Guests: [String] = ["duoduo", "meidian", "cici"]
+    static let Guests: [String] = ["duoduo", "meidian", "cici", "fanfan", "bobo", "mian", "spidey", "po", "stitch", "hangyodon", "tinky", "dipsy", "laalaa"]   // 可以來我的櫃作客的內建公仔   //@fan
+    // <public> static let Guests: [String] = ["duoduo", "meidian", "cici", "fanfan", "bobo", "mian"]
 
     static func CuReset() { all = nil }
     static func GetBuiltin(_ id: String) -> Pal! { if all == nil { return nil }; for p in all! { if p.Id == id && !p.Cu { return p } }; return nil }

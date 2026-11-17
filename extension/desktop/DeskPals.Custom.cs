@@ -143,6 +143,7 @@ namespace DeskPals
         // 身體的範圍（BodyTop／BodyH，stand 的不透明範圍；泡泡、櫃子高度用）、沒電的電量液體（Liquid）
         public double AnchorX = -1, AnchorY = -1;
         public bool NoHalo;
+        public bool Shadow;          // 腳下畫一層很淡的落地陰影（窩伴小世界：圖沒有白邊，淺色桌布上輪廓偏弱；<資料夾>.txt 的 shadow 1）
         public int BodyTop = -1, BodyH = -1, BodyLeft = -1, BodyW = -1;
         public Dictionary<string, SqLiquid> Liquid;
         public double AX { get { return AnchorX >= 0 ? AnchorX : W / 2.0; } }
@@ -521,8 +522,8 @@ namespace DeskPals
         public CuMeta Meta;
         public CuSprite Spr;
         public const string Mine = "mine";
-        public static readonly string[] Guests = { "duoduo", "meidian", "cici", "spidey", "po", "stitch", "hangyodon", "tinky", "dipsy", "laalaa" };   // 可以來我的櫃作客的內建公仔   //@fan
-        // <public> public static readonly string[] Guests = { "duoduo", "meidian", "cici" };
+        public static readonly string[] Guests = { "duoduo", "meidian", "cici", "fanfan", "bobo", "mian", "spidey", "po", "stitch", "hangyodon", "tinky", "dipsy", "laalaa" };   // 可以來我的櫃作客的內建公仔   //@fan
+        // <public> public static readonly string[] Guests = { "duoduo", "meidian", "cici", "fanfan", "bobo", "mian" };
 
         public static void CuReset() { all = null; }
         public static Pal GetBuiltin(string id) { if (all == null) return null; foreach (Pal p in all) if (p.Id == id && !p.Cu) return p; return null; }

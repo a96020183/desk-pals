@@ -25,6 +25,9 @@ const CHARS = {
 	duoduo: { emoji: "📦", name: "躲躲", lineup: "original", squad: true },
 	meidian: { emoji: "🔋", name: "沒電", lineup: "original", squad: true },
 	cici: { emoji: "🌵", name: "刺刺", lineup: "original", squad: true },
+	fanfan: { emoji: "📖", name: "翻翻", lineup: "woban", squad: true, dir: "woban" },
+	bobo: { emoji: "💧", name: "破破", lineup: "woban", squad: true, dir: "woban" },
+	mian: { emoji: "☁", name: "綿綿", lineup: "woban", squad: true, dir: "woban" },
 };
 // 舊的像素版續命小隊（半糖、醒醒、糰糰、貼貼）→ 新三隻（設定裡存的舊 id 照這個換；桌面版也同一套）
 const OLD_IDS = { boba: "duoduo", coffee: "meidian", onigiri: "cici", sticky: "duoduo" };
@@ -43,9 +46,23 @@ const SQUAD_LINES = {
 		tickle: ["不准搔我癢！", "再戳我就炸毛了！"], hi: ["我是刺刺。不用跟我好（小聲：你好）"], hi_d: ["嗨…這麼晚了"], errors: ["{n} 個錯誤？…又不是我寫的"], errors_d: ["{n} 個錯誤…明天再修，回家"],
 		errors_ok: ["修好了。…還算可以啦"], errors_ok_d: ["修好了…快回家"], rest: ["{n} 分鐘了，起來動。不是我關心你，是椅子很累"], rest_d: ["{n} 分鐘了…回家。現在。"],
 		wake: ["我沒睡。只是閉目養神"], wake_d: ["…還不下班？"], sleep: ["我閉目養神一下"], night_on: ["下班了。…回家路上小心（小聲）"], night_off: ["早。…今天也要好好的 ☀"], x_sig: ["這、這是花粉過敏！"] },
+	// 窩伴小世界（桌面版的完整台詞在 DeskPals.Woban.cs）
+	fanfan: { save: ["存好了，進度都在 ✓", "存檔完成～又往前一步"], save_d: ["存好了，今天就到這裡吧"], pats: ["嘿嘿，被摸頭了", "謝謝你～我會繼續陪你", "這樣很安心"], pats_d: ["晚安摸摸，收到了"],
+		tickle: ["哈哈，好癢", "不要翻我的頁啦～"], hi: ["嗨，我是翻翻。我們一起慢慢前進吧"], hi_d: ["嗨…晚上了，今天也辛苦了"], errors: ["有 {n} 個錯誤，我們一個一個來"], errors_d: ["{n} 個錯誤…明天精神好再看"],
+		errors_ok: ["錯誤都清掉了！這是個小進步 ✨"], errors_ok_d: ["修好了，可以安心休息了"], rest: ["{n} 分鐘了，休息一下，大腦才記得住"], rest_d: ["{n} 分鐘了，今天就到這裡吧"],
+		wake: ["（揉眼睛）你回來了，我們繼續吧"], wake_d: ["嗯…還在忙嗎？"], sleep: ["我先閉上眼睛…"], night_on: ["下班時間到了，把書籤夾好吧"], night_off: ["早安！今天想先完成哪一件？☀"], x_sig: ["完成一件了！撒花 ✨"] },
+	bobo: { save: ["存好了，放心", "幫你存起來了～"], save_d: ["存好了，收工吧"], pats: ["嘿嘿，謝謝你", "被摸摸了，好開心", "你今天辛苦了"], pats_d: ["晚安摸摸"],
+		tickle: ["哈哈哈好癢", "不要啦～"], hi: ["嗨，我是破破。喝水、吃飯，交給我提醒"], hi_d: ["嗨…晚上了，吃飯了嗎"], errors: ["有 {n} 個錯誤，先喝口水再慢慢看"], errors_d: ["{n} 個錯誤…明天再看吧"],
+		errors_ok: ["錯誤都不見了！來，喝口水慶祝"], errors_ok_d: ["修好了，可以休息了"], rest: ["{n} 分鐘了，起來走走，順便裝杯水"], rest_d: ["{n} 分鐘了，休息吧"],
+		wake: ["你回來了！先喝口水"], wake_d: ["嗯…還要忙嗎？"], sleep: ["我先睡一下…"], night_on: ["下班時間到了，記得吃晚餐"], night_off: ["早安！先喝一杯溫水吧 ☀"], x_sig: ["來，喝口水 💧"] },
+	mian: { save: ["存好了，可以放心", "存起來了～鬆一口氣"], save_d: ["存好了，該休息了"], pats: ["（軟軟地陷下去）", "好舒服～", "被摸了，心情變好了"], pats_d: ["晚安摸摸"],
+		tickle: ["呼呼，好癢", "不要啦～會軟掉"], hi: ["嗨，我是綿綿。累了就來找我"], hi_d: ["嗨…晚上了，放鬆一下"], errors: ["有 {n} 個錯誤，先深呼吸，不急"], errors_d: ["{n} 個錯誤…明天再看吧"],
+		errors_ok: ["錯誤都不見了，鬆一口氣～"], errors_ok_d: ["修好了，好好休息"], rest: ["{n} 分鐘了，休息一下吧～我蓋好毯子陪你"], rest_d: ["{n} 分鐘了，今天就到這裡吧"],
+		wake: ["嗯…你回來了，休息得好嗎"], wake_d: ["嗯…還不睡嗎"], sleep: ["我先睡一下…"], night_on: ["下班時間到了，讓自己慢下來"], night_off: ["早安～今天也慢慢來 ☀"], x_sig: ["捧著熱可可，放空一下下 ☕"] },
 };
 const LINEUPS = {
 	original: { name: "續命小隊", desc: "躲躲、沒電、刺刺（原創角色，大格是躲躲）", ids: ["duoduo", "meidian", "cici"] },
+	woban: { name: "窩伴小世界", desc: "翻翻、破破、綿綿（原創角色，住在書包小屋）", ids: ["fanfan", "bobo", "mian"] },
 	// <fan>
 	classic: { name: "經典一櫃", desc: "Spidey、小波、史迪仔、人魚漢頓", ids: ["spidey", "po", "stitch", "hangyodon"] },
 	teletubbies: { name: "天線寶寶一櫃", desc: "丁丁、迪西、拉拉、小波（大格是小波）", ids: ["tinky", "dipsy", "laalaa", "po"] },
@@ -66,8 +83,8 @@ const lineupSetting = () => { const v = vscode.workspace.getConfiguration("deskP
 // <public> const lineupSetting = () => { const v = vscode.workspace.getConfiguration("deskPals").get("lineup", "original"); return LINEUPS[v] ? v : "original"; };
 // 使用者真的設過「哪一櫃」嗎？沒設過＝讓桌面版自己決定（照它上次的；全新安裝才是續命小隊），舊使用者不會因為預設值改了被換櫃
 const lineupExplicit = () => { const i = vscode.workspace.getConfiguration("deskPals").inspect("lineup"); return !!i && (i.globalValue !== undefined || i.workspaceValue !== undefined || i.workspaceFolderValue !== undefined); };
-const lineupDefaultPet = (lu) => (lu === "mine" && LINEUPS.mine ? LINEUPS.mine.ids[0] : lu === "teletubbies" ? "po" : (lu === "pikmin" ? "pkred" : (lu === "original" ? "duoduo" : "spidey")));   //@fan
-// <public> const lineupDefaultPet = (lu) => (lu === "mine" && LINEUPS.mine ? LINEUPS.mine.ids[0] : "duoduo");
+const lineupDefaultPet = (lu) => (lu === "mine" && LINEUPS.mine ? LINEUPS.mine.ids[0] : lu === "teletubbies" ? "po" : (lu === "pikmin" ? "pkred" : (lu === "original" ? "duoduo" : (lu === "woban" ? "fanfan" : "spidey"))));   //@fan
+// <public> const lineupDefaultPet = (lu) => (lu === "mine" && LINEUPS.mine ? LINEUPS.mine.ids[0] : (lu === "woban" ? "fanfan" : "duoduo"));
 const inLineup = (id, lu) => !!CHARS[id] && (CHARS[id].lineup === "both" || CHARS[id].lineup === lu);
 let current = "spidey";   //@fan
 // <public> let current = "duoduo";
@@ -321,8 +338,8 @@ async function pickCharacter(context, desktop, provider, first) {
 async function pickLineup(desktop) {
 	const now = lineupSetting();
 	const items = Object.keys(LINEUPS).map((lu) => ({
-		label: `${lu === "classic" ? "🕷" : (lu === "pikmin" ? "🌸" : (lu === "original" ? "🥤" : (lu === "mine" ? "🧸" : "☀")))} ${LINEUPS[lu].name}`,   //@fan
-		// <public> label: `${lu === "original" ? "🥤" : (lu === "mine" ? "🧸" : "☀")} ${LINEUPS[lu].name}`,
+		label: `${lu === "classic" ? "🕷" : (lu === "pikmin" ? "🌸" : (lu === "original" ? "🥤" : (lu === "woban" ? "🎒" : (lu === "mine" ? "🧸" : "☀"))))} ${LINEUPS[lu].name}`,   //@fan
+		// <public> label: `${lu === "original" ? "🥤" : (lu === "woban" ? "🎒" : (lu === "mine" ? "🧸" : "☀"))} ${LINEUPS[lu].name}`,
 		description: LINEUPS[lu].desc,
 		detail: lu === now ? "現在是這一櫃" : undefined,
 		lineup: lu,
@@ -682,10 +699,10 @@ function customMsg(id) {
 	return { type: "custom", id, name: c.name, img, lines: c.lines || {}, restMin };
 }
 
-// 側邊欄畫續命小隊：桌面版同一套圖（desktop/pals/squad/<id>/icon.png）轉成 data URL＋幾句台詞
+// 側邊欄畫圖片公仔（續命小隊、窩伴小世界）：桌面版同一套圖（desktop/pals/<資料夾>/<id>/icon.png）轉成 data URL＋幾句台詞
 function squadMsg(context, id) {
 	let img = "";
-	try { img = "data:image/png;base64," + fs.readFileSync(path.join(context.extensionPath, "desktop", "pals", "squad", id, "icon.png")).toString("base64"); } catch (e) {}
+	try { img = "data:image/png;base64," + fs.readFileSync(path.join(context.extensionPath, "desktop", "pals", CHARS[id].dir || "squad", id, "icon.png")).toString("base64"); } catch (e) {}
 	const restMin = Math.max(1, vscode.workspace.getConfiguration("deskPals").get("restMinutes", 50));
 	return { type: "custom", id, name: CHARS[id].name, img, lines: SQUAD_LINES[id] || {}, restMin };
 }

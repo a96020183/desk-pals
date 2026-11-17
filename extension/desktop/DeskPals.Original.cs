@@ -19,19 +19,50 @@ namespace DeskPals
     // desk-pals.ps1（Add-Type 沒有實體路徑）在 Run 之前設 [DeskPals.SqAssets]::Root；exe 讀內嵌的資源；也可以用環境變數 DESKPALS_ASSETS
     public static class SqAssets { public static string Root = ""; }
 
-    // ================= 圖：讀 pals/squad =================
+    // 一櫃圖片公仔（pals/lineups.txt 的一行）：lineup id、資料夾、名稱、角色（順序＝格子順序）
+    class SqLineup { public string Id, Dir, Name; public string[] Ids; public bool Placeholder; }
+
+    // ================= 圖：一櫃＝pals 底下一個資料夾（pals/lineups.txt 列出有哪幾櫃）=================
     static class SqArt
     {
         public static readonly string[] Keys = { "stand", "walk1", "walk2", "jump", "sleep", "happy", "held", "sit", "grab", "push", "cry", "blown", "sig1", "sig2", "surprised", "pout" };
+        // lineups.txt 讀不到（整包圖不見了）時用：跟檔案內容一樣，角色還是建得出來（畫成圓圓的佔位）
+        static readonly string[] BuiltinLineups = { "original squad 續命小隊 duoduo meidian cici", "woban woban 窩伴小世界 fanfan bobo mian" };
+        static List<SqLineup> lineups;
 
         static string Root()
         {
             foreach (string d in new string[] { SqAssets.Root, Environment.GetEnvironmentVariable("DESKPALS_ASSETS"), Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "pals") })
-                if (!string.IsNullOrEmpty(d) && File.Exists(Path.Combine(d, Path.Combine("squad", "squad.txt")))) return d;
+                if (!string.IsNullOrEmpty(d) && File.Exists(Path.Combine(d, "lineups.txt"))) return d;
             return "";
         }
 
-        // 讀一個檔：資料夾有就讀資料夾，沒有就讀 exe 內嵌的資源（build.ps1 用 /resource 放進去，名字＝pals/squad/…、pals/shelf/…）
+        public static List<SqLineup> Lineups()
+        {
+            if (lineups != null) return lineups;
+            List<SqLineup> l = new List<SqLineup>();
+            byte[] b = Read("lineups.txt");
+            if (b == null) App.LogAlways("pals/lineups.txt missing (root=" + Root() + "): built-in list");
+            string[] rows = b == null ? BuiltinLineups : System.Text.Encoding.UTF8.GetString(b).Split('\n');
+            foreach (string row in rows)
+            {
+                string t = row.Trim().TrimStart('\uFEFF');
+                if (t == "" || t.StartsWith("#")) continue;
+                string[] a = t.Split(new char[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                if (a.Length < 4) continue;
+                SqLineup q = new SqLineup();
+                q.Id = a[0]; q.Dir = a[1]; q.Name = a[2];
+                q.Ids = new string[a.Length - 3];
+                Array.Copy(a, 3, q.Ids, 0, q.Ids.Length);
+                l.Add(q);
+            }
+            lineups = l;
+            return l;
+        }
+        public static SqLineup Lineup(string lu) { foreach (SqLineup q in Lineups()) if (q.Id == lu) return q; return null; }
+        public static SqLineup LineupOf(string id) { foreach (SqLineup q in Lineups()) if (Array.IndexOf(q.Ids, id) >= 0) return q; return null; }
+
+        // 讀一個檔：資料夾有就讀資料夾，沒有就讀 exe 內嵌的資源（build.ps1 用 /resource 放進去，名字＝pals/<相對路徑>）
         public static byte[] Read(string rel)
         {
             string root = Root();
@@ -76,28 +107,35 @@ namespace DeskPals
             int r = Res();
             CuSprite s = Load(id, r);
             if (s == null && r == 1) s = Load(id, 2);
-            if (s == null) { App.LogAlways("squad art missing: " + id + " (root=" + Root() + ")"); s = Placeholder(); }
+            if (s == null) { App.LogAlways("pal art missing: " + id + " (root=" + Root() + ")"); s = Placeholder(); }
             return s;
         }
 
+        // <資料夾>/<資料夾>.txt：id 倍率 畫布寬 畫布高 腳底中心x 腳底y 身體頂y 身體高 身體左x 身體寬；「placeholder 1」＝暫代圖（log 記一下）
         static CuSprite Load(string id, int r)
         {
-            byte[] meta = Read("squad/squad.txt");
+            SqLineup q = LineupOf(id);
+            if (q == null) return null;
+            byte[] meta = Read(q.Dir + "/" + q.Dir + ".txt");
             if (meta == null) return null;
             int[] m = null;
+            bool shadow = false;
             foreach (string line in System.Text.Encoding.UTF8.GetString(meta).Split('\n'))
             {
                 string[] a = line.Trim().Split(' ');
+                if (a[0] == "placeholder" && !q.Placeholder) { q.Placeholder = true; App.LogAlways(q.Dir + " art is placeholder"); }
+                if (a[0] == "shadow" && a.Length >= 2) shadow = a[1] == "1";
                 if (a.Length < 8 || a[0] != id || a[1] != r.ToString()) continue;
                 m = new int[8];
                 for (int i = 0; i < 8 && i + 2 < a.Length; i++) int.TryParse(a[i + 2], out m[i]);
             }
             if (m == null) return null;
+            string dir = q.Dir + "/" + id + "/" + r + "x/";
             CuSprite s = new CuSprite();
-            s.Pixel = false; s.R = r == 1 ? 4 : 8; s.Rig = false; s.NoHalo = true;
+            s.Pixel = false; s.R = r == 1 ? 4 : 8; s.Rig = false; s.NoHalo = true; s.Shadow = shadow;
             foreach (string k in Keys)
             {
-                Bitmap b = Png("squad/" + id + "/" + r + "x/" + k + ".png");
+                Bitmap b = Png(dir + k + ".png");
                 if (b == null) { s.Dispose(); return null; }
                 s.Frames[k] = b;
             }
@@ -106,18 +144,16 @@ namespace DeskPals
             if (m[7] > 0) { s.BodyLeft = m[6]; s.BodyW = m[7]; }
             s.HeadTop = s.BodyTop; s.HeadCx = m[2]; s.HeadW = s.W / 4; s.NeckCx = m[2]; s.NeckW = s.W / 4;
             s.Neck = s.BodyTop + s.BodyH / 3; s.Hip = s.BodyTop + s.BodyH * 3 / 4; s.Split = m[2];
-            s.Main = id == "duoduo" ? Color.FromArgb(0xD8, 0xA8, 0x6C) : (id == "meidian" ? Color.FromArgb(0xFB, 0xF0, 0xDF) : Color.FromArgb(0x90, 0xC0, 0x78));
+            s.Main = Color.FromArgb(0xE0, 0xD8, 0xC8);   // 只有自己做的公仔用到（Pal.MakeCu）
             s.Outline = Color.FromArgb(0x1E, 0x1E, 0x24);
-            if (id == "meidian")
+            // 有液體遮罩（<動作>.liquid.png）的那隻：執行時依電量上色（沒電）；其他隻沒有遮罩，照原圖畫
+            foreach (string k in Keys)
             {
-                s.Liquid = new Dictionary<string, SqLiquid>();
-                foreach (string k in Keys)
-                {
-                    Bitmap mb = Png("squad/" + id + "/" + r + "x/" + k + ".liquid.png");
-                    if (mb == null) continue;
-                    s.Liquid[k] = SqLiquid.Make(k, CuImg.Pixels(s.Frames[k]), CuImg.Pixels(mb), s.W, s.H);
-                    mb.Dispose();
-                }
+                Bitmap mb = Png(dir + k + ".liquid.png");
+                if (mb == null) continue;
+                if (s.Liquid == null) s.Liquid = new Dictionary<string, SqLiquid>();
+                s.Liquid[k] = SqLiquid.Make(k, CuImg.Pixels(s.Frames[k]), CuImg.Pixels(mb), s.W, s.H);
+                mb.Dispose();
             }
             return s;
         }
@@ -267,19 +303,57 @@ namespace DeskPals
     // ================= 角色資料 =================
     partial class Pal
     {
-        public bool Orig;                    // 續命小隊
+        public bool Orig;                    // 圖片公仔（續命小隊、窩伴小世界）：行為走 Pet 的 Orig* 掛點
+        public string Squad = "";            // 在哪一櫃圖片公仔（pals/lineups.txt 的 lineup id）
         public const string Original = "original";
         public const string OriginalName = "續命小隊";
+        public const string Woban = "woban";                                  // 窩伴小世界（DeskPals.Woban.cs）
         public static readonly string[] OriginalIds = { "duoduo", "meidian", "cici" };
         public static readonly string[] OldOriginalIds = { "boba", "coffee", "onigiri", "sticky" };   // 舊的像素版（資料轉給新三隻）
 
-        static List<Pal> OrigPals() { return new List<Pal>(new Pal[] { Duoduo(), Meidian(), Cici() }); }
-
-        // 這一櫃有誰：三隻＋（做過自己的公仔的話）第 4 格放你的公仔（我的櫃排第一的那隻）
-        public static string[] OrigLineupIds()
+        // pals/lineups.txt 列的每一隻都建一個（角色的個性、台詞在程式裡：續命小隊在這個檔、窩伴小世界在 DeskPals.Woban.cs）
+        static List<Pal> OrigPals()
         {
-            List<string> l = new List<string>(OriginalIds);
-            foreach (string id in MineIds()) if (CuStore.Get(id) != null) { l.Add(id); break; }
+            List<Pal> l = new List<Pal>();
+            foreach (SqLineup q in SqArt.Lineups())
+                foreach (string id in q.Ids)
+                {
+                    Pal p = SqMake(id);
+                    if (p == null) { App.LogAlways("pals/lineups.txt: no character code for " + id); continue; }
+                    p.Squad = q.Id;
+                    l.Add(p);
+                }
+            return l;
+        }
+        static Pal SqMake(string id)
+        {
+            switch (id)
+            {
+                case "duoduo": return Duoduo();
+                case "meidian": return Meidian();
+                case "cici": return Cici();
+            }
+            return WobanMake(id);
+        }
+
+        // 圖片公仔櫃（pals/lineups.txt）：有哪幾櫃、這櫃的角色、名字
+        public static List<string> SqLineupList() { List<string> l = new List<string>(); foreach (SqLineup q in SqArt.Lineups()) l.Add(q.Id); return l; }
+        public static bool IsSquad(string lineup) { return SqArt.Lineup(lineup) != null; }
+        public static string[] SqIds(string lineup) { SqLineup q = SqArt.Lineup(lineup); return q == null ? new string[0] : (string[])q.Ids.Clone(); }
+        public static string SqName(string lineup) { SqLineup q = SqArt.Lineup(lineup); return q == null ? OriginalName : q.Name; }
+        // 設定視窗第一頁兩櫃主打的一句介紹
+        public static string SqBlurb(string lineup)
+        {
+            if (lineup == Original) return "累到不行也要一起撐：躲在紙箱裡、電量跟你一起掉、嘴硬心軟。無厘頭續命梗";
+            if (lineup == Woban) return "住在書包小屋：陪你讀書專注、提醒喝水吃飯、帶你休息放鬆。溫柔療癒系";
+            return null;
+        }
+
+        // 這一櫃有誰：資料夾列的那幾隻＋（櫃子還有空格、做過自己的公仔的話）空格放你的公仔（我的櫃排第一的那隻）
+        public static string[] SqLineupIds(string lineup)
+        {
+            List<string> l = new List<string>(SqIds(lineup));
+            if (l.Count < ShelfArt.For(lineup).N) foreach (string id in MineIds()) if (CuStore.Get(id) != null) { l.Add(id); break; }
             return l.ToArray();
         }
 
@@ -298,6 +372,13 @@ namespace DeskPals
             foreach (string k in new string[] { "HEAD", "BODY", "ARMS_UP", "ARMS_HUG", "LEGS_A", "LEGS_B", "LEGS_SIT", "SLEEPY", "HAPPY", "DIZZY" }) p.Art[k] = blank;
             return p;
         }
+
+        // 通知的開場白（fl_<種類>）：照 World.OrigFlavor 的順序一句一句給
+        static readonly string[] FlavorKeys = { "ci-run", "ci-ok", "ci-fail", "cmd-ok", "cmd-fail", "meeting", "meeting-now", "jira", "worklog",
+                                                "remind", "pc-cpu", "pc-ram", "pc-disk", "net-down", "net-up", "vpn", "download" };
+        void Flavors(params string[] a) { for (int i = 0; i < a.Length && i < FlavorKeys.Length; i++) Say("fl_" + FlavorKeys[i], a[i]); }
+        // 搶票倒數五段（tk_0～tk_4；{n}＝名稱、{h}＝還有多久）
+        void Tickets(params string[] a) { for (int i = 0; i < a.Length; i++) Say("tk_" + i, a[i]); }
 
         // ---------------- 躲躲：住在網購紙箱裡。好奇又害羞；口頭禪「我不在」----------------
         static Pal Duoduo()
@@ -369,6 +450,14 @@ namespace DeskPals
             p.Say("react", "嚇！", "（咻一下縮進去）", "什、什麼？");
             p.Say("o_hide", "我不在我不在我不在", "（箱子蓋起來了）", "這裡只有一個普通的箱子");
             p.Say("o_run", "被、被發現了——撤！", "箱子長腳了！跑！", "我不是躲躲！我是路過的箱子！");
+            p.Say("o_goal", "進、進了！🏀（探頭）"); p.Say("o_cheer", "好、好球！"); p.Say("o_miss", "沒進…我先躲一下");
+            p.Say("lunch_start", "午餐！便當…是網購送來的嗎 🔔"); p.Say("lunch_nap", "吃飽了…躲進箱子睡一下"); p.Say("lunch_end", "下午了…（打開箱子）");
+            p.Say("lunch_eat", "（躲在箱子裡吃）", "便當好好吃…不要看我吃", "便當的盒子也可以住嗎");
+            p.Say("sc_tea", "點心…可以帶回箱子吃嗎"); p.Say("sc_tea_lead", "三點了…有、有點心嗎 ⚡"); p.Say("sc_tea_end", "續、續命成功…乾杯（小聲）");
+            p.Say("sc_lunch", "我躲在箱子裡吃…"); p.Say("sc_photo", "我、我有拍到嗎…（躲）"); p.Say("sc_roll", "躲躲…到（小聲）📦"); p.Say("sc_bye", "回箱子…不是，回櫃子囉");
+            p.Flavors("CI 開始跑了…（偷看）", "CI 過了！我出來一下下！", "CI 失敗了…我先躲：", "跑完了…：", "沒成功…（縮）：", "等等要開會…好緊張：", "開會了！快去（我躲好了）", "有新的 Jira…：", "今天的日誌好了：",
+                      "⏰ 躲躲提醒你（小聲）：", "電腦好燙…箱子要融化了：", "記憶體快滿了…像塞爆的箱子：", "硬碟快滿了…：", "網路斷了…包裹送不到了", "網路回來了！", "連不到公司網路（VPN 斷了？）", "下載好了…是新的包裹嗎：");
+            p.Tickets("🎫 {n} 還有 {h}開賣…先登入、綁好付款喔", "🎫 {n} 再 30 分鐘…好緊張", "🎫 {n} 剩 10 分鐘！我躲好了", "🎫 準、準備…", "🎫 開搶！！（衝出箱子）");
             p.Shared();
             return p;
         }
@@ -445,6 +534,14 @@ namespace DeskPals
             p.Say("o_flop", "……（靈魂在說）我沒電了，你去休息我才能充", "沒電了…（攤平）", "（鬼魂飄出來）充…電…");
             p.Say("o_charge", "插上了……嗯……這就是天堂", "充電中，請勿打擾（請打擾我，我很孤單）", "充電中…你也休息一下");
             p.Say("o_full", "100%！……好，我再睡五分鐘", "充飽了！可以再撐一小時（大概）");
+            p.Say("o_goal", "進了…省電投籃 🏀"); p.Say("o_cheer", "好球…（拍手耗電 1%）"); p.Say("o_miss", "沒電了，沒投好");
+            p.Say("lunch_start", "午餐！吃飯＝人類的充電 🔔"); p.Say("lunch_nap", "吃飽了…邊睡邊充電"); p.Say("lunch_end", "充、充好了…大概");
+            p.Say("lunch_eat", "（嚼）……電量 +5%", "吃飽會想睡，這是定律", "這便當幾瓦？");
+            p.Say("sc_tea", "續命！電量 +10%（心理上）"); p.Say("sc_tea_lead", "三點了…下午的電最難撐 ⚡"); p.Say("sc_tea_end", "續命成功！乾杯～");
+            p.Say("sc_lunch", "吃飯＝充電，開動"); p.Say("sc_photo", "閃光燈好耗電…"); p.Say("sc_roll", "沒電，到…（剩 {p}%）🔋"); p.Say("sc_bye", "關機囉…明天見");
+            p.Flavors("CI 開跑…好耗電：", "CI 過了！電量 +1%", "CI 掛了…我也快掛了：", "跑完了：", "失敗了…先充電再看：", "等等開會…我撐得住（騙人）：", "開會了…待機模式啟動：", "新的 Jira：", "日誌好了，可以關機了：",
+                      "⏰ 沒電提醒你（剩 {p}%）：", "電腦好燙…我也好燙：", "記憶體快滿了：", "硬碟快滿了：", "網路斷了…正好省電", "網路回來了…", "連不到公司網路（VPN 斷了？）", "下載好了：");
+            p.Tickets("🎫 {n} 還有 {h}開賣。先登入、綁好付款", "🎫 {n} 30 分鐘後開賣…我先充電", "🎫 {n} 剩 10 分鐘！電量全開", "🎫 準備。手指放好。", "🎫 開搶！！用掉我最後的電！");
             p.Shared();
             return p;
         }
@@ -519,12 +616,20 @@ namespace DeskPals
             p.Say("react", "幹嘛！嚇我一跳", "（刺豎起來）", "什麼啦");
             p.Say("o_bloom", "這、這是花粉過敏！", "花是自己開的，跟你沒關係", "不准看！（花開得更大）");
             p.Say("o_bristle", "別碰我！", "現在很刺，請稍後再摸", "哼！！（刺全部豎起來）");
+            p.Say("o_goal", "進了。…還好啦 🏀"); p.Say("o_cheer", "好球。哼，還行"); p.Say("o_miss", "沒進！是球的問題");
+            p.Say("lunch_start", "午餐時間。…我才不餓 🔔"); p.Say("lunch_nap", "吃飽了…閉目養神"); p.Say("lunch_end", "下午了。…加油（小聲）");
+            p.Say("lunch_eat", "才不是因為好吃才吃很快", "你也要吃飯喔。…我隨便說的", "（偷偷多吃一口）");
+            p.Say("sc_tea", "我不用續命。…一口就好"); p.Say("sc_tea_lead", "三點了。…要不要吃點東西 ⚡"); p.Say("sc_tea_end", "續命完畢。…還行");
+            p.Say("sc_lunch", "我才不餓。…開動"); p.Say("sc_photo", "我才沒有笑。"); p.Say("sc_roll", "刺刺。到。🌵"); p.Say("sc_bye", "下班。…路上小心（小聲）");
+            p.Flavors("CI 開跑了。看什麼：", "CI 過了。…還行啦", "CI 掛了？又不是我寫的：", "跑完了：", "失敗了。哼：", "等等要開會。別遲到：", "開會了！快去！", "新的 Jira。去看：", "日誌好了。不用謝：",
+                      "⏰ 提醒你（才不是關心）：", "電腦好燙！你在幹嘛：", "記憶體快滿了：", "硬碟快滿了，東西要收：", "網路斷了！…不是我拔的", "網路回來了。哼", "連不到公司網路（VPN 斷了？）", "下載好了：");
+            p.Tickets("🎫 {n} 還有 {h}開賣。先登入、綁好付款，別到時候哭", "🎫 {n} 再 30 分鐘。我才沒有很期待", "🎫 {n} 剩 10 分鐘！刺都豎起來了", "🎫 準備！", "🎫 開搶！！快啊！");
             p.Shared();
             return p;
         }
     }
 
-    // ================= 一隻續命小隊 =================
+    // ================= 一隻圖片公仔（續命小隊；窩伴小世界的專屬行為在 DeskPals.Woban.cs 的 Wb*）=================
     partial class Pet
     {
         string oAct = "", oPose = "";            // 專屬動作（state == "orig"）；oPose＝要擺哪一張圖
@@ -541,6 +646,7 @@ namespace DeskPals
         public void OPose(string frame, double dur) { if (!Grounded() && state != "air") return; oPose = frame; OrigDo("pose", dur); }
 
         bool BatLink { get { return Is("meidian") && SqBattery.Link; } }
+        bool Wb { get { return P.Squad == Pal.Woban; } }   // 窩伴小世界
         bool Flat { get { return BatLink && SqBattery.Level <= 0.001 && !SqBattery.Charging; } }
 
         // ---------- 連點三下 ----------
@@ -548,6 +654,7 @@ namespace DeskPals
         {
             Say(L("tickle"), 1.8);
             if (!Grounded() || state == "dizzy") return;
+            if (Wb) { WbCombo(); return; }
             switch (P.Id)
             {
                 case "duoduo": OrigDo("hide", 2.4); break;                                        // 縮回箱子
@@ -560,6 +667,7 @@ namespace DeskPals
         void OrigSignature()
         {
             if (!Grounded()) return;
+            if (Wb) { WbSignature(); return; }
             switch (P.Id)
             {
                 case "duoduo": OrigDo("hide", R(2.6, 4)); Say(L("o_hide"), 1.6); break;
@@ -596,7 +704,7 @@ namespace DeskPals
                 case "sq_bloom": if (Grounded() && Is("cici")) { OrigDo("bloom", 3); Say(L("o_bloom"), 1.8); } return true;
                 case "sq_bristle": if (Grounded() && Is("cici")) { OrigDo("bristle", 2.2); Say(L("o_bristle"), 1.6); } return true;
             }
-            return false;
+            return Wb && WbAct(a);
         }
 
         // ---------- 自己閒晃時決定做什麼 ----------
@@ -609,6 +717,7 @@ namespace DeskPals
             if (r < .55) { OrigSignature(); return; }
             if (r < .62)
             {
+                if (Wb) { WbChat(); return; }
                 switch (P.Id)
                 {
                     case "duoduo": OPose("surprised", 1.4); Say(L("talk"), 2.2); break;
@@ -628,7 +737,7 @@ namespace DeskPals
         // 走到視窗邊：0 照預設跳、1 回頭、2 換狀態了
         int OrigEdge(bool right)
         {
-            if (Is("meidian") || rnd.NextDouble() < 0.45) { dir = -dir; return 1; }   // 沒電：跳太耗電
+            if (Is("meidian") || Is("mian") || rnd.NextDouble() < 0.45) { dir = -dir; return 1; }   // 沒電：跳太耗電；綿綿：慢慢來，不跳
             x += dir * 4 * k; Jump(dir * 120 * k, -260 * k); Say(L("jump"), 0.8);
             return 2;
         }
@@ -657,19 +766,20 @@ namespace DeskPals
             switch (P.Id)
             {
                 case "duoduo": if (rnd.NextDouble() < 0.6) afterLand = "opeek"; break;
-                case "cici": if (rnd.NextDouble() < 0.4) afterLand = "ohappy"; break;
+                case "cici": case "fanfan": case "bobo": case "mian": if (rnd.NextDouble() < 0.4) afterLand = "ohappy"; break;
             }
         }
 
         public void OrigNewWindow(WinInfo win)
         {
             if (Is("duoduo") && rnd.NextDouble() < 0.6) { OrigDo("hide", 2.4); Say(L("newwin"), 1.5); return; }   // 新視窗跳出來：先躲
-            if (!GoToWindow(win, L("newwin"), Is("cici") ? "ohappy" : "opeek")) Say(L("newwin"), 1.5);
+            if (!GoToWindow(win, L("newwin"), Is("cici") || Is("bobo") || Is("mian") ? "ohappy" : "opeek")) Say(L("newwin"), 1.5);
         }
 
         // 錯誤變多：躲躲躲起來、沒電嚇到、刺刺炸毛
         void OrigReact(string why)
         {
+            if (Wb) { WbReact(why); return; }
             switch (P.Id)
             {
                 case "duoduo": OrigDo("hide", 2.6); break;
@@ -682,21 +792,13 @@ namespace DeskPals
         void OrigCelebrate(string line, bool lead)
         {
             if (lead) w.Fireworks(w.WA(Cx, y + SH / 2.0), 10, -1);
-            if (Grounded()) { if (Is("cici")) OrigDo("bloom", 3.2); else OPose("happy", 3.2); }
+            if (Grounded()) { if (Is("cici")) OrigDo("bloom", 3.2); else if (Is("fanfan")) OrigDo("s2", 3.2); else OPose("happy", 3.2); }   // 翻翻：慶祝小進步
             Say(line, 4);
             Burst(8);
         }
 
-        string OrigLine(string kind)
-        {
-            switch (kind)
-            {
-                case "goal": return Is("duoduo") ? "進、進了！🏀（探頭）" : (Is("meidian") ? "進了…省電投籃 🏀" : "進了。…還好啦 🏀");
-                case "cheer": return Is("duoduo") ? "好、好球！" : (Is("meidian") ? "好球…（拍手耗電 1%）" : "好球。哼，還行");
-                case "miss": return Is("duoduo") ? "沒進…我先躲一下" : (Is("meidian") ? "沒電了，沒投好" : "沒進！是球的問題");
-            }
-            return "！";
-        }
+        // 進球、加油、沒進（o_goal／o_cheer／o_miss，每隻自己的台詞）
+        string OrigLine(string kind) { string l = L("o_" + kind); return l == "" ? "！" : l; }
 
         // ---------- 球 ----------
         void OrigBall()
@@ -835,9 +937,12 @@ namespace DeskPals
                     case "bloom": return "sig1";
                     case "bristle": return "sig2";
                     case "catch": return "grab";
+                    case "s1": return "sig1";    // 窩伴小世界的招牌動作（DeskPals.Woban.cs）
+                    case "s2": return "sig2";
                 }
                 return "stand";
             }
+            if (Wb) { string wf = WbFrame(); if (wf != null) return wf; }
             if (Is("meidian") && SqBattery.Charging && (state == "sleep" || state == "idle") && BatLink) return "sig1";   // 你去休息了：他在充電
             if (Flat && (state == "idle" || state == "sleep")) return "sig2";
             switch (state)
@@ -861,7 +966,7 @@ namespace DeskPals
                 case "leap": case "fall": return "jump";
                 case "hold": return Is("duoduo") ? "sig1" : "grab";                      // 躲躲：游標收進紙箱
                 case "run": return Is("duoduo") ? "sig2" : (Math.Floor(anim * 5) % 2 == 1 ? "walk2" : "walk1");   // 躲躲：箱子長腳逃跑
-                case "drop": return Is("meidian") ? "sleep" : (Is("cici") ? "sig1" : "happy");   // 沒電：抱著游標當枕頭
+                case "drop": return Is("meidian") || Is("mian") ? "sleep" : (Is("cici") ? "sig1" : "happy");   // 沒電、綿綿：抱著游標當枕頭
                 case "caught": return Is("duoduo") ? "surprised" : (Is("cici") ? "sig2" : "surprised");
                 case "brace": case "push": return "push";
                 case "cry": return "cry";
@@ -898,37 +1003,30 @@ namespace DeskPals
         // 畫一隻：圖＋手上的球、午餐
         void DrawFigureOrig(Graphics g, Fr f, int sbx, int sby, int sps, bool fx, bool extras)
         {
+            if (P.Spr.Shadow && extras && Grounded() && !Dragging) DrawSqShadow(g, sbx + 6 * sps, sby + 16 * sps, sps);
             CuDraw(g, cuPose, sbx + 6 * sps, sby + 16 * sps, sps, fx);
             if (!extras) return;
             if (w.Holder == this) DrawAt(g, w.BallKind == "baseball" ? BALLART : TBALL, 8, P.BodyTop - 1 + cuPose.Y, sbx, sby, sps, fx, false, true);
             DrawLunch(g, f, sbx, sby, sps, fx);
         }
 
+        // 很淡的落地陰影（腳底正中間一個扁橢圓，邊緣再淡一圈）：沒有白邊的圖在淺色桌布上比較站得住
+        void DrawSqShadow(Graphics g, int fx, int fy, int ps)
+        {
+            CuSprite s = P.Spr;
+            float w = (float)((s.BodyW > 0 ? s.BodyW : s.W) / (double)s.R * ps * 0.78), h = Math.Max(2f, ps * 1.6f);
+            System.Drawing.Drawing2D.SmoothingMode was = g.SmoothingMode;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (SolidBrush b1 = new SolidBrush(Color.FromArgb(Night ? 22 : 30, 20, 24, 40))) g.FillEllipse(b1, fx - w / 2 - ps, fy - h / 2 - ps * 0.2f, w + 2 * ps, h + ps * 0.6f);
+            using (SolidBrush b2 = new SolidBrush(Color.FromArgb(Night ? 26 : 38, 20, 24, 40))) g.FillEllipse(b2, fx - w / 2, fy - h / 2, w, h);
+            g.SmoothingMode = was;
+        }
+
         void DrawOrigBehind(Graphics g, Fr f, int bx, int by, int ps, bool fx) { }
         void DrawOrigFront(Graphics g, Fr f, int bx, int by, int ps, bool fx) { }
 
         // ---------- 午餐：躲躲吃網購的便當、沒電吃飯＝人類的充電、刺刺吃沙拉（不是同類！）----------
-        string OrigLunchLine(string phase)
-        {
-            switch (P.Id)
-            {
-                case "duoduo":
-                    if (phase == "start") return "午餐！便當…是網購送來的嗎 🔔";
-                    if (phase == "nap") return "吃飽了…躲進箱子睡一下";
-                    if (phase == "end") return "下午了…（打開箱子）";
-                    return Pick(new string[] { "（躲在箱子裡吃）", "便當好好吃…不要看我吃", "便當的盒子也可以住嗎" });
-                case "meidian":
-                    if (phase == "start") return "午餐！吃飯＝人類的充電 🔔";
-                    if (phase == "nap") return "吃飽了…邊睡邊充電";
-                    if (phase == "end") return "充、充好了…大概";
-                    return Pick(new string[] { "（嚼）……電量 +5%", "吃飽會想睡，這是定律", "這便當幾瓦？" });
-                default:
-                    if (phase == "start") return "午餐時間。…我才不餓 🔔";
-                    if (phase == "nap") return "吃飽了…閉目養神";
-                    if (phase == "end") return "下午了。…加油（小聲）";
-                    return Pick(new string[] { "才不是因為好吃才吃很快", "你也要吃飯喔。…我隨便說的", "（偷偷多吃一口）" });
-            }
-        }
+        string OrigLunchLine(string phase) { return L("lunch_" + phase); }   // lunch_start／nap／end／eat（每隻自己的台詞）
 
         void DrawOrigLunch(Graphics g, Fr f, int bx, int by, int ps, bool fx, int bite)
         {
@@ -952,6 +1050,7 @@ namespace DeskPals
             else if (Is("meidian") && SqBattery.Link && SqBattery.Pct == 0) fr = "sig2";
             else if (Is("duoduo") && (tt % 11) < 2.5) fr = "sig1";
             else if (Is("cici") && (tt % 13) < 2) fr = "pout";
+            else if (Wb && WbShelfFrame(tt) != null) fr = WbShelfFrame(tt);
             else if ((tt % 9) < 0.9) fr = "happy";
             if (w.Lunch && !Night) fr = "sit";
             p.Frame = fr;
@@ -1023,10 +1122,12 @@ namespace DeskPals
         }
     }
 
-    // ================= World：續命小隊的串場、點名、大合照、下班、電量 =================
+    // ================= World：圖片公仔櫃的串場、點名、大合照、下班；沒電的電量 =================
     partial class World
     {
-        public bool OrigLineup { get { return lineup == Pal.Original; } }
+        public bool OrigLineup { get { return Pal.IsSquad(lineup); } }           // 圖片公仔櫃（續命小隊、窩伴小世界；pals/lineups.txt）
+        public bool WobanLineup { get { return lineup == Pal.Woban; } }         // 窩伴小世界（DeskPals.Woban.cs）
+        public string LineupNow { get { return lineup; } }
 
         // 沒指定哪一櫃時：照上次的；全新安裝（什麼都還沒存過）就是續命小隊。舊使用者完全不變。
         string StartLineup()
@@ -1089,7 +1190,7 @@ namespace DeskPals
         List<Pet> OrigOrder(List<Pet> l)
         {
             List<Pet> o = new List<Pet>();
-            foreach (string id in Pal.OriginalIds) foreach (Pet p in l) if (p.P.Id == id) o.Add(p);
+            foreach (string id in Pal.SqIds(lineup)) foreach (Pet p in l) if (p.P.Id == id) o.Add(p);
             return o;
         }
 
@@ -1105,6 +1206,7 @@ namespace DeskPals
                     return new string[][] { new string[] { SqBattery.Link ? "電量 " + SqBattery.Pct + "%" + (SqBattery.Charging ? "（充電中）" : "") : "電量連動關著（滿電）", "sq_battery" },
                         new string[] { "抱抱 ♥", "hug" }, new string[] { "打招呼", "hi" }, new string[] { "敲敲螢幕", "knock" }, new string[] { "插上充電", "sq_charge" },
                         new string[] { "攤平給你看", "sq_flop" }, new string[] { "待機（睡覺）", "sleep" }, new string[] { "丟球給他 ⚾", "ball" } };
+                case "fanfan": case "bobo": case "mian": return WbMenuItems(p);
                 default:
                     return new string[][] { new string[] { "抱抱 ♥", "hug" }, new string[] { "打招呼", "hi" }, new string[] { "敲敲螢幕", "knock" }, new string[] { "開花（被拆穿）", "sq_bloom" },
                         new string[] { "炸毛", "sq_bristle" }, new string[] { "跳到別的視窗上", "jump" }, new string[] { "睡覺", "sleep" }, new string[] { "丟球給她 ⚾", "ball" } };
@@ -1113,8 +1215,8 @@ namespace DeskPals
 
         void AddOrigMenu(ContextMenuStrip m)
         {
-            ToolStripMenuItem grp = new ToolStripMenuItem("續命小隊一起…");
-            string[][] gs = { new string[] { "下午三點續命 ⚡", "teatime" }, new string[] { "大合照 📷", "photo" }, new string[] { "點名", "rollcall" }, new string[] { "下班說再見", "byebye" } };
+            ToolStripMenuItem grp = new ToolStripMenuItem(Pal.SqName(lineup) + "一起…");
+            string[][] gs = { new string[] { WobanLineup ? "下午茶，伸展一下 🍵" : "下午三點續命 ⚡", "teatime" }, new string[] { "大合照 📷", "photo" }, new string[] { "點名", "rollcall" }, new string[] { "下班說再見", "byebye" } };
             foreach (string[] gi in gs) { string key = gi[1]; grp.DropDownItems.Add(gi[0], null, delegate { OrigScene(key); }); }
             m.Items.Add(grp);
         }
@@ -1184,6 +1286,7 @@ namespace DeskPals
             if (batForceCharge) { SqBattery.Charging = true; SqBattery.Level = Math.Min(1, SqBattery.Level + dt / 600); }
             else BatTick(dt);
             if (!OrigLineup) return;
+            if (WobanLineup) WbTick(dt);
             if (LunchState != oLunchSeen)
             {
                 if (LunchState == "eat" && oLunchSeen == "" && OutCount() >= 2) Later(4, delegate { if (scene == null && OrigLineup) OrigScene("lunch"); });
@@ -1213,7 +1316,7 @@ namespace DeskPals
                 case "teatime": SceneTeaTime(outs); break;
                 case "lunch": SceneOrigLunch(outs); break;
                 case "photo": case "group": OrigPhoto(); break;
-                case "rollcall": { List<string> ids = new List<string>(); foreach (Pet p in outs) ids.Add(p.P.Id); if (ids.Count == 0) ids.AddRange(Pal.OriginalIds); OrigRollCall(ids); } break;
+                case "rollcall": { List<string> ids = new List<string>(); foreach (Pet p in outs) ids.Add(p.P.Id); if (ids.Count == 0) ids.AddRange(Pal.SqIds(lineup)); OrigRollCall(ids); } break;
                 case "byebye": OrigNight(false); break;
             }
         }
@@ -1226,6 +1329,7 @@ namespace DeskPals
                 case "cici-meidian": if (c != null && m != null) ScenePlugPot(m, c); break;
                 case "duoduo-meidian": if (d != null && m != null) SceneBoxBed(d, m); break;
                 case "cici-duoduo": if (c != null && d != null) SceneWhereDidHeGo(d, c); break;
+                default: WbPairScene(key); break;
             }
         }
 
@@ -1277,21 +1381,21 @@ namespace DeskPals
         // ---------- 大家：下午三點續命 ----------
         void SceneTeaTime(List<Pet> outs)
         {
-            Pet m = Get("meidian");
-            Pet lead = m != null && outs.Contains(m) ? m : outs[0];
+            Pet lead = outs[0];
+            foreach (Pet p in outs) if (p.P.Id == "meidian" || p.P.Id == "mian") { lead = p; break; }   // 沒電、綿綿帶頭
             Begin(outs.ToArray());
             LineUp(outs, Lead(), 2.7);
-            At(0, delegate { lead.Say("三點了…下午的電最難撐 ⚡", 2.2); });
+            At(0, delegate { lead.Say(lead.L("sc_tea_lead"), 2.2); });
             At(4.4, delegate { foreach (Pet p in outs) { p.FaceTo(lead); p.ScenePose("idle", 30); } });
             double d = 4.8;
             foreach (Pet p in outs)
             {
                 Pet pp = p;
-                string line = pp.P.Id == "duoduo" ? "點心…可以帶回箱子吃嗎" : (pp.P.Id == "meidian" ? "續命！電量 +10%（心理上）" : "我不用續命。…一口就好");
-                At(d, delegate { pp.OPose(pp.P.Id == "meidian" ? "sig1" : "happy", 1.6); pp.Say(line, 1.8); if (pp.P.Id == "meidian" && SqBattery.Link) SqBattery.Level = Math.Min(1, SqBattery.Level + 0.02); });
+                string line = pp.L("sc_tea");
+                At(d, delegate { pp.OPose(pp.P.Id == "meidian" || pp.P.Id == "bobo" || pp.P.Id == "mian" ? "sig1" : "happy", 1.6); pp.Say(line, 1.8); if (pp.P.Id == "meidian" && SqBattery.Link) SqBattery.Level = Math.Min(1, SqBattery.Level + 0.02); });
                 d += 2.0;
             }
-            At(d + 0.4, delegate { foreach (Pet p in outs) { p.OPose("happy", 2.4); p.AddHeart(); p.Burst(5); } lead.Say("續命成功！乾杯～", 2.2); });
+            At(d + 0.4, delegate { foreach (Pet p in outs) { p.OPose("happy", 2.4); p.AddHeart(); p.Burst(5); } lead.Say(lead.L("sc_tea_end"), 2.2); });
             At(d + 3.2, delegate { foreach (Pet p in outs) p.ScenePose("wave", 1.6); });
             At(d + 5.0, delegate { });
         }
@@ -1306,7 +1410,7 @@ namespace DeskPals
             foreach (Pet p in outs)
             {
                 Pet pp = p;
-                string line = pp.P.Id == "duoduo" ? "我躲在箱子裡吃…" : (pp.P.Id == "meidian" ? "吃飯＝充電，開動" : "我才不餓。…開動");
+                string line = pp.L("sc_lunch");
                 At(d, delegate { pp.OPose("sit", 30); pp.Say(line, 2.3); });
                 d += 2.5;
             }
@@ -1323,7 +1427,7 @@ namespace DeskPals
             Begin(outs.ToArray());
             double[] lr = LineUp(outs, l, 2.7);
             double left = lr[0], right = lr[1], foot = lr[2];
-            At(0, delegate { l.Say("續命小隊，來拍照～排好排好！", 2); });
+            At(0, delegate { l.Say(Pal.SqName(lineup) + "，來拍照～排好排好！", 2); });
             At(5.2, delegate
             {
                 foreach (Pet p in outs)
@@ -1338,8 +1442,8 @@ namespace DeskPals
             foreach (Pet p in outs)
             {
                 Pet pp = p;
-                string line = pp.P.Id == "duoduo" ? "我、我有拍到嗎…（躲）" : (pp.P.Id == "meidian" ? "閃光燈好耗電…" : "我才沒有笑。");
-                At(d, delegate { if (pp.P.Id == "duoduo") pp.OrigDo("hide", 2); else if (pp.P.Id == "cici") pp.OrigDo("bloom", 2); pp.Say(line, 1.4); });
+                string line = pp.L("sc_photo");
+                At(d, delegate { if (pp.P.Id == "duoduo") pp.OrigDo("hide", 2); else if (pp.P.Id == "cici") pp.OrigDo("bloom", 2); else if (pp.P.Id == "fanfan") pp.OrigDo("s2", 2); pp.Say(line, 1.4); });
                 d += 1.4;
             }
             At(d + 0.4, delegate { });
@@ -1349,12 +1453,12 @@ namespace DeskPals
         void OrigRollCall(List<string> ids)
         {
             List<Pet> order = new List<Pet>();
-            foreach (string id in Pal.OriginalIds) if (ids.Contains(id) && Get(id) != null) order.Add(Get(id));
+            foreach (string id in Pal.SqIds(lineup)) if (ids.Contains(id) && Get(id) != null) order.Add(Get(id));
             double d = 0.4;
             foreach (Pet p in order)
             {
                 Pet pp = p;
-                string line = pp.P.Id == "duoduo" ? "躲躲…到（小聲）📦" : (pp.P.Id == "meidian" ? "沒電，到…（剩 " + SqBattery.Pct + "%）🔋" : "刺刺。到。🌵");
+                string line = pp.L("sc_roll");
                 Later(d, delegate { if (!pp.Out) BringOut(pp, false); });
                 Later(d + 1.0, delegate { pp.Say(line, 1.8); });
                 d += 1.6;
@@ -1362,7 +1466,7 @@ namespace DeskPals
             Later(d + 1.0, delegate
             {
                 foreach (Pet p in order) if (p.Out && p.Grounded()) p.ScenePose("wave", 1.8);
-                if (order.Count > 0) Lead().Say("續命小隊，報到！", 2.6);
+                if (order.Count > 0) Lead().Say(Pal.SqName(lineup) + "，報到！", 2.6);
             });
         }
 
@@ -1370,7 +1474,7 @@ namespace DeskPals
         void OrigNight(bool nag)
         {
             List<Pet> outs = OrigOrder(OutPets());
-            if (outs.Count == 0) { Lead().Say("續命小隊…下班囉～", 2.4); return; }
+            if (outs.Count == 0) { Lead().Say(Pal.SqName(lineup) + "…下班囉～", 2.4); return; }
             outs.Sort(delegate(Pet a, Pet b) { return (a.P.Id == "meidian" ? 1 : 0).CompareTo(b.P.Id == "meidian" ? 1 : 0); });
             Begin(outs.ToArray());
             foreach (Pet p in outs) if (p.Grounded()) p.ScenePose("idle", 60);
@@ -1379,40 +1483,30 @@ namespace DeskPals
             foreach (Pet p in outs)
             {
                 Pet pp = p;
-                string line = pp.P.Id == "duoduo" ? "回箱子…不是，回櫃子囉" : (pp.P.Id == "cici" ? "下班。…路上小心（小聲）" : "關機囉…明天見");
+                string line = pp.L("sc_bye");
                 At(d, delegate { pp.ScenePose("wave", 2); pp.Say(line, 2.2); });
                 At(d + 1.6, delegate { pp.InScene = false; if (pp.Out) pp.StowToShelf(false); });
                 d += 2.6;
             }
-            At(d + 0.6, delegate { Pet last = outs[outs.Count - 1]; last.Say("續命小隊，下班！明天見～", 2.6); });
+            At(d + 0.6, delegate { Pet last = outs[outs.Count - 1]; last.Say(Pal.SqName(lineup) + "，下班！明天見～", 2.6); });
             At(d + 3.4, delegate { });
         }
 
-        // ---------- 通知的開場白、搶票 ----------
+        // ---------- 通知的開場白、搶票：每隻自己的台詞（fl_<種類>、tk_<階段>，Pal.Flavors／Tickets 給的）----------
         static string OrigFlavor(string id, string kind)
         {
-            if (id != "duoduo" && id != "meidian" && id != "cici") return null;
-            string[] keys = { "ci-run", "ci-ok", "ci-fail", "cmd-ok", "cmd-fail", "meeting", "meeting-now", "jira", "worklog",
-                              "remind", "pc-cpu", "pc-ram", "pc-disk", "net-down", "net-up", "vpn", "download" };
-            int i = Array.IndexOf(keys, kind);
-            if (i < 0) return null;
-            string[] dd = { "CI 開始跑了…（偷看）", "CI 過了！我出來一下下！", "CI 失敗了…我先躲：", "跑完了…：", "沒成功…（縮）：", "等等要開會…好緊張：", "開會了！快去（我躲好了）", "有新的 Jira…：", "今天的日誌好了：",
-                            "⏰ 躲躲提醒你（小聲）：", "電腦好燙…箱子要融化了：", "記憶體快滿了…像塞爆的箱子：", "硬碟快滿了…：", "網路斷了…包裹送不到了", "網路回來了！", "連不到公司網路（VPN 斷了？）", "下載好了…是新的包裹嗎：" };
-            string[] md = { "CI 開跑…好耗電：", "CI 過了！電量 +1%", "CI 掛了…我也快掛了：", "跑完了：", "失敗了…先充電再看：", "等等開會…我撐得住（騙人）：", "開會了…待機模式啟動：", "新的 Jira：", "日誌好了，可以關機了：",
-                            "⏰ 沒電提醒你（剩 {p}%）：", "電腦好燙…我也好燙：", "記憶體快滿了：", "硬碟快滿了：", "網路斷了…正好省電", "網路回來了…", "連不到公司網路（VPN 斷了？）", "下載好了：" };
-            string[] cc = { "CI 開跑了。看什麼：", "CI 過了。…還行啦", "CI 掛了？又不是我寫的：", "跑完了：", "失敗了。哼：", "等等要開會。別遲到：", "開會了！快去！", "新的 Jira。去看：", "日誌好了。不用謝：",
-                            "⏰ 提醒你（才不是關心）：", "電腦好燙！你在幹嘛：", "記憶體快滿了：", "硬碟快滿了，東西要收：", "網路斷了！…不是我拔的", "網路回來了。哼", "連不到公司網路（VPN 斷了？）", "下載好了：" };
-            string s = id == "duoduo" ? dd[i] : (id == "meidian" ? md[i] : cc[i]);
-            return s.Replace("{p}", SqBattery.Pct.ToString());
+            Pal p = Pal.Get(id);
+            string[] a;
+            if (p == null || !p.Orig || !p.Lines.TryGetValue("fl_" + kind, out a) || a.Length == 0) return null;
+            return a[0].Replace("{p}", SqBattery.Pct.ToString());
         }
 
         static string OrigTicket(string id, int stage, string n, string h)
         {
-            if (id != "duoduo" && id != "meidian" && id != "cici") return null;
-            string[] dd = { "🎫 " + n + " 還有 " + h + "開賣…先登入、綁好付款喔", "🎫 " + n + " 再 30 分鐘…好緊張", "🎫 " + n + " 剩 10 分鐘！我躲好了", "🎫 準、準備…", "🎫 開搶！！（衝出箱子）" };
-            string[] md = { "🎫 " + n + " 還有 " + h + "開賣。先登入、綁好付款", "🎫 " + n + " 30 分鐘後開賣…我先充電", "🎫 " + n + " 剩 10 分鐘！電量全開", "🎫 準備。手指放好。", "🎫 開搶！！用掉我最後的電！" };
-            string[] cc = { "🎫 " + n + " 還有 " + h + "開賣。先登入、綁好付款，別到時候哭", "🎫 " + n + " 再 30 分鐘。我才沒有很期待", "🎫 " + n + " 剩 10 分鐘！刺都豎起來了", "🎫 準備！", "🎫 開搶！！快啊！" };
-            return id == "duoduo" ? dd[stage] : (id == "meidian" ? md[stage] : cc[stage]);
+            Pal p = Pal.Get(id);
+            string[] a;
+            if (p == null || !p.Orig || !p.Lines.TryGetValue("tk_" + Math.Max(0, Math.Min(4, stage)), out a) || a.Length == 0) return null;
+            return a[0].Replace("{n}", n).Replace("{h}", h);
         }
     }
 }

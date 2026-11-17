@@ -719,9 +719,8 @@ extension Pet {
         case "laalaa": line = "進球！🏀 啦啦啦～"
         case "pkred", "pkyellow", "pkblue": line = PikLine("goal")
         // </fan>
-        case "duoduo", "meidian", "cici": line = OrigLine("goal")
-        default: line = P.Cu ? L("x_goal") : "進球！🏀 Thwip!"   //@fan
-        // <public> default: line = P.Cu ? L("x_goal") : "進球！🏀"
+        default: line = P.Orig ? OrigLine("goal") : (P.Cu ? L("x_goal") : "進球！🏀 Thwip!")   //@fan
+        // <public> default: line = P.Orig ? OrigLine("goal") : (P.Cu ? L("x_goal") : "進球！🏀")
         }
         Say(line, 2.4)
         Burst(14)
@@ -742,8 +741,7 @@ extension Pet {
         case "laalaa": line = "啦啦～進了！"
         case "pkred", "pkyellow", "pkblue": line = PikLine("cheer")
         // </fan>
-        case "duoduo", "meidian", "cici": line = OrigLine("cheer")
-        default: line = P.Cu ? L("x_cheer") : "好球！"
+        default: line = P.Orig ? OrigLine("cheer") : (P.Cu ? L("x_cheer") : "好球！")
         }
         Say(line, 1.4)
         Mark(0)
@@ -751,6 +749,7 @@ extension Pet {
     }
 
     func MissLine() -> String {
+        if P.Orig { return OrigLine("miss") }
         switch P.Id {
         // <fan>
         case "po": return "差一點點！再來一次！"
@@ -761,7 +760,6 @@ extension Pet {
         case "laalaa": return "差一點！再來一次！"
         case "pkred", "pkyellow", "pkblue": return PikLine("miss")
         // </fan>
-        case "duoduo", "meidian", "cici": return OrigLine("miss")
         default: break
         }
         return P.Cu ? L("x_miss") : "差一點！再一次？"
@@ -1119,8 +1117,8 @@ extension Pet {
         case "dipsy": if Grounded() { HatToss(true) }; Say(line, 4); Burst(8)
         case "laalaa": if Grounded() { SetState("twirl", 2.4) }; Say(line, 4); for _ in 0..<4 { Mark(0) }; Burst(8)
         // </fan>
-        case "duoduo", "meidian", "cici": OrigCelebrate(line, lead)
         default:
+            if P.Orig { OrigCelebrate(line, lead); break }
             if lead { w.Fireworks(w.WA(Cx, y + Double(SH) / 2.0), 10, -1) }
             if Grounded() { SetState("dance", 3.5) }
             Say(line, 4); Burst(10)

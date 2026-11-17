@@ -2,7 +2,8 @@
 // 第 4 格是「做一隻你的公仔」入口（點了開做公仔視窗）、晚上變暗偏藍、外出中、點格子叫公仔出來、收合鈕收成蛋。
 // 用法：先用離屏模式（DESKPALS_OFFSCREEN=1、DESKPALS_ISOLATED=1、profile.txt＝done、mode.txt＝shelf）啟動桌面版，再
 //   node test/desktop-shelf.js <pipe 或 socket> <截圖資料夾>
-//   SHELF_LINEUP=pikmin：個人版的皮克敏一櫃（大格是休息花、沒有第 4 格入口）。最後會送 quit。
+//   SHELF_LINEUP=pikmin：個人版的皮克敏一櫃（大格是休息花、沒有第 4 格入口）。
+//   SHELF_LINEUP=woban：窩伴小世界的書包小屋（pals/woban/shelf：三間一樣大的房間左右並排、沒有第 4 格）。最後會送 quit。
 // 不管現在幾點都一樣（CI 是 UTC）：一開始就 act light、act lunchend。
 const net = require("net");
 const fs = require("fs");
@@ -14,6 +15,8 @@ const pipe = process.argv[2] || "desk-pals-shelftest";
 const shots = (process.argv[3] || path.join(__dirname, "..", "shots-shelf")).split(String.fromCharCode(92)).join("/");
 const lineup = process.env.SHELF_LINEUP || "original";
 const pik = lineup === "pikmin";
+const wb = lineup === "woban";
+const shelfTxt = path.join(__dirname, "..", "extension", "desktop", "pals", ...(wb ? ["woban", "shelf"] : ["shelf"]), "shelf.txt");
 fs.mkdirSync(shots, { recursive: true });
 
 const s = net.connect(pipe.includes("/") ? pipe : ["", "", ".", "pipe", pipe].join(String.fromCharCode(92)));
@@ -33,8 +36,8 @@ async function where() {
 async function info() {
 	const out = await reply("shelf-info", (b) => /(^|\n)end\n/.test(b));
 	const o = { cells: [] };
-	const m = /shelf (-?\d+) (-?\d+) (\d+) (\d+) (\d) (\d+) (\d)/.exec(out);
-	if (m) Object.assign(o, { x: +m[1], y: +m[2], w: +m[3], h: +m[4], collapsed: +m[5], S: +m[6], art: +m[7] });
+	const m = /shelf (-?\d+) (-?\d+) (\d+) (\d+) (\d) (\d+) (\d)(?: (\d+) (\S+))?/.exec(out);
+	if (m) Object.assign(o, { x: +m[1], y: +m[2], w: +m[3], h: +m[4], collapsed: +m[5], S: +m[6], art: +m[7], n: m[8] ? +m[8] : 4, dir: m[9] || "shelf" });
 	for (const c of out.matchAll(/cell (\d) (-?\d+) (-?\d+) (\d+) (\d+) (-?\d+) (-?\d+) (\d+) (\d+) (-?\d+) (-?\d+)/g))
 		o.cells[+c[1]] = { open: { x: +c[2], y: +c[3], w: +c[4], h: +c[5] }, plate: { x: +c[6], y: +c[7], w: +c[8], h: +c[9] }, foot: { x: +c[10], y: +c[11] } };
 	const t = /tab (-?\d+) (-?\d+) (\d+) (\d+)/.exec(out);
@@ -120,9 +123,9 @@ async function check(name, fn) {
 	await sleep(3500);   // 回櫃子的泡泡消失
 	let I = await info();
 	const area = { x: I.x, y: I.y, w: I.w, h: I.h };
-	await check("紙箱櫃的圖讀到了（shelf.txt、box.png）", () => assert.equal(I.art, 1, I.raw));
-	await check("櫃子大小＝shelf.txt 的 2x 尺寸 × S/8（100% 縮放約 256×334）", () => {
-		const txt = fs.readFileSync(path.join(__dirname, "..", "extension", "desktop", "pals", "shelf", "shelf.txt"), "utf8");
+	await check(wb ? "書包小屋的圖讀到了（woban/shelf：shelf.txt、box.png）" : "紙箱櫃的圖讀到了（shelf.txt、box.png）", () => { assert.equal(I.art, 1, I.raw); assert.equal(I.dir, wb ? "woban/shelf" : "shelf", I.raw); });
+	await check("櫃子大小＝shelf.txt 的 2x 尺寸 × S/8", () => {
+		const txt = fs.readFileSync(shelfTxt, "utf8");
 		const [, W2, H2] = /size (\d+) (\d+)/.exec(txt).map(Number);
 		assert.equal(I.w, Math.floor(W2 * I.S / 8 + 0.5), I.raw);
 		assert.equal(I.h, Math.floor(H2 * I.S / 8 + 0.5), I.raw);
@@ -133,6 +136,15 @@ async function check(name, fn) {
 			assert.ok(c.foot.y > c.open.y && c.foot.y <= c.open.y + c.open.h && c.foot.x > c.open.x && c.foot.x < c.open.x + c.open.w, "腳底在開口裡 " + JSON.stringify(c));
 		}
 	});
+	if (wb) await check("書包小屋：三間差不多大的房間（差 8% 內），左右並排、地板同高", () => {
+		assert.equal(I.n, 3, I.raw);
+		assert.equal(I.cells.length, 3, I.raw);
+		for (let i = 1; i < 3; i++) {
+			const a = I.cells[i - 1].open, b = I.cells[i].open;
+			assert.ok(Math.abs(a.w - b.w) <= a.w * 0.08 && Math.abs(a.h - b.h) <= a.h * 0.08 && Math.abs(a.y + a.h - b.y - b.h) <= 2, "差不多大、同一排 " + JSON.stringify([a, b]));
+			assert.ok(b.x >= a.x + a.w, "左右並排、不重疊 " + JSON.stringify([a, b]));
+		}
+	});
 	await check("一開始大家都在櫃子裡", () => assert.deepEqual(Object.keys(pos), []));
 
 	const day = await snap("shelf-day", area);
@@ -140,14 +152,15 @@ async function check(name, fn) {
 	await check("白天：櫃子畫出來了（大部分不是桌布）", () => assert.ok(dayS.cover > 0.6, JSON.stringify(dayS)));
 	const palCells = pik ? [1, 2, 3] : [0, 1, 2];
 	const dayPal = I.cells.map((c) => count(day, area.x, area.y, c.open, palColor));
-	await check("三隻在格子裡（" + palCells.join("、") + "）", () => { for (const i of palCells) assert.ok(dayPal[i] > 40, "格 " + i + " 沒有公仔的顏色: " + JSON.stringify(dayPal)); });
-	await check("四塊名牌上都有字", () => {
+	// 窩伴小世界的房間是粉彩色（跟公仔的顏色分不開）：改成比「在家」和「外出中」兩張截圖的差（見下面外出中那段）
+	if (!wb) await check("三隻在格子裡（" + palCells.join("、") + "）", () => { for (const i of palCells) assert.ok(dayPal[i] > 40, "格 " + i + " 沒有公仔的顏色: " + JSON.stringify(dayPal)); });
+	await check(I.cells.length + " 塊名牌上都有字", () => {
 		const n = I.cells.map((c) => count(day, area.x, area.y, c.plate, ink, 2));
-		for (let i = 0; i < 4; i++) assert.ok(n[i] >= 6, "名牌 " + i + " 沒有字: " + JSON.stringify(n));
+		for (let i = 0; i < I.cells.length; i++) assert.ok(n[i] >= 6, "名牌 " + i + " 沒有字: " + JSON.stringify(n));
 	});
 	if (pik) {
 		await check("皮克敏一櫃：大格是休息花（粉紅花瓣）", () => assert.ok(count(day, area.x, area.y, I.cells[0].open, (r, g, b) => r > 200 && g > 110 && g < 190 && b > 140) > 20));
-	} else {
+	} else if (!wb) {
 		await check("第 4 格是「做一隻你的公仔」入口（加號＋一行字）", () => {
 			const c = I.cells[3].open;
 			assert.ok(count(day, area.x, area.y, c, plus) > 10, "沒有橘色加號");
@@ -161,7 +174,7 @@ async function check(name, fn) {
 	const nightS = stats(night, area.x, area.y);
 	await check("晚上：櫃子變暗、偏藍（程式調色，不是另一張圖）", () => {
 		assert.ok(nightS.lum < dayS.lum * 0.8, "不夠暗: " + JSON.stringify({ dayS, nightS }));
-		assert.ok(nightS.blue > dayS.blue + 10, "沒有偏藍: " + JSON.stringify({ dayS, nightS }));
+		assert.ok(nightS.blue > dayS.blue + (wb ? 2 : 10), "沒有偏藍: " + JSON.stringify({ dayS, nightS }));   // 書包小屋本來就是薄荷綠（偏藍），夜色混進去差得比較少
 		assert.ok(nightS.cover > 0.6, "櫃子不見了: " + JSON.stringify(nightS));
 	});
 	send("act light");
@@ -172,7 +185,18 @@ async function check(name, fn) {
 	await sleep(5000);
 	const away = await snap("shelf-away", area);
 	const awayPal = I.cells.map((c) => count(away, area.x, area.y, c.open, palColor));
-	await check("外出中：格子裡的公仔不見了（只剩剪影）", () => { for (const i of palCells) assert.ok(awayPal[i] < dayPal[i] * 0.5, "格 " + i + ": " + JSON.stringify({ dayPal, awayPal })); });
+	if (wb) {
+		const diff = I.cells.map((c) => {
+			let n = 0;
+			for (let y = c.open.y - area.y; y < c.open.y - area.y + c.open.h; y++)
+				for (let x = c.open.x - area.x; x < c.open.x - area.x + c.open.w; x++) {
+					const i = (y * day.w + x) * 4;
+					if (Math.abs(day.px[i] - away.px[i]) + Math.abs(day.px[i + 1] - away.px[i + 1]) + Math.abs(day.px[i + 2] - away.px[i + 2]) > 60) n++;
+				}
+			return n;
+		});
+		await check("三隻在房間裡（在家／外出中兩張截圖，每間都差很多）", () => { for (const i of palCells) assert.ok(diff[i] > 300, "房間 " + i + ": " + JSON.stringify(diff)); });
+	} else await check("外出中：格子裡的公仔不見了（只剩剪影）", () => { for (const i of palCells) assert.ok(awayPal[i] < dayPal[i] * 0.5, "格 " + i + ": " + JSON.stringify({ dayPal, awayPal })); });
 
 	// 點格子：叫那一隻出來
 	for (let tries = 0; tries < 10; tries++) {
@@ -189,7 +213,7 @@ async function check(name, fn) {
 	send("act home");
 	await sleep(3000);
 
-	if (!pik) {
+	if (!pik && !wb) {
 		const c3 = I.cells[3];
 		send(`act click ${c3.foot.x},${c3.open.y + Math.round(c3.open.h / 2)}`);
 		await sleep(1500);

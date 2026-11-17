@@ -35,6 +35,7 @@ mac/
     57_share.swift      DeskPals.Share.cs（分享短片 GIF89a 編碼器、`.deskpal` 匯出匯入）
     58_fan.swift        DeskPals.Fan.cs（經典一櫃、天線寶寶一櫃的 Pal 資料、專屬動作、串場；個人版才有）
     59_mischief.swift   DeskPals.Mischief.cs（搗蛋：搶游標、下班清場、購物警察、打字太兇；MisSys／MisFake）
+    60_woban.swift      DeskPals.Woban.cs（窩伴小世界：翻翻・破破・綿綿的 Pal 資料、Wb* 專屬行為、喝水／休息／專注提醒、兩兩串場；圖片載入在 51_original.swift 的 SqArt，照 pals/lineups.txt）
     03_shim_custom_a.swift / 04_shim_custom_b.swift  做公仔用到的 shim（Matrix、ColorMatrix 像素處理、拖放、NSOpenPanel／NSSavePanel）
 ```
 (Line numbers above are from the first port and drift as the C# grows — find your range by the section comments.)

@@ -308,8 +308,8 @@ extension World {
         focusEnd = Now + Double(focusMin * 60)
         AbortScene()
         for p in OutPets() { p.QuietDown() }
-        let l: Pet = Lead()
-        l.Say(ExamNear() ? String(focusMin) + " 分鐘讀書開始 📚 我們安靜陪你" : String(focusMin) + " 分鐘專注開始 🍅 我們安靜陪你", 2.4)
+        let l: Pet = FocusPet()   // 窩伴小世界：翻翻陪你（60_woban.swift）
+        l.Say(ExamNear() ? String(focusMin) + " 分鐘讀書開始 📚 我們安靜陪你" : (l.P.Lines.ContainsKey("focus_start") ? l.L("focus_start", "n", String(focusMin)) : String(focusMin) + " 分鐘專注開始 🍅 我們安靜陪你"), 2.4)
         lastFocusLeft = FocusLeft()
         BroadcastFocus()
     }
@@ -318,7 +318,7 @@ extension World {
         if !focusOn { return }
         focusOn = false
         BroadcastFocus()
-        let l: Pet = Lead()
+        let l: Pet = FocusPet()
         if !done { l.Say("好，先不專注了～", 1.6); FlushFocusHeld(1); return }
         let n = BumpTomato()
         var end: String
@@ -331,10 +331,11 @@ extension World {
         case "dipsy": end = "專注結束。休息 5 分鐘 ☕ 你很酷"
         case "laalaa": end = "專注結束！休息 5 分鐘 ☕ 啦啦啦～好棒棒"
         // </fan>
-        default: end = l.P.Cu ? l.L("x_focus_end") : "專注結束！休息 5 分鐘 ☕ 你超強的"
+        default: end = l.P.Cu ? l.L("x_focus_end") : (l.P.Lines.ContainsKey("focus_end") ? l.L("focus_end") : "專注結束！休息 5 分鐘 ☕ 你超強的")
         }
         l.Knock((ExamNear() ? end.Replace("專注結束", "讀書結束") : end) + "　今天第 " + String(n) + " 顆 🍅", "high")
         for p in OutPets() { if p !== l { p.React() } }
+        WbFocusDone()   // 翻翻撒花：又完成一段
         breakOn = true; breakEnd = Now + 300
         FlushFocusHeld(5)
     }

@@ -4,6 +4,7 @@
 // 沒電＝一顆很累的電池（身體裡的電量跟你的工作時間連動：一直工作就掉、休息就充，充電時是綠的）、
 // 刺刺＝嘴硬心軟的盆栽仙人掌（被拆穿就開花、生氣就炸毛）。
 // 圖是一張一張的 PNG（extension/desktop/pals/squad/<id>/<1x|2x>/<動作>.png，tools/squad_art 產生），用「自己做的公仔」那套畫法（53_custom.swift 的 CuDraw）。
+// 一櫃＝pals 底下一個資料夾（pals/lineups.txt 列出有哪幾櫃）；窩伴小世界（翻翻・破破・綿綿）的專屬行為在 60_woban.swift。
 // mac：圖一律用 2x（cuOut 是裝置像素，Retina 剛好 1:1）；圖的資料夾：Contents/Resources/pals（.app）或執行檔旁邊的 pals（VS Code 擴充套件）。
 import Foundation
 import AppKit
@@ -11,19 +12,56 @@ import AppKit
 // mac：C# 的 [DeskPals.SqAssets]::Root（desk-pals.ps1 設的）；這裡給測試用（DESKPALS_ASSETS 也可以）
 enum SqAssets { static var Root = "" }
 
-// ================= 圖：讀 pals/squad =================
+// 一櫃圖片公仔（pals/lineups.txt 的一行）：lineup id、資料夾、名稱、角色（順序＝格子順序）
+final class SqLineup { var Id = "", Dir = "", Name = ""; var Ids: [String] = []; var Placeholder = false; init() {} }
+
+// ================= 圖：一櫃＝pals 底下一個資料夾（pals/lineups.txt 列出有哪幾櫃）=================
 enum SqArt
 {
     static let Keys: [String] = ["stand", "walk1", "walk2", "jump", "sleep", "happy", "held", "sit", "grab", "push", "cry", "blown", "sig1", "sig2", "surprised", "pout"]
+    // lineups.txt 讀不到（整包圖不見了）時用：跟檔案內容一樣，角色還是建得出來（畫成圓圓的佔位）
+    static let BuiltinLineups: [String] = ["original squad 續命小隊 duoduo meidian cici", "woban woban 窩伴小世界 fanfan bobo mian"]
+    static var lineups: List<SqLineup>! = nil
 
     static func Root() -> String
     {
         var cands: [String] = [SqAssets.Root, ProcessInfo.processInfo.environment["DESKPALS_ASSETS"] ?? "", Path.Combine(Application.StartupPath, "pals")]
         if let rp = Bundle.main.resourcePath { cands.append(Path.Combine(rp, "pals")) }
         cands.append(Path.Combine(Application.StartupPath, "../Resources/pals"))
-        for d in cands { if !d.isEmpty && File.Exists(Path.Combine(Path.Combine(d, "squad"), "squad.txt")) { return d } }
+        for d in cands { if !d.isEmpty && File.Exists(Path.Combine(d, "lineups.txt")) { return d } }
         return ""
     }
+
+    // 讀一個文字檔（pals 底下的相對路徑）；讀不到＝nil
+    static func ReadText(_ rel: String) -> String? {
+        let root = Root()
+        if root.isEmpty { return nil }
+        let f = Path.Combine(root, rel)
+        if !File.Exists(f) { return nil }
+        return try? File.ReadAllText(f)
+    }
+
+    static func Lineups() -> List<SqLineup> {
+        if let l0 = lineups { return l0 }
+        let l = List<SqLineup>()
+        let txt: String? = ReadText("lineups.txt")
+        if txt == nil { App.LogAlways("pals/lineups.txt missing (root=" + Root() + "): built-in list") }
+        let rows: [String] = txt == nil ? BuiltinLineups : txt!.components(separatedBy: "\n")
+        for row in rows {
+            let t = row.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\u{FEFF}", with: "")
+            if t.isEmpty || t.hasPrefix("#") { continue }
+            let a: [String] = t.components(separatedBy: CharacterSet(charactersIn: " \t")).filter { !$0.isEmpty }
+            if a.count < 4 { continue }
+            let q = SqLineup()
+            q.Id = a[0]; q.Dir = a[1]; q.Name = a[2]
+            q.Ids = Array(a[3...])
+            l.Add(q)
+        }
+        lineups = l
+        return l
+    }
+    static func Lineup(_ lu: String) -> SqLineup? { for q in Lineups() { if q.Id == lu { return q } }; return nil }
+    static func LineupOf(_ id: String) -> SqLineup? { for q in Lineups() { if q.Ids.contains(id) { return q } }; return nil }
 
     static func Png(_ rel: String) -> Bitmap!
     {
@@ -40,28 +78,32 @@ enum SqArt
     static func Load(_ id: String) -> CuSprite
     {
         if let s = Load(id, Res()) { return s }
-        App.LogAlways("squad art missing: " + id + " (root=" + Root() + ")")
+        App.LogAlways("pal art missing: " + id + " (root=" + Root() + ")")
         return Placeholder()
     }
 
+    // <資料夾>/<資料夾>.txt：id 倍率 畫布寬 畫布高 腳底中心x 腳底y 身體頂y 身體高 身體左x 身體寬；「placeholder 1」＝暫代圖、「shadow 1」＝腳下畫淡淡的落地陰影
     static func Load(_ id: String, _ r: Int) -> CuSprite?
     {
-        let root = Root()
-        if root.isEmpty { return nil }
-        guard let meta = try? File.ReadAllText(Path.Combine(Path.Combine(root, "squad"), "squad.txt")) else { return nil }
+        guard let q = LineupOf(id) else { return nil }
+        guard let meta = ReadText(q.Dir + "/" + q.Dir + ".txt") else { return nil }
         var m: [Int]? = nil
+        var shadow = false
         for line in meta.components(separatedBy: "\n") {
             let a = line.Trim().components(separatedBy: " ")
+            if a[0] == "placeholder" && !q.Placeholder { q.Placeholder = true; App.LogAlways(q.Dir + " art is placeholder") }
+            if a[0] == "shadow" && a.count >= 2 { shadow = a[1] == "1" }
             if a.count < 8 || a[0] != id || a[1] != String(r) { continue }
             var mm = [Int](repeating: 0, count: 8)
             for i in 0..<8 where i + 2 < a.count { mm[i] = Int(a[i + 2]) ?? 0 }
             m = mm
         }
         guard let mv = m else { return nil }
+        let dir: String = q.Dir + "/" + id + "/" + String(r) + "x/"
         let s = CuSprite()
-        s.Pixel = false; s.R = r == 1 ? 4 : 8; s.Rig = false; s.NoHalo = true
+        s.Pixel = false; s.R = r == 1 ? 4 : 8; s.Rig = false; s.NoHalo = true; s.Shadow = shadow
         for k in Keys {
-            guard let b = Png("squad/" + id + "/" + String(r) + "x/" + k + ".png") else { return nil }
+            guard let b = Png(dir + k + ".png") else { return nil }
             s.Frames[k] = b
         }
         s.Stand = s.Frames["stand"]; s.W = s.Stand.Width; s.H = s.Stand.Height
@@ -69,17 +111,13 @@ enum SqArt
         if mv[7] > 0 { s.BodyLeft = mv[6]; s.BodyW = mv[7] }
         s.HeadTop = s.BodyTop; s.HeadCx = mv[2]; s.HeadW = s.W / 4; s.NeckCx = mv[2]; s.NeckW = s.W / 4
         s.Neck = s.BodyTop + s.BodyH / 3; s.Hip = s.BodyTop + s.BodyH * 3 / 4; s.Split = mv[2]
-        if id == "duoduo" { s.Main = Color.FromArgb(0xD8, 0xA8, 0x6C) }
-        else if id == "meidian" { s.Main = Color.FromArgb(0xFB, 0xF0, 0xDF) }
-        else { s.Main = Color.FromArgb(0x90, 0xC0, 0x78) }
+        s.Main = Color.FromArgb(0xE0, 0xD8, 0xC8)   // 只有自己做的公仔用到（Pal.MakeCu）
         s.Outline = Color.FromArgb(0x1E, 0x1E, 0x24)
-        if id == "meidian" {
-            let liq = Dict<String, SqLiquid>()
-            for k in Keys {
-                guard let mb = Png("squad/" + id + "/" + String(r) + "x/" + k + ".liquid.png") else { continue }
-                liq[k] = SqLiquid.Make(k, CuImg.Pixels(s.Frames[k]), CuImg.Pixels(mb), s.W, s.H)
-            }
-            s.Liquid = liq
+        // 有液體遮罩（<動作>.liquid.png）的那隻：執行時依電量上色（沒電）；其他隻沒有遮罩，照原圖畫
+        for k in Keys {
+            guard let mb = Png(dir + k + ".liquid.png") else { continue }
+            if s.Liquid == nil { s.Liquid = Dict<String, SqLiquid>() }
+            s.Liquid[k] = SqLiquid.Make(k, CuImg.Pixels(s.Frames[k]), CuImg.Pixels(mb), s.W, s.H)
         }
         return s
     }
@@ -234,23 +272,63 @@ enum SqBattery
 
 // ================= 角色資料 =================
 //@@IN Pal
-    var Orig: Bool = false                     // 續命小隊
+    var Orig: Bool = false                     // 圖片公仔（續命小隊、窩伴小世界）：行為走 Pet 的 Orig* 掛點
+    var Squad: String = ""                     // 在哪一櫃圖片公仔（pals/lineups.txt 的 lineup id）
 //@@END
 
 extension Pal {
     static let Original = "original"
     static let OriginalName = "續命小隊"
+    static let Woban = "woban"                                  // 窩伴小世界（60_woban.swift）
     static let OriginalIds: [String] = ["duoduo", "meidian", "cici"]
     static let OldOriginalIds: [String] = ["boba", "coffee", "onigiri", "sticky"]   // 舊的像素版（資料轉給新三隻）
 
-    static func OrigPals() -> List<Pal> { return List<Pal>([Duoduo(), Meidian(), Cici()]) }
-
-    // 這一櫃有誰：三隻＋（做過自己的公仔的話）第 4 格放你的公仔（我的櫃排第一的那隻）
-    static func OrigLineupIds() -> [String] {
-        var l: [String] = OriginalIds
-        for id in MineIds() { if CuStore.Get(id) != nil { l.append(id); break } }
+    // pals/lineups.txt 列的每一隻都建一個（角色的個性、台詞在程式裡：續命小隊在這個檔、窩伴小世界在 60_woban.swift）
+    static func OrigPals() -> List<Pal> {
+        let l = List<Pal>()
+        for q in SqArt.Lineups() {
+            for id in q.Ids {
+                guard let p = SqMake(id) else { App.LogAlways("pals/lineups.txt: no character code for " + id); continue }
+                p.Squad = q.Id
+                l.Add(p)
+            }
+        }
         return l
     }
+    static func SqMake(_ id: String) -> Pal? {
+        switch id {
+        case "duoduo": return Duoduo()
+        case "meidian": return Meidian()
+        case "cici": return Cici()
+        default: return WobanMake(id)
+        }
+    }
+
+    // 圖片公仔櫃（pals/lineups.txt）：有哪幾櫃、這櫃的角色、名字
+    static func SqLineupList() -> [String] { var l: [String] = []; for q in SqArt.Lineups() { l.append(q.Id) }; return l }
+    static func IsSquad(_ lineup: String) -> Bool { return SqArt.Lineup(lineup) != nil }
+    static func SqIds(_ lineup: String) -> [String] { guard let q = SqArt.Lineup(lineup) else { return [] }; return q.Ids }
+    static func SqName(_ lineup: String) -> String { guard let q = SqArt.Lineup(lineup) else { return OriginalName }; return q.Name }
+    // 設定視窗第一頁兩櫃主打的一句介紹
+    static func SqBlurb(_ lineup: String) -> String? {
+        if lineup == Original { return "累到不行也要一起撐：躲在紙箱裡、電量跟你一起掉、嘴硬心軟。無厘頭續命梗" }
+        if lineup == Woban { return "住在書包小屋：陪你讀書專注、提醒喝水吃飯、帶你休息放鬆。溫柔療癒系" }
+        return nil
+    }
+
+    // 這一櫃有誰：資料夾列的那幾隻＋（櫃子還有空格、做過自己的公仔的話）空格放你的公仔（我的櫃排第一的那隻）
+    static func SqLineupIds(_ lineup: String) -> [String] {
+        var l: [String] = SqIds(lineup)
+        if l.count < ShelfArt.For(lineup).N { for id in MineIds() { if CuStore.Get(id) != nil { l.append(id); break } } }
+        return l
+    }
+
+    // 通知的開場白（fl_<種類>）：照 World.OrigFlavor 的順序一句一句給
+    static let FlavorKeys: [String] = ["ci-run", "ci-ok", "ci-fail", "cmd-ok", "cmd-fail", "meeting", "meeting-now", "jira", "worklog",
+                                       "remind", "pc-cpu", "pc-ram", "pc-disk", "net-down", "net-up", "vpn", "download"]
+    func Flavors(_ a: String...) { var i = 0; while i < a.count && i < Pal.FlavorKeys.count { Say("fl_" + Pal.FlavorKeys[i], a[i]); i += 1 } }
+    // 搶票倒數五段（tk_0～tk_4；{n}＝名稱、{h}＝還有多久）
+    func Tickets(_ a: String...) { var i = 0; while i < a.count { Say("tk_" + String(i), a[i]); i += 1 } }
 
     // 共用：圖、頭頂超出 16 格的列數、配件不戴
     static func OrigBase(_ id: String, _ name: String) -> Pal
@@ -338,6 +416,14 @@ extension Pal {
         p.Say("react", "嚇！", "（咻一下縮進去）", "什、什麼？")
         p.Say("o_hide", "我不在我不在我不在", "（箱子蓋起來了）", "這裡只有一個普通的箱子")
         p.Say("o_run", "被、被發現了——撤！", "箱子長腳了！跑！", "我不是躲躲！我是路過的箱子！")
+        p.Say("o_goal", "進、進了！🏀（探頭）"); p.Say("o_cheer", "好、好球！"); p.Say("o_miss", "沒進…我先躲一下")
+        p.Say("lunch_start", "午餐！便當…是網購送來的嗎 🔔"); p.Say("lunch_nap", "吃飽了…躲進箱子睡一下"); p.Say("lunch_end", "下午了…（打開箱子）")
+        p.Say("lunch_eat", "（躲在箱子裡吃）", "便當好好吃…不要看我吃", "便當的盒子也可以住嗎")
+        p.Say("sc_tea", "點心…可以帶回箱子吃嗎"); p.Say("sc_tea_lead", "三點了…有、有點心嗎 ⚡"); p.Say("sc_tea_end", "續、續命成功…乾杯（小聲）")
+        p.Say("sc_lunch", "我躲在箱子裡吃…"); p.Say("sc_photo", "我、我有拍到嗎…（躲）"); p.Say("sc_roll", "躲躲…到（小聲）📦"); p.Say("sc_bye", "回箱子…不是，回櫃子囉")
+        p.Flavors("CI 開始跑了…（偷看）", "CI 過了！我出來一下下！", "CI 失敗了…我先躲：", "跑完了…：", "沒成功…（縮）：", "等等要開會…好緊張：", "開會了！快去（我躲好了）", "有新的 Jira…：", "今天的日誌好了：",
+                  "⏰ 躲躲提醒你（小聲）：", "電腦好燙…箱子要融化了：", "記憶體快滿了…像塞爆的箱子：", "硬碟快滿了…：", "網路斷了…包裹送不到了", "網路回來了！", "連不到公司網路（VPN 斷了？）", "下載好了…是新的包裹嗎：")
+        p.Tickets("🎫 {n} 還有 {h}開賣…先登入、綁好付款喔", "🎫 {n} 再 30 分鐘…好緊張", "🎫 {n} 剩 10 分鐘！我躲好了", "🎫 準、準備…", "🎫 開搶！！（衝出箱子）")
         p.Shared()
         return p
     }
@@ -414,6 +500,14 @@ extension Pal {
         p.Say("o_flop", "……（靈魂在說）我沒電了，你去休息我才能充", "沒電了…（攤平）", "（鬼魂飄出來）充…電…")
         p.Say("o_charge", "插上了……嗯……這就是天堂", "充電中，請勿打擾（請打擾我，我很孤單）", "充電中…你也休息一下")
         p.Say("o_full", "100%！……好，我再睡五分鐘", "充飽了！可以再撐一小時（大概）")
+        p.Say("o_goal", "進了…省電投籃 🏀"); p.Say("o_cheer", "好球…（拍手耗電 1%）"); p.Say("o_miss", "沒電了，沒投好")
+        p.Say("lunch_start", "午餐！吃飯＝人類的充電 🔔"); p.Say("lunch_nap", "吃飽了…邊睡邊充電"); p.Say("lunch_end", "充、充好了…大概")
+        p.Say("lunch_eat", "（嚼）……電量 +5%", "吃飽會想睡，這是定律", "這便當幾瓦？")
+        p.Say("sc_tea", "續命！電量 +10%（心理上）"); p.Say("sc_tea_lead", "三點了…下午的電最難撐 ⚡"); p.Say("sc_tea_end", "續命成功！乾杯～")
+        p.Say("sc_lunch", "吃飯＝充電，開動"); p.Say("sc_photo", "閃光燈好耗電…"); p.Say("sc_roll", "沒電，到…（剩 {p}%）🔋"); p.Say("sc_bye", "關機囉…明天見")
+        p.Flavors("CI 開跑…好耗電：", "CI 過了！電量 +1%", "CI 掛了…我也快掛了：", "跑完了：", "失敗了…先充電再看：", "等等開會…我撐得住（騙人）：", "開會了…待機模式啟動：", "新的 Jira：", "日誌好了，可以關機了：",
+                  "⏰ 沒電提醒你（剩 {p}%）：", "電腦好燙…我也好燙：", "記憶體快滿了：", "硬碟快滿了：", "網路斷了…正好省電", "網路回來了…", "連不到公司網路（VPN 斷了？）", "下載好了：")
+        p.Tickets("🎫 {n} 還有 {h}開賣。先登入、綁好付款", "🎫 {n} 30 分鐘後開賣…我先充電", "🎫 {n} 剩 10 分鐘！電量全開", "🎫 準備。手指放好。", "🎫 開搶！！用掉我最後的電！")
         p.Shared()
         return p
     }
@@ -488,12 +582,20 @@ extension Pal {
         p.Say("react", "幹嘛！嚇我一跳", "（刺豎起來）", "什麼啦")
         p.Say("o_bloom", "這、這是花粉過敏！", "花是自己開的，跟你沒關係", "不准看！（花開得更大）")
         p.Say("o_bristle", "別碰我！", "現在很刺，請稍後再摸", "哼！！（刺全部豎起來）")
+        p.Say("o_goal", "進了。…還好啦 🏀"); p.Say("o_cheer", "好球。哼，還行"); p.Say("o_miss", "沒進！是球的問題")
+        p.Say("lunch_start", "午餐時間。…我才不餓 🔔"); p.Say("lunch_nap", "吃飽了…閉目養神"); p.Say("lunch_end", "下午了。…加油（小聲）")
+        p.Say("lunch_eat", "才不是因為好吃才吃很快", "你也要吃飯喔。…我隨便說的", "（偷偷多吃一口）")
+        p.Say("sc_tea", "我不用續命。…一口就好"); p.Say("sc_tea_lead", "三點了。…要不要吃點東西 ⚡"); p.Say("sc_tea_end", "續命完畢。…還行")
+        p.Say("sc_lunch", "我才不餓。…開動"); p.Say("sc_photo", "我才沒有笑。"); p.Say("sc_roll", "刺刺。到。🌵"); p.Say("sc_bye", "下班。…路上小心（小聲）")
+        p.Flavors("CI 開跑了。看什麼：", "CI 過了。…還行啦", "CI 掛了？又不是我寫的：", "跑完了：", "失敗了。哼：", "等等要開會。別遲到：", "開會了！快去！", "新的 Jira。去看：", "日誌好了。不用謝：",
+                  "⏰ 提醒你（才不是關心）：", "電腦好燙！你在幹嘛：", "記憶體快滿了：", "硬碟快滿了，東西要收：", "網路斷了！…不是我拔的", "網路回來了。哼", "連不到公司網路（VPN 斷了？）", "下載好了：")
+        p.Tickets("🎫 {n} 還有 {h}開賣。先登入、綁好付款，別到時候哭", "🎫 {n} 再 30 分鐘。我才沒有很期待", "🎫 {n} 剩 10 分鐘！刺都豎起來了", "🎫 準備！", "🎫 開搶！！快啊！")
         p.Shared()
         return p
     }
 }
 
-// ================= 一隻續命小隊 =================
+// ================= 一隻圖片公仔（續命小隊；窩伴小世界的專屬行為在 60_woban.swift 的 Wb*）=================
 //@@IN Pet
     var oAct = "", oPose = ""            // 專屬動作（state == "orig"）；oPose＝要擺哪一張圖
     var oT: Double = 0, oSulkT: Double = 0, oLowCd: Double = 0, oSigCd: Double = 0
@@ -512,12 +614,14 @@ extension Pet {
     func OPose(_ frame: String, _ dur: Double) { if !Grounded() && state != "air" { return }; oPose = frame; OrigDo("pose", dur) }
 
     var BatLink: Bool { return Is("meidian") && SqBattery.Link }
+    var Wb: Bool { return P.Squad == Pal.Woban }   // 窩伴小世界
     var Flat: Bool { return BatLink && SqBattery.Level <= 0.001 && !SqBattery.Charging }
 
     // ---------- 連點三下 ----------
     func OrigCombo() {
         Say(L("tickle"), 1.8)
         if !Grounded() || state == "dizzy" { return }
+        if Wb { WbCombo(); return }
         switch P.Id {
         case "duoduo": OrigDo("hide", 2.4)                                        // 縮回箱子
         case "meidian": OPose("surprised", 1.4); if BatLink { SqBattery.Level = Math.Max(0, SqBattery.Level - 0.01) }
@@ -528,6 +632,7 @@ extension Pet {
     // ---------- 招牌動作 ----------
     func OrigSignature() {
         if !Grounded() { return }
+        if Wb { WbSignature(); return }
         switch P.Id {
         case "duoduo": OrigDo("hide", R(2.6, 4)); Say(L("o_hide"), 1.6)
         case "meidian":
@@ -563,7 +668,7 @@ extension Pet {
         case "sq_battery": Say(SqBattery.Link ? L("hover") : "電量連動關著：我永遠滿電 🔋", 2.2); return true
         case "sq_bloom": if Grounded() && Is("cici") { OrigDo("bloom", 3); Say(L("o_bloom"), 1.8) }; return true
         case "sq_bristle": if Grounded() && Is("cici") { OrigDo("bristle", 2.2); Say(L("o_bristle"), 1.6) }; return true
-        default: return false
+        default: return Wb && WbAct(a)
         }
     }
 
@@ -575,6 +680,7 @@ extension Pet {
         if r < 0.48 { if !JumpToPlatform() { Hop() }; return }
         if r < 0.55 { OrigSignature(); return }
         if r < 0.62 {
+            if Wb { WbChat(); return }
             switch P.Id {
             case "duoduo": OPose("surprised", 1.4); Say(L("talk"), 2.2)
             case "meidian": if SqBattery.Pct < 25 && BatLink { OPose("pout", 2); Say(L("o_low"), 2.2) } else { OPose("sit", 2.6); Say(L("talk"), 2.4) }
@@ -592,7 +698,7 @@ extension Pet {
 
     // 走到視窗邊：0 照預設跳、1 回頭、2 換狀態了
     func OrigEdge(_ right: Bool) -> Int {
-        if Is("meidian") || rnd.NextDouble() < 0.45 { dir = -dir; return 1 }   // 沒電：跳太耗電
+        if Is("meidian") || Is("mian") || rnd.NextDouble() < 0.45 { dir = -dir; return 1 }   // 沒電：跳太耗電；綿綿：慢慢來，不跳
         x += Double(dir) * 4 * k; Jump(Double(dir) * 120 * k, -260 * k); Say(L("jump"), 0.8)
         return 2
     }
@@ -616,18 +722,19 @@ extension Pet {
     func OrigExit() {
         switch P.Id {
         case "duoduo": if rnd.NextDouble() < 0.6 { afterLand = "opeek" }
-        case "cici": if rnd.NextDouble() < 0.4 { afterLand = "ohappy" }
+        case "cici", "fanfan", "bobo", "mian": if rnd.NextDouble() < 0.4 { afterLand = "ohappy" }
         default: break
         }
     }
 
     func OrigNewWindow(_ win: WinInfo) {
         if Is("duoduo") && rnd.NextDouble() < 0.6 { OrigDo("hide", 2.4); Say(L("newwin"), 1.5); return }   // 新視窗跳出來：先躲
-        if !GoToWindow(win, L("newwin"), Is("cici") ? "ohappy" : "opeek") { Say(L("newwin"), 1.5) }
+        if !GoToWindow(win, L("newwin"), Is("cici") || Is("bobo") || Is("mian") ? "ohappy" : "opeek") { Say(L("newwin"), 1.5) }
     }
 
     // 錯誤變多：躲躲躲起來、沒電嚇到、刺刺炸毛
     func OrigReact(_ why: String) {
+        if Wb { WbReact(why); return }
         switch P.Id {
         case "duoduo": OrigDo("hide", 2.6)
         case "meidian": OPose("surprised", 2.2); Mark(1)
@@ -638,19 +745,13 @@ extension Pet {
     // 慶祝（上版、做完）：刺刺被拆穿＝開花
     func OrigCelebrate(_ line: String, _ lead: Bool) {
         if lead { w.Fireworks(w.WA(Cx, y + Double(SH) / 2.0), 10, -1) }
-        if Grounded() { if Is("cici") { OrigDo("bloom", 3.2) } else { OPose("happy", 3.2) } }
+        if Grounded() { if Is("cici") { OrigDo("bloom", 3.2) } else if Is("fanfan") { OrigDo("s2", 3.2) } else { OPose("happy", 3.2) } }   // 翻翻：慶祝小進步
         Say(line, 4)
         Burst(8)
     }
 
-    func OrigLine(_ kind: String) -> String {
-        switch kind {
-        case "goal": return Is("duoduo") ? "進、進了！🏀（探頭）" : (Is("meidian") ? "進了…省電投籃 🏀" : "進了。…還好啦 🏀")
-        case "cheer": return Is("duoduo") ? "好、好球！" : (Is("meidian") ? "好球…（拍手耗電 1%）" : "好球。哼，還行")
-        case "miss": return Is("duoduo") ? "沒進…我先躲一下" : (Is("meidian") ? "沒電了，沒投好" : "沒進！是球的問題")
-        default: return "！"
-        }
-    }
+    // 進球、加油、沒進（o_goal／o_cheer／o_miss，每隻自己的台詞）
+    func OrigLine(_ kind: String) -> String { let l = L("o_" + kind); return l == "" ? "！" : l }
 
     // ---------- 球 ----------
     func OrigBall() {
@@ -773,9 +874,12 @@ extension Pet {
             case "bloom": return "sig1"
             case "bristle": return "sig2"
             case "catch": return "grab"
+            case "s1": return "sig1"    // 窩伴小世界的招牌動作（60_woban.swift）
+            case "s2": return "sig2"
             default: return "stand"
             }
         }
+        if Wb, let wf = WbFrame() { return wf }
         if Is("meidian") && SqBattery.Charging && (state == "sleep" || state == "idle") && BatLink { return "sig1" }   // 你去休息了：他在充電
         if Flat && (state == "idle" || state == "sleep") { return "sig2" }
         switch state {
@@ -797,7 +901,7 @@ extension Pet {
         case "leap", "fall": return "jump"
         case "hold": return Is("duoduo") ? "sig1" : "grab"                      // 躲躲：游標收進紙箱
         case "run": return Is("duoduo") ? "sig2" : (step ? "walk2" : "walk1")    // 躲躲：箱子長腳逃跑
-        case "drop": return Is("meidian") ? "sleep" : (Is("cici") ? "sig1" : "happy")   // 沒電：抱著游標當枕頭
+        case "drop": return Is("meidian") || Is("mian") ? "sleep" : (Is("cici") ? "sig1" : "happy")   // 沒電、綿綿：抱著游標當枕頭
         case "caught": return Is("cici") ? "sig2" : "surprised"
         case "brace", "push": return "push"
         case "cry": return "cry"
@@ -829,35 +933,32 @@ extension Pet {
 
     // 畫一隻：圖＋手上的球、午餐
     func DrawFigureOrig(_ g: Graphics, _ f: Fr, _ sbx: Int, _ sby: Int, _ sps: Int, _ fx: Bool, _ extras: Bool) {
+        if P.Spr.Shadow && extras && Grounded() && !Dragging { DrawSqShadow(g, sbx + 6 * sps, sby + 16 * sps, sps) }
         CuDraw(g, cuPose, Double(sbx + 6 * sps), Double(sby + 16 * sps), sps, fx)
         if !extras { return }
         if w.Holder === self { DrawAt(g, w.BallKind == "baseball" ? Pet.BALLART : Pet.TBALL, 8.0, Double(P.BodyTop - 1) + cuPose.Y, sbx, sby, sps, fx, false, true) }
         DrawLunch(g, f, sbx, sby, sps, fx)
     }
 
+    // 很淡的落地陰影（腳底正中間一個扁橢圓，邊緣再淡一圈）：沒有白邊的圖在淺色桌布上比較站得住
+    func DrawSqShadow(_ g: Graphics, _ fx: Int, _ fy: Int, _ ps: Int) {
+        let s: CuSprite = P.Spr
+        let bw: Double = s.BodyW > 0 ? Double(s.BodyW) : Double(s.W)
+        let w: Double = bw / Double(s.R) * Double(ps) * 0.78
+        let h: Double = Math.Max(2.0, Double(ps) * 1.6)
+        let was = g.SmoothingMode
+        g.SmoothingMode = SmoothingMode.AntiAlias
+        let cx = Double(fx), cy = Double(fy), pd = Double(ps)
+        g.FillEllipse(SolidBrush(Color.FromArgb(Night ? 22 : 30, 20, 24, 40)), cx - w / 2 - pd, cy - h / 2 - pd * 0.2, w + 2 * pd, h + pd * 0.6)
+        g.FillEllipse(SolidBrush(Color.FromArgb(Night ? 26 : 38, 20, 24, 40)), cx - w / 2, cy - h / 2, w, h)
+        g.SmoothingMode = was
+    }
+
     func DrawOrigBehind(_ g: Graphics, _ f: Fr, _ bx: Int, _ by: Int, _ ps: Int, _ fx: Bool) { }
     func DrawOrigFront(_ g: Graphics, _ f: Fr, _ bx: Int, _ by: Int, _ ps: Int, _ fx: Bool) { }
 
     // ---------- 午餐：躲躲吃網購的便當、沒電吃飯＝人類的充電、刺刺吃飯（嘴硬）----------
-    func OrigLunchLine(_ phase: String) -> String {
-        switch P.Id {
-        case "duoduo":
-            if phase == "start" { return "午餐！便當…是網購送來的嗎 🔔" }
-            if phase == "nap" { return "吃飽了…躲進箱子睡一下" }
-            if phase == "end" { return "下午了…（打開箱子）" }
-            return Pick(["（躲在箱子裡吃）", "便當好好吃…不要看我吃", "便當的盒子也可以住嗎"])
-        case "meidian":
-            if phase == "start" { return "午餐！吃飯＝人類的充電 🔔" }
-            if phase == "nap" { return "吃飽了…邊睡邊充電" }
-            if phase == "end" { return "充、充好了…大概" }
-            return Pick(["（嚼）……電量 +5%", "吃飽會想睡，這是定律", "這便當幾瓦？"])
-        default:
-            if phase == "start" { return "午餐時間。…我才不餓 🔔" }
-            if phase == "nap" { return "吃飽了…閉目養神" }
-            if phase == "end" { return "下午了。…加油（小聲）" }
-            return Pick(["才不是因為好吃才吃很快", "你也要吃飯喔。…我隨便說的", "（偷偷多吃一口）"])
-        }
-    }
+    func OrigLunchLine(_ phase: String) -> String { return L("lunch_" + phase) }   // lunch_start／nap／end／eat（每隻自己的台詞）
 
     func DrawOrigLunch(_ g: Graphics, _ f: Fr, _ bx: Int, _ by: Int, _ ps: Int, _ fx: Bool, _ bite: Int) {
         DrawAt(g, Pet.BENTO, 8.5, Double(P.BodyTop + bite) + cuPose.Y, bx, by, ps, fx, false, true)
@@ -878,6 +979,7 @@ extension Pet {
         else if Is("meidian") && SqBattery.Link && SqBattery.Pct == 0 { fr = "sig2" }
         else if Is("duoduo") && tt.truncatingRemainder(dividingBy: 11) < 2.5 { fr = "sig1" }
         else if Is("cici") && tt.truncatingRemainder(dividingBy: 13) < 2 { fr = "pout" }
+        else if Wb, let wf = WbShelfFrame(tt) { fr = wf }
         else if tt.truncatingRemainder(dividingBy: 9) < 0.9 { fr = "happy" }
         if w.Lunch && !Night { fr = "sit" }
         p.Frame = fr
@@ -944,7 +1046,7 @@ extension ShelfForm {
     }
 }
 
-// ================= World：續命小隊的串場、點名、大合照、下班、電量 =================
+// ================= World：圖片公仔櫃的串場、點名、大合照、下班；沒電的電量 =================
 //@@IN World
     var oLunchSeen = "", oTeaDay = ""
     var batLoaded = false; var batSaveT: Double = 0
@@ -952,7 +1054,9 @@ extension ShelfForm {
 //@@END
 
 extension World {
-    var OrigLineup: Bool { return lineup == Pal.Original }
+    var OrigLineup: Bool { return Pal.IsSquad(lineup) }            // 圖片公仔櫃（續命小隊、窩伴小世界；pals/lineups.txt）
+    var WobanLineup: Bool { return lineup == Pal.Woban }          // 窩伴小世界（60_woban.swift）
+    var LineupNow: String { return lineup }
 
     // 沒指定哪一櫃時：照上次的；全新安裝（什麼都還沒存過）就是續命小隊。舊使用者完全不變。
     // mac: World.init 在 super.init 之前就要用，所以是 static（只用到 static 的 ReadText／WriteText／FilePath）
@@ -1008,7 +1112,7 @@ extension World {
 
     func OrigOrder(_ l: List<Pet>) -> List<Pet> {
         let o = List<Pet>()
-        for id in Pal.OriginalIds { for p in l { if p.P.Id == id { o.Add(p) } } }
+        for id in Pal.SqIds(lineup) { for p in l { if p.P.Id == id { o.Add(p) } } }
         return o
     }
 
@@ -1024,6 +1128,7 @@ extension World {
             return [[bat, "sq_battery"],
                     ["抱抱 ♥", "hug"], ["打招呼", "hi"], ["敲敲螢幕", "knock"], ["插上充電", "sq_charge"],
                     ["攤平給你看", "sq_flop"], ["待機（睡覺）", "sleep"], ["丟球給他 ⚾", "ball"]]
+        case "fanfan", "bobo", "mian": return WbMenuItems(p)
         default:
             return [["抱抱 ♥", "hug"], ["打招呼", "hi"], ["敲敲螢幕", "knock"], ["開花（被拆穿）", "sq_bloom"],
                     ["炸毛", "sq_bristle"], ["跳到別的視窗上", "jump"], ["睡覺", "sleep"], ["丟球給她 ⚾", "ball"]]
@@ -1031,8 +1136,8 @@ extension World {
     }
 
     func AddOrigMenu(_ m: ContextMenuStrip) {
-        let grp = ToolStripMenuItem("續命小隊一起…")
-        let gs: [[String]] = [["下午三點續命 ⚡", "teatime"], ["大合照 📷", "photo"], ["點名", "rollcall"], ["下班說再見", "byebye"]]
+        let grp = ToolStripMenuItem(Pal.SqName(lineup) + "一起…")
+        let gs: [[String]] = [[WobanLineup ? "下午茶，伸展一下 🍵" : "下午三點續命 ⚡", "teatime"], ["大合照 📷", "photo"], ["點名", "rollcall"], ["下班說再見", "byebye"]]
         for gi in gs { let key = gi[1]; grp.DropDownItems.Add(gi[0], nil, { [self] in OrigScene(key) }) }
         m.Items.Add(grp)
     }
@@ -1095,6 +1200,7 @@ extension World {
         if batForceCharge { SqBattery.Charging = true; SqBattery.Level = Math.Min(1.0, SqBattery.Level + dt / 600) }
         else { BatTick(dt) }
         if !OrigLineup { return }
+        if WobanLineup { WbTick(dt) }
         if LunchState != oLunchSeen {
             if LunchState == "eat" && oLunchSeen == "" && OutCount() >= 2 { Later(4) { [self] in if scene == nil && OrigLineup { OrigScene("lunch") } } }
             oLunchSeen = LunchState
@@ -1122,7 +1228,7 @@ extension World {
         case "rollcall":
             let ids = List<String>()
             for p in outs { ids.Add(p.P.Id) }
-            if ids.Count == 0 { ids.AddRange(Pal.OriginalIds) }
+            if ids.Count == 0 { ids.AddRange(Pal.SqIds(lineup)) }
             OrigRollCall(ids)
         case "byebye": OrigNight(false)
         default: break
@@ -1135,7 +1241,7 @@ extension World {
         case "cici-meidian": if let c = c, let m = m { ScenePlugPot(m, c) }
         case "duoduo-meidian": if let d = d, let m = m { SceneBoxBed(d, m) }
         case "cici-duoduo": if let c = c, let d = d { SceneWhereDidHeGo(d, c) }
-        default: break
+        default: WbPairScene(key)
         }
     }
 
@@ -1183,20 +1289,22 @@ extension World {
 
     // ---------- 大家：下午三點續命 ----------
     func SceneTeaTime(_ outs: List<Pet>) {
-        let m: Pet? = Get("meidian")
-        let lead: Pet = (m != nil && outs.Contains(m!)) ? m! : outs[0]
+        var lead0: Pet = outs[0]
+        for p in outs { if p.P.Id == "meidian" || p.P.Id == "mian" { lead0 = p; break } }   // 沒電、綿綿帶頭
+        let lead: Pet = lead0
         Begin(outs.ToArray())
         _ = LineUp(outs, Lead(), 2.7)
-        At(0) { lead.Say("三點了…下午的電最難撐 ⚡", 2.2) }
+        let leadLine = lead.L("sc_tea_lead"), endLine = lead.L("sc_tea_end")
+        At(0) { lead.Say(leadLine, 2.2) }
         At(4.4) { for p in outs { p.FaceTo(lead); p.ScenePose("idle", 30) } }
         var d = 4.8
         for p in outs {
             let pp = p
-            let line = pp.P.Id == "duoduo" ? "點心…可以帶回箱子吃嗎" : (pp.P.Id == "meidian" ? "續命！電量 +10%（心理上）" : "我不用續命。…一口就好")
-            At(d) { pp.OPose(pp.P.Id == "meidian" ? "sig1" : "happy", 1.6); pp.Say(line, 1.8); if pp.P.Id == "meidian" && SqBattery.Link { SqBattery.Level = Math.Min(1.0, SqBattery.Level + 0.02) } }
+            let line = pp.L("sc_tea")
+            At(d) { pp.OPose(pp.P.Id == "meidian" || pp.P.Id == "bobo" || pp.P.Id == "mian" ? "sig1" : "happy", 1.6); pp.Say(line, 1.8); if pp.P.Id == "meidian" && SqBattery.Link { SqBattery.Level = Math.Min(1.0, SqBattery.Level + 0.02) } }
             d += 2.0
         }
-        At(d + 0.4) { for p in outs { p.OPose("happy", 2.4); p.AddHeart(); p.Burst(5) }; lead.Say("續命成功！乾杯～", 2.2) }
+        At(d + 0.4) { for p in outs { p.OPose("happy", 2.4); p.AddHeart(); p.Burst(5) }; lead.Say(endLine, 2.2) }
         At(d + 3.2) { for p in outs { p.ScenePose("wave", 1.6) } }
         At(d + 5.0) { }
     }
@@ -1209,7 +1317,7 @@ extension World {
         var d = 4.6
         for p in outs {
             let pp = p
-            let line = pp.P.Id == "duoduo" ? "我躲在箱子裡吃…" : (pp.P.Id == "meidian" ? "吃飯＝充電，開動" : "我才不餓。…開動")
+            let line = pp.L("sc_lunch")
             At(d) { pp.OPose("sit", 30); pp.Say(line, 2.3) }
             d += 2.5
         }
@@ -1225,7 +1333,8 @@ extension World {
         Begin(outs.ToArray())
         let lr = LineUp(outs, l, 2.7)
         let left = lr[0], right = lr[1], foot = lr[2]
-        At(0) { l.Say("續命小隊，來拍照～排好排好！", 2) }
+        let name = Pal.SqName(lineup)
+        At(0) { l.Say(name + "，來拍照～排好排好！", 2) }
         At(5.2) {
             for p in outs {
                 p.dir = p.Cx < (left + right) / 2 ? 1 : -1
@@ -1237,8 +1346,8 @@ extension World {
         var d = 7.4
         for p in outs {
             let pp = p
-            let line = pp.P.Id == "duoduo" ? "我、我有拍到嗎…（躲）" : (pp.P.Id == "meidian" ? "閃光燈好耗電…" : "我才沒有笑。")
-            At(d) { if pp.P.Id == "duoduo" { pp.OrigDo("hide", 2) } else if pp.P.Id == "cici" { pp.OrigDo("bloom", 2) }; pp.Say(line, 1.4) }
+            let line = pp.L("sc_photo")
+            At(d) { if pp.P.Id == "duoduo" { pp.OrigDo("hide", 2) } else if pp.P.Id == "cici" { pp.OrigDo("bloom", 2) } else if pp.P.Id == "fanfan" { pp.OrigDo("s2", 2) }; pp.Say(line, 1.4) }
             d += 1.4
         }
         At(d + 0.4) { }
@@ -1247,27 +1356,26 @@ extension World {
     // ---------- 早上點名：一隻一隻出來 ----------
     func OrigRollCall(_ ids: List<String>) {
         let order = List<Pet>()
-        for id in Pal.OriginalIds { if ids.Contains(id) && Get(id) != nil { order.Add(Get(id)) } }
+        for id in Pal.SqIds(lineup) { if ids.Contains(id) && Get(id) != nil { order.Add(Get(id)) } }
         var d = 0.4
         for p in order {
             let pp = p
-            var line = "刺刺。到。🌵"
-            if pp.P.Id == "duoduo" { line = "躲躲…到（小聲）📦" }
-            if pp.P.Id == "meidian" { line = "沒電，到…（剩 " + String(SqBattery.Pct) + "%）🔋" }
+            let line = pp.L("sc_roll")
             Later(d) { [self] in if !pp.Out { BringOut(pp, false) } }
             Later(d + 1.0) { pp.Say(line, 1.8) }
             d += 1.6
         }
         Later(d + 1.0) { [self] in
             for p in order { if p.Out && p.Grounded() { p.ScenePose("wave", 1.8) } }
-            if order.Count > 0 { Lead().Say("續命小隊，報到！", 2.6) }
+            if order.Count > 0 { Lead().Say(Pal.SqName(lineup) + "，報到！", 2.6) }
         }
     }
 
     // ---------- 下班：一個一個回櫃子（沒電最後，因為走最慢）----------
     func OrigNight(_ nag: Bool) {
         let outs = OrigOrder(OutPets())
-        if outs.Count == 0 { Lead().Say("續命小隊…下班囉～", 2.4); return }
+        let name = Pal.SqName(lineup)
+        if outs.Count == 0 { Lead().Say(name + "…下班囉～", 2.4); return }
         outs.Sort { a, b in let ka = a.P.Id == "meidian" ? 1 : 0, kb = b.P.Id == "meidian" ? 1 : 0; return ka < kb ? -1 : (ka == kb ? 0 : 1) }
         Begin(outs.ToArray())
         for p in outs { if p.Grounded() { p.ScenePose("idle", 60) } }
@@ -1275,37 +1383,27 @@ extension World {
         if nag { for p in outs { let pp = p; At(d) { pp.Say(pp.L("nag"), 2.6) }; d += 2.8 } }
         for p in outs {
             let pp = p
-            let line = pp.P.Id == "duoduo" ? "回箱子…不是，回櫃子囉" : (pp.P.Id == "cici" ? "下班。…路上小心（小聲）" : "關機囉…明天見")
+            let line = pp.L("sc_bye")
             At(d) { pp.ScenePose("wave", 2); pp.Say(line, 2.2) }
             At(d + 1.6) { pp.InScene = false; if pp.Out { pp.StowToShelf(false) } }
             d += 2.6
         }
-        At(d + 0.6) { let last = outs[outs.Count - 1]; last.Say("續命小隊，下班！明天見～", 2.6) }
+        At(d + 0.6) { let last = outs[outs.Count - 1]; last.Say(name + "，下班！明天見～", 2.6) }
         At(d + 3.4) { }
     }
 
-    // ---------- 通知的開場白、搶票 ----------
+    // ---------- 通知的開場白、搶票：每隻自己的台詞（fl_<種類>、tk_<階段>，Pal.Flavors／Tickets 給的）----------
     static func OrigFlavor(_ id: String, _ kind: String) -> String? {
-        if id != "duoduo" && id != "meidian" && id != "cici" { return nil }
-        let keys: [String] = ["ci-run", "ci-ok", "ci-fail", "cmd-ok", "cmd-fail", "meeting", "meeting-now", "jira", "worklog",
-                              "remind", "pc-cpu", "pc-ram", "pc-disk", "net-down", "net-up", "vpn", "download"]
-        let i = keys.IndexOf(kind)
-        if i < 0 { return nil }
-        let dd: [String] = ["CI 開始跑了…（偷看）", "CI 過了！我出來一下下！", "CI 失敗了…我先躲：", "跑完了…：", "沒成功…（縮）：", "等等要開會…好緊張：", "開會了！快去（我躲好了）", "有新的 Jira…：", "今天的日誌好了：",
-                            "⏰ 躲躲提醒你（小聲）：", "電腦好燙…箱子要融化了：", "記憶體快滿了…像塞爆的箱子：", "硬碟快滿了…：", "網路斷了…包裹送不到了", "網路回來了！", "連不到公司網路（VPN 斷了？）", "下載好了…是新的包裹嗎："]
-        let md: [String] = ["CI 開跑…好耗電：", "CI 過了！電量 +1%", "CI 掛了…我也快掛了：", "跑完了：", "失敗了…先充電再看：", "等等開會…我撐得住（騙人）：", "開會了…待機模式啟動：", "新的 Jira：", "日誌好了，可以關機了：",
-                            "⏰ 沒電提醒你（剩 {p}%）：", "電腦好燙…我也好燙：", "記憶體快滿了：", "硬碟快滿了：", "網路斷了…正好省電", "網路回來了…", "連不到公司網路（VPN 斷了？）", "下載好了："]
-        let cc: [String] = ["CI 開跑了。看什麼：", "CI 過了。…還行啦", "CI 掛了？又不是我寫的：", "跑完了：", "失敗了。哼：", "等等要開會。別遲到：", "開會了！快去！", "新的 Jira。去看：", "日誌好了。不用謝：",
-                            "⏰ 提醒你（才不是關心）：", "電腦好燙！你在幹嘛：", "記憶體快滿了：", "硬碟快滿了，東西要收：", "網路斷了！…不是我拔的", "網路回來了。哼", "連不到公司網路（VPN 斷了？）", "下載好了："]
-        let s = id == "duoduo" ? dd[i] : (id == "meidian" ? md[i] : cc[i])
-        return s.Replace("{p}", String(SqBattery.Pct))
+        guard let p = Pal.Get(id), p.Orig else { return nil }
+        var a: [String] = []
+        if !p.Lines.TryGetValue("fl_" + kind, &a) || a.count == 0 { return nil }
+        return a[0].Replace("{p}", String(SqBattery.Pct))
     }
 
     static func OrigTicket(_ id: String, _ stage: Int, _ n: String, _ h: String) -> String? {
-        if id != "duoduo" && id != "meidian" && id != "cici" { return nil }
-        let dd: [String] = ["🎫 " + n + " 還有 " + h + "開賣…先登入、綁好付款喔", "🎫 " + n + " 再 30 分鐘…好緊張", "🎫 " + n + " 剩 10 分鐘！我躲好了", "🎫 準、準備…", "🎫 開搶！！（衝出箱子）"]
-        let md: [String] = ["🎫 " + n + " 還有 " + h + "開賣。先登入、綁好付款", "🎫 " + n + " 30 分鐘後開賣…我先充電", "🎫 " + n + " 剩 10 分鐘！電量全開", "🎫 準備。手指放好。", "🎫 開搶！！用掉我最後的電！"]
-        let cc: [String] = ["🎫 " + n + " 還有 " + h + "開賣。先登入、綁好付款，別到時候哭", "🎫 " + n + " 再 30 分鐘。我才沒有很期待", "🎫 " + n + " 剩 10 分鐘！刺都豎起來了", "🎫 準備！", "🎫 開搶！！快啊！"]
-        return id == "duoduo" ? dd[stage] : (id == "meidian" ? md[stage] : cc[stage])
+        guard let p = Pal.Get(id), p.Orig else { return nil }
+        var a: [String] = []
+        if !p.Lines.TryGetValue("tk_" + String(Math.Max(0, Math.Min(4, stage))), &a) || a.count == 0 { return nil }
+        return a[0].Replace("{n}", n).Replace("{h}", h)
     }
 }

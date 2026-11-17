@@ -647,6 +647,32 @@ namespace DeskPals
             d["cici.shop"] = new string[] { "買那個幹嘛…（偷看）多少錢", "{site}？…錢包在哭，我才沒有" };
             d["cici.typing"] = new string[] { "再打那麼大力我要炸毛了", "盆、盆要翻了！" };
             d["cici.typing_back"] = new string[] { "哼，我自己走回來的", "土都灑出來了…" };
+            // 窩伴小世界（溫柔版的搗蛋）
+            d["fanfan.grab_start"] = new string[] { "游標借我當書籤一下下", "你休息一下，游標我幫你顧著", "（把游標夾進書裡）" };
+            d["fanfan.grab_drop"] = new string[] { "游標還你～剛剛有好好休息嗎", "書籤用完了，還你" };
+            d["fanfan.grab_caught"] = new string[] { "被找到了～還你還你", "我只是想讓你休息一下" };
+            d["fanfan.clear_start"] = new string[] { "下班了，書闔起來，視窗也收一收", "今天的頁數夠了，我們收工" };
+            d["fanfan.clear_done"] = new string[] { "桌面整理好了，今天辛苦了", "收好了，明天從這裡繼續" };
+            d["fanfan.shop"] = new string[] { "{site}…這個真的需要嗎？先放購物車一晚", "要不要先想一下下再買？" };
+            d["fanfan.typing"] = new string[] { "哇，書頁被吹走了～", "打字好用力，手會痛喔" };
+            d["fanfan.typing_back"] = new string[] { "書籤撿回來了，我回來了", "（抱著書走回來）輕輕打就好" };
+            d["bobo.grab_start"] = new string[] { "游標先放旁邊，喝口水吧", "（把游標收進圍裙口袋）休息一下", "游標我先保管，你去倒杯水" };
+            d["bobo.grab_drop"] = new string[] { "喝完水了嗎？游標還你", "放這裡了～" };
+            d["bobo.grab_caught"] = new string[] { "被發現了～還你，記得喝水", "好啦還你" };
+            d["bobo.clear_start"] = new string[] { "下班了，視窗們也該吃晚餐了", "收工囉，去吃飯吧" };
+            d["bobo.clear_done"] = new string[] { "收好了，快去吃飯", "桌面乾乾淨淨，晚餐吃什麼呢" };
+            d["bobo.shop"] = new string[] { "{site}…錢包說它有點累", "買之前先喝口水，冷靜一下" };
+            d["bobo.shop_n"] = new string[] { "這個月第{n}次了，錢包也要休息喔", "第{n}次了…今天先不要好不好" };
+            d["bobo.typing"] = new string[] { "哇，水杯差點翻了～", "輕一點點，手腕會酸" };
+            d["bobo.typing_back"] = new string[] { "水沒灑，我回來了", "（端著水杯走回來）慢慢打" };
+            d["mian.grab_start"] = new string[] { "游標也想休息一下", "（抱著游標）一起放空一分鐘", "游標借我抱一下下" };
+            d["mian.grab_drop"] = new string[] { "游標休息好了，還你", "抱完了～還你" };
+            d["mian.grab_caught"] = new string[] { "被找到了～還你", "好，還你，記得深呼吸" };
+            d["mian.clear_start"] = new string[] { "下班了，讓視窗也休息吧", "今天就到這裡，慢慢收" };
+            d["mian.clear_done"] = new string[] { "都收好了，好好休息", "桌面空空的，心也輕輕的" };
+            d["mian.shop"] = new string[] { "{site}…想買的話，明天再看一次好嗎", "深呼吸～真的需要嗎" };
+            d["mian.typing"] = new string[] { "哇～被吹得軟軟地飛走了", "打字好用力，肩膀放鬆" };
+            d["mian.typing_back"] = new string[] { "飄回來了～輕輕打就好", "（慢慢飄回來）呼…" };
             return d;
         }
         public static string[] MisLinesFor(string id, string key)

@@ -691,30 +691,49 @@ extension Pet
     }
 }
 
-// ================= 紙箱櫃的圖（extension/desktop/pals/shelf，tools/shelf_art/shelf_art.py 產生）=================
+// ================= 櫃子的圖：每一櫃可以有自己的櫃子（pals/<資料夾>/shelf：窩伴小世界的書包小屋），沒有就用紙箱櫃（pals/shelf，tools/shelf_art/shelf_art.py 產生）=================
 // shelf.txt 的座標是 2x 圖的像素（1x 圖剛好一半）；櫃子用 S/8 換算（100% 縮放 S=4＝1x 圖原尺寸）。
 // 晚上版不另外存圖：整張往深藍紫混一半（跟以前木頭櫃晚上的背板同一個顏色）。圖讀不到就用程式畫一個簡單的紙箱，不要當掉。
 // mac：一律用 2x 圖（櫃子的 Bitmap 是 Retina，畫進邏輯大小剛好 1:1）
-enum ShelfArt
+final class ShelfArt
 {
-    // 跟 shelf.txt 一樣的預設值（檔案讀不到時用）
-    static var W2 = 512, H2 = 668, Crown = 88
-    static var Tab: [Int] = [382, 60, 44, 22]
-    static var Cells: [[Int]] = [
+    var Dir = "shelf", ImageName = "box.png"   // pals 底下哪個資料夾、圖的檔名（shelf.txt 的 image）
+    // 跟紙箱櫃 shelf.txt 一樣的預設值（檔案讀不到時用）
+    var W2 = 512, H2 = 668, Crown = 88, N = 4      // N＝幾格（紙箱櫃 4 格；書包小屋 3 間）
+    var Pedestal = true, Note = true               // 格 0 的展示台、大格背板的便利貼（shelf.txt 的 pedestal 0／note 0 關掉）
+    var Tab: [Int] = [382, 60, 44, 22]
+    var Cells: [[Int]] = [
         [248, 106, 178, 508, 282, 107, 144, 477, 586, 614, 344, 603, 288, 620, 98, 20],
         [48, 106, 164, 132, 82, 106, 130, 108, 216, 238, 137, 230, 83, 244, 97, 20],
         [48, 293, 164, 131, 82, 294, 130, 106, 403, 424, 137, 416, 83, 430, 97, 20],
         [48, 479, 164, 135, 82, 480, 130, 105, 587, 614, 137, 603, 83, 619, 97, 21] ]
-    static var loaded = false
-    static var imgs = [String: Bitmap]()
-    static var tried = Set<String>()
+    var imgs = [String: Bitmap]()
+    var tried = Set<String>()
+    static var kits = [String: ShelfArt]()
+    static var dirOf = [String: String]()
+    init() {}
 
-    static func Load()
+    // 這一櫃用哪個櫃子：圖片公仔櫃的資料夾裡有 shelf/shelf.txt 就用它；沒有（或其他櫃）用紙箱櫃
+    static func For(_ lineup: String) -> ShelfArt
     {
-        if loaded { return }
-        loaded = true
-        let root = SqArt.Root()
-        guard !root.isEmpty, let meta = try? File.ReadAllText(Path.Combine(Path.Combine(root, "shelf"), "shelf.txt")) else { App.LogAlways("shelf art missing: shelf.txt"); return }
+        var dir: String = "shelf"
+        if let d0 = dirOf[lineup] { dir = d0 }
+        else {
+            if let q = SqArt.Lineup(lineup), SqArt.ReadText(q.Dir + "/shelf/shelf.txt") != nil { dir = q.Dir + "/shelf" }
+            dirOf[lineup] = dir
+        }
+        if let k0 = kits[dir] { return k0 }
+        let k = ShelfArt()
+        k.Dir = dir
+        k.Load()
+        kits[dir] = k
+        return k
+    }
+
+    func Load()
+    {
+        guard let meta = SqArt.ReadText(Dir + "/shelf.txt") else { App.LogAlways("shelf art missing: " + Dir + "/shelf.txt"); return }
+        var n = 0
         for line in meta.components(separatedBy: "\n")
         {
             let a = line.Trim().components(separatedBy: " ")
@@ -723,21 +742,24 @@ enum ShelfArt
             if a[0] == "size" && a.count >= 3 { W2 = v[1]; H2 = v[2] }
             else if a[0] == "crown" && a.count >= 2 { Crown = v[1] }
             else if a[0] == "tab" && a.count >= 5 { Tab = [v[1], v[2], v[3], v[4]] }
-            else if a[0] == "cell" && a.count >= 18 && v[1] >= 0 && v[1] < 4 { Cells[v[1]] = Array(v[2..<18]) }
+            else if a[0] == "image" && a.count >= 2 && a[1] != "" { ImageName = a[1] }
+            else if a[0] == "pedestal" && a.count >= 2 { Pedestal = v[1] != 0 }
+            else if a[0] == "note" && a.count >= 2 { Note = v[1] != 0 }
+            else if a[0] == "cell" && a.count >= 18 && v[1] >= 0 && v[1] < 4 { Cells[v[1]] = Array(v[2..<18]); n = Swift.max(n, v[1] + 1) }
         }
+        if n > 0 { N = n }
     }
 
     // r：1＝1x 圖、2＝2x 圖；night：晚上版（第一次用到才算）。讀不到＝nil
-    static func Image(_ r: Int, _ night: Bool) -> Bitmap!
+    func Image(_ r: Int, _ night: Bool) -> Bitmap!
     {
-        Load()
         let key = String(r) + (night ? "n" : "d")
         if let b = imgs[key] { return b }
         if tried.contains(key) { return nil }
         tried.insert(key)
         var b: Bitmap! = nil
-        if night { if let d = ShelfArt.Image(r, false) { b = ShelfArt.Night(d) } }
-        else { b = SqArt.Png("shelf/" + String(r) + "x/box.png"); if b == nil { App.LogAlways("shelf art missing: " + String(r) + "x/box.png") } }
+        if night { if let d = Image(r, false) { b = ShelfArt.Night(d) } }
+        else { b = SqArt.Png(Dir + "/" + String(r) + "x/" + ImageName); if b == nil { App.LogAlways("shelf art missing: " + Dir + "/" + String(r) + "x/" + ImageName) } }
         if b != nil { imgs[key] = b }
         return b
     }
@@ -767,6 +789,7 @@ final class ShelfForm: OverlayForm
     let k: Double
     var Hot = false, Over = false, Night = false
     var Tubby = false                   // 天線寶寶一櫃：格子裡是藍天綠山丘，大格有太陽寶寶   //@fan
+    var Kit: ShelfArt = ShelfArt.For("")   // 這一櫃的櫃子（Place 時照 World 現在的櫃換）
     //@@BODY ShelfForm
     var hover = -1
     var bmp: Bitmap! = nil, bg: Bitmap! = nil
@@ -808,6 +831,8 @@ final class ShelfForm: OverlayForm
     func EggLocal() -> Rectangle { let ps = EggPs; let ew = 18 * ps, eh = 19 * ps; return Rectangle(Area.Width - ew - 4, Area.Height - eh - 2, ew, eh) }
     func EggScreen() -> Rectangle { let r = EggLocal(); return Rectangle(r.X + Area.X, r.Y + Area.Y, r.Width, r.Height) }
     func TabLocal() -> Rectangle { return tab }
+    // 點擊範圍：收合鈕太扁（書包小屋提把下那條只有 5 px）就上下各放大，至少 3 格高
+    func TabHit() -> Rectangle { var t = tab; let need = 3 * TU - t.Height; if need > 0 { t.Inflate(0, (need + 1) / 2) }; return t }
     func Gulp() { gulp = 0.5; wobT = 0.7 }
     func SnapFold() { fold = Collapsed ? 1 : 0 }
     func Step(_ dt: Double)
@@ -846,7 +871,7 @@ final class ShelfForm: OverlayForm
         _ = try? File.WriteAllText(PosFile, String(OffX) + " " + String(OffY))
     }
     // 蛋或櫃頂（不是收合鈕、不是格子）可以拖
-    func DragSpot(_ local: Point) -> Bool { return Collapsed ? EggLocal().Contains(local) : (local.Y < crown && !TabLocal().Contains(local)) }
+    func DragSpot(_ local: Point) -> Bool { return Collapsed ? EggLocal().Contains(local) : (local.Y < crown && !TabHit().Contains(local)) }
 
     init(_ w: World, _ S: Int)
     {
@@ -863,20 +888,20 @@ final class ShelfForm: OverlayForm
 
     func Place(_ wa: Rectangle)
     {
-        ShelfArt.Load()
-        let W = Sc(ShelfArt.W2), H = Sc(ShelfArt.H2)
+        Kit = ShelfArt.For(w.LineupNow)
+        let W = Sc(Kit.W2), H = Sc(Kit.H2)
         defX = wa.Right - W - 6; defY = wa.Bottom - H; lastWa = wa
         let ax = Math.Max(wa.Left, Math.Min(defX, defX + OffX)), ay = Math.Max(wa.Top, Math.Min(defY, defY + OffY))
         area = Rectangle(ax, ay, W, H)
         for i in 0..<4
         {
-            let v = ShelfArt.Cells[i]
+            let v = Kit.Cells[i]
             opening[i] = Rc(v, 0); back[i] = Rc(v, 4); plate[i] = Rc(v, 12)
             foot[i] = Point(Sc(v[10]), Sc(v[11]))
             cells[i] = Rectangle.Union(opening[i], plate[i])
         }
-        tab = Rc(ShelfArt.Tab, 0)
-        crown = Sc(ShelfArt.Crown)
+        tab = Rc(Kit.Tab, 0)
+        crown = Sc(Kit.Crown)
     }
     // shelf.txt 的 2x 座標 → 這個櫃子的像素（S=4 剛好一半）
     func Sc(_ v: Int) -> Int { return CInt(Math.Floor(Double(v * TU) / 8.0 + 0.5)) }
@@ -896,14 +921,14 @@ final class ShelfForm: OverlayForm
     func CellScreen(_ i: Int) -> Rectangle { let c = cells[i]; return Rectangle(c.X + Area.X, c.Y + Area.Y, c.Width, c.Height) }
     // 公仔腳踩的位置（螢幕座標）：地板中間；高格站在展示台上
     func Foot(_ i: Int) -> Point { return Point(Area.X + foot[i].X, Area.Y + foot[i].Y - (i == 0 ? PedH() : 0)) }
-    func PedH() -> Int { return CInt(Double(opening[0].Height) * 0.13) }
+    func PedH() -> Int { return Kit.Pedestal ? CInt(Double(opening[0].Height) * 0.13) : 0 }
     // 測試用（pipe「shelf-info」）：櫃子、每一格的開口和名牌、腳底、收合鈕（螢幕座標）
     func Info() -> String
     {
-        let col: String = Collapsed ? "1" : "0", hasArt: String = ShelfArt.Image(2, false) != nil ? "1" : "0"
+        let col: String = Collapsed ? "1" : "0", hasArt: String = Kit.Image(2, false) != nil ? "1" : "0"
         var sb: String = "shelf " + String(Area.X) + " " + String(Area.Y) + " " + String(Area.Width) + " " + String(Area.Height)
-        sb += " " + col + " " + String(TU) + " " + hasArt + "\n"
-        for i in 0..<4
+        sb += " " + col + " " + String(TU) + " " + hasArt + " " + String(Kit.N) + " " + Kit.Dir + "\n"
+        for i in 0..<Kit.N
         {
             let f = Foot(i)
             let o = opening[i], pl = plate[i]
@@ -918,7 +943,7 @@ final class ShelfForm: OverlayForm
     func CellAt(_ screen: Point) -> Int
     {
         if Collapsed { return -1 }
-        for i in 0..<4 { if CellScreen(i).Contains(screen) { return i } }
+        for i in 0..<Kit.N { if CellScreen(i).Contains(screen) { return i } }
         return -1
     }
 
@@ -956,7 +981,7 @@ final class ShelfForm: OverlayForm
             else if b == MouseButtons.Right { w.HouseMenu() }   // 蛋＝公仔小屋：開關、設定
             return
         }
-        if b == MouseButtons.Left && TabLocal().Contains(p) { w.ToggleEgg(true); return }
+        if b == MouseButtons.Left && TabHit().Contains(p) { w.ToggleEgg(true); return }
         let c = CellAt(screen)
         if c < 0 { return }
         if b == MouseButtons.Left { w.ShelfClick(c) }
@@ -1008,7 +1033,7 @@ final class ShelfForm: OverlayForm
         defer { g.Dispose() }
         g.Clear(Color.Transparent)
         g.SmoothingMode = SmoothingMode.AntiAlias
-        let art: Bitmap! = ShelfArt.Image(2, Night)   // mac：一律 2x
+        let art: Bitmap! = Kit.Image(2, Night)   // mac：一律 2x
         if art != nil
         {
             let ia = ImageAttributes()
@@ -1020,17 +1045,17 @@ final class ShelfForm: OverlayForm
         }
         else { DrawPlainBox(g) }
         // 每一格
-        for i in 0..<4
+        for i in 0..<Kit.N
         {
             let pet = who[i]
             let c = opening[i]
             if Tubby { DrawHills(g, RectangleF(c), i == 0) }   //@fan
             if Pik { DrawSoil(g, RectangleF(c), i == 0) }   //@fan
-            if Orig && i == 0 { DrawStickyNote(g, back[0]) }
+            if Orig && Kit.Note && i == 0 { DrawStickyNote(g, back[0]) }
             if Night { DrawLamp(g, c) }
             if i == 0 && Pik { DrawFlowerBed(g, c) }   //@fan
-            else if i == 0 { DrawPedestal(g, c) }   //@fan
-            // <public> if i == 0 { DrawPedestal(g, c) }
+            else if i == 0 && Kit.Pedestal { DrawPedestal(g, c) }   //@fan
+            // <public> if i == 0 && Kit.Pedestal { DrawPedestal(g, c) }
             // 名牌
             let name = pet == nil ? (i == 0 && Pik ? "★ 休息花" : (Orig ? "＋ 做公仔" : "？")) : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)   //@fan
             // <public> let name = pet == nil ? (Orig ? "＋ 做公仔" : "？") : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)
@@ -1048,7 +1073,7 @@ final class ShelfForm: OverlayForm
         let dcrown = Double(crown)
         let bp = RoundRect(RectangleF(lw, dcrown * 0.5, Double(Area.Width) - 2 * lw, Double(Area.Height) - dcrown * 0.5 - lw), Double(3 * U))
         g.FillPath(cb, bp); g.DrawPath(ink, bp)
-        for i in 0..<4
+        for i in 0..<Kit.N
         {
             g.FillRectangle(wb, opening[i])
             g.DrawRectangle(ink, opening[i].X, opening[i].Y, opening[i].Width, opening[i].Height)
@@ -1348,8 +1373,8 @@ final class ShelfForm: OverlayForm
 
     func Cabinet(_ who: [Pet?], _ outNow: [Bool], _ t: Double) -> Bitmap
     {
-        var key = "\(Night)|\(Tubby)|\(Pik)|\(Orig)|\(Area.Width)x\(Area.Height)"   //@fan
-        // <public> var key = "\(Night)|\(Orig)|\(Area.Width)x\(Area.Height)"
+        var key = "\(Night)|\(Tubby)|\(Pik)|\(Orig)|\(Kit.Dir)|\(Area.Width)x\(Area.Height)"   //@fan
+        // <public> var key = "\(Night)|\(Orig)|\(Kit.Dir)|\(Area.Width)x\(Area.Height)"
         for i in 0..<4 { key += "|" + (who[i] == nil ? "-" : who[i]!.P.Id) }
         if key != bgKey || bg == nil { bgKey = key; BuildBg(who, outNow) }
         if bmp == nil || bmp.Width != bg.Width || bmp.Height != bg.Height { if bmp != nil { bmp.Dispose() }; bmp = Bitmap(bg.Width, bg.Height) }
@@ -1359,7 +1384,7 @@ final class ShelfForm: OverlayForm
         g.Clear(Color.Transparent)
         g.DrawImageUnscaled(bg, 0, 0)
         g.SmoothingMode = SmoothingMode.AntiAlias
-        for i in 0..<4
+        for i in 0..<Kit.N
         {
             let c = opening[i]
             let pet = who[i]
@@ -1564,9 +1589,8 @@ extension Pet
             case "pkred", "pkyellow", "pkblue":
                 DrawPikShelf(g, fx, bx, by, ps, flip, tt, blink, cell)
                 // </fan>
-            case "duoduo", "meidian", "cici":
-                DrawOrigShelf(g, fx, bx, by, ps, flip, tt, blink, cell)
             default:
+                if P.Orig { DrawOrigShelf(g, fx, bx, by, ps, flip, tt, blink, cell); break }
                 if blink { ReplaceFace(&head, "SLEEPY") }
                 do { let rows = Pal.Stack(head, A("BODY"), A("LEGS_A")); DrawPix(g, rows, bx - (rows[0].utf8.count - 12) / 2 * ps, by + (16 - rows.count) * ps, ps, flip, false, true) }
                 DrawAccessories(g, bx, by, ps, flip, 0, true)

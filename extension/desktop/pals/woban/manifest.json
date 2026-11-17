@@ -1,0 +1,554 @@
+{
+ "fanfan": {
+  "name": "翻翻",
+  "target_h_1x": 96,
+  "canvas_1x": [
+   132,
+   132
+  ],
+  "canvas_2x": [
+   264,
+   265
+  ],
+  "anchor_1x": {
+   "footX": 66,
+   "baselineY": 118
+  },
+  "anchor_2x": {
+   "footX": 132,
+   "baselineY": 237
+  },
+  "R_1x": 4,
+  "R_2x": 8,
+  "frames": {
+   "stand": {
+    "label": "站",
+    "bbox_1x": [
+     18,
+     23,
+     118,
+     119
+    ],
+    "scale_vs_stand_raw": 1.0
+   },
+   "walk1": {
+    "label": "走1",
+    "bbox_1x": [
+     16,
+     26,
+     116,
+     119
+    ],
+    "scale_vs_stand_raw": 0.993
+   },
+   "walk2": {
+    "label": "走2",
+    "bbox_1x": [
+     16,
+     25,
+     116,
+     119
+    ],
+    "scale_vs_stand_raw": 0.977
+   },
+   "jump": {
+    "label": "跳",
+    "bbox_1x": [
+     18,
+     22,
+     122,
+     119
+    ],
+    "scale_vs_stand_raw": 1.017
+   },
+   "sleep": {
+    "label": "睡",
+    "bbox_1x": [
+     14,
+     58,
+     121,
+     119
+    ],
+    "scale_vs_stand_raw": 1.001
+   },
+   "happy": {
+    "label": "開心",
+    "bbox_1x": [
+     20,
+     16,
+     122,
+     119
+    ],
+    "scale_vs_stand_raw": 0.967
+   },
+   "held": {
+    "label": "被抓",
+    "bbox_1x": [
+     22,
+     23,
+     108,
+     128
+    ],
+    "scale_vs_stand_raw": 0.987
+   },
+   "sit": {
+    "label": "坐",
+    "bbox_1x": [
+     20,
+     36,
+     120,
+     119
+    ],
+    "scale_vs_stand_raw": 0.975
+   },
+   "grab": {
+    "label": "搶游標",
+    "bbox_1x": [
+     16,
+     32,
+     114,
+     119
+    ],
+    "scale_vs_stand_raw": 1.107
+   },
+   "push": {
+    "label": "推視窗",
+    "bbox_1x": [
+     14,
+     33,
+     114,
+     119
+    ],
+    "scale_vs_stand_raw": 1.01
+   },
+   "cry": {
+    "label": "抱錢包哭",
+    "bbox_1x": [
+     20,
+     45,
+     108,
+     119
+    ],
+    "scale_vs_stand_raw": 1.137
+   },
+   "blown": {
+    "label": "被震飛",
+    "bbox_1x": [
+     6,
+     15,
+     127,
+     129
+    ],
+    "scale_vs_stand_raw": 0.888
+   },
+   "sig1": {
+    "label": "專心看書",
+    "bbox_1x": [
+     20,
+     30,
+     115,
+     119
+    ],
+    "scale_vs_stand_raw": 0.968
+   },
+   "sig2": {
+    "label": "完成撒花",
+    "bbox_1x": [
+     10,
+     5,
+     128,
+     119
+    ],
+    "scale_vs_stand_raw": 0.883
+   },
+   "surprised": {
+    "label": "嚇到",
+    "bbox_1x": [
+     24,
+     4,
+     114,
+     119
+    ],
+    "scale_vs_stand_raw": 0.928
+   },
+   "pout": {
+    "label": "嘟嘴",
+    "bbox_1x": [
+     18,
+     46,
+     110,
+     119
+    ],
+    "scale_vs_stand_raw": 1.037
+   }
+  }
+ },
+ "bobo": {
+  "name": "破破",
+  "target_h_1x": 92,
+  "canvas_1x": [
+   118,
+   123
+  ],
+  "canvas_2x": [
+   230,
+   246
+  ],
+  "anchor_1x": {
+   "footX": 59,
+   "baselineY": 106
+  },
+  "anchor_2x": {
+   "footX": 115,
+   "baselineY": 213
+  },
+  "R_1x": 4,
+  "R_2x": 8,
+  "frames": {
+   "stand": {
+    "label": "站",
+    "bbox_1x": [
+     19,
+     15,
+     101,
+     107
+    ],
+    "scale_vs_stand_raw": 1.0
+   },
+   "walk1": {
+    "label": "走1",
+    "bbox_1x": [
+     19,
+     10,
+     100,
+     107
+    ],
+    "scale_vs_stand_raw": 0.951
+   },
+   "walk2": {
+    "label": "走2",
+    "bbox_1x": [
+     19,
+     10,
+     102,
+     107
+    ],
+    "scale_vs_stand_raw": 0.926
+   },
+   "jump": {
+    "label": "跳",
+    "bbox_1x": [
+     21,
+     10,
+     103,
+     107
+    ],
+    "scale_vs_stand_raw": 0.942
+   },
+   "sleep": {
+    "label": "睡",
+    "bbox_1x": [
+     19,
+     37,
+     108,
+     107
+    ],
+    "scale_vs_stand_raw": 1.013
+   },
+   "happy": {
+    "label": "開心",
+    "bbox_1x": [
+     17,
+     10,
+     114,
+     107
+    ],
+    "scale_vs_stand_raw": 0.928
+   },
+   "held": {
+    "label": "被抓",
+    "bbox_1x": [
+     17,
+     15,
+     103,
+     120
+    ],
+    "scale_vs_stand_raw": 0.892
+   },
+   "sit": {
+    "label": "坐",
+    "bbox_1x": [
+     16,
+     21,
+     103,
+     107
+    ],
+    "scale_vs_stand_raw": 0.987
+   },
+   "grab": {
+    "label": "搶游標",
+    "bbox_1x": [
+     23,
+     15,
+     89,
+     107
+    ],
+    "scale_vs_stand_raw": 1.122
+   },
+   "push": {
+    "label": "推視窗",
+    "bbox_1x": [
+     14,
+     19,
+     105,
+     107
+    ],
+    "scale_vs_stand_raw": 1.024
+   },
+   "cry": {
+    "label": "抱錢包哭",
+    "bbox_1x": [
+     15,
+     17,
+     103,
+     107
+    ],
+    "scale_vs_stand_raw": 1.056
+   },
+   "blown": {
+    "label": "被震飛",
+    "bbox_1x": [
+     12,
+     4,
+     111,
+     107
+    ],
+    "scale_vs_stand_raw": 0.98
+   },
+   "sig1": {
+    "label": "喝水",
+    "bbox_1x": [
+     20,
+     17,
+     98,
+     107
+    ],
+    "scale_vs_stand_raw": 1.028
+   },
+   "sig2": {
+    "label": "打筆電",
+    "bbox_1x": [
+     19,
+     20,
+     99,
+     107
+    ],
+    "scale_vs_stand_raw": 1.038
+   },
+   "surprised": {
+    "label": "嚇到",
+    "bbox_1x": [
+     17,
+     9,
+     101,
+     107
+    ],
+    "scale_vs_stand_raw": 0.986
+   },
+   "pout": {
+    "label": "嘟嘴",
+    "bbox_1x": [
+     19,
+     17,
+     100,
+     107
+    ],
+    "scale_vs_stand_raw": 0.968
+   }
+  }
+ },
+ "mian": {
+  "name": "綿綿",
+  "target_h_1x": 81,
+  "canvas_1x": [
+   110,
+   101
+  ],
+  "canvas_2x": [
+   222,
+   200
+  ],
+  "anchor_1x": {
+   "footX": 55,
+   "baselineY": 86
+  },
+  "anchor_2x": {
+   "footX": 111,
+   "baselineY": 171
+  },
+  "R_1x": 4,
+  "R_2x": 8,
+  "frames": {
+   "stand": {
+    "label": "站",
+    "bbox_1x": [
+     15,
+     6,
+     95,
+     87
+    ],
+    "scale_vs_stand_raw": 1.0
+   },
+   "walk1": {
+    "label": "走1",
+    "bbox_1x": [
+     14,
+     6,
+     93,
+     87
+    ],
+    "scale_vs_stand_raw": 0.99
+   },
+   "walk2": {
+    "label": "走2",
+    "bbox_1x": [
+     12,
+     6,
+     93,
+     87
+    ],
+    "scale_vs_stand_raw": 1.167
+   },
+   "jump": {
+    "label": "跳",
+    "bbox_1x": [
+     13,
+     7,
+     106,
+     87
+    ],
+    "scale_vs_stand_raw": 0.986
+   },
+   "sleep": {
+    "label": "睡",
+    "bbox_1x": [
+     7,
+     20,
+     97,
+     87
+    ],
+    "scale_vs_stand_raw": 0.962
+   },
+   "happy": {
+    "label": "開心",
+    "bbox_1x": [
+     13,
+     5,
+     98,
+     87
+    ],
+    "scale_vs_stand_raw": 0.971
+   },
+   "held": {
+    "label": "被抓",
+    "bbox_1x": [
+     17,
+     6,
+     92,
+     98
+    ],
+    "scale_vs_stand_raw": 0.916
+   },
+   "sit": {
+    "label": "坐",
+    "bbox_1x": [
+     14,
+     14,
+     97,
+     87
+    ],
+    "scale_vs_stand_raw": 0.98
+   },
+   "grab": {
+    "label": "搶游標",
+    "bbox_1x": [
+     16,
+     13,
+     95,
+     87
+    ],
+    "scale_vs_stand_raw": 1.051
+   },
+   "push": {
+    "label": "推視窗",
+    "bbox_1x": [
+     16,
+     4,
+     96,
+     87
+    ],
+    "scale_vs_stand_raw": 0.985
+   },
+   "cry": {
+    "label": "抱錢包哭",
+    "bbox_1x": [
+     17,
+     11,
+     95,
+     87
+    ],
+    "scale_vs_stand_raw": 1.025
+   },
+   "blown": {
+    "label": "被震飛",
+    "bbox_1x": [
+     7,
+     6,
+     98,
+     87
+    ],
+    "scale_vs_stand_raw": 0.95
+   },
+   "sig1": {
+    "label": "蓋毯子睡",
+    "bbox_1x": [
+     12,
+     21,
+     105,
+     87
+    ],
+    "scale_vs_stand_raw": 1.199
+   },
+   "sig2": {
+    "label": "熱可可放空",
+    "bbox_1x": [
+     16,
+     11,
+     95,
+     87
+    ],
+    "scale_vs_stand_raw": 1.219
+   },
+   "surprised": {
+    "label": "嚇到",
+    "bbox_1x": [
+     13,
+     11,
+     94,
+     87
+    ],
+    "scale_vs_stand_raw": 1.15
+   },
+   "pout": {
+    "label": "嘟嘴",
+    "bbox_1x": [
+     16,
+     12,
+     94,
+     87
+    ],
+    "scale_vs_stand_raw": 1.134
+   }
+  }
+ }
+}
