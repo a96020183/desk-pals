@@ -2968,12 +2968,75 @@ namespace DeskPals
         }
     }
 
+    // ================= 紙箱櫃的圖（extension/desktop/pals/shelf，tools/shelf_art/shelf_art.py 產生）=================
+    // shelf.txt 的座標是 2x 圖的像素（1x 圖剛好一半）；櫃子用 S/8 換算（100% 縮放 S=4＝1x 圖原尺寸）。
+    // 晚上版不另外存圖：整張往深藍紫混一半（跟以前木頭櫃晚上的背板同一個顏色）。圖讀不到就用程式畫一個簡單的紙箱，不要當掉。
+    static class ShelfArt
+    {
+        // 跟 shelf.txt 一樣的預設值（檔案讀不到時用）
+        public static int W2 = 512, H2 = 668, Crown = 88;
+        public static int[] Tab = { 382, 60, 44, 22 };
+        public static readonly int[][] Cells = {
+            new int[] { 248, 106, 178, 508, 282, 107, 144, 477, 586, 614, 344, 603, 288, 620, 98, 20 },
+            new int[] { 48, 106, 164, 132, 82, 106, 130, 108, 216, 238, 137, 230, 83, 244, 97, 20 },
+            new int[] { 48, 293, 164, 131, 82, 294, 130, 106, 403, 424, 137, 416, 83, 430, 97, 20 },
+            new int[] { 48, 479, 164, 135, 82, 480, 130, 105, 587, 614, 137, 603, 83, 619, 97, 21 } };
+        static bool loaded;
+        static readonly Dictionary<string, Bitmap> imgs = new Dictionary<string, Bitmap>();
+
+        public static void Load()
+        {
+            if (loaded) return;
+            loaded = true;
+            byte[] meta = SqArt.Read("shelf/shelf.txt");
+            if (meta == null) { App.LogAlways("shelf art missing: shelf.txt"); return; }
+            foreach (string line in System.Text.Encoding.UTF8.GetString(meta).Split('\n'))
+            {
+                string[] a = line.Trim().Split(' ');
+                int[] v = new int[a.Length];
+                for (int i = 1; i < a.Length; i++) int.TryParse(a[i], out v[i]);
+                if (a[0] == "size" && a.Length >= 3) { W2 = v[1]; H2 = v[2]; }
+                else if (a[0] == "crown" && a.Length >= 2) Crown = v[1];
+                else if (a[0] == "tab" && a.Length >= 5) Tab = new int[] { v[1], v[2], v[3], v[4] };
+                else if (a[0] == "cell" && a.Length >= 18 && v[1] >= 0 && v[1] < 4) { int[] c = new int[16]; Array.Copy(v, 2, c, 0, 16); Cells[v[1]] = c; }
+            }
+        }
+
+        // r：1＝1x 圖、2＝2x 圖；night：晚上版（第一次用到才算）。讀不到＝null
+        public static Bitmap Image(int r, bool night)
+        {
+            Load();
+            string key = r + (night ? "n" : "d");
+            Bitmap b;
+            if (imgs.TryGetValue(key, out b)) return b;
+            if (night) { Bitmap d = Image(r, false); b = d == null ? null : Night(d); }
+            else { b = SqArt.Png("shelf/" + r + "x/box.png"); if (b == null) App.LogAlways("shelf art missing: " + r + "x/box.png"); }
+            imgs[key] = b;
+            return b;
+        }
+
+        // 晚上：每個顏色往 #2A2238 混 55%（白邊、黑線、紙箱、背板一起暗下來、偏藍紫）
+        public static Bitmap Night(Bitmap d)
+        {
+            int[] px = CuImg.Pixels(d);
+            for (int i = 0; i < px.Length; i++)
+            {
+                int v = px[i], a = (v >> 24) & 255;
+                if (a == 0) continue;
+                int r = (((v >> 16) & 255) * 45 + 0x2A * 55) / 100, g = (((v >> 8) & 255) * 45 + 0x22 * 55) / 100, b = ((v & 255) * 45 + 0x38 * 55) / 100;
+                px[i] = (a << 24) | (r << 16) | (g << 8) | b;
+            }
+            return CuImg.FromPixels(px, d.Width, d.Height);
+        }
+    }
+
     // ================= 公仔櫃 =================
-    // 右下角的木頭展示櫃：右邊一格高的（最愛）、左邊三格小的。點格子裡的公仔＝放出來／收回去。
+    // 右下角的紙箱櫃（網購紙箱疊成的，跟續命小隊同一種粗黑線貼紙畫風）：右邊一格高的（最愛）、左邊三格小的，每格底下一塊名牌。
+    // 櫃子本體是一張圖（ShelfArt）；格子裡的公仔、名牌上的字、第 4 格入口、收合鈕、最愛的展示台都是程式畫在上面。點格子裡的公仔＝放出來／收回去。
     partial class ShelfForm : OverlayForm
     {
         readonly World w;
-        public readonly int U, TU;           // 小格、高格的像素大小
+        public readonly int U, TU;           // 小格、高格的像素大小（像素公仔；TU＝S）
         readonly double k;
         public bool Hot, Over, Night;
         public bool Tubby;                   // 天線寶寶一櫃：格子裡是藍天綠山丘，大格有太陽寶寶   //@fan
@@ -2982,8 +3045,11 @@ namespace DeskPals
         string bgKey = "";
         Rectangle area;                      // 螢幕座標
         public Rectangle Area { get { return area; } }
-        readonly Rectangle[] cells = new Rectangle[4]; // 本地座標（含名牌那條）
-        int bW, crown, baseH, div, plateH;
+        readonly Rectangle[] cells = new Rectangle[4]; // 本地座標：開口＋名牌（點這裡＝點這一格）
+        readonly Rectangle[] opening = new Rectangle[4], back = new Rectangle[4], plate = new Rectangle[4];   // 開口（公仔畫在裡面）、背板、名牌
+        readonly Point[] foot = new Point[4];          // 公仔腳踩的地方（地板中間）
+        Rectangle tab;                                  // 收合鈕「－」
+        int crown;                                      // 箱子正面的上緣：再上面是蓋子（可以拖著搬家、掛徽章）
         // ---- 收合成蛋 ----
         public bool Collapsed;
         double fold, gulp, wobT, nextWob = 4;    // fold：0 櫃子 → 1 蛋
@@ -3013,7 +3079,7 @@ namespace DeskPals
         int EggPs { get { return TU; } }
         public Rectangle EggLocal() { int ps = EggPs; int ew = 18 * ps, eh = 19 * ps; return new Rectangle(Area.Width - ew - 4, Area.Height - eh - 2, ew, eh); }
         public Rectangle EggScreen() { Rectangle r = EggLocal(); r.Offset(Area.Location); return r; }
-        Rectangle TabLocal() { int s = 5 * U; return new Rectangle(Area.Width - s - 3 * U, 0, s, (int)(crown * 0.8)); }
+        Rectangle TabLocal() { return tab; }
         public void Gulp() { gulp = 0.5; wobT = 0.7; }
         public void SnapFold() { fold = Collapsed ? 1 : 0; }
         public void Step(double dt)
@@ -3071,15 +3137,24 @@ namespace DeskPals
 
         public void Place(Rectangle wa)
         {
-            bW = 3 * U; crown = 5 * U; baseH = 5 * U; div = 2 * U; plateH = 5 * U;
-            int smallW = 24 * U, smallH = 33 * U, tallW = 24 * TU, tallH = 3 * smallH + 2 * div;
-            int W = bW * 2 + smallW + div + tallW, H = crown + tallH + baseH;
+            ShelfArt.Load();
+            int W = Sc(ShelfArt.W2), H = Sc(ShelfArt.H2);
             defX = wa.Right - W - 6; defY = wa.Bottom - H; lastWa = wa;
             int ax = Math.Max(wa.Left, Math.Min(defX, defX + OffX)), ay = Math.Max(wa.Top, Math.Min(defY, defY + OffY));
             area = new Rectangle(ax, ay, W, H);
-            cells[0] = new Rectangle(bW + smallW + div, crown, tallW, tallH);
-            for (int i = 0; i < 3; i++) cells[i + 1] = new Rectangle(bW, crown + i * (smallH + div), smallW, smallH);
+            for (int i = 0; i < 4; i++)
+            {
+                int[] v = ShelfArt.Cells[i];
+                opening[i] = Rc(v, 0); back[i] = Rc(v, 4); plate[i] = Rc(v, 12);
+                foot[i] = new Point(Sc(v[10]), Sc(v[11]));
+                cells[i] = Rectangle.Union(opening[i], plate[i]);
+            }
+            tab = Rc(ShelfArt.Tab, 0);
+            crown = Sc(ShelfArt.Crown);
         }
+        // shelf.txt 的 2x 座標 → 這個櫃子的像素（S=4 剛好一半）
+        int Sc(int v) { return (int)Math.Floor(v * TU / 8.0 + 0.5); }
+        Rectangle Rc(int[] v, int o) { int x = Sc(v[o]), y = Sc(v[o + 1]); return new Rectangle(x, y, Sc(v[o] + v[o + 2]) - x, Sc(v[o + 1] + v[o + 3]) - y); }
 
         public int CellPs(int i) { return i == 0 ? TU : U; }
         // 依公仔實際高度（天線、耳朵、頭鰭、帽子、晃動）縮放，保證離格子頂端至少 2px
@@ -3087,14 +3162,27 @@ namespace DeskPals
         {
             int ps = CellPs(i);
             if (p == null) return ps;
-            int avail = cells[i].Height - plateH - U - (i == 0 ? PedH() : 0) - 2 - 2;
+            int avail = foot[i].Y - (i == 0 ? PedH() : 0) - opening[i].Y - 2 - 2;
             while (ps > 2 && p.ShelfRows() * ps > avail) ps--;
             return ps;
         }
         public Rectangle CellScreen(int i) { Rectangle c = cells[i]; c.Offset(Area.Location); return c; }
-        // 公仔腳踩的位置（螢幕座標）
-        public Point Foot(int i) { Rectangle c = CellScreen(i); return new Point(c.X + c.Width / 2, c.Bottom - plateH - U - (i == 0 ? PedH() : 0)); }
-        int PedH() { return (int)((cells[0].Height - plateH) * 0.2); }
+        // 公仔腳踩的位置（螢幕座標）：地板中間；高格站在展示台上
+        public Point Foot(int i) { return new Point(Area.X + foot[i].X, Area.Y + foot[i].Y - (i == 0 ? PedH() : 0)); }
+        int PedH() { return (int)(opening[0].Height * 0.13); }
+        // 測試用（pipe「shelf-info」）：櫃子、每一格的開口和名牌、腳底、收合鈕（螢幕座標）
+        public string Info()
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.Append("shelf " + Area.X + " " + Area.Y + " " + Area.Width + " " + Area.Height + " " + (Collapsed ? 1 : 0) + " " + TU + " " + (ShelfArt.Image(2, false) != null ? 1 : 0) + "\n");
+            for (int i = 0; i < 4; i++)
+            {
+                Point f = Foot(i);
+                sb.Append("cell " + i + " " + (Area.X + opening[i].X) + " " + (Area.Y + opening[i].Y) + " " + opening[i].Width + " " + opening[i].Height + " " + (Area.X + plate[i].X) + " " + (Area.Y + plate[i].Y) + " " + plate[i].Width + " " + plate[i].Height + " " + f.X + " " + f.Y + "\n");
+            }
+            sb.Append("tab " + (Area.X + tab.X) + " " + (Area.Y + tab.Y) + " " + tab.Width + " " + tab.Height + "\n");
+            return sb.ToString();
+        }
 
         public int CellAt(Point screen)
         {
@@ -3171,7 +3259,7 @@ namespace DeskPals
             return p;
         }
 
-        // 櫃子本體（不會動的部分）先畫好存起來
+        // 櫃子本體（不會動的部分）先畫好存起來：紙箱櫃的圖（晚上是調暗的版本）＋每一格的背景、展示台、名牌上的字
         void BuildBg(Pet[] who, bool[] outNow)
         {
             int W = Area.Width, H = Area.Height;
@@ -3180,105 +3268,91 @@ namespace DeskPals
             {
                 g.Clear(Color.Transparent);
                 g.SmoothingMode = SmoothingMode.AntiAlias;
-                Color w1 = Night ? C(0x5C3B24) : C(0x9A6338), w2 = Night ? C(0x3C2617) : C(0x6B4024), w3 = Night ? C(0x74503A) : C(0xB97F4E);
-                // 影子
-                using (GraphicsPath sh = RoundRect(new RectangleF(3, 4, W - 4, H - 4), 5 * U))
-                using (SolidBrush b = new SolidBrush(Color.FromArgb(60, 0, 0, 0))) g.FillPath(b, sh);
-                // 櫃身
-                RectangleF body = new RectangleF(1, crown * 0.35f, W - 3, H - crown * 0.35f - 2);
-                using (GraphicsPath p = RoundRect(body, 3 * U))
-                using (LinearGradientBrush lb = new LinearGradientBrush(body, w1, w2, 90f)) g.FillPath(lb, p);
-                // 木紋
-                Random r = new Random(5);
-                using (Pen grain = new Pen(Color.FromArgb(Night ? 26 : 34, 40, 20, 8), Math.Max(1f, U * 0.35f)))
-                    for (int i = 0; i < 14; i++)
+                Bitmap art = ShelfArt.Image(TU <= 4 ? 1 : 2, Night);
+                if (art != null && art.Width == W && art.Height == H) g.DrawImageUnscaled(art, 0, 0);
+                else if (art != null)
+                    using (ImageAttributes ia = new ImageAttributes())
                     {
-                        float gx = (float)(r.NextDouble() * W), gy = (float)(crown + r.NextDouble() * (H - crown * 2));
-                        g.DrawBezier(grain, gx, gy, gx + 6 * U, gy - U, gx + 12 * U, gy + U, gx + 18 * U, gy);
+                        ia.SetWrapMode(WrapMode.TileFlipXY);   // 縮放時外框不要變淡
+                        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                        g.DrawImage(art, new Rectangle(0, 0, W, H), 0, 0, art.Width, art.Height, GraphicsUnit.Pixel, ia);
+                        g.PixelOffsetMode = PixelOffsetMode.Default;
                     }
-                // 頂蓋（冠線）
-                RectangleF top = new RectangleF(0, 0, W - 1, crown);
-                using (GraphicsPath p = RoundRect(top, 2 * U))
-                using (LinearGradientBrush lb = new LinearGradientBrush(top, w3, w1, 90f)) g.FillPath(lb, p);
-                using (Pen hi = new Pen(Color.FromArgb(Night ? 50 : 90, 255, 230, 200), Math.Max(1f, U * 0.5f))) g.DrawLine(hi, 3 * U, U, W - 3 * U, U);
-                using (Pen dk = new Pen(Color.FromArgb(120, 30, 15, 5), Math.Max(1f, U * 0.5f))) g.DrawLine(dk, U, crown - U * 0.3f, W - U, crown - U * 0.3f);
-                // 底座＋小腳
-                RectangleF bas = new RectangleF(0, H - baseH - 1, W - 1, baseH - U);
-                using (GraphicsPath p = RoundRect(bas, 1.5f * U))
-                using (LinearGradientBrush lb = new LinearGradientBrush(bas, w3, w2, 90f)) g.FillPath(lb, p);
-                using (SolidBrush ft = new SolidBrush(w2))
-                {
-                    g.FillRectangle(ft, 3 * U, H - 2 * U, 4 * U, 2 * U);
-                    g.FillRectangle(ft, W - 7 * U, H - 2 * U, 4 * U, 2 * U);
-                }
+                else DrawPlainBox(g);
                 // 每一格
                 for (int i = 0; i < 4; i++)
                 {
-                    Rectangle c = cells[i];
                     Pet pet = who[i];
-                    Color panel = pet != null ? pet.P.Panel : C(0xEDE6DA);
-                    if (Night) panel = Mix(panel, C(0x2A2238), 0.55);
-                    RectangleF inner = new RectangleF(c.X, c.Y, c.Width, c.Height - plateH);
-                    using (LinearGradientBrush lb = new LinearGradientBrush(inner, Mix(panel, Color.White, 0.35), Mix(panel, C(0x6B4A30), 0.25), 90f)) g.FillRectangle(lb, inner);
-                    if (Tubby) DrawHills(g, inner, i == 0);   //@fan
-                    if (Pik) DrawSoil(g, inner, i == 0);   //@fan
-                    if (Orig) DrawGridPaper(g, inner, i == 0);
-                    // 頂上的展示燈
-                    using (GraphicsPath gp = new GraphicsPath())
-                    {
-                        RectangleF glow = new RectangleF(inner.X - inner.Width * 0.2f, inner.Y - inner.Height * 0.25f, inner.Width * 1.4f, inner.Height * 0.75f);
-                        gp.AddEllipse(glow);
-                        using (PathGradientBrush pg = new PathGradientBrush(gp))
-                        {
-                            pg.CenterColor = Night ? Color.FromArgb(120, 255, 214, 150) : Color.FromArgb(110, 255, 250, 235);
-                            pg.SurroundColors = new Color[] { Color.FromArgb(0, 255, 240, 220) };
-                            g.SetClip(inner);
-                            g.FillPath(pg, gp);
-                            g.ResetClip();
-                        }
-                    }
-                    // 內側陰影（凹進去的感覺）
-                    using (LinearGradientBrush s1 = new LinearGradientBrush(new RectangleF(inner.X, inner.Y, inner.Width, 3 * U + 1), Color.FromArgb(90, 40, 20, 5), Color.FromArgb(0, 40, 20, 5), 90f))
-                        g.FillRectangle(s1, inner.X, inner.Y, inner.Width, 3 * U);
-                    using (LinearGradientBrush s2 = new LinearGradientBrush(new RectangleF(inner.X, inner.Y, 2 * U + 1, inner.Height), Color.FromArgb(70, 40, 20, 5), Color.FromArgb(0, 40, 20, 5), 0f))
-                        g.FillRectangle(s2, inner.X, inner.Y, 2 * U, inner.Height);
+                    Rectangle c = opening[i];
+                    if (Tubby) DrawHills(g, c, i == 0);   //@fan
+                    if (Pik) DrawSoil(g, c, i == 0);   //@fan
+                    if (Orig && i == 0) DrawStickyNote(g, back[0]);
+                    if (Night) DrawLamp(g, c);
                     if (i == 0 && Pik) DrawFlowerBed(g, c);   //@fan
-                    else if (i == 0) DrawPedestal(g, c, panel);   //@fan
-                    // <public> if (i == 0) DrawPedestal(g, c, panel);
-                    // 層板（公仔站的地方）＋名牌那條
-                    RectangleF board = new RectangleF(c.X - U, c.Bottom - plateH, c.Width + 2 * U, plateH);
-                    using (LinearGradientBrush lb = new LinearGradientBrush(board, w3, w1, 90f)) g.FillRectangle(lb, board);
-                    using (Pen edge = new Pen(Color.FromArgb(Night ? 60 : 110, 255, 235, 205), Math.Max(1f, U * 0.4f))) g.DrawLine(edge, board.X, board.Y + 0.5f, board.Right, board.Y + 0.5f);
+                    else if (i == 0) DrawPedestal(g, c);   //@fan
+                    // <public> if (i == 0) DrawPedestal(g, c);
                     // 名牌
                     string name = pet == null ? (i == 0 && Pik ? "★ 休息花" : (Orig ? "＋ 做公仔" : "？")) : (i == 0 ? "★ " + pet.P.Name : pet.P.Name);   //@fan
                     // <public> string name = pet == null ? (Orig ? "＋ 做公仔" : "？") : (i == 0 ? "★ " + pet.P.Name : pet.P.Name);
-                    using (Font f = new Font("Microsoft JhengHei UI", (float)Math.Max(9, 6.6 * k), FontStyle.Bold, GraphicsUnit.Pixel))
-                    {
-                        SizeF ts = g.MeasureString(name, f);
-                        float pw = Math.Min(c.Width - 2 * U, ts.Width + 3 * U), ph = plateH - 1.6f * U;
-                        RectangleF pr = new RectangleF(c.X + (c.Width - pw) / 2, c.Bottom - plateH + 0.9f * U, pw, ph);
-                        using (GraphicsPath pp = RoundRect(pr, U * 0.8f))
-                        using (LinearGradientBrush brass = new LinearGradientBrush(pr, i == 0 ? C(0xF6D77A) : C(0xEBCB7E), i == 0 ? C(0xC08A2C) : C(0xB48A45), 90f))
-                        using (Pen rim = new Pen(Color.FromArgb(160, 90, 60, 15), 1f))
-                        {
-                            g.FillPath(brass, pp);
-                            g.DrawPath(rim, pp);
-                        }
-                        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
-                        using (StringFormat sf = new StringFormat())
-                        using (SolidBrush tb = new SolidBrush(C(0x4A3010)))
-                        {
-                            sf.Alignment = StringAlignment.Center; sf.LineAlignment = StringAlignment.Center; sf.Trimming = StringTrimming.None;
-                            g.DrawString(name, f, tb, new RectangleF(pr.X - 4, pr.Y + 0.5f, pr.Width + 8, pr.Height), sf);
-                        }
-                    }
+                    DrawPlate(g, plate[i], name, i == 0);
                 }
-                // 左右小格和高格之間的隔板線
-                using (Pen dk = new Pen(Color.FromArgb(90, 30, 15, 5), 1f))
-                    g.DrawLine(dk, cells[0].X - div / 2f, crown, cells[0].X - div / 2f, H - baseH);
             }
         }
 
+        // 圖讀不到：程式畫一個簡單的紙箱（格子、名牌的位置一樣）
+        void DrawPlainBox(Graphics g)
+        {
+            float lw = Math.Max(1.5f, TU * 0.5f);
+            using (SolidBrush cb = new SolidBrush(Night ? C(0x6E5440) : C(0xD9A066)))
+            using (SolidBrush wb = new SolidBrush(Night ? C(0x8A8290) : C(0xFAF2E2)))
+            using (Pen ink = new Pen(C(0x1E1E24), lw))
+            {
+                using (GraphicsPath bp = RoundRect(new RectangleF(lw, crown * 0.5f, Area.Width - 2 * lw, Area.Height - crown * 0.5f - lw), 3 * U)) { g.FillPath(cb, bp); g.DrawPath(ink, bp); }
+                for (int i = 0; i < 4; i++)
+                {
+                    g.FillRectangle(wb, opening[i]);
+                    g.DrawRectangle(ink, opening[i].X, opening[i].Y, opening[i].Width, opening[i].Height);
+                    using (GraphicsPath pp = RoundRect(new RectangleF(plate[i].X, plate[i].Y, plate[i].Width, plate[i].Height), plate[i].Height * 0.3f)) { g.FillPath(wb, pp); g.DrawPath(ink, pp); }
+                }
+            }
+        }
+
+        // 晚上：格子裡亮著一盞暖暖的小燈（公仔看得清楚）
+        void DrawLamp(Graphics g, Rectangle c)
+        {
+            using (GraphicsPath gp = new GraphicsPath())
+            {
+                gp.AddEllipse(new RectangleF(c.X - c.Width * 0.2f, c.Y - c.Width * 0.35f, c.Width * 1.4f, Math.Min(c.Height * 0.8f, c.Width * 1.3f)));
+                using (PathGradientBrush pg = new PathGradientBrush(gp))
+                {
+                    pg.CenterColor = Color.FromArgb(120, 255, 214, 150);
+                    pg.SurroundColors = new Color[] { Color.FromArgb(0, 255, 240, 220) };
+                    g.SetClip(c);
+                    g.FillPath(pg, gp);
+                    g.ResetClip();
+                }
+            }
+        }
+
+        // 名牌：圖上那塊空白的牌子寫名字（字太長就縮小；晚上牌子補一點亮，字才看得清楚）
+        void DrawPlate(Graphics g, Rectangle pr, string name, bool fav)
+        {
+            if (Night)
+                using (GraphicsPath pp = RoundRect(new RectangleF(pr.X + 0.5f, pr.Y + 0.5f, pr.Width - 1, pr.Height - 1), pr.Height * 0.3f))
+                using (SolidBrush lb = new SolidBrush(Color.FromArgb(140, 255, 236, 200))) g.FillPath(lb, pp);
+            float fs = Math.Max(9f, Math.Min(pr.Height * 0.95f, 3.4f * TU));
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
+            Font f = new Font("Microsoft JhengHei UI", fs, FontStyle.Bold, GraphicsUnit.Pixel);
+            while (fs > 7.5f && g.MeasureString(name, f).Width - fs * 0.3f > pr.Width) { f.Dispose(); fs -= 0.5f; f = new Font("Microsoft JhengHei UI", fs, FontStyle.Bold, GraphicsUnit.Pixel); }
+            using (f)
+            using (StringFormat sf = new StringFormat())
+            using (SolidBrush tb = new SolidBrush(fav ? C(0x8A3A12) : C(0x3A2A1E)))
+            {
+                sf.Alignment = StringAlignment.Center; sf.LineAlignment = StringAlignment.Center; sf.Trimming = StringTrimming.None; sf.FormatFlags = StringFormatFlags.NoWrap;
+                g.DrawString(name, f, tb, new RectangleF(pr.X - 8, pr.Y + 0.5f, pr.Width + 16, pr.Height), sf);
+            }
+        }
 
         // <fan>
         // ---- 天線寶寶一櫃的格子：藍天、綠色小山丘、小花；大格有太陽寶寶（晚上下山）----
@@ -3318,10 +3392,10 @@ namespace DeskPals
             g.Restore(st);
         }
 
-        // 太陽寶寶：白天在天上笑，晚上一半沉到山丘後面
+        // 太陽寶寶：白天在天上笑，晚上一半沉到山丘後面（c＝高格的開口）
         void DrawSunBaby(Graphics g, Rectangle c, float cx, float sy, float sr)
         {
-            RectangleF inner = new RectangleF(c.X, c.Y, c.Width, c.Height - plateH);
+            RectangleF inner = new RectangleF(c.X, c.Y, c.Width, c.Height);
             float hy = HillTop(inner, true);
             float r = sr * 0.5f, y0 = Night ? hy - r * 0.15f : sy;
             if (Night) cx -= c.Width * 0.24f;   // 晚上在山丘邊慢慢下山（不要躲在圓台後面）
@@ -3349,11 +3423,11 @@ namespace DeskPals
         }
         // </fan>
 
-        // 高格：最愛站的小圓台＋背板上淡淡的大星星
-        void DrawPedestal(Graphics g, Rectangle c, Color panel)
+        // 高格：最愛站的小圓台（貼紙畫風：奶油色＋粗黑邊）＋背板上淡淡的大星星；c＝開口
+        void DrawPedestal(Graphics g, Rectangle c)
         {
-            float cx = c.X + c.Width / 2f, ph = PedH(), floor = c.Bottom - plateH, top = floor - ph;
-            float pw = c.Width * 0.62f, eh = 4 * U;
+            float cx = foot[0].X, ph = PedH(), floor = foot[0].Y, top = floor - ph;
+            float pw = c.Width * 0.56f, eh = Math.Max(4f, pw * 0.22f);
             // 星星
             PointF[] star = new PointF[10];
             float sr = c.Width * 0.36f, sy = c.Y + (top - c.Y) * 0.42f;
@@ -3364,22 +3438,30 @@ namespace DeskPals
             }
             if (Tubby) DrawSunBaby(g, c, cx, sy, sr);   //@fan
             else   //@fan
-                using (SolidBrush sb = new SolidBrush(Night ? Color.FromArgb(40, 255, 220, 150) : Color.FromArgb(70, 255, 236, 180))) g.FillPolygon(sb, star);
-            // 圓台
+                using (SolidBrush sb = new SolidBrush(Night ? Color.FromArgb(50, 255, 220, 150) : Color.FromArgb(90, 255, 214, 120))) g.FillPolygon(sb, star);
+            // 圓台：側面（下緣是半個橢圓）＋金色細帶＋頂面，都描粗黑邊
             Color m1 = Night ? C(0x8A7A70) : C(0xFFF6E8), m2 = Night ? C(0x4E443F) : C(0xD9C7AE);
-            RectangleF bodyR = new RectangleF(cx - pw / 2, top, pw, ph - U * 0.5f);
-            using (LinearGradientBrush lb = new LinearGradientBrush(new RectangleF(bodyR.X - 1, bodyR.Y, bodyR.Width + 2, bodyR.Height), m2, m1, 0f))
+            float lw = Math.Max(1.5f, TU * 0.5f), x0 = cx - pw / 2;
+            using (Pen ink = new Pen(Night ? C(0x221E28) : C(0x1E1E24), lw))
+            using (GraphicsPath side = new GraphicsPath())
             {
-                ColorBlend cb = new ColorBlend();
-                cb.Colors = new Color[] { m2, m1, m1, m2 };
-                cb.Positions = new float[] { 0f, 0.35f, 0.55f, 1f };
-                lb.InterpolationColors = cb;
-                g.FillRectangle(lb, bodyR);
-                g.FillEllipse(lb, bodyR.X, bodyR.Bottom - eh / 2, bodyR.Width, eh);
+                side.AddLine(x0 + pw, top, x0 + pw, floor);
+                side.AddArc(x0, floor - eh / 2, pw, eh, 0, 180);
+                side.AddLine(x0, floor, x0, top);
+                side.CloseFigure();
+                using (LinearGradientBrush lb = new LinearGradientBrush(new RectangleF(x0 - 1, top, pw + 2, ph + eh), m2, m1, 0f))
+                {
+                    ColorBlend cb = new ColorBlend();
+                    cb.Colors = new Color[] { m2, m1, m1, m2 };
+                    cb.Positions = new float[] { 0f, 0.35f, 0.55f, 1f };
+                    lb.InterpolationColors = cb;
+                    g.FillPath(lb, side);
+                }
+                using (SolidBrush gold = new SolidBrush(Night ? C(0xB08A3C) : C(0xE2B550))) g.FillRectangle(gold, x0, top + eh * 0.55f, pw, Math.Max(1f, eh * 0.28f));
+                g.DrawPath(ink, side);
+                using (SolidBrush tp = new SolidBrush(Night ? C(0x9C8B80) : C(0xFFFBF3))) g.FillEllipse(tp, x0, top - eh / 2, pw, eh);
+                g.DrawEllipse(ink, x0, top - eh / 2, pw, eh);
             }
-            using (SolidBrush gold = new SolidBrush(Night ? C(0xB08A3C) : C(0xE2B550))) g.FillRectangle(gold, bodyR.X, top + eh * 0.45f, bodyR.Width, U * 0.9f);
-            using (SolidBrush tp = new SolidBrush(Night ? C(0x9C8B80) : C(0xFFFBF3))) g.FillEllipse(tp, bodyR.X, top - eh / 2, bodyR.Width, eh);
-            using (Pen rim = new Pen(Night ? C(0xB08A3C) : C(0xD9A944), Math.Max(1f, U * 0.5f))) g.DrawEllipse(rim, bodyR.X, top - eh / 2, bodyR.Width, eh);
         }
 
         // 每 0.1 秒左右重畫（公仔會呼吸、眨眼、晃一下）
@@ -3420,18 +3502,23 @@ namespace DeskPals
             return cab;
         }
 
-        // 收合鈕「－」（櫃子頂上右邊的小牌子）
+        // 收合鈕「－」（大箱子蓋子上的小貼紙）
         void DrawTab(Bitmap b)
         {
             using (Graphics g = Graphics.FromImage(b))
             {
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 Rectangle r = TabLocal();
-                using (GraphicsPath p = RoundRect(new RectangleF(r.X, r.Y + 1, r.Width, r.Height - 2), U))
-                using (SolidBrush bg2 = new SolidBrush(Color.FromArgb(220, 255, 246, 226)))
-                using (Pen rim = new Pen(Color.FromArgb(160, 120, 80, 40), 1f)) { g.FillPath(bg2, p); g.DrawPath(rim, p); }
-                using (Pen mp = new Pen(Color.FromArgb(0x8A, 0x5A, 0x2A), Math.Max(1.5f, U * 0.6f)))
-                    g.DrawLine(mp, r.X + r.Width * 0.28f, r.Y + r.Height / 2f, r.X + r.Width * 0.72f, r.Y + r.Height / 2f);
+                float lw = Math.Max(1.5f, TU * 0.45f);
+                RectangleF rf = new RectangleF(r.X + lw / 2, r.Y + lw / 2, r.Width - lw, r.Height - lw);
+                using (GraphicsPath p = RoundRect(rf, rf.Height * 0.35f))
+                using (SolidBrush bg2 = new SolidBrush(Night ? C(0xA49A90) : C(0xFFF8EC)))
+                using (Pen rim = new Pen(C(0x1E1E24), lw)) { g.FillPath(bg2, p); g.DrawPath(rim, p); }
+                using (Pen mp = new Pen(C(0x1E1E24), Math.Max(1.5f, TU * 0.55f)))
+                {
+                    mp.StartCap = LineCap.Round; mp.EndCap = LineCap.Round;
+                    g.DrawLine(mp, r.X + r.Width * 0.33f, r.Y + r.Height / 2f, r.X + r.Width * 0.67f, r.Y + r.Height / 2f);
+                }
             }
         }
 
@@ -3532,30 +3619,23 @@ namespace DeskPals
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 for (int i = 0; i < 4; i++)
                 {
-                    Rectangle c = cells[i];
+                    Rectangle c = opening[i];
                     Pet pet = who[i];
                     int ps = FitPs(i, pet);
-                    int fx = c.X + c.Width / 2, fy = c.Bottom - plateH - U - (i == 0 ? PedH() : 0);
-                    g.SetClip(new Rectangle(c.X, c.Y, c.Width, c.Height - plateH));
+                    int fx = foot[i].X, fy = foot[i].Y - (i == 0 ? PedH() : 0);
+                    g.SetClip(c);
                     if (pet == null && i == 0 && Pik) DrawRestFlower(g, c, t);   //@fan
                     else if (pet == null) { if (Orig) DrawMakeSlot(g, c, fx, fy); else DrawUnknown(g, fx, fy, ps); }   //@fan
                     // <public> if (pet == null) { if (Orig) DrawMakeSlot(g, c, fx, fy); else DrawUnknown(g, fx, fy, ps); }
-                    else if (outNow[i]) { if (pet.P.Orig) pet.OrigGhost(g, fx, fy, c, Night); else pet.DrawGhost(g, fx, fy, ps, Night); DrawAway(g, c, ps); }
+                    else if (outNow[i]) { if (pet.P.Orig) pet.OrigGhost(g, fx, fy, c, Night); else pet.DrawGhost(g, fx, fy, ps, Night); DrawAway(g, c, fx, fy, ps); }
                     else pet.DrawOnShelf(g, fx, fy, ps, c, t);
                     g.ResetClip();
+                    // 滑過：格子開口亮一圈
                     if (hover == i && (pet != null || Orig))
-                        using (Pen hp = new Pen(Color.FromArgb(150, 255, 236, 160), Math.Max(2f, U * 0.7f)))
-                            g.DrawRectangle(hp, c.X + 1, c.Y + 1, c.Width - 3, c.Height - plateH - 2);
+                        using (Pen hp = new Pen(Color.FromArgb(200, 255, 214, 90), Math.Max(2f, TU * 0.7f)))
+                        using (GraphicsPath hpp = RoundRect(new RectangleF(c.X + 1, c.Y + 1, c.Width - 2, c.Height - 2), TU))
+                            g.DrawPath(hp, hpp);
                 }
-                // 玻璃門的反光
-                using (Pen gl = new Pen(Color.FromArgb(Night ? 14 : 26, 255, 255, 255), 3 * U))
-                    for (int i = 0; i < 4; i++)
-                    {
-                        Rectangle c = cells[i];
-                        g.SetClip(new Rectangle(c.X, c.Y, c.Width, c.Height - plateH));
-                        g.DrawLine(gl, c.X + c.Width * 0.15f, c.Bottom, c.X + c.Width * 0.95f, c.Y - c.Width * 0.2f);
-                        g.ResetClip();
-                    }
                 int left = w.FocusLeft(), qleft = w.QuietLeft();
                 if (left >= 0 && qleft >= 0) { DrawBadge(g, left, false, -1); DrawBadge(g, qleft, true, 1); }
                 else if (left >= 0) DrawBadge(g, left, false, 0);
@@ -3619,27 +3699,27 @@ namespace DeskPals
             }
         }
 
-        // 外出中：空的展示台＋掛著的小牌子
-        void DrawAway(Graphics g, Rectangle c, int ps)
+        // 外出中：空的地板（展示台）上一圈影子＋從格子頂上掛下來的小牌子；c＝開口，(fx, fy)＝公仔平常站的地方
+        void DrawAway(Graphics g, Rectangle c, int fx, int fy, int ps)
         {
-            int fx = c.X + c.Width / 2, fy = c.Bottom - plateH - U;
             using (SolidBrush st = new SolidBrush(Color.FromArgb(70, 80, 50, 25)))
                 g.FillEllipse(st, fx - 5 * ps, fy - ps, 10 * ps, 2 * ps);
-            float tagW = Math.Max(13 * ps * 0.9f, 15 * U), tagH = Math.Max(4.6f * ps, 5.2f * U), ty = c.Y + c.Height * 0.32f;
-            using (Pen str = new Pen(Color.FromArgb(150, 110, 80, 50), 1f))
+            float tagW = Math.Min(c.Width - 6, Math.Max(13 * ps * 0.9f, 15 * U)), tagH = Math.Max(4.6f * ps, 5.2f * U), ty = c.Y + c.Height * 0.3f;
+            float lw = Math.Max(1f, TU * 0.35f);
+            using (Pen str = new Pen(Color.FromArgb(200, 0x3A, 0x2A, 0x1E), lw))
             {
-                g.DrawLine(str, fx - tagW * 0.3f, c.Y + 2, fx - tagW * 0.25f, ty);
-                g.DrawLine(str, fx + tagW * 0.3f, c.Y + 2, fx + tagW * 0.25f, ty);
+                g.DrawLine(str, fx - tagW * 0.3f, c.Y, fx - tagW * 0.25f, ty);
+                g.DrawLine(str, fx + tagW * 0.3f, c.Y, fx + tagW * 0.25f, ty);
             }
             RectangleF tr = new RectangleF(fx - tagW / 2, ty, tagW, tagH);
             using (GraphicsPath p = RoundRect(tr, ps))
-            using (SolidBrush b = new SolidBrush(Night ? Color.FromArgb(235, 70, 58, 80) : Color.FromArgb(240, 255, 250, 238)))
-            using (Pen rim = new Pen(Color.FromArgb(160, 150, 110, 70), 1f))
+            using (SolidBrush b = new SolidBrush(Night ? Color.FromArgb(235, 70, 58, 80) : Color.FromArgb(245, 255, 250, 238)))
+            using (Pen rim = new Pen(C(0x1E1E24), Math.Max(1.5f, TU * 0.4f)))
             {
                 g.FillPath(b, p); g.DrawPath(rim, p);
             }
             using (Font f = new Font("Microsoft JhengHei UI", (float)Math.Max(10, 2.7 * ps), FontStyle.Bold, GraphicsUnit.Pixel))
-            using (SolidBrush tb = new SolidBrush(Night ? Color.FromArgb(0xFF, 0xE6, 0xC8) : Color.FromArgb(0x8A, 0x5A, 0x2A)))
+            using (SolidBrush tb = new SolidBrush(Night ? Color.FromArgb(0xFF, 0xE6, 0xC8) : Color.FromArgb(0x3A, 0x2A, 0x1E)))
             using (StringFormat sf = new StringFormat())
             {
                 sf.Alignment = StringAlignment.Center; sf.LineAlignment = StringAlignment.Center;
@@ -5140,6 +5220,7 @@ namespace DeskPals
                         Send(c, sb.ToString());
                     }
                     break;
+                case "shelf-info": Send(c, (shelf == null ? "" : shelf.Info()) + "maker " + (maker != null && !maker.IsDisposed && maker.VVisible ? 1 : 0) + "\nend\n"); break;   // 測試用（test/desktop-shelf.js）
                 case "notify":
                     if (p.Length >= 4)
                     {

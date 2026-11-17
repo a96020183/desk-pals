@@ -9074,26 +9074,96 @@ extension Pet
     }
 }
 
+// ================= 紙箱櫃的圖（extension/desktop/pals/shelf，tools/shelf_art/shelf_art.py 產生）=================
+// shelf.txt 的座標是 2x 圖的像素（1x 圖剛好一半）；櫃子用 S/8 換算（100% 縮放 S=4＝1x 圖原尺寸）。
+// 晚上版不另外存圖：整張往深藍紫混一半（跟以前木頭櫃晚上的背板同一個顏色）。圖讀不到就用程式畫一個簡單的紙箱，不要當掉。
+// mac：一律用 2x 圖（櫃子的 Bitmap 是 Retina，畫進邏輯大小剛好 1:1）
+enum ShelfArt
+{
+    // 跟 shelf.txt 一樣的預設值（檔案讀不到時用）
+    static var W2 = 512, H2 = 668, Crown = 88
+    static var Tab: [Int] = [382, 60, 44, 22]
+    static var Cells: [[Int]] = [
+        [248, 106, 178, 508, 282, 107, 144, 477, 586, 614, 344, 603, 288, 620, 98, 20],
+        [48, 106, 164, 132, 82, 106, 130, 108, 216, 238, 137, 230, 83, 244, 97, 20],
+        [48, 293, 164, 131, 82, 294, 130, 106, 403, 424, 137, 416, 83, 430, 97, 20],
+        [48, 479, 164, 135, 82, 480, 130, 105, 587, 614, 137, 603, 83, 619, 97, 21] ]
+    static var loaded = false
+    static var imgs = [String: Bitmap]()
+    static var tried = Set<String>()
+
+    static func Load()
+    {
+        if loaded { return }
+        loaded = true
+        let root = SqArt.Root()
+        guard !root.isEmpty, let meta = try? File.ReadAllText(Path.Combine(Path.Combine(root, "shelf"), "shelf.txt")) else { App.LogAlways("shelf art missing: shelf.txt"); return }
+        for line in meta.components(separatedBy: "\n")
+        {
+            let a = line.Trim().components(separatedBy: " ")
+            var v = [Int](repeating: 0, count: a.count)
+            for i in 1..<Swift.max(1, a.count) { v[i] = Int(a[i]) ?? 0 }
+            if a[0] == "size" && a.count >= 3 { W2 = v[1]; H2 = v[2] }
+            else if a[0] == "crown" && a.count >= 2 { Crown = v[1] }
+            else if a[0] == "tab" && a.count >= 5 { Tab = [v[1], v[2], v[3], v[4]] }
+            else if a[0] == "cell" && a.count >= 18 && v[1] >= 0 && v[1] < 4 { Cells[v[1]] = Array(v[2..<18]) }
+        }
+    }
+
+    // r：1＝1x 圖、2＝2x 圖；night：晚上版（第一次用到才算）。讀不到＝nil
+    static func Image(_ r: Int, _ night: Bool) -> Bitmap!
+    {
+        Load()
+        let key = String(r) + (night ? "n" : "d")
+        if let b = imgs[key] { return b }
+        if tried.contains(key) { return nil }
+        tried.insert(key)
+        var b: Bitmap! = nil
+        if night { if let d = ShelfArt.Image(r, false) { b = ShelfArt.Night(d) } }
+        else { b = SqArt.Png("shelf/" + String(r) + "x/box.png"); if b == nil { App.LogAlways("shelf art missing: " + String(r) + "x/box.png") } }
+        if b != nil { imgs[key] = b }
+        return b
+    }
+
+    // 晚上：每個顏色往 #2A2238 混 55%（白邊、黑線、紙箱、背板一起暗下來、偏藍紫）
+    static func Night(_ d: Bitmap) -> Bitmap
+    {
+        var px = CuImg.Pixels(d)
+        for i in 0..<px.count
+        {
+            let v = px[i], a = (v >> 24) & 255
+            if a == 0 { continue }
+            let r = (((v >> 16) & 255) * 45 + 0x2A * 55) / 100, g = (((v >> 8) & 255) * 45 + 0x22 * 55) / 100, b = ((v & 255) * 45 + 0x38 * 55) / 100
+            px[i] = (a << 24) | (r << 16) | (g << 8) | b
+        }
+        return CuImg.FromPixels(px, d.Width, d.Height)
+    }
+}
+
 // ================= 公仔櫃 =================
-// 右下角的木頭展示櫃：右邊一格高的（最愛）、左邊三格小的。點格子裡的公仔＝放出來／收回去。
+// 右下角的紙箱櫃（網購紙箱疊成的，跟續命小隊同一種粗黑線貼紙畫風）：右邊一格高的（最愛）、左邊三格小的，每格底下一塊名牌。
+// 櫃子本體是一張圖（ShelfArt）；格子裡的公仔、名牌上的字、第 4 格入口、收合鈕、最愛的展示台都是程式畫在上面。點格子裡的公仔＝放出來／收回去。
 final class ShelfForm: OverlayForm
 {
     let w: World
-    let U: Int, TU: Int           // 小格、高格的像素大小
+    let U: Int, TU: Int           // 小格、高格的像素大小（像素公仔；TU＝S）
     let k: Double
     var Hot = false, Over = false, Night = false
     var Tubby = false                   // 天線寶寶一櫃：格子裡是藍天綠山丘，大格有太陽寶寶   //@fan
     // ---- from 50_pikmin.swift ----
     var Pik = false                     // 皮克敏一櫃：格子底下是土和草，大格種一朵休息花
     // ---- from 51_original.swift ----
-    var Orig = false                    // 續命小隊：格子背板是淡淡的方格紙，大格釘一張小便利貼
+    var Orig = false                    // 續命小隊：大格的背板右上角釘一張小便利貼（畫一顆愛心）；空的格子是「做一隻你的公仔」入口
     var hover = -1
     var bmp: Bitmap! = nil, bg: Bitmap! = nil
     var bgKey = ""
     var area = Rectangle(0, 0, 0, 0)    // 螢幕座標
     var Area: Rectangle { return area }
-    var cells = [Rectangle](repeating: Rectangle(0, 0, 0, 0), count: 4) // 本地座標（含名牌那條）
-    var bW = 0, crown = 0, baseH = 0, div = 0, plateH = 0
+    var cells = [Rectangle](repeating: Rectangle(0, 0, 0, 0), count: 4) // 本地座標：開口＋名牌（點這裡＝點這一格）
+    var opening = [Rectangle](repeating: Rectangle(0, 0, 0, 0), count: 4), back = [Rectangle](repeating: Rectangle(0, 0, 0, 0), count: 4), plate = [Rectangle](repeating: Rectangle(0, 0, 0, 0), count: 4)   // 開口（公仔畫在裡面）、背板、名牌
+    var foot = [Point](repeating: Point(0, 0), count: 4)          // 公仔腳踩的地方（地板中間）
+    var tab = Rectangle(0, 0, 0, 0)                                // 收合鈕「－」
+    var crown = 0                                                  // 箱子正面的上緣：再上面是蓋子（可以拖著搬家、掛徽章）
     // ---- 收合成蛋 ----
     var Collapsed = false
     var fold = 0.0, gulp = 0.0, wobT = 0.0, nextWob = 4.0    // fold：0 櫃子 → 1 蛋
@@ -9123,7 +9193,7 @@ final class ShelfForm: OverlayForm
     var EggPs: Int { return TU }
     func EggLocal() -> Rectangle { let ps = EggPs; let ew = 18 * ps, eh = 19 * ps; return Rectangle(Area.Width - ew - 4, Area.Height - eh - 2, ew, eh) }
     func EggScreen() -> Rectangle { let r = EggLocal(); return Rectangle(r.X + Area.X, r.Y + Area.Y, r.Width, r.Height) }
-    func TabLocal() -> Rectangle { let s = 5 * U; return Rectangle(Area.Width - s - 3 * U, 0, s, CInt(Double(crown) * 0.8)) }
+    func TabLocal() -> Rectangle { return tab }
     func Gulp() { gulp = 0.5; wobT = 0.7 }
     func SnapFold() { fold = Collapsed ? 1 : 0 }
     func Step(_ dt: Double)
@@ -9179,15 +9249,24 @@ final class ShelfForm: OverlayForm
 
     func Place(_ wa: Rectangle)
     {
-        bW = 3 * U; crown = 5 * U; baseH = 5 * U; div = 2 * U; plateH = 5 * U
-        let smallW = 24 * U, smallH = 33 * U, tallW = 24 * TU, tallH = 3 * smallH + 2 * div
-        let W = bW * 2 + smallW + div + tallW, H = crown + tallH + baseH
+        ShelfArt.Load()
+        let W = Sc(ShelfArt.W2), H = Sc(ShelfArt.H2)
         defX = wa.Right - W - 6; defY = wa.Bottom - H; lastWa = wa
         let ax = Math.Max(wa.Left, Math.Min(defX, defX + OffX)), ay = Math.Max(wa.Top, Math.Min(defY, defY + OffY))
         area = Rectangle(ax, ay, W, H)
-        cells[0] = Rectangle(bW + smallW + div, crown, tallW, tallH)
-        for i in 0..<3 { cells[i + 1] = Rectangle(bW, crown + i * (smallH + div), smallW, smallH) }
+        for i in 0..<4
+        {
+            let v = ShelfArt.Cells[i]
+            opening[i] = Rc(v, 0); back[i] = Rc(v, 4); plate[i] = Rc(v, 12)
+            foot[i] = Point(Sc(v[10]), Sc(v[11]))
+            cells[i] = Rectangle.Union(opening[i], plate[i])
+        }
+        tab = Rc(ShelfArt.Tab, 0)
+        crown = Sc(ShelfArt.Crown)
     }
+    // shelf.txt 的 2x 座標 → 這個櫃子的像素（S=4 剛好一半）
+    func Sc(_ v: Int) -> Int { return CInt(Math.Floor(Double(v * TU) / 8.0 + 0.5)) }
+    func Rc(_ v: [Int], _ o: Int) -> Rectangle { let x = Sc(v[o]), y = Sc(v[o + 1]); return Rectangle(x, y, Sc(v[o] + v[o + 2]) - x, Sc(v[o + 1] + v[o + 3]) - y) }
 
     func CellPs(_ i: Int) -> Int { return i == 0 ? TU : U }
     // 依公仔實際高度（天線、耳朵、頭鰭、帽子、晃動）縮放，保證離格子頂端至少 2px
@@ -9195,15 +9274,32 @@ final class ShelfForm: OverlayForm
     {
         var ps = CellPs(i)
         guard let p = p else { return ps }
-        let avail = cells[i].Height - plateH - U - (i == 0 ? PedH() : 0) - 2 - 2
+        let avail = foot[i].Y - (i == 0 ? PedH() : 0) - opening[i].Y - 2 - 2
         let rows = p.ShelfRows()
         while ps > 2 && rows * ps > avail { ps -= 1 }
         return ps
     }
     func CellScreen(_ i: Int) -> Rectangle { let c = cells[i]; return Rectangle(c.X + Area.X, c.Y + Area.Y, c.Width, c.Height) }
-    // 公仔腳踩的位置（螢幕座標）
-    func Foot(_ i: Int) -> Point { let c = CellScreen(i); return Point(c.X + c.Width / 2, c.Bottom - plateH - U - (i == 0 ? PedH() : 0)) }
-    func PedH() -> Int { return CInt(Double(cells[0].Height - plateH) * 0.2) }
+    // 公仔腳踩的位置（螢幕座標）：地板中間；高格站在展示台上
+    func Foot(_ i: Int) -> Point { return Point(Area.X + foot[i].X, Area.Y + foot[i].Y - (i == 0 ? PedH() : 0)) }
+    func PedH() -> Int { return CInt(Double(opening[0].Height) * 0.13) }
+    // 測試用（pipe「shelf-info」）：櫃子、每一格的開口和名牌、腳底、收合鈕（螢幕座標）
+    func Info() -> String
+    {
+        let col: String = Collapsed ? "1" : "0", hasArt: String = ShelfArt.Image(2, false) != nil ? "1" : "0"
+        var sb: String = "shelf " + String(Area.X) + " " + String(Area.Y) + " " + String(Area.Width) + " " + String(Area.Height)
+        sb += " " + col + " " + String(TU) + " " + hasArt + "\n"
+        for i in 0..<4
+        {
+            let f = Foot(i)
+            let o = opening[i], pl = plate[i]
+            let a: String = "cell " + String(i) + " " + String(Area.X + o.X) + " " + String(Area.Y + o.Y) + " " + String(o.Width) + " " + String(o.Height)
+            let b: String = " " + String(Area.X + pl.X) + " " + String(Area.Y + pl.Y) + " " + String(pl.Width) + " " + String(pl.Height) + " " + String(f.X) + " " + String(f.Y) + "\n"
+            sb += a + b
+        }
+        sb += "tab " + String(Area.X + tab.X) + " " + String(Area.Y + tab.Y) + " " + String(tab.Width) + " " + String(tab.Height) + "\n"
+        return sb
+    }
 
     func CellAt(_ screen: Point) -> Int
     {
@@ -9289,108 +9385,96 @@ final class ShelfForm: OverlayForm
     }
     func RoundRect(_ r: RectangleF, _ rad: Double) -> GraphicsPath { return ShelfForm.RoundRect(r, rad) }
 
-    // 櫃子本體（不會動的部分）先畫好存起來
+    // 櫃子本體（不會動的部分）先畫好存起來：紙箱櫃的圖（晚上是調暗的版本）＋每一格的背景、展示台、名牌上的字
     func BuildBg(_ who: [Pet?], _ outNow: [Bool])
     {
         let W = Area.Width, H = Area.Height
-        let dW = Double(W), dH = Double(H), dU = Double(U), dcrown = Double(crown), dplateH = Double(plateH)
         if bg == nil || bg.Width != W || bg.Height != H { if bg != nil { bg.Dispose() }; bg = Bitmap(W, H) }
         let g = Graphics.FromImage(bg)
         defer { g.Dispose() }
         g.Clear(Color.Transparent)
         g.SmoothingMode = SmoothingMode.AntiAlias
-        let w1 = Night ? C(0x5C3B24) : C(0x9A6338), w2 = Night ? C(0x3C2617) : C(0x6B4024), w3 = Night ? C(0x74503A) : C(0xB97F4E)
-        // 影子
-        g.FillPath(SolidBrush(Color.FromArgb(60, 0, 0, 0)), RoundRect(RectangleF(3, 4, dW - 4, dH - 4), 5 * dU))
-        // 櫃身
-        let body = RectangleF(1, dcrown * 0.35, dW - 3, dH - dcrown * 0.35 - 2)
-        g.FillPath(LinearGradientBrush(body, w1, w2, 90.0), RoundRect(body, 3 * dU))
-        // 木紋
-        let r = Random(5)
-        do
+        let art: Bitmap! = ShelfArt.Image(2, Night)   // mac：一律 2x
+        if art != nil
         {
-            let grain = Pen(Color.FromArgb(Night ? 26 : 34, 40, 20, 8), Math.Max(1.0, dU * 0.35))
-            for _ in 0..<14
-            {
-                let gx = r.NextDouble() * dW, gy = dcrown + r.NextDouble() * (dH - dcrown * 2)
-                g.DrawBezier(grain, gx, gy, gx + 6 * dU, gy - dU, gx + 12 * dU, gy + dU, gx + 18 * dU, gy)
-            }
+            let ia = ImageAttributes()
+            ia.SetWrapMode(WrapMode.TileFlipXY)   // 縮放時外框不要變淡
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality
+            g.DrawImage(art, Rectangle(0, 0, W, H), 0, 0, art.Width, art.Height, GraphicsUnit.Pixel, ia)
+            g.PixelOffsetMode = PixelOffsetMode.Default
         }
-        // 頂蓋（冠線）
-        let top = RectangleF(0, 0, dW - 1, dcrown)
-        g.FillPath(LinearGradientBrush(top, w3, w1, 90.0), RoundRect(top, 2 * dU))
-        g.DrawLine(Pen(Color.FromArgb(Night ? 50 : 90, 255, 230, 200), Math.Max(1.0, dU * 0.5)), 3 * dU, dU, dW - 3 * dU, dU)
-        g.DrawLine(Pen(Color.FromArgb(120, 30, 15, 5), Math.Max(1.0, dU * 0.5)), dU, dcrown - dU * 0.3, dW - dU, dcrown - dU * 0.3)
-        // 底座＋小腳
-        let bas = RectangleF(0, dH - Double(baseH) - 1, dW - 1, Double(baseH - U))
-        g.FillPath(LinearGradientBrush(bas, w3, w2, 90.0), RoundRect(bas, 1.5 * dU))
-        do
-        {
-            let ft = SolidBrush(w2)
-            g.FillRectangle(ft, 3 * U, H - 2 * U, 4 * U, 2 * U)
-            g.FillRectangle(ft, W - 7 * U, H - 2 * U, 4 * U, 2 * U)
-        }
+        else { DrawPlainBox(g) }
         // 每一格
         for i in 0..<4
         {
-            let c = cells[i]
             let pet = who[i]
-            var panel = pet != nil ? pet!.P.Panel : C(0xEDE6DA)
-            if Night { panel = Mix(panel, C(0x2A2238), 0.55) }
-            let inner = RectangleF(Double(c.X), Double(c.Y), Double(c.Width), Double(c.Height - plateH))
-            g.FillRectangle(LinearGradientBrush(inner, Mix(panel, Color.White, 0.35), Mix(panel, C(0x6B4A30), 0.25), 90.0), inner)
-            if Tubby { DrawHills(g, inner, i == 0) }   //@fan
-            if Pik { DrawSoil(g, inner, i == 0) }   //@fan
-            if Orig { DrawGridPaper(g, inner, i == 0) }
-            // 頂上的展示燈
-            do
-            {
-                let gp = GraphicsPath()
-                let glow = RectangleF(inner.X - inner.Width * 0.2, inner.Y - inner.Height * 0.25, inner.Width * 1.4, inner.Height * 0.75)
-                gp.AddEllipse(glow)
-                let pg = PathGradientBrush(gp)
-                pg.CenterColor = Night ? Color.FromArgb(120, 255, 214, 150) : Color.FromArgb(110, 255, 250, 235)
-                pg.SurroundColors = [ Color.FromArgb(0, 255, 240, 220) ]
-                g.SetClip(inner)
-                g.FillPath(pg, gp)
-                g.ResetClip()
-            }
-            // 內側陰影（凹進去的感覺）
-            g.FillRectangle(LinearGradientBrush(RectangleF(inner.X, inner.Y, inner.Width, 3 * dU + 1), Color.FromArgb(90, 40, 20, 5), Color.FromArgb(0, 40, 20, 5), 90.0), inner.X, inner.Y, inner.Width, 3 * dU)
-            g.FillRectangle(LinearGradientBrush(RectangleF(inner.X, inner.Y, 2 * dU + 1, inner.Height), Color.FromArgb(70, 40, 20, 5), Color.FromArgb(0, 40, 20, 5), 0.0), inner.X, inner.Y, 2 * dU, inner.Height)
+            let c = opening[i]
+            if Tubby { DrawHills(g, RectangleF(c), i == 0) }   //@fan
+            if Pik { DrawSoil(g, RectangleF(c), i == 0) }   //@fan
+            if Orig && i == 0 { DrawStickyNote(g, back[0]) }
+            if Night { DrawLamp(g, c) }
             if i == 0 && Pik { DrawFlowerBed(g, c) }   //@fan
-            else if i == 0 { DrawPedestal(g, c, panel) }   //@fan
-            // <public> if i == 0 { DrawPedestal(g, c, panel) }
-            // 層板（公仔站的地方）＋名牌那條
-            let board = RectangleF(Double(c.X - U), Double(c.Bottom - plateH), Double(c.Width + 2 * U), dplateH)
-            g.FillRectangle(LinearGradientBrush(board, w3, w1, 90.0), board)
-            g.DrawLine(Pen(Color.FromArgb(Night ? 60 : 110, 255, 235, 205), Math.Max(1.0, dU * 0.4)), board.X, board.Y + 0.5, board.Right, board.Y + 0.5)
+            else if i == 0 { DrawPedestal(g, c) }   //@fan
+            // <public> if i == 0 { DrawPedestal(g, c) }
             // 名牌
             let name = pet == nil ? (i == 0 && Pik ? "★ 休息花" : (Orig ? "＋ 做公仔" : "？")) : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)   //@fan
             // <public> let name = pet == nil ? (Orig ? "＋ 做公仔" : "？") : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)
-            do
-            {
-                let f = Font("Microsoft JhengHei UI", Math.Max(9.0, 6.6 * k), FontStyle.Bold, GraphicsUnit.Pixel)
-                let ts = g.MeasureString(name, f)
-                let pw = Math.Min(Double(c.Width) - 2 * dU, ts.Width + 3 * dU), ph = dplateH - 1.6 * dU
-                let pr = RectangleF(Double(c.X) + (Double(c.Width) - pw) / 2, Double(c.Bottom - plateH) + 0.9 * dU, pw, ph)
-                let pp = RoundRect(pr, dU * 0.8)
-                let brass = LinearGradientBrush(pr, i == 0 ? C(0xF6D77A) : C(0xEBCB7E), i == 0 ? C(0xC08A2C) : C(0xB48A45), 90.0)
-                let rim = Pen(Color.FromArgb(160, 90, 60, 15), 1.0)
-                g.FillPath(brass, pp)
-                g.DrawPath(rim, pp)
-                g.TextRenderingHint = TextRenderingHint.AntiAlias
-                let sf = StringFormat()
-                let tb = SolidBrush(C(0x4A3010))
-                sf.Alignment = StringAlignment.Center; sf.LineAlignment = StringAlignment.Center; sf.Trimming = StringTrimming.None
-                g.DrawString(name, f, tb, RectangleF(pr.X - 4, pr.Y + 0.5, pr.Width + 8, pr.Height), sf)
-            }
+            DrawPlate(g, plate[i], name, i == 0)
         }
-        // 左右小格和高格之間的隔板線
-        let dk = Pen(Color.FromArgb(90, 30, 15, 5), 1.0)
-        g.DrawLine(dk, Double(cells[0].X) - Double(div) / 2, dcrown, Double(cells[0].X) - Double(div) / 2, Double(H - baseH))
     }
 
+    // 圖讀不到：程式畫一個簡單的紙箱（格子、名牌的位置一樣）
+    func DrawPlainBox(_ g: Graphics)
+    {
+        let lw = Math.Max(1.5, Double(TU) * 0.5)
+        let cb = SolidBrush(Night ? C(0x6E5440) : C(0xD9A066))
+        let wb = SolidBrush(Night ? C(0x8A8290) : C(0xFAF2E2))
+        let ink = Pen(C(0x1E1E24), lw)
+        let dcrown = Double(crown)
+        let bp = RoundRect(RectangleF(lw, dcrown * 0.5, Double(Area.Width) - 2 * lw, Double(Area.Height) - dcrown * 0.5 - lw), Double(3 * U))
+        g.FillPath(cb, bp); g.DrawPath(ink, bp)
+        for i in 0..<4
+        {
+            g.FillRectangle(wb, opening[i])
+            g.DrawRectangle(ink, opening[i].X, opening[i].Y, opening[i].Width, opening[i].Height)
+            let pp = RoundRect(RectangleF(Double(plate[i].X), Double(plate[i].Y), Double(plate[i].Width), Double(plate[i].Height)), Double(plate[i].Height) * 0.3)
+            g.FillPath(wb, pp); g.DrawPath(ink, pp)
+        }
+    }
+
+    // 晚上：格子裡亮著一盞暖暖的小燈（公仔看得清楚）
+    func DrawLamp(_ g: Graphics, _ c: Rectangle)
+    {
+        let cx = Double(c.X), cy = Double(c.Y), cw = Double(c.Width), ch = Double(c.Height)
+        let gp = GraphicsPath()
+        gp.AddEllipse(RectangleF(cx - cw * 0.2, cy - cw * 0.35, cw * 1.4, Math.Min(ch * 0.8, cw * 1.3)))
+        let pg = PathGradientBrush(gp)
+        pg.CenterColor = Color.FromArgb(120, 255, 214, 150)
+        pg.SurroundColors = [ Color.FromArgb(0, 255, 240, 220) ]
+        g.SetClip(c)
+        g.FillPath(pg, gp)
+        g.ResetClip()
+    }
+
+    // 名牌：圖上那塊空白的牌子寫名字（字太長就縮小；晚上牌子補一點亮，字才看得清楚）
+    func DrawPlate(_ g: Graphics, _ pr: Rectangle, _ name: String, _ fav: Bool)
+    {
+        let px = Double(pr.X), py = Double(pr.Y), pw = Double(pr.Width), ph = Double(pr.Height)
+        if Night
+        {
+            let pp = RoundRect(RectangleF(px + 0.5, py + 0.5, pw - 1, ph - 1), ph * 0.3)
+            g.FillPath(SolidBrush(Color.FromArgb(140, 255, 236, 200)), pp)
+        }
+        var fs = Math.Max(9.0, Math.Min(ph * 0.95, 3.4 * Double(TU)))
+        g.TextRenderingHint = TextRenderingHint.AntiAlias
+        var f = Font("Microsoft JhengHei UI", fs, FontStyle.Bold, GraphicsUnit.Pixel)
+        while fs > 7.5 && g.MeasureString(name, f).Width - fs * 0.3 > pw { fs -= 0.5; f = Font("Microsoft JhengHei UI", fs, FontStyle.Bold, GraphicsUnit.Pixel) }
+        let sf = StringFormat()
+        let tb = SolidBrush(fav ? C(0x8A3A12) : C(0x3A2A1E))
+        sf.Alignment = StringAlignment.Center; sf.LineAlignment = StringAlignment.Center; sf.Trimming = StringTrimming.None; sf.FormatFlags = StringFormatFlags.NoWrap
+        g.DrawString(name, f, tb, RectangleF(px - 8, py + 0.5, pw + 16, ph), sf)
+    }
 
     // <fan>
     // ---- 天線寶寶一櫃的格子：藍天、綠色小山丘、小花；大格有太陽寶寶（晚上下山）----
@@ -9428,11 +9512,11 @@ final class ShelfForm: OverlayForm
         g.Restore(st)
     }
 
-    // 太陽寶寶：白天在天上笑，晚上一半沉到山丘後面
+    // 太陽寶寶：白天在天上笑，晚上一半沉到山丘後面（c＝高格的開口）
     func DrawSunBaby(_ g: Graphics, _ c: Rectangle, _ cx0: Double, _ sy: Double, _ sr: Double)
     {
         var cx = cx0
-        let inner = RectangleF(Double(c.X), Double(c.Y), Double(c.Width), Double(c.Height - plateH))
+        let inner = RectangleF(Double(c.X), Double(c.Y), Double(c.Width), Double(c.Height))
         let hy = HillTop(inner, true)
         let r = sr * 0.5, y0 = Night ? hy - r * 0.15 : sy
         if Night { cx -= Double(c.Width) * 0.24 }   // 晚上在山丘邊慢慢下山（不要躲在圓台後面）
@@ -9463,12 +9547,11 @@ final class ShelfForm: OverlayForm
     }
     // </fan>
 
-    // 高格：最愛站的小圓台＋背板上淡淡的大星星
-    func DrawPedestal(_ g: Graphics, _ c: Rectangle, _ panel: Color)
+    // 高格：最愛站的小圓台（貼紙畫風：奶油色＋粗黑邊）＋背板上淡淡的大星星；c＝開口
+    func DrawPedestal(_ g: Graphics, _ c: Rectangle)
     {
-        let dU = Double(U)
-        let cx = Double(c.X) + Double(c.Width) / 2, ph = Double(PedH()), floor = Double(c.Bottom - plateH), top = floor - ph
-        let pw = Double(c.Width) * 0.62, eh = 4 * dU
+        let cx = Double(foot[0].X), ph = Double(PedH()), floor = Double(foot[0].Y), top = floor - ph
+        let pw = Double(c.Width) * 0.56, eh = Math.Max(4.0, pw * 0.22)
         // 星星
         var star = [PointF]()
         let sr = Double(c.Width) * 0.36, sy = Double(c.Y) + (top - Double(c.Y)) * 0.42
@@ -9479,24 +9562,30 @@ final class ShelfForm: OverlayForm
         }
         if Tubby { DrawSunBaby(g, c, cx, sy, sr) }   //@fan
         else   //@fan
-        { g.FillPolygon(SolidBrush(Night ? Color.FromArgb(40, 255, 220, 150) : Color.FromArgb(70, 255, 236, 180)), star) }   //@fan
-        // <public> do { g.FillPolygon(SolidBrush(Night ? Color.FromArgb(40, 255, 220, 150) : Color.FromArgb(70, 255, 236, 180)), star) }
-        // 圓台
+        { g.FillPolygon(SolidBrush(Night ? Color.FromArgb(50, 255, 220, 150) : Color.FromArgb(90, 255, 214, 120)), star) }   //@fan
+        // <public> do { g.FillPolygon(SolidBrush(Night ? Color.FromArgb(50, 255, 220, 150) : Color.FromArgb(90, 255, 214, 120)), star) }
+        // 圓台：側面（下緣是半個橢圓）＋金色細帶＋頂面，都描粗黑邊
         let m1 = Night ? C(0x8A7A70) : C(0xFFF6E8), m2 = Night ? C(0x4E443F) : C(0xD9C7AE)
-        let bodyR = RectangleF(cx - pw / 2, top, pw, ph - dU * 0.5)
+        let lw = Math.Max(1.5, Double(TU) * 0.5), x0 = cx - pw / 2
+        let ink = Pen(Night ? C(0x221E28) : C(0x1E1E24), lw)
+        let side = GraphicsPath()
+        side.AddLine(x0 + pw, top, x0 + pw, floor)
+        side.AddArc(x0, floor - eh / 2, pw, eh, 0, 180)
+        side.AddLine(x0, floor, x0, top)
+        side.CloseFigure()
         do
         {
-            let lb = LinearGradientBrush(RectangleF(bodyR.X - 1, bodyR.Y, bodyR.Width + 2, bodyR.Height), m2, m1, 0.0)
+            let lb = LinearGradientBrush(RectangleF(x0 - 1, top, pw + 2, ph + eh), m2, m1, 0.0)
             let cb = ColorBlend()
             cb.Colors = [ m2, m1, m1, m2 ]
             cb.Positions = [ 0.0, 0.35, 0.55, 1.0 ]
             lb.InterpolationColors = cb
-            g.FillRectangle(lb, bodyR)
-            g.FillEllipse(lb, bodyR.X, bodyR.Bottom - eh / 2, bodyR.Width, eh)
+            g.FillPath(lb, side)
         }
-        g.FillRectangle(SolidBrush(Night ? C(0xB08A3C) : C(0xE2B550)), bodyR.X, top + eh * 0.45, bodyR.Width, dU * 0.9)
-        g.FillEllipse(SolidBrush(Night ? C(0x9C8B80) : C(0xFFFBF3)), bodyR.X, top - eh / 2, bodyR.Width, eh)
-        g.DrawEllipse(Pen(Night ? C(0xB08A3C) : C(0xD9A944), Math.Max(1.0, dU * 0.5)), bodyR.X, top - eh / 2, bodyR.Width, eh)
+        g.FillRectangle(SolidBrush(Night ? C(0xB08A3C) : C(0xE2B550)), x0, top + eh * 0.55, pw, Math.Max(1.0, eh * 0.28))
+        g.DrawPath(ink, side)
+        g.FillEllipse(SolidBrush(Night ? C(0x9C8B80) : C(0xFFFBF3)), x0, top - eh / 2, pw, eh)
+        g.DrawEllipse(ink, x0, top - eh / 2, pw, eh)
     }
 
     // 每 0.1 秒左右重畫（公仔會呼吸、眨眼、晃一下）
@@ -9535,17 +9624,21 @@ final class ShelfForm: OverlayForm
         return cab
     }
 
-    // 收合鈕「－」（櫃子頂上右邊的小牌子）
+    // 收合鈕「－」（大箱子蓋子上的小貼紙）
     func DrawTab(_ b: Bitmap)
     {
         let g = Graphics.FromImage(b)
         defer { g.Dispose() }
         g.SmoothingMode = SmoothingMode.AntiAlias
         let r = TabLocal()
-        let p = RoundRect(RectangleF(Double(r.X), Double(r.Y + 1), Double(r.Width), Double(r.Height - 2)), Double(U))
-        g.FillPath(SolidBrush(Color.FromArgb(220, 255, 246, 226)), p); g.DrawPath(Pen(Color.FromArgb(160, 120, 80, 40), 1.0), p)
-        let mp = Pen(Color.FromArgb(0x8A, 0x5A, 0x2A), Math.Max(1.5, Double(U) * 0.6))
-        g.DrawLine(mp, Double(r.X) + Double(r.Width) * 0.28, Double(r.Y) + Double(r.Height) / 2, Double(r.X) + Double(r.Width) * 0.72, Double(r.Y) + Double(r.Height) / 2)
+        let rx = Double(r.X), ry = Double(r.Y), rw = Double(r.Width), rh = Double(r.Height)
+        let lw = Math.Max(1.5, Double(TU) * 0.45)
+        let rf = RectangleF(rx + lw / 2, ry + lw / 2, rw - lw, rh - lw)
+        let p = RoundRect(rf, rf.Height * 0.35)
+        g.FillPath(SolidBrush(Night ? C(0xA49A90) : C(0xFFF8EC)), p); g.DrawPath(Pen(C(0x1E1E24), lw), p)
+        let mp = Pen(C(0x1E1E24), Math.Max(1.5, Double(TU) * 0.55))
+        mp.StartCap = LineCap.Round; mp.EndCap = LineCap.Round
+        g.DrawLine(mp, rx + rw * 0.33, ry + rh / 2, rx + rw * 0.67, ry + rh / 2)
     }
 
     func DrawEgg(_ g: Graphics, _ t: Double, _ appear: Double)
@@ -9654,33 +9747,22 @@ final class ShelfForm: OverlayForm
         g.SmoothingMode = SmoothingMode.AntiAlias
         for i in 0..<4
         {
-            let c = cells[i]
+            let c = opening[i]
             let pet = who[i]
             let ps = FitPs(i, pet)
-            let fx = c.X + c.Width / 2, fy = c.Bottom - plateH - U - (i == 0 ? PedH() : 0)
-            g.SetClip(Rectangle(c.X, c.Y, c.Width, c.Height - plateH))
+            let fx = foot[i].X, fy = foot[i].Y - (i == 0 ? PedH() : 0)
+            g.SetClip(c)
             if pet == nil && i == 0 && Pik { DrawRestFlower(g, c, t) }   //@fan
             else if pet == nil { if Orig { DrawMakeSlot(g, c, fx, fy) } else { DrawUnknown(g, fx, fy, ps) } }   //@fan
             // <public> if pet == nil { if Orig { DrawMakeSlot(g, c, fx, fy) } else { DrawUnknown(g, fx, fy, ps) } }
-            else if outNow[i] { if pet!.P.Orig { pet!.OrigGhost(g, fx, fy, c, Night) } else { pet!.DrawGhost(g, fx, fy, ps, Night) }; DrawAway(g, c, ps) }
+            else if outNow[i] { if pet!.P.Orig { pet!.OrigGhost(g, fx, fy, c, Night) } else { pet!.DrawGhost(g, fx, fy, ps, Night) }; DrawAway(g, c, fx, fy, ps) }
             else { pet!.DrawOnShelf(g, fx, fy, ps, c, t) }
             g.ResetClip()
+            // 滑過：格子開口亮一圈
             if hover == i && (pet != nil || Orig)
             {
-                let hp = Pen(Color.FromArgb(150, 255, 236, 160), Math.Max(2.0, dU * 0.7))
-                g.DrawRectangle(hp, c.X + 1, c.Y + 1, c.Width - 3, c.Height - plateH - 2)
-            }
-        }
-        // 玻璃門的反光
-        do
-        {
-            let gl = Pen(Color.FromArgb(Night ? 14 : 26, 255, 255, 255), 3 * dU)
-            for i in 0..<4
-            {
-                let c = cells[i]
-                g.SetClip(Rectangle(c.X, c.Y, c.Width, c.Height - plateH))
-                g.DrawLine(gl, Double(c.X) + Double(c.Width) * 0.15, Double(c.Bottom), Double(c.X) + Double(c.Width) * 0.95, Double(c.Y) - Double(c.Width) * 0.2)
-                g.ResetClip()
+                let hp = Pen(Color.FromArgb(200, 255, 214, 90), Math.Max(2.0, Double(TU) * 0.7))
+                g.DrawPath(hp, RoundRect(RectangleF(Double(c.X + 1), Double(c.Y + 1), Double(c.Width - 2), Double(c.Height - 2)), Double(TU)))
             }
         }
         let left = w.FocusLeft(), qleft = w.QuietLeft()
@@ -9757,22 +9839,22 @@ final class ShelfForm: OverlayForm
         g.DrawString("?", f, b2, RectangleF(Double(fx - 6 * ps), Double(fy - 16 * ps), Double(12 * ps), Double(9 * ps)), sf)
     }
 
-    // 外出中：空的展示台＋掛著的小牌子
-    func DrawAway(_ g: Graphics, _ c: Rectangle, _ ps: Int)
+    // 外出中：空的地板（展示台）上一圈影子＋從格子頂上掛下來的小牌子；c＝開口，(fx, fy)＝公仔平常站的地方
+    func DrawAway(_ g: Graphics, _ c: Rectangle, _ fx: Int, _ fy: Int, _ ps: Int)
     {
-        let fx = c.X + c.Width / 2, fy = c.Bottom - plateH - U
-        let dps = Double(ps), dU = Double(U), dfx = Double(fx)
+        let dps = Double(ps), dU = Double(U), dfx = Double(fx), cy = Double(c.Y)
         g.FillEllipse(SolidBrush(Color.FromArgb(70, 80, 50, 25)), fx - 5 * ps, fy - ps, 10 * ps, 2 * ps)
-        let tagW = Math.Max(13 * dps * 0.9, 15 * dU), tagH = Math.Max(4.6 * dps, 5.2 * dU), ty = Double(c.Y) + Double(c.Height) * 0.32
-        let str = Pen(Color.FromArgb(150, 110, 80, 50), 1.0)
-        g.DrawLine(str, dfx - tagW * 0.3, Double(c.Y + 2), dfx - tagW * 0.25, ty)
-        g.DrawLine(str, dfx + tagW * 0.3, Double(c.Y + 2), dfx + tagW * 0.25, ty)
+        let tagW = Math.Min(Double(c.Width - 6), Math.Max(13 * dps * 0.9, 15 * dU)), tagH = Math.Max(4.6 * dps, 5.2 * dU), ty = cy + Double(c.Height) * 0.3
+        let lw = Math.Max(1.0, Double(TU) * 0.35)
+        let str = Pen(Color.FromArgb(200, 0x3A, 0x2A, 0x1E), lw)
+        g.DrawLine(str, dfx - tagW * 0.3, cy, dfx - tagW * 0.25, ty)
+        g.DrawLine(str, dfx + tagW * 0.3, cy, dfx + tagW * 0.25, ty)
         let tr = RectangleF(dfx - tagW / 2, ty, tagW, tagH)
         let p = RoundRect(tr, dps)
-        g.FillPath(SolidBrush(Night ? Color.FromArgb(235, 70, 58, 80) : Color.FromArgb(240, 255, 250, 238)), p)
-        g.DrawPath(Pen(Color.FromArgb(160, 150, 110, 70), 1.0), p)
+        g.FillPath(SolidBrush(Night ? Color.FromArgb(235, 70, 58, 80) : Color.FromArgb(245, 255, 250, 238)), p)
+        g.DrawPath(Pen(C(0x1E1E24), Math.Max(1.5, Double(TU) * 0.4)), p)
         let f = Font("Microsoft JhengHei UI", Math.Max(10.0, 2.7 * dps), FontStyle.Bold, GraphicsUnit.Pixel)
-        let tb = SolidBrush(Night ? Color.FromArgb(0xFF, 0xE6, 0xC8) : Color.FromArgb(0x8A, 0x5A, 0x2A))
+        let tb = SolidBrush(Night ? Color.FromArgb(0xFF, 0xE6, 0xC8) : Color.FromArgb(0x3A, 0x2A, 0x1E))
         let sf = StringFormat()
         sf.Alignment = StringAlignment.Center; sf.LineAlignment = StringAlignment.Center
         g.TextRenderingHint = TextRenderingHint.AntiAlias
@@ -11416,6 +11498,10 @@ extension World {
             for x in Pets { if x.Out { let pid: String = x.P.Id; let px: String = String(CInt(x.x)), py: String = String(CInt(x.y)); sb += "pos " + pid + " " + px + " " + py + " " + x.state + "\n" } }
             sb += "end\n"
             World.Send(c, sb)
+        case "shelf-info":   // 測試用（test/desktop-shelf.js）
+            let si: String = shelf == nil ? "" : shelf.Info()
+            let mk: Bool = maker != nil && !maker.IsDisposed && maker.VVisible
+            World.Send(c, si + "maker " + (mk ? "1" : "0") + "\nend\n")
         case "notify":
             if p.count >= 4 {
                 // 文字可以有空白：取第三個空白之後全部
@@ -15547,9 +15633,9 @@ extension ShelfForm {
         g.Restore(st)
     }
 
-    // 大格：花圃（土堆比較高）
+    // 大格：花圃（土堆比較高；c＝高格的開口）
     func DrawFlowerBed(_ g: Graphics, _ c: Rectangle) {
-        let inner = RectangleF(Double(c.X), Double(c.Y), Double(c.Width), Double(c.Height - plateH))
+        let inner = RectangleF(Double(c.X), Double(c.Y), Double(c.Width), Double(c.Height))
         let top = inner.Bottom - inner.Height * 0.16
         g.FillEllipse(SolidBrush(Night ? C(0x3E2E20) : C(0x6E4A2C)), inner.X + inner.Width * 0.12, top - inner.Height * 0.035, inner.Width * 0.76, inner.Height * 0.09)
         g.FillEllipse(SolidBrush(Color.FromArgb(50, 255, 230, 200)), inner.X + inner.Width * 0.25, top - inner.Height * 0.03, inner.Width * 0.4, inner.Height * 0.025)
@@ -15559,7 +15645,7 @@ extension ShelfForm {
     func DrawRestFlower(_ g: Graphics, _ c: Rectangle, _ t: Double) {
         var wilt: Double = 0; var petals = 0; var regrow: Double = 0; var nectar = false; var bubble: Double = 0
         w.FlowerLook(&wilt, &petals, &regrow, &nectar, &bubble)
-        let inner = RectangleF(Double(c.X), Double(c.Y), Double(c.Width), Double(c.Height - plateH))
+        let inner = RectangleF(Double(c.X), Double(c.Y), Double(c.Width), Double(c.Height))
         let u = Math.Max(2, TU)
         let du = Double(u)
         let soilTop = inner.Bottom - inner.Height * 0.16 - inner.Height * 0.03
@@ -17045,46 +17131,35 @@ extension Pet {
     }
 }
 
-// ================= 公仔櫃：方格紙背板（像筆記本）=================
+// ================= 公仔櫃：大格背板上釘一張小便利貼 =================
 
 extension ShelfForm {
-    func DrawGridPaper(_ g: Graphics, _ inner: RectangleF, _ tall: Bool) {
-        let st = g.Save()
-        g.SetClip(inner)
-        let step = Math.Max(4.0, Double(U) * 2.6)
-        let gp = Pen(Night ? Color.FromArgb(26, 200, 210, 255) : Color.FromArgb(40, 80, 120, 170), 1.0)
-        var gx = inner.X + step * 0.5
-        while gx < inner.Right { g.DrawLine(gp, gx, inner.Y, gx, inner.Bottom); gx += step }
-        var gy = inner.Y + step * 0.5
-        while gy < inner.Bottom { g.DrawLine(gp, inner.X, gy, inner.Right, gy); gy += step }
-        if tall {
-            // 大格右上角釘一張小便利貼（畫一顆愛心）
-            let u = Math.Max(2, U * 3 / 4)
-            let du = Double(u)
-            let nx = inner.Right - 13 * du, ny = inner.Y + 4 * du
-            g.FillRectangle(SolidBrush(Color.FromArgb(50, 60, 40, 10)), nx + du, ny + du, 9 * du, 9 * du)
-            g.FillRectangle(SolidBrush(Night ? C(0xC8B05A) : C(0xFFE45C)), nx, ny, 9 * du, 9 * du)
-            g.FillRectangle(SolidBrush(Night ? C(0xAC9440) : C(0xF2CC3A)), nx, ny, 9 * du, 2 * du)
-            let heart: [String] = [".pp.pp.", "ppppppp", ".ppppp.", "..ppp..", "...p..."]
-            let hb = SolidBrush(Night ? C(0xC87A88) : C(0xFF8FA8))
-            for r in 0..<heart.count {
-                let row = Array(heart[r])
-                for c in 0..<row.count { if row[c] != "." { g.FillRectangle(hb, nx + Double(1 + c) * du, ny + Double(3 + r) * du, du, du) } }
-            }
-            g.FillEllipse(SolidBrush(Night ? C(0x9A3A3A) : C(0xE04848)), nx + 3.5 * du, ny - 0.8 * du, 2 * du, 2 * du)
+    func DrawStickyNote(_ g: Graphics, _ bk: Rectangle) {
+        let u = Math.Max(2, U * 3 / 4)
+        let du = Double(u)
+        let nx = Double(bk.Right) - 12 * du, ny = Double(bk.Y) + 4 * du
+        g.FillRectangle(SolidBrush(Color.FromArgb(50, 60, 40, 10)), nx + du, ny + du, 9 * du, 9 * du)
+        g.FillRectangle(SolidBrush(Night ? C(0xC8B05A) : C(0xFFE45C)), nx, ny, 9 * du, 9 * du)
+        g.FillRectangle(SolidBrush(Night ? C(0xAC9440) : C(0xF2CC3A)), nx, ny, 9 * du, 2 * du)
+        g.DrawRectangle(Pen(Color.FromArgb(200, 0x1E, 0x1E, 0x24), Math.Max(1.0, du * 0.5)), nx, ny, 9 * du, 9 * du)
+        let heart: [String] = [".pp.pp.", "ppppppp", ".ppppp.", "..ppp..", "...p..."]
+        let hb = SolidBrush(Night ? C(0xC87A88) : C(0xFF8FA8))
+        for r in 0..<heart.count {
+            let row = Array(heart[r])
+            for c in 0..<row.count { if row[c] != "." { g.FillRectangle(hb, nx + Double(1 + c) * du, ny + Double(3 + r) * du, du, du) } }
         }
-        g.Restore(st)
+        g.FillEllipse(SolidBrush(Night ? C(0x9A3A3A) : C(0xE04848)), nx + 3.5 * du, ny - 0.8 * du, 2 * du, 2 * du)
     }
 }
 
 // 續命小隊的第 4 格：「＋ 做一隻你的公仔」入口（點了開做公仔視窗；做好了第 4 格就放那一隻）
 extension ShelfForm {
     func DrawMakeSlot(_ g: Graphics, _ c: Rectangle, _ fx: Int, _ fy: Int) {
-        // 淡淡的虛線剪影（圓頭＋身體）＋身體上一顆加號＋底下一行小字
+        // 背板上方一行小字＋底下淡淡的虛線剪影（圓頭＋身體，站在地板上）＋身體上一顆加號
         let h = Double(fy - c.Y), cwd = Double(c.Width), dfx = Double(fx), dfy = Double(fy)
-        let fs = Math.Max(9.0, cwd * 0.115)
-        let th = fs * 1.35
-        let top = Double(c.Y) + h * 0.1, bot = dfy - th - h * 0.03, sh = bot - top
+        let fs = Math.Max(9.0, Math.Min(cwd * 0.115, 3.2 * Double(TU)))
+        let th = fs * 1.35, ty = Double(c.Y) + h * 0.05
+        let top = ty + th + h * 0.02, bot = dfy - h * 0.01, sh = bot - top
         let hd = sh * 0.36, gap = sh * 0.05
         let bw = Math.Min(cwd * 0.56, sh * 0.78), bh = sh - hd - gap
         let head = RectangleF(dfx - hd / 2, top, hd, hd)
@@ -17102,10 +17177,11 @@ extension ShelfForm {
         g.DrawLine(pl, cx - cr * 0.5, cy, cx + cr * 0.5, cy)
         g.DrawLine(pl, cx, cy - cr * 0.5, cx, cy + cr * 0.5)
         let f = Font("Microsoft JhengHei UI", fs, FontStyle.Bold, GraphicsUnit.Pixel)
-        let tb = SolidBrush(Night ? Color.FromArgb(200, 232, 224, 244) : Color.FromArgb(225, 128, 84, 52))
+        let tb = SolidBrush(Night ? Color.FromArgb(220, 240, 230, 250) : Color.FromArgb(235, 110, 70, 40))
         let sf = StringFormat()
-        sf.Alignment = StringAlignment.Center; sf.LineAlignment = StringAlignment.Center
-        g.DrawString("做一隻你的公仔", f, tb, RectangleF(Double(c.X), dfy - th, cwd, th), sf)
+        sf.Alignment = StringAlignment.Center; sf.LineAlignment = StringAlignment.Center; sf.FormatFlags = StringFormatFlags.NoWrap
+        g.TextRenderingHint = TextRenderingHint.AntiAlias
+        g.DrawString("做一隻你的公仔", f, tb, RectangleF(Double(c.X) - 8, ty, cwd + 16, th), sf)
     }
 }
 

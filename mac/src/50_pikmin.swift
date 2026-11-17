@@ -635,9 +635,9 @@ extension ShelfForm {
         g.Restore(st)
     }
 
-    // 大格：花圃（土堆比較高）
+    // 大格：花圃（土堆比較高；c＝高格的開口）
     func DrawFlowerBed(_ g: Graphics, _ c: Rectangle) {
-        let inner = RectangleF(Double(c.X), Double(c.Y), Double(c.Width), Double(c.Height - plateH))
+        let inner = RectangleF(Double(c.X), Double(c.Y), Double(c.Width), Double(c.Height))
         let top = inner.Bottom - inner.Height * 0.16
         g.FillEllipse(SolidBrush(Night ? C(0x3E2E20) : C(0x6E4A2C)), inner.X + inner.Width * 0.12, top - inner.Height * 0.035, inner.Width * 0.76, inner.Height * 0.09)
         g.FillEllipse(SolidBrush(Color.FromArgb(50, 255, 230, 200)), inner.X + inner.Width * 0.25, top - inner.Height * 0.03, inner.Width * 0.4, inner.Height * 0.025)
@@ -647,7 +647,7 @@ extension ShelfForm {
     func DrawRestFlower(_ g: Graphics, _ c: Rectangle, _ t: Double) {
         var wilt: Double = 0; var petals = 0; var regrow: Double = 0; var nectar = false; var bubble: Double = 0
         w.FlowerLook(&wilt, &petals, &regrow, &nectar, &bubble)
-        let inner = RectangleF(Double(c.X), Double(c.Y), Double(c.Width), Double(c.Height - plateH))
+        let inner = RectangleF(Double(c.X), Double(c.Y), Double(c.Width), Double(c.Height))
         let u = Math.Max(2, TU)
         let du = Double(u)
         let soilTop = inner.Bottom - inner.Height * 0.16 - inner.Height * 0.03

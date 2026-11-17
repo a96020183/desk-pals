@@ -647,7 +647,7 @@ namespace DeskPals
     {
         public bool Pik;                     // 皮克敏一櫃：格子底下是土和草，大格種一朵休息花
 
-        // 每一格底下一層土＋小草（公仔站在土上）
+        // 每一格底下一層土＋小草（公仔站在土上；inner＝格子的開口）
         void DrawSoil(Graphics g, RectangleF inner, bool tall)
         {
             GraphicsState st = g.Save();
@@ -672,10 +672,10 @@ namespace DeskPals
             g.Restore(st);
         }
 
-        // 大格：花圃（土堆比較高）
+        // 大格：花圃（土堆比較高；c＝高格的開口）
         void DrawFlowerBed(Graphics g, Rectangle c)
         {
-            RectangleF inner = new RectangleF(c.X, c.Y, c.Width, c.Height - plateH);
+            RectangleF inner = new RectangleF(c.X, c.Y, c.Width, c.Height);
             float top = inner.Bottom - inner.Height * 0.16f;
             using (SolidBrush mb = new SolidBrush(Night ? C(0x3E2E20) : C(0x6E4A2C)))
                 g.FillEllipse(mb, inner.X + inner.Width * 0.12f, top - inner.Height * 0.035f, inner.Width * 0.76f, inner.Height * 0.09f);
@@ -688,7 +688,7 @@ namespace DeskPals
         {
             double wilt; int petals; double regrow; bool nectar; double bubble;
             w.FlowerLook(out wilt, out petals, out regrow, out nectar, out bubble);
-            RectangleF inner = new RectangleF(c.X, c.Y, c.Width, c.Height - plateH);
+            RectangleF inner = new RectangleF(c.X, c.Y, c.Width, c.Height);
             int u = Math.Max(2, TU);
             float soilTop = inner.Bottom - inner.Height * 0.16f - inner.Height * 0.03f;
             float baseX = inner.X + inner.Width / 2f;

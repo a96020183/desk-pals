@@ -4,9 +4,9 @@
 產出：
   DeskPals.ico                      Windows exe／安裝程式／捷徑（16～256，透明底）
   png/icon-<n>.png                  同一套的 PNG
-  AppIcon.iconset/                  macOS（iconutil -c icns 轉成 AppIcon.icns；圓角磚＋小木架）
+  AppIcon.iconset/                  macOS（iconutil -c icns 轉成 AppIcon.icns；圓角磚＋一塊紙箱板）
   msix/Assets/*.png                 Microsoft Store（MSIX）磚與 Logo（scale-100／200、targetsize、altform-unplated）
-  inno/wizard-<pct>.bmp、inno/small-<pct>.bmp   安裝程式左邊的公仔櫃圖、右上角小圖（100%～200% DPI）
+  inno/wizard-<pct>.bmp、inno/small-<pct>.bmp   安裝程式左邊的公仔櫃圖（紙箱櫃：extension/desktop/pals/shelf）、右上角小圖（100%～200% DPI）
 """
 import os
 import struct
@@ -18,6 +18,7 @@ from PIL import Image, ImageDraw
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
 ART = os.path.join(HERE, "squad")
+SHELF = os.path.join(ROOT, "extension", "desktop", "pals", "shelf")   # 紙箱櫃（tools/shelf_art/shelf_art.py 產生）
 
 
 def art(pid):
@@ -52,9 +53,9 @@ def figure_icon(n, pad=0.0):
     return img
 
 
-# ---------------- macOS：圓角磚＋小木架 ----------------
+# ---------------- macOS：圓角磚＋一塊紙箱板 ----------------
 TOP, BOTTOM = (255, 236, 214), (255, 196, 170)       # 奶茶粉橘漸層
-PLANK, PLANK_D, PLANK_L = (168, 116, 58), (122, 80, 38), (217, 165, 91)
+PLANK, PLANK_D, PLANK_L = (214, 160, 98), (30, 30, 36), (236, 196, 140)   # 紙箱色＋粗黑邊（跟紙箱櫃同一種貼紙畫風）
 
 
 def tile_bg(n, radius_frac=0.225, inset_frac=0.0977):
@@ -89,23 +90,22 @@ def mac_icon(n):
     spr = fit_img(hero_img(head_only), inner)
     cx = ins + side // 2
     if plank:
-        # 小木架：一塊木板，公仔站在上面
+        # 一塊紙箱板（黑邊），公仔站在上面
         pw = int(side * 0.70)
-        ph = max(2, side // 40)
+        ph = max(3, side // 28)
         py = ins + int(side * 0.82)
         d = ImageDraw.Draw(img)
         x0 = cx - pw // 2
-        lip = max(1, ph // 4)
-        d.rectangle([x0, py, x0 + pw - 1, py + ph - 1], fill=PLANK + (255,))
-        d.rectangle([x0, py, x0 + pw - 1, py + lip - 1], fill=PLANK_L + (255,))
-        d.rectangle([x0, py + ph - lip, x0 + pw - 1, py + ph - 1], fill=PLANK_D + (255,))
+        lw = max(1, ph // 4)
+        d.rounded_rectangle([x0, py, x0 + pw - 1, py + ph - 1], max(1, ph // 3), fill=PLANK + (255,), outline=PLANK_D + (255,), width=lw)
+        d.rectangle([x0 + lw, py + lw, x0 + pw - 1 - lw, py + lw + max(1, ph // 5) - 1], fill=PLANK_L + (255,))
         img.alpha_composite(spr, (cx - spr.width // 2, py - spr.height + max(1, ph // 3)))
     else:
         img.alpha_composite(spr, (cx - spr.width // 2, ins + (side - spr.height) // 2))
     return img
 
 
-# ---------------- 一整櫃（續命小隊三隻站在木架上）----------------
+# ---------------- 一整櫃（續命小隊三隻住在紙箱櫃裡）----------------
 SQUAD = ["duoduo", "meidian", "cici"]
 
 
@@ -116,28 +116,43 @@ def squad_sprites(h):
     return [fit_img(a, max(1, round(max(a.width, a.height) * h / top))) for a in arts]
 
 
+def shelf_cells():
+    """shelf.txt：每格的開口（x, y, w, h）和腳底（x, y），2x 圖的座標。"""
+    cells = {}
+    for line in open(os.path.join(SHELF, "shelf.txt"), encoding="utf-8"):
+        a = line.split()
+        if len(a) >= 18 and a[0] == "cell":
+            v = [int(x) for x in a[1:18]]
+            cells[v[0]] = (tuple(v[1:5]), (v[11], v[12]))
+    return cells
+
+
 def shelf_image(w, h, ps, bg_top=TOP, bg_bottom=BOTTOM):
-    """安裝程式左邊那張：直的公仔櫃，上層兩隻、下層一隻。"""
+    """安裝程式左邊那張：紙箱櫃，大格躲躲、小格沒電和刺刺，第 4 格空著（之後放自己做的公仔）。"""
     img = Image.new("RGBA", (w, h))
     d = ImageDraw.Draw(img)
     for y in range(h):
         t = y / max(1, h - 1)
         d.line([(0, y), (w, y)], fill=tuple(int(bg_top[i] + (bg_bottom[i] - bg_top[i]) * t) for i in range(3)) + (255,))
-    shelf_h = ps * 2
-    sp = squad_sprites(int(min(w * 0.40, h * 0.30)))
-    row_h = max(s.height for s in sp) + shelf_h + ps * 3
-    top = (h - 2 * row_h) // 2 + ps * 2
-    for r, pair in enumerate((sp[:2], sp[2:])):
-        py = top + (r + 1) * row_h - shelf_h
-        x0, x1 = ps * 2, w - ps * 2
-        d.rectangle([x0, py, x1, py + shelf_h - 1], fill=PLANK + (255,))
-        d.rectangle([x0, py, x1, py + max(1, ps // 2) - 1], fill=PLANK_L + (255,))
-        d.rectangle([x0, py + shelf_h - max(1, ps // 2), x1, py + shelf_h - 1], fill=PLANK_D + (255,))
-        gap = (w - sum(s.width for s in pair)) // (len(pair) + 1)
-        x = gap
-        for s in pair:
-            img.alpha_composite(s, (x, py - s.height + ps // 2))
-            x += s.width + gap
+    box = Image.open(os.path.join(SHELF, "2x", "box.png")).convert("RGBA")
+    k = min(w * 0.92 / box.width, h * 0.9 / box.height)
+    bw, bh = round(box.width * k), round(box.height * k)
+    bx, by = (w - bw) // 2, (h - bh) // 2
+    img.alpha_composite(box.convert("RGBa").resize((bw, bh), Image.LANCZOS).convert("RGBA"), (bx, by))
+    cells = shelf_cells()
+    for ci, pid in ((0, "duoduo"), (1, "meidian"), (2, "cici")):
+        (ox, oy, ow, oh), (fx, fy) = cells[ci]
+        ox, oy, ow, oh, fx, fy = (round(v * k) for v in (ox, oy, ow, oh, fx, fy))
+        a = art(pid)
+        s = min((fy - oy) * 0.86 / a.height, ow * 0.82 / a.width)
+        spr = fit_img(a, max(1, round(max(a.width, a.height) * s)))
+        layer = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        layer.alpha_composite(spr, (bx + fx - spr.width // 2, by + fy - spr.height))
+        mask = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(mask).rectangle([bx + ox, by + oy, bx + ox + ow - 1, by + oy + oh - 1], fill=255)   # 不要超出格子
+        clip = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        clip.paste(layer, (0, 0), mask)
+        img.alpha_composite(clip)
     return img
 
 

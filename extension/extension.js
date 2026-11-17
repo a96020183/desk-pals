@@ -542,6 +542,15 @@ class Desktop {
 		};
 		for (const f of files) copy(f, this.home);
 		if (sa) return;
+		// 圖（續命小隊 pals/squad、紙箱櫃 pals/shelf）：桌面版從自己旁邊的 pals 讀
+		const copyDir = (rel) => {
+			const from = path.join(src, rel);
+			for (const e of fs.readdirSync(from, { withFileTypes: true })) {
+				const r = path.join(rel, e.name);
+				if (e.isDirectory()) { fs.mkdirSync(path.join(this.home, r), { recursive: true }); copyDir(r); } else copy(r, this.home);
+			}
+		};
+		try { fs.mkdirSync(path.join(this.home, "pals"), { recursive: true }); copyDir("pals"); } catch (e) { console.error("deskpals pals", e); }
 		if (process.platform === "darwin") fs.chmodSync(path.join(this.home, this.sh), 0o755);
 		this.installAutostart();
 	}

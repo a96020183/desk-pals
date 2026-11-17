@@ -1329,6 +1329,10 @@ extension World {
             for x in Pets { if x.Out { let pid: String = x.P.Id; let px: String = String(CInt(x.x)), py: String = String(CInt(x.y)); sb += "pos " + pid + " " + px + " " + py + " " + x.state + "\n" } }
             sb += "end\n"
             World.Send(c, sb)
+        case "shelf-info":   // 測試用（test/desktop-shelf.js）
+            let si: String = shelf == nil ? "" : shelf.Info()
+            let mk: Bool = maker != nil && !maker.IsDisposed && maker.VVisible
+            World.Send(c, si + "maker " + (mk ? "1" : "0") + "\nend\n")
         case "notify":
             if p.count >= 4 {
                 // 文字可以有空白：取第三個空白之後全部
