@@ -696,6 +696,38 @@ jobs:
           $env:SHELF_LINEUP = "original"
           node test/desktop-shelf.js desk-pals-exeshelf (Resolve-Path exe-shots\shelf).Path
           if ($LASTEXITCODE -ne 0) { throw "shelf test failed (exe)" }
+      # 窩伴小世界跑在 exe 上（vsix 附的就是這支）：lineups.txt、woban.txt、動作圖、書包小屋都要從內嵌的資源讀到（exe 旁邊沒有 pals）
+      - name: Woban test on DeskPals.exe (setup first page, pals, 書包小屋; embedded resources)
+        shell: powershell
+        run: |
+          $runs = @(
+            @{ n = "setup-pub"; exe = "dist\DeskPals.exe"; mode = "setup"; per = "0"; fresh = $true; test = "woban"; out = "exe-shots\woban-setup" },
+            @{ n = "pals-pub"; exe = "dist\DeskPals.exe"; mode = "pals"; per = "0"; fresh = $false; test = "woban"; out = "exe-shots\woban-pals" },
+            @{ n = "shelf-pub"; exe = "dist\DeskPals.exe"; mode = ""; per = "0"; fresh = $false; test = "shelf"; out = "exe-shots\woban-shelf" },
+            @{ n = "pals-per"; exe = "dist-personal\DeskPals-personal.exe"; mode = "pals"; per = "1"; fresh = $false; test = "woban"; out = "personal-exe-shots\woban-pals" })
+          foreach ($v in $runs) {
+            $env:DESKPALS_OFFSCREEN = "1"; $env:DESKPALS_ISOLATED = "1"
+            $env:DESKPALS_DATA_DIR = "$env:RUNNER_TEMP\dp-exe-woban-" + $v.n
+            New-Item -ItemType Directory -Force $env:DESKPALS_DATA_DIR, $v.out | Out-Null
+            $pipe = "desk-pals-exewoban-" + $v.n
+            $a = "--pipe $pipe"
+            if (-not $v.fresh) {
+              Set-Content "$env:DESKPALS_DATA_DIR\profile.txt" "done" -NoNewline
+              Set-Content "$env:DESKPALS_DATA_DIR\mode.txt" "shelf" -NoNewline
+              Set-Content "$env:DESKPALS_DATA_DIR\lineup.txt" "woban" -NoNewline
+              $a += " --pet bobo --lineup woban"
+            }
+            $p = Start-Process $v.exe -ArgumentList $a -PassThru
+            node .github/ping.js $pipe
+            if ($LASTEXITCODE -ne 0) { throw ("exe did not start (woban " + $v.n + ")") }
+            $env:WOBAN_MODE = $v.mode; $env:WOBAN_PERSONAL = $v.per; $env:SHELF_LINEUP = "woban"
+            if ($v.test -eq "woban") { node test/desktop-woban.js $pipe (Resolve-Path $v.out).Path "$env:TEMP\desk-pals.log" }
+            else { node test/desktop-shelf.js $pipe (Resolve-Path $v.out).Path }
+            if ($LASTEXITCODE -ne 0) { throw ("woban test failed on the exe (" + $v.n + ")") }
+            if (-not $p.WaitForExit(15000)) { throw ("exe did not quit (woban " + $v.n + ")") }
+          }
+          $miss = Get-Content "$env:TEMP\desk-pals.log" -Encoding UTF8 | Select-String "lineups.txt missing|art missing"
+          if ($miss) { $miss; throw "exe could not read embedded art" }
       - name: Smoke-test personal DeskPals-personal.exe (offscreen, all lineups)
         shell: powershell
         run: |
@@ -745,6 +777,7 @@ jobs:
             public-ps1-shots/shelf/*.png
             exe-shots/*.png
             exe-shots/shelf/*.png
+            exe-shots/woban-*/*.png
       # 個人版的測試結果（含同人角色的截圖）：只給自己看，不會附到 Release
       - uses: actions/upload-artifact@v4
         if: always()
@@ -755,6 +788,7 @@ jobs:
             ps1-shots/mischief/*.png
             ps1-shots/shelf/*.png
             personal-exe-shots/*.png
+            personal-exe-shots/woban-*/*.png
       # 公開版：Release 會附上這些
       - uses: actions/upload-artifact@v4
         with:
