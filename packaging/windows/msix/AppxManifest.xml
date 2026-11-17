@@ -7,7 +7,7 @@
       __PUBLISHER__                → Package/Identity/Publisher            GitHub 變數 MSIX_PUBLISHER（形如 CN=XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX）
       __PUBLISHER_DISPLAY_NAME__   → Package/Properties/PublisherDisplayName  GitHub 變數 MSIX_PUBLISHER_DISPLAY_NAME
     沒填＝佔位值（DeskPals.Placeholder／CN=DeskPals-Placeholder），只能拿來檢查，Partner Center 不收。
-  ★ DisplayName「公仔櫃 Desk Pals」要跟你在 Partner Center 保留的 App 名稱一模一樣（保留的名字不同就改這裡兩處）。
+  ★ DisplayName「WoWo Pals」（Partner Center 保留的名稱，2026-11-17）要跟你在 Partner Center 保留的 App 名稱一模一樣（保留的名字不同就改這裡兩處）。
   __VERSION__ 由 extension/package.json 的 version 產生（x.y.z.0；Store 規定最後一碼是 0）。
 
   刻意「不」宣告 unvirtualizedResources／FileSystemWriteVirtualization=disabled（受限功能，Store 很少核准、會影響乾淨解除安裝）：
@@ -27,7 +27,7 @@
   <Identity Name="__IDENTITY_NAME__" Publisher="__PUBLISHER__" Version="__VERSION__" ProcessorArchitecture="x64"/>
 
   <Properties>
-    <DisplayName>公仔櫃 Desk Pals</DisplayName>
+    <DisplayName>WoWo Pals</DisplayName>
     <PublisherDisplayName>__PUBLISHER_DISPLAY_NAME__</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
@@ -43,7 +43,7 @@
   <Applications>
     <Application Id="DeskPals" Executable="DeskPals.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
-        DisplayName="公仔櫃 Desk Pals"
+        DisplayName="WoWo Pals"
         Description="桌面上的像素公仔櫃：選一隻出來，在整個螢幕陪你。"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
@@ -54,7 +54,7 @@
         <!-- 開機自動啟動：第一次打開後生效。第一次設定的第二頁有「開機時自動出現」勾選（沒勾＝StartupTask.Disable），
              之後小屋選單、Windows「設定 → 應用程式 → 啟動」都能開關 -->
         <desktop:Extension Category="windows.startupTask" Executable="DeskPals.exe" EntryPoint="Windows.FullTrustApplication">
-          <desktop:StartupTask TaskId="DeskPalsStartup" Enabled="true" DisplayName="公仔櫃 Desk Pals"/>
+          <desktop:StartupTask TaskId="DeskPalsStartup" Enabled="true" DisplayName="WoWo Pals"/>
         </desktop:Extension>
         <!-- %LOCALAPPDATA%\Microsoft\WindowsApps\DeskPals.exe：VS Code 擴充套件用這個路徑叫它起來 -->
         <uap3:Extension Category="windows.appExecutionAlias" Executable="DeskPals.exe" EntryPoint="Windows.FullTrustApplication">
