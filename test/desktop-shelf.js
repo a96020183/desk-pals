@@ -5,7 +5,9 @@
 //   node test/desktop-shelf.js <pipe 或 socket> <截圖資料夾>
 //   SHELF_LINEUP=pikmin：個人版的皮克敏一櫃（大格是休息花、沒有第 4 格入口）。
 //   SHELF_LINEUP=woban：窩伴小世界的書包小屋（pals/woban/shelf：三間一樣大的房間左右並排、沒有第 4 格）。最後會送 quit。
-// 不管現在幾點都一樣（CI 是 UTC）：一開始就 act light、act lunchend。
+// 不管現在幾點都一樣（CI 是 UTC）：一開始就 act light、act lunchend，並關掉串門子劇情（act feature scenes=0）——
+//   續命小隊／窩伴小世界平日 15:00–15:10 只要外面有兩隻就自動演下午茶，大家會圍到櫃子前面，「外出中」的格子就被擋住
+//   （CI 在 UTC 15:0x 跑到這裡時真的發生過：格 0 被沒電擋住、格 3 被躲躲擋住）。
 const net = require("net");
 const fs = require("fs");
 const path = require("path");
@@ -129,6 +131,7 @@ async function check(name, fn) {
 	await reply("hello", (b) => /lineup \w+/.test(b));
 	send("act light");
 	send("act lunchend");   // CI 是 UTC：12 點剛好午休，大家會在櫃子裡拿便當
+	send("act feature scenes=0");   // 15:00 的下午茶等時段劇情不要演（會把大家叫到櫃子前面）
 	send("act unegg");
 	// 全部回櫃子（早上點名、下班串場可能把大家叫出來：一直收到真的都在櫃子裡）
 	let pos = {};
