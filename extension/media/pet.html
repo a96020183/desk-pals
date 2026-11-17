@@ -5,9 +5,13 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' {{csp}}; script-src 'nonce-{{nonce}}';">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  html, body { height: 100%; margin: 0; }
-  body { background: var(--vscode-sideBar-background); color: var(--vscode-sideBar-foreground, var(--vscode-foreground)); font-family: var(--vscode-font-family); font-size: 12px; display: flex; flex-direction: column; overflow: hidden; user-select: none; }
-  #zone { flex: 1; position: relative; min-height: 120px; cursor: crosshair; }
+  html, body { min-height:100%; margin:0; }
+  body { background:var(--vscode-sideBar-background); color:var(--vscode-sideBar-foreground,var(--vscode-foreground)); font-family:var(--vscode-font-family); font-size:12px; display:flex; flex-direction:column; overflow-x:hidden; overflow-y:auto; user-select:none; }
+  .masthead { display:flex; align-items:center; justify-content:space-between; padding:12px 12px 7px; }
+  .brand { font-size:15px; font-weight:700; }
+  .subbrand { color:var(--vscode-descriptionForeground); font-size:11px; margin-top:2px; }
+  #zone { flex:0 0 172px; position:relative; height:172px; min-height:150px; margin:0 10px; border:1px solid var(--vscode-widget-border,#8885); border-radius:12px; overflow:hidden; cursor:crosshair; background:linear-gradient(160deg,#dff4d9,#eff8d8 58%,#f7edcf); }
+  body[data-dark="true"] #zone { background:linear-gradient(160deg,#233b35,#30394b 65%,#493c4b); }
   canvas { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; }
   .bubble { position: absolute; z-index: 2; pointer-events: none; transform: translate(-50%, -100%); background: #FFFFFF; color: #2A2F45; border: 2px solid #2A2F45; border-radius: 8px; padding: 3px 8px; white-space: nowrap; max-width: 92vw; overflow: hidden; text-overflow: ellipsis; }
   .bubble::after { content: ""; position: absolute; left: 50%; bottom: -7px; width: 8px; height: 8px; background: #FFFFFF; border-right: 2px solid #2A2F45; border-bottom: 2px solid #2A2F45; transform: translateX(-50%) rotate(45deg); }
@@ -22,22 +26,68 @@
   .bubble.deep::after { background: #14203A; border-color: #6FA8E8; }
   .bubble.lonely { background: #12303A; color: #E6F6F8; border-color: #5FC3CF; }
   .bubble.lonely::after { background: #12303A; border-color: #5FC3CF; }
-  .btns { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 6px 8px 8px; }
-  button { font: inherit; cursor: pointer; border-radius: 4px; padding: 3px 0; background: var(--vscode-button-secondaryBackground, transparent); color: var(--vscode-button-secondaryForeground, inherit); border: 1px solid var(--vscode-widget-border, #8888); }
-  button:hover { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
-  button:focus-visible { outline: 1px solid var(--vscode-focusBorder); }
+  .dashboard { padding:0 10px 12px; }
+  .section-title { display:flex; justify-content:space-between; align-items:baseline; margin:12px 2px 7px; font-weight:700; }
+  .muted { color:var(--vscode-descriptionForeground); font-size:10px; font-weight:400; }
+  .stats,.quick { display:grid; grid-template-columns:1fr 1fr; gap:7px; }
+  .card { border:1px solid var(--vscode-widget-border,#8885); border-radius:9px; padding:9px; background:var(--vscode-editorWidget-background,var(--vscode-sideBar-background)); min-width:0; }
+  .card-label,.card-foot { color:var(--vscode-descriptionForeground); font-size:10px; }
+  .card-value { font-size:16px; font-weight:700; margin:4px 0 2px; }
+  button { font:inherit; cursor:pointer; border-radius:8px; padding:8px 6px; background:var(--vscode-button-secondaryBackground,transparent); color:var(--vscode-button-secondaryForeground,inherit); border:1px solid var(--vscode-widget-border,#8888); }
+  button:hover { background:var(--vscode-button-background); color:var(--vscode-button-foreground); }
+  button:focus-visible { outline:1px solid var(--vscode-focusBorder); }
+  .quick button { text-align:left; min-height:42px; font-weight:600; }
+  .quick .primary { background:var(--vscode-button-background); color:var(--vscode-button-foreground); border-color:transparent; }
+  .reminder { display:flex; align-items:center; gap:8px; margin-top:7px; }
+  .reminder-icon { font-size:18px; }
+  .reminder-copy { flex:1; min-width:0; }
+  .reminder-copy strong,.reminder-copy span { display:block; }
+  .reminder-copy span { margin-top:3px; color:var(--vscode-descriptionForeground); font-size:10px; }
+  .btns { display:grid; grid-template-columns:repeat(4,1fr); gap:4px; padding:7px 10px 12px; }
+  .btns button { border-radius:7px; padding:5px 2px; font-size:10px; }
+  .tabs { display:grid; grid-template-columns:1fr 1fr; gap:4px; margin-top:12px; }
+  .tabs button { padding:6px; border:0; background:transparent; color:var(--vscode-descriptionForeground); }
+  .tabs button[aria-selected="true"] { color:var(--vscode-foreground); font-weight:700; border-bottom:2px solid var(--vscode-focusBorder); border-radius:0; }
+  .panel[hidden] { display:none; }
+  .toggle-row { display:flex; justify-content:space-between; align-items:center; padding:9px 2px; border-bottom:1px solid var(--vscode-widget-border,#8884); }
+  input[type="checkbox"] { accent-color:var(--vscode-button-background); }
+  dialog { width:calc(100% - 48px); max-width:290px; border:1px solid var(--vscode-widget-border,#8888); border-radius:12px; padding:14px; color:var(--vscode-foreground); background:var(--vscode-editor-background); }
+  dialog::backdrop { background:#0008; }
+  dialog label { display:block; margin:10px 0 5px; color:var(--vscode-descriptionForeground); }
+  dialog input { box-sizing:border-box; width:100%; padding:7px; color:var(--vscode-input-foreground); background:var(--vscode-input-background); border:1px solid var(--vscode-input-border,var(--vscode-widget-border)); border-radius:6px; }
+  .dialog-actions { display:flex; justify-content:flex-end; gap:6px; margin-top:12px; }
 </style>
 </head>
 <body>
+<div class="masthead"><div><div class="brand">🌱 皮克敏小隊</div><div class="subbrand">陪你顧好今天的生活節奏</div></div><button type="button" data-task="settings" aria-label="開啟設定">⚙</button></div>
 <div id="zone"><canvas id="pet"></canvas><div class="bubble" id="bubble" hidden></div></div>
-<div class="btns">
-  <button type="button" data-act="hi">打招呼</button>
-  <button type="button" data-act="swing">擺盪</button>
-  <button type="button" data-act="hang">倒吊</button>
-  <button type="button" data-act="sleep">睡覺</button>
-</div>
+<main class="dashboard"><div class="tabs" role="tablist"><button type="button" role="tab" data-tab="today" aria-selected="true">今日</button><button type="button" role="tab" data-tab="habits" aria-selected="false">習慣設定</button></div>
+<section id="today-panel" class="panel"><div class="section-title"><span>今天的狀態</span><span class="muted" id="date-label"></span></div>
+<div class="stats"><div class="card"><div class="card-label">電腦使用</div><div class="card-value" id="usage-value">0 分</div><div class="card-foot">此面板開啟時記錄</div></div><div class="card"><div class="card-label">喝水紀錄</div><div class="card-value" id="water-value">0 杯</div><div class="card-foot" id="water-foot">今天，從現在開始記</div></div></div>
+<div class="section-title"><span>快速做一件事</span><span class="muted">少點幾下就完成</span></div><div class="quick"><button type="button" class="primary" data-task="focus">🍅 開始專注</button><button type="button" data-task="water">💧 我喝水了</button><button type="button" data-task="remind">＋ 新增提醒</button><button type="button" data-task="ticket">🎫 搶票倒數</button></div>
+<div class="section-title"><span>接下來</span><span class="muted">你的提醒</span></div><div id="reminder-list"></div></section>
+<section id="habits-panel" class="panel" hidden><div class="section-title"><span>習慣與提醒</span><span class="muted">資料存在本機</span></div>
+<label class="toggle-row"><span>記錄此面板開啟時間</span><input id="usage-toggle" type="checkbox" checked></label><label class="toggle-row"><span>每 60 分鐘提醒喝水</span><input id="water-toggle" type="checkbox" checked></label><div class="toggle-row"><span>休息花休息提醒</span><span class="muted">依 VS Code 休息間隔</span></div>
+<div class="card" style="margin-top:10px"><strong>AI 皮克敏</strong><div class="card-foot" style="margin-top:5px">目前是固定陪伴回應；連接 AI 服務可在後續版本設定。</div></div></section></main>
+<div class="section-title" style="padding:0 10px;margin-bottom:0"><span>和小隊互動</span><span class="muted">點角色也能摸摸牠</span></div>
+<div class="btns" id="pet-actions"><button type="button" data-act="hi">打招呼</button><button type="button" data-act="swing">擺盪</button><button type="button" data-act="hang">倒吊</button><button type="button" data-act="sleep">睡覺</button></div>
+<dialog id="reminder-dialog"><form method="dialog" id="reminder-form"><strong id="dialog-title">新增提醒</strong><label for="reminder-name">提醒內容</label><input id="reminder-name" maxlength="60" required placeholder="例如：交作業、音樂祭開賣"><label for="reminder-time">提醒時間</label><input id="reminder-time" type="datetime-local" required><div class="dialog-actions"><button type="button" id="dialog-cancel">取消</button><button type="submit">儲存提醒</button></div></form></dialog>
 <script nonce="{{nonce}}">
 const vscodeApi = acquireVsCodeApi();
+const initialState=vscodeApi.getState()||{};
+const todayKey=new Date().toLocaleDateString("sv-SE");
+const dayData=initialState.lifeDay===todayKey?(initialState.lifeData||{}):{water:0,lastWater:0,usage:0,reminders:[]};
+if(!dayData.startedAt)dayData.startedAt=Date.now();
+const saveLife=()=>vscodeApi.setState({...(vscodeApi.getState()||{}),lifeDay:todayKey,lifeData:dayData});
+const fmtMins=n=>Math.floor(n/60)+" 小時 "+(n%60)+" 分";
+let focusLeft=0,reminderKind="remind";const dialog=document.getElementById("reminder-dialog");
+function renderLife(){document.getElementById("date-label").textContent=new Date().toLocaleDateString("zh-TW",{month:"numeric",day:"numeric",weekday:"short"});document.getElementById("usage-value").textContent=fmtMins(dayData.usage||0);document.getElementById("water-value").textContent=(dayData.water||0)+" 杯";document.getElementById("water-foot").textContent=dayData.lastWater?"上次記錄 "+new Date(dayData.lastWater).toLocaleTimeString("zh-TW",{hour:"2-digit",minute:"2-digit"}):"今天，從現在開始記";const list=document.getElementById("reminder-list"),upcoming=(dayData.reminders||[]).filter(x=>!x.done).sort((a,b)=>a.at-b.at).slice(0,3);list.replaceChildren();if(!upcoming.length){const c=document.createElement("div");c.className="card reminder";c.textContent="🌼 今天先照顧好自己：新增課業或搶票提醒";list.append(c);}upcoming.forEach(x=>{const c=document.createElement("div");c.className="card reminder";const icon=document.createElement("span");icon.className="reminder-icon";icon.textContent=x.kind==="ticket"?"🎫":"⏰";const copy=document.createElement("div");copy.className="reminder-copy";const title=document.createElement("strong");title.textContent=x.title;const time=document.createElement("span");time.textContent=new Date(x.at).toLocaleString("zh-TW",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"});copy.append(title,time);c.append(icon,copy);list.append(c);});}
+renderLife();
+document.querySelectorAll("[data-tab]").forEach(b=>b.addEventListener("click",()=>{const t=b.dataset.tab;document.querySelectorAll("[data-tab]").forEach(x=>x.setAttribute("aria-selected",String(x===b)));document.getElementById("today-panel").hidden=t!=="today";document.getElementById("habits-panel").hidden=t!=="habits";}));
+document.querySelectorAll("[data-task]").forEach(b=>b.addEventListener("click",()=>{const t=b.dataset.task;if(t==="water"){dayData.water=(dayData.water||0)+1;dayData.lastWater=Date.now();saveLife();renderLife();say("噗咿！喝水補充能量了 💧",2.5);return;}if(t==="focus"){focusLeft=25*60;say("先專心 25 分鐘，小隊幫你顧著！🍅",3);b.textContent="⏸ 專注中 25:00";return;}if(t==="settings"){document.querySelector('[data-tab="habits"]').click();return;}reminderKind=t==="ticket"?"ticket":"remind";document.getElementById("dialog-title").textContent=reminderKind==="ticket"?"新增搶票倒數":"新增生活提醒";document.getElementById("reminder-name").placeholder=reminderKind==="ticket"?"活動名稱，例如：音樂祭":"例如：交作業、上課、吃飯";document.getElementById("reminder-time").value="";dialog.showModal();}));
+document.getElementById("dialog-cancel").addEventListener("click",()=>dialog.close());document.getElementById("reminder-form").addEventListener("submit",e=>{e.preventDefault();const title=document.getElementById("reminder-name").value.trim(),at=new Date(document.getElementById("reminder-time").value).getTime();if(!title||!Number.isFinite(at)||at<=Date.now())return;dayData.reminders=dayData.reminders||[];dayData.reminders.push({title,at,kind:reminderKind,done:false});saveLife();renderLife();dialog.close();say((reminderKind==="ticket"?"搶票時間記好了！🎫 ":"好，我會提醒你：")+title,3);});
+document.getElementById("usage-toggle").checked=initialState.trackUsage!==false;document.getElementById("water-toggle").checked=initialState.waterEnabled!==false;document.getElementById("usage-toggle").addEventListener("change",e=>{const q=vscodeApi.getState()||{};vscodeApi.setState({...q,trackUsage:e.target.checked});});document.getElementById("water-toggle").addEventListener("change",e=>{const q=vscodeApi.getState()||{};vscodeApi.setState({...q,waterEnabled:e.target.checked});});
+setInterval(()=>{const q=vscodeApi.getState()||{};if(q.trackUsage!==false&&document.visibilityState==="visible"){dayData.usage=(dayData.usage||0)+1;saveLife();renderLife();}if(focusLeft>0){focusLeft--;const b=document.querySelector('[data-task="focus"]');b.textContent="⏸ 專注中 "+Math.floor(focusLeft/60)+":"+String(focusLeft%60).padStart(2,"0");if(focusLeft===0){b.textContent="🍅 開始專注";say("專注完成！起來動一動吧 🌼",4,true);}}const now=Date.now();(dayData.reminders||[]).forEach(x=>{if(!x.done&&x.at<=now){x.done=true;saveLife();renderLife();say((x.kind==="ticket"?"🎫 ":"⏰ ")+x.title+(x.kind==="ticket"?" 開始了！":""),5,true);}});if(document.getElementById("water-toggle").checked&&now-(dayData.lastWater||dayData.startedAt)>=3600000&&now-(dayData.waterNudgeAt||0)>=3600000){dayData.waterNudgeAt=now;saveLife();say("喝口水補充能量吧 💧",4,true);}},60000);
 const COL_N = { k:"#2A2F45", r:"#D84A4A", R:"#A83A3A", b:"#3D5FAE", w:"#FFFFFF" };
 const COL_D = { k:"#0B0B10", r:"#2C2E3B", R:"#1B1C26", b:"#3E4055", w:"#F6F6FA" };
 let COL = COL_N, dark = false;
@@ -51,7 +101,7 @@ function isDarkTime(n) {
 function checkDark(announce) {
   const d = isDarkTime(new Date());
   if (d === dark) return;
-  dark = d; COL = d ? COL_D : COL_N;
+  dark = d; COL = d ? COL_D : COL_N; document.body.dataset.dark=String(d);
   if (announce) {
     if (isOther()) say(d ? LINES[charId].night_on : LINES[charId].night_off, 3);
     else say(d ? "……下班時間到了。" : "早安，我又變回來了 ☀", 3, d);
@@ -248,7 +298,7 @@ const LT = (k) => { const L = LINES[charId]; if (!L) return ""; const v = dark &
 const PATS = ["你今天也很棒！", "累了就休息一下，我陪你", "有我在，bug 不敢來", "我一直都在喔 ♥", "你寫的 code 很帥", "辛苦了，摸摸頭", "不管怎樣我都站你這邊", "慢慢來，你可以的"];
 const PATS_D = ["……摸夠了就下班。", "我是擔心你才一直催你。", "你已經很努力了，剩下的明天再說。", "哼，就讓你摸一下。"];
 
-const saved = vscodeApi.getState() || {};
+const saved = initialState;
 if (saved.char && ART[saved.char]) { charId = saved.char; [SW, SH] = sizeFor(charId); }
 const pet = { x: saved.x ?? 30, y: 0, vx: 0, vy: 0, dir: 1, state: "walk", t: 3, ax: 0, ay: 0, L: 80, th: 0, om: 0, anim: 0, bubble: "", bt: 0, alert: false, sense: 0, z: 0 };
 pet.y = ground();
@@ -416,7 +466,7 @@ function loop(now) {
   update(dt); draw();
   if (pet.happy > 0) pet.happy -= dt;
   if (pet.joke > 0) { pet.joke -= dt; if (pet.joke <= 0) say("好笑嗎？好笑嗎？", 1.8); }
-  saveT += dt; if (saveT > 5) { saveT = 0; vscodeApi.setState({ x: pet.x, char: charId }); }
+  saveT += dt; if (saveT > 5) { saveT = 0; vscodeApi.setState({ ...(vscodeApi.getState() || {}), x: pet.x, char: charId }); }
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
@@ -462,8 +512,8 @@ function setChar(id, announce) {
   charId = id; [SW, SH] = sizeFor(id);
   pet.x = Math.min(Math.max(2, pet.x), Math.max(2, W - SW - 2)); pet.y = ground(); setState("walk", 2);
   const labels = id === "spidey" ? BTN_SPIDEY : LINES[id].btn;
-  document.querySelectorAll("button").forEach((b, i) => { b.textContent = labels[i]; });
-  vscodeApi.setState({ x: pet.x, char: charId });
+  document.querySelectorAll("#pet-actions button").forEach((b, i) => { b.textContent = labels[i]; });
+  vscodeApi.setState({ ...(vscodeApi.getState() || {}), x: pet.x, char: charId });
   if (announce) act("hi");
 }
 
@@ -474,7 +524,7 @@ function act(a) {
   if (a === "hang") { grounded(); startHang(); say("倒吊看世界～", 2); }
   if (a === "sleep") { pet.z = 0; pet.y = ground(); setState("sleep", 8); say("晚安…", 1.2); }
 }
-document.querySelectorAll("button").forEach(b => b.addEventListener("click", () => act(b.dataset.act)));
+document.querySelectorAll("#pet-actions button").forEach(b => b.addEventListener("click", () => act(b.dataset.act)));
 
 window.addEventListener("message", e => {
   const m = e.data || {};
