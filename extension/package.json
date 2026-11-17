@@ -1,8 +1,8 @@
 {
 	"name": "desk-pals",
 	"displayName": "公仔櫃 Desk Pals",
-	"description": "大學生桌面小夥伴：皮克敏陪你專注、提醒休息，並在 Codex／Claude 長指令、CI 或下載完成時通知。",
-	"version": "0.6.1",
+	"description": "大學生桌面小夥伴：用皮克敏陪你專注、記錄喝水、安排課業與搶票提醒。",
+	"version": "0.7.0",
 	"publisher": "local",
 	"engines": {
 		"vscode": "^1.70.0"
