@@ -2,7 +2,7 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' {{csp}}; script-src 'nonce-{{nonce}}';">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' {{csp}}; img-src data:; script-src 'nonce-{{nonce}}';">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
   html, body { min-height:100%; margin:0; }
@@ -45,7 +45,7 @@
   .reminder-copy span { margin-top:3px; color:var(--vscode-descriptionForeground); font-size:10px; }
   .btns { display:grid; grid-template-columns:repeat(4,1fr); gap:4px; padding:7px 10px 12px; }
   .btns button { border-radius:7px; padding:5px 2px; font-size:10px; }
-   .tabs { display:grid; grid-template-columns:repeat(3,1fr); gap:4px; margin-top:12px; }
+    .tabs { display:grid; grid-template-columns:repeat(4,1fr); gap:2px; margin-top:12px; }
   .tabs button { padding:6px; border:0; background:transparent; color:var(--vscode-descriptionForeground); }
   .tabs button[aria-selected="true"] { color:var(--vscode-foreground); font-weight:700; border-bottom:2px solid var(--vscode-focusBorder); border-radius:0; }
   .panel[hidden] { display:none; }
@@ -57,6 +57,27 @@
   dialog label { display:block; margin:10px 0 5px; color:var(--vscode-descriptionForeground); }
   dialog input { box-sizing:border-box; width:100%; padding:7px; color:var(--vscode-input-foreground); background:var(--vscode-input-background); border:1px solid var(--vscode-input-border,var(--vscode-widget-border)); border-radius:6px; }
   .dialog-actions { display:flex; justify-content:flex-end; gap:6px; margin-top:12px; }
+  #custom-avatar { display:none; position:absolute; z-index:1; left:50%; bottom:7px; width:min(58%,150px); height:150px; object-fit:contain; transform:translateX(-50%); cursor:pointer; image-rendering:pixelated; animation:custom-float 1.8s ease-in-out infinite; }
+  #zone.custom-active canvas { visibility:hidden; }
+  #zone.custom-active #custom-avatar { display:block; }
+  @keyframes custom-float { 0%,100% { margin-bottom:0; } 50% { margin-bottom:7px; } }
+  @keyframes custom-pop { 0% { scale:.75; } 60% { scale:1.12; } 100% { scale:1; } }
+  #custom-avatar.pop { animation:custom-pop .35s ease-out,custom-float 1.8s .35s ease-in-out infinite; }
+  .bag-card { display:flex; align-items:center; gap:7px; padding:11px; border-radius:12px; border:1px solid var(--vscode-widget-border,#8885); background:linear-gradient(145deg,#c9e8ce,#eaf4db); }
+  .bag-card[data-style="pencilcase"] { background:linear-gradient(145deg,#f6d6a8,#fff0d4); }
+  .bag-card[data-style="locker"] { background:linear-gradient(145deg,#cdd9f1,#e8edfa); }
+  .bag-icon { font-size:30px; }
+  .bag-info { flex:1; min-width:0; }
+  .bag-info strong,.bag-info span { display:block; }
+  .bag-info span { margin-top:3px; color:var(--vscode-descriptionForeground); font-size:10px; }
+  .slots { display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:8px; }
+  .custom-slot { min-height:96px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; text-align:center; }
+  .custom-slot.empty { border-style:dashed; color:var(--vscode-descriptionForeground); }
+  .custom-slot img { width:46px; height:46px; object-fit:contain; image-rendering:pixelated; }
+  .slot-actions { display:flex; gap:4px; }
+  .slot-actions button { padding:4px 6px; font-size:10px; }
+  .creator-note { margin:8px 2px; color:var(--vscode-descriptionForeground); font-size:10px; line-height:1.45; }
+  #custom-file { width:100%; }
   .chat-messages { display:flex; flex-direction:column; gap:7px; max-height:230px; overflow:auto; padding:4px 1px; }
   .chat-message { max-width:90%; padding:8px 9px; border-radius:10px; line-height:1.45; white-space:pre-wrap; overflow-wrap:anywhere; }
   .chat-message.user { align-self:flex-end; background:var(--vscode-button-secondaryBackground); }
@@ -68,23 +89,33 @@
 </head>
 <body>
 <div class="masthead"><div><div class="brand">🌱 皮克敏小隊</div><div class="subbrand">陪你顧好今天的生活節奏</div></div><button type="button" data-task="settings" aria-label="開啟設定">⚙</button></div>
-<div id="zone"><canvas id="pet"></canvas><div class="bubble" id="bubble" hidden></div></div>
-<main class="dashboard"><div class="tabs" role="tablist"><button type="button" role="tab" data-tab="today" aria-selected="true">今日</button><button type="button" role="tab" data-tab="habits" aria-selected="false">習慣</button><button type="button" role="tab" data-tab="chat" aria-selected="false">聊天</button></div>
+<div id="zone"><canvas id="pet"></canvas><img id="custom-avatar" alt=""><div class="bubble" id="bubble" hidden></div></div>
+<main class="dashboard"><div class="tabs" role="tablist"><button type="button" role="tab" data-tab="today" aria-selected="true">今日</button><button type="button" role="tab" data-tab="habits" aria-selected="false">習慣</button><button type="button" role="tab" data-tab="chat" aria-selected="false">聊天</button><button type="button" role="tab" data-tab="custom" aria-selected="false">公仔包</button></div>
 <section id="today-panel" class="panel"><div class="section-title"><span>今天的狀態</span><span class="muted" id="date-label"></span></div>
 <div class="stats"><div class="card"><div class="card-label">電腦使用</div><div class="card-value" id="usage-value">0 分</div><div class="card-foot">此面板開啟時記錄</div></div><div class="card"><div class="card-label">喝水紀錄</div><div class="card-value" id="water-value">0 杯</div><div class="card-foot" id="water-foot">今天，從現在開始記</div></div></div>
 <div class="section-title"><span>快速做一件事</span><span class="muted">少點幾下就完成</span></div><div class="quick"><button type="button" class="primary" data-task="focus">🍅 開始專注</button><button type="button" data-task="water">💧 我喝水了</button><button type="button" data-task="remind">＋ 新增提醒</button><button type="button" data-task="ticket">🎫 搶票倒數</button></div>
 <div class="section-title"><span>接下來</span><span class="muted">你的提醒</span></div><div id="reminder-list"></div></section>
 <section id="habits-panel" class="panel" hidden><div class="section-title"><span>習慣與提醒</span><span class="muted">資料存在本機</span></div>
 <label class="toggle-row"><span>記錄此面板開啟時間</span><input id="usage-toggle" type="checkbox" checked></label><label class="toggle-row"><span>喝水提醒</span><input id="water-toggle" type="checkbox" checked></label><label class="toggle-row"><span>喝水間隔</span><select id="water-interval"><option value="30">30 分鐘</option><option value="45">45 分鐘</option><option value="60">60 分鐘</option><option value="90">90 分鐘</option></select></label><label class="toggle-row"><span>專注時間</span><select id="focus-duration"><option value="25">25 分鐘</option><option value="50">50 分鐘</option><option value="90">90 分鐘</option></select></label><div class="toggle-row"><span>休息花休息提醒</span><span class="muted">依 VS Code 休息間隔</span></div>
-<div class="card" style="margin-top:10px"><strong>AI 皮克敏</strong><div class="card-foot" style="margin-top:5px">目前是固定陪伴回應；連接 AI 服務可在後續版本設定。</div></div></section>
-<section id="chat-panel" class="panel" hidden><div class="section-title"><span>和皮克敏聊聊</span><button type="button" data-task="setup-ai">設定 AI</button></div><div id="chat-messages" class="chat-messages"></div><form id="chat-form" class="chat-form"><textarea id="chat-input" maxlength="1200" rows="2" placeholder="說說今天的課業或心情…"></textarea><button type="submit" aria-label="送出">送出</button></form><div class="chat-note">訊息會送到 OpenAI API 產生回覆，依你的 API 方案計費；請勿輸入密碼或敏感資料。金鑰只保存在 VS Code 安全儲存區。</div></section></main>
+<div class="card" style="margin-top:10px"><strong>AI 皮克敏</strong><div class="card-foot" style="margin-top:5px">先設定 OpenAI API 金鑰，再到聊天頁和小隊互動。</div><button type="button" data-task="setup-ai" style="margin-top:7px">設定 AI</button></div></section>
+<section id="chat-panel" class="panel" hidden><div class="section-title"><span>和皮克敏聊聊</span><button type="button" data-task="setup-ai">設定 AI</button></div><div id="chat-messages" class="chat-messages"></div><form id="chat-form" class="chat-form"><textarea id="chat-input" maxlength="1200" rows="2" placeholder="說說今天的課業或心情…"></textarea><button type="submit" aria-label="送出">送出</button></form><div class="chat-note">訊息會送到 OpenAI API 產生回覆，依你的 API 方案計費；請勿輸入密碼或敏感資料。金鑰只保存在 VS Code 安全儲存區。</div></section>
+<section id="custom-panel" class="panel" hidden>
+ <div class="section-title"><span>我的公仔包</span><span class="muted">最多 4 隻</span></div>
+ <div class="bag-card" id="bag-card" data-style="backpack"><span class="bag-icon" id="bag-icon">🎒</span><div class="bag-info"><strong>我的小隊出發包</strong><span>點一隻公仔，讓牠出來陪你</span></div><select id="bag-style" aria-label="選擇收藏櫃造型"><option value="backpack">後背包</option><option value="pencilcase">筆袋</option><option value="locker">置物櫃</option></select></div>
+ <button type="button" data-task="custom-home" style="width:100%;margin-top:7px">回到皮克敏小隊</button><div id="custom-slots" class="slots"></div><button type="button" data-task="add-custom" class="primary" style="width:100%;margin-top:8px">＋ 設計我的公仔</button>
+ <div class="creator-note">先準備一張透明背景 PNG 就能新增；系統會自動加上輕微待機動態。圖片和角色資料只存於這個 VS Code 裡。</div>
+ </section></main>
 <div class="section-title" style="padding:0 10px;margin-bottom:0"><span>和小隊互動</span><span class="muted">點角色也能摸摸牠</span></div>
 <div class="btns" id="pet-actions"><button type="button" data-act="hi">打招呼</button><button type="button" data-act="swing">擺盪</button><button type="button" data-act="hang">倒吊</button><button type="button" data-act="sleep">睡覺</button></div>
+<dialog id="custom-dialog"><form method="dialog" id="custom-form"><strong>設計一隻公仔</strong><label for="custom-name">公仔名字</label><input id="custom-name" maxlength="24" required placeholder="例如：小糰子"><label for="custom-file">圖片（PNG／JPG／WebP）</label><input id="custom-file" type="file" accept="image/png,image/jpeg,image/webp" required><div id="custom-file-note" class="card-foot">建議方形圖片；圖片會縮到 256 × 256 以內。</div><div class="dialog-actions"><button type="button" id="custom-cancel">取消</button><button type="submit">加入公仔包</button></div></form></dialog>
 <dialog id="reminder-dialog"><form method="dialog" id="reminder-form"><strong id="dialog-title">新增提醒</strong><label for="reminder-name">提醒內容</label><input id="reminder-name" maxlength="60" required placeholder="例如：交作業、音樂祭開賣"><label for="reminder-time">提醒時間</label><input id="reminder-time" type="datetime-local" required><div class="dialog-actions"><button type="button" id="dialog-cancel">取消</button><button type="submit">儲存提醒</button></div></form></dialog>
 <script nonce="{{nonce}}">
 const vscodeApi = acquireVsCodeApi();
 const initialState=vscodeApi.getState()||{};
 const todayKey=new Date().toLocaleDateString("sv-SE");
+const customCharacters=Array.isArray(initialState.customCharacters)?initialState.customCharacters.slice(0,4):[];
+let activeCustomId=initialState.activeCustomId||null,customInitialized=false,pendingCustomImage="";
+const customAvatar=document.getElementById("custom-avatar");
 const dayData=initialState.lifeDay===todayKey?(initialState.lifeData||{}):{water:0,lastWater:0,usage:0,reminders:[]};
 if(!dayData.startedAt)dayData.startedAt=Date.now();
 const saveLife=()=>vscodeApi.setState({...(vscodeApi.getState()||{}),lifeDay:todayKey,lifeData:dayData});
@@ -92,8 +123,19 @@ const fmtMins=n=>Math.floor(n/60)+" 小時 "+(n%60)+" 分";
 let focusLeft=0,reminderKind="remind";let focusDuration=Number(initialState.focusMinutes)||25;let waterInterval=Number(initialState.waterMinutes)||60;const dialog=document.getElementById("reminder-dialog");
 function renderLife(){document.getElementById("date-label").textContent=new Date().toLocaleDateString("zh-TW",{month:"numeric",day:"numeric",weekday:"short"});document.getElementById("usage-value").textContent=fmtMins(dayData.usage||0);document.getElementById("water-value").textContent=(dayData.water||0)+" 杯";document.getElementById("water-foot").textContent=dayData.lastWater?"上次記錄 "+new Date(dayData.lastWater).toLocaleTimeString("zh-TW",{hour:"2-digit",minute:"2-digit"}):"今天，從現在開始記";const list=document.getElementById("reminder-list"),upcoming=(dayData.reminders||[]).filter(x=>!x.done).sort((a,b)=>a.at-b.at).slice(0,3);list.replaceChildren();if(!upcoming.length){const c=document.createElement("div");c.className="card reminder";c.textContent="🌼 今天先照顧好自己：新增課業或搶票提醒";list.append(c);}upcoming.forEach(x=>{const c=document.createElement("div");c.className="card reminder";const icon=document.createElement("span");icon.className="reminder-icon";icon.textContent=x.kind==="ticket"?"🎫":"⏰";const copy=document.createElement("div");copy.className="reminder-copy";const title=document.createElement("strong");title.textContent=x.title;const time=document.createElement("span");time.textContent=new Date(x.at).toLocaleString("zh-TW",{month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"});copy.append(title,time);c.append(icon,copy);list.append(c);});}
 renderLife();
-document.querySelectorAll("[data-tab]").forEach(b=>b.addEventListener("click",()=>{const t=b.dataset.tab;document.querySelectorAll("[data-tab]").forEach(x=>x.setAttribute("aria-selected",String(x===b)));document.getElementById("today-panel").hidden=t!=="today";document.getElementById("habits-panel").hidden=t!=="habits";document.getElementById("chat-panel").hidden=t!=="chat";}));
-document.querySelectorAll("[data-task]").forEach(b=>b.addEventListener("click",()=>{const t=b.dataset.task;if(t==="water"){dayData.water=(dayData.water||0)+1;dayData.lastWater=Date.now();saveLife();renderLife();say("噗咿！喝水補充能量了 💧",2.5);return;}if(t==="focus"){focusLeft=focusDuration*60;say("先專心 "+focusDuration+" 分鐘，小隊幫你顧著！🍅",3);b.textContent="⏸ 專注中 "+focusDuration+":00";return;}if(t==="settings"){document.querySelector('[data-tab="habits"]').click();return;}if(t==="setup-ai"){vscodeApi.postMessage({type:"setupAi"});return;}reminderKind=t==="ticket"?"ticket":"remind";document.getElementById("dialog-title").textContent=reminderKind==="ticket"?"新增搶票倒數":"新增生活提醒";document.getElementById("reminder-name").placeholder=reminderKind==="ticket"?"活動名稱，例如：音樂祭":"例如：交作業、上課、吃飯";document.getElementById("reminder-time").value="";dialog.showModal();}));
+function saveCustomState(){const state=vscodeApi.getState()||{};vscodeApi.setState({...state,customCharacters,activeCustomId,shelfStyle:document.getElementById("bag-style").value});}
+function setCustomActive(id,announce=true){const c=customCharacters.find(x=>x.id===id);if(!c)return;activeCustomId=id;customAvatar.src=c.image;customAvatar.alt=c.name;document.getElementById("zone").classList.add("custom-active");saveCustomState();if(announce)say(c.name+" 出來陪你囉！",3);}
+function renderCustomSlots(){const slots=document.getElementById("custom-slots");slots.replaceChildren();for(let i=0;i<4;i++){const c=customCharacters[i],slot=document.createElement("div");slot.className="card custom-slot"+(c?"":" empty");if(!c){slot.textContent="＋ 空位";slots.append(slot);continue;}const img=document.createElement("img");img.src=c.image;img.alt=c.name;const name=document.createElement("strong");name.textContent=c.name;const actions=document.createElement("div");actions.className="slot-actions";const out=document.createElement("button");out.type="button";out.textContent=c.id===activeCustomId?"陪伴中":"叫出來";out.addEventListener("click",()=>setCustomActive(c.id));const remove=document.createElement("button");remove.type="button";remove.textContent="刪除";remove.addEventListener("click",()=>{const active=c.id===activeCustomId,at=customCharacters.findIndex(x=>x.id===c.id);if(at>=0)customCharacters.splice(at,1);if(active){activeCustomId=null;document.getElementById("zone").classList.remove("custom-active");customAvatar.removeAttribute("src");}saveCustomState();renderCustomSlots();});actions.append(out,remove);slot.append(img,name,actions);slots.append(slot);}}
+const shelf=initialState.shelfStyle||"backpack";document.getElementById("bag-style").value=shelf;document.getElementById("bag-card").dataset.style=shelf;document.getElementById("bag-icon").textContent=shelf==="pencilcase"?"🖊️":shelf==="locker"?"🗄️":"🎒";document.getElementById("bag-style").addEventListener("change",e=>{const v=e.target.value;document.getElementById("bag-card").dataset.style=v;document.getElementById("bag-icon").textContent=v==="pencilcase"?"🖊️":v==="locker"?"🗄️":"🎒";saveCustomState();});
+renderCustomSlots();
+const customDialog=document.getElementById("custom-dialog");document.getElementById("custom-cancel").addEventListener("click",()=>customDialog.close());
+document.getElementById("custom-file").addEventListener("change",e=>{pendingCustomImage="";const f=e.target.files&&e.target.files[0],note=document.getElementById("custom-file-note");if(!f)return;if(f.size>8*1024*1024){note.textContent="圖片太大，請選 8 MB 以下的檔案。";e.target.value="";return;}const reader=new FileReader();reader.onerror=()=>{note.textContent="圖片讀取失敗，請再選一次。";};reader.onload=()=>{const image=new Image();image.onerror=()=>{note.textContent="圖片格式無法讀取。";};image.onload=()=>{const scale=Math.min(1,256/image.width,256/image.height),canvas=document.createElement("canvas");canvas.width=Math.max(1,Math.round(image.width*scale));canvas.height=Math.max(1,Math.round(image.height*scale));canvas.getContext("2d").drawImage(image,0,0,canvas.width,canvas.height);pendingCustomImage=canvas.toDataURL("image/png");note.textContent="圖片已準備好，儲存後會留在這台電腦。";};image.src=String(reader.result);};reader.readAsDataURL(f);});
+document.getElementById("custom-form").addEventListener("submit",e=>{e.preventDefault();if(customCharacters.length>=4){say("公仔包已滿，先刪除一隻再新增。",3);return;}const name=document.getElementById("custom-name").value.trim();if(!name||!pendingCustomImage){document.getElementById("custom-file-note").textContent="請輸入名字並選一張圖片。";return;}const c={id:Date.now().toString(36)+Math.random().toString(36).slice(2,7),name,image:pendingCustomImage};customCharacters.push(c);pendingCustomImage="";saveCustomState();renderCustomSlots();customDialog.close();document.getElementById("custom-form").reset();setCustomActive(c.id);});
+customAvatar.addEventListener("click",()=>{customAvatar.classList.remove("pop");void customAvatar.offsetWidth;customAvatar.classList.add("pop");const c=customCharacters.find(x=>x.id===activeCustomId);if(c)say(c.name+" 噗咿～",2);});
+if(activeCustomId&&customCharacters.some(x=>x.id===activeCustomId)){customAvatar.src=customCharacters.find(x=>x.id===activeCustomId).image;customAvatar.alt=customCharacters.find(x=>x.id===activeCustomId).name;document.getElementById("zone").classList.add("custom-active");}else activeCustomId=null;
+customInitialized=true;
+document.querySelectorAll("[data-tab]").forEach(b=>b.addEventListener("click",()=>{const t=b.dataset.tab;document.querySelectorAll("[data-tab]").forEach(x=>x.setAttribute("aria-selected",String(x===b)));document.getElementById("today-panel").hidden=t!=="today";document.getElementById("habits-panel").hidden=t!=="habits";document.getElementById("chat-panel").hidden=t!=="chat";document.getElementById("custom-panel").hidden=t!=="custom";}));
+document.querySelectorAll("[data-task]").forEach(b=>b.addEventListener("click",()=>{const t=b.dataset.task;if(t==="add-custom"){if(customCharacters.length>=4){say("公仔包已滿，先刪除一隻再新增。",3);return;}pendingCustomImage="";document.getElementById("custom-form").reset();document.getElementById("custom-file-note").textContent="建議方形圖片；圖片會縮到 256 × 256 以內。";customDialog.showModal();return;}if(t==="custom-home"){activeCustomId=null;document.getElementById("zone").classList.remove("custom-active");customAvatar.removeAttribute("src");saveCustomState();say("皮克敏小隊回來陪你！",2);return;}if(t==="water"){dayData.water=(dayData.water||0)+1;dayData.lastWater=Date.now();saveLife();renderLife();say("噗咿！喝水補充能量了 💧",2.5);return;}if(t==="focus"){focusLeft=focusDuration*60;say("先專心 "+focusDuration+" 分鐘，小隊幫你顧著！🍅",3);b.textContent="⏸ 專注中 "+focusDuration+":00";return;}if(t==="settings"){document.querySelector('[data-tab="habits"]').click();return;}if(t==="setup-ai"){vscodeApi.postMessage({type:"setupAi"});return;}reminderKind=t==="ticket"?"ticket":"remind";document.getElementById("dialog-title").textContent=reminderKind==="ticket"?"新增搶票倒數":"新增生活提醒";document.getElementById("reminder-name").placeholder=reminderKind==="ticket"?"活動名稱，例如：音樂祭":"例如：交作業、上課、吃飯";document.getElementById("reminder-time").value="";dialog.showModal();}));
 const chatHistory=Array.isArray(initialState.chatHistory)?initialState.chatHistory.slice(-12):[];let chatPending=false;
 function renderChat(){const box=document.getElementById("chat-messages");box.replaceChildren();if(!chatHistory.length){const welcome=document.createElement("div");welcome.className="chat-message assistant";welcome.textContent="嗨，我是你的皮克敏小隊。今天想先聊聊什麼？";box.append(welcome);}chatHistory.forEach(m=>{const row=document.createElement("div");row.className="chat-message "+m.role;row.textContent=m.text;box.append(row);});if(chatPending){const row=document.createElement("div");row.className="chat-message assistant";row.textContent="小隊正在想怎麼陪你…";box.append(row);}box.scrollTop=box.scrollHeight;}
 function saveChat(){const state=vscodeApi.getState()||{};vscodeApi.setState({...state,chatHistory:chatHistory.slice(-12)});}
@@ -523,6 +565,7 @@ function actOther(a) {
 const BTN_SPIDEY = ["打招呼", "擺盪", "倒吊", "睡覺"];
 function setChar(id, announce) {
   if (!(id === "spidey" || ART[id])) return;
+  if(activeCustomId&&customInitialized){activeCustomId=null;document.getElementById("zone").classList.remove("custom-active");customAvatar.removeAttribute("src");saveCustomState();}
   charId = id; [SW, SH] = sizeFor(id);
   pet.x = Math.min(Math.max(2, pet.x), Math.max(2, W - SW - 2)); pet.y = ground(); setState("walk", 2);
   const labels = id === "spidey" ? BTN_SPIDEY : LINES[id].btn;
