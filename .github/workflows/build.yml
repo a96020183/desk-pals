@@ -489,10 +489,10 @@ jobs:
           if ((Get-Content "$env:DESKPALS_DATA_DIR\lineup.txt") -ne "original") { throw "fresh install did not start in original" }
           if (-not (Test-Path public-ps1-shots\shot-original.png)) { throw "no snapshot" }
       # 搗蛋四個玩法（公開版＋個人版）：離屏模式一定用假的游標／視窗／按鍵計數（MisFake），不會動到 runner 的滑鼠、視窗、鍵盤
-      - name: Mischief tests (public + personal, offscreen, fake side effects) + VS Code settings unit test
+      - name: Mischief tests (public + personal, offscreen, fake side effects) + VS Code settings unit test + line keys
         shell: powershell
         run: |
-          node --test test/mischief.test.js
+          node --test test/mischief.test.js test/lines.test.js
           if ($LASTEXITCODE -ne 0) { throw "mischief unit test failed" }
           $runs = @(@{ n = "pub"; ps1 = "build\public\extension\desktop\desk-pals.ps1"; out = "public-ps1-shots\mischief" }, @{ n = "per"; ps1 = "extension\desktop\desk-pals.ps1"; out = "ps1-shots\mischief" })
           foreach ($v in $runs) {
@@ -600,11 +600,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "fresh install test (personal) failed" }
           node .github/legacy-upgrade.js fresh desk-pals-lg-c "$T\none-c" "$T\Startup-c" "$T\data-c" spidey-pet-lg-c -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File $pub -PipeName desk-pals-lg-c
           if ($LASTEXITCODE -ne 0) { throw "fresh install test (public) failed" }
-      - name: Build vsix (public → dist, personal → dist-personal)
-        run: |
-          python -I build_vsix.py --public
-          python -I build_vsix.py --personal --out dist-personal
-
       # ---------- standalone DeskPals.exe / installer / MSIX ----------
       - name: Tools (Pillow, Inno Setup)
         shell: powershell
@@ -632,10 +627,31 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "build.ps1 (personal) failed" }
           if ($pfx) { Remove-Item $pfx }
           Get-ChildItem dist, dist-personal | Format-Table Directory, Name, Length
+      # vsix 要在 exe 編好之後才打：通用版（Mac 用，不帶 exe）＋ Windows 專用版（TargetPlatform win32-x64／arm64，附剛編好的 DeskPals.exe：
+      # 公開版附公開版的 exe、個人版附個人版的；擴充套件直接執行它，不再用 PowerShell 即時編譯）
+      - name: Build vsix (universal + win32 with the bundled DeskPals.exe; public → dist, personal → dist-personal)
+        run: |
+          python -I build_vsix.py --public
+          python -I build_vsix.py --public --target win32-x64,win32-arm64 --exe dist/DeskPals.exe
+          python -I build_vsix.py --personal --out dist-personal
+          python -I build_vsix.py --personal --target win32-x64 --exe dist-personal/DeskPals-personal.exe --out dist-personal
       - name: Fan-content guard on everything that gets published (dist)
         run: |
           python -I tools/variant.py guard dist build/win/DeskPals.all.cs build/win/msix
           python -c "import glob,sys; bad=[f for f in glob.glob('dist/*') if 'personal' in f]; print('personal files in dist:', bad); sys.exit(1 if bad else 0)"
+      # 擴充套件從 Windows 專用的 vsix 啟動：跑的是附上的 exe（放到 %LOCALAPPDATA%\DeskPals\app），不是 powershell.exe。
+      # 假的 vscode 模組＋離屏；LOCALAPPDATA／APPDATA／TEMP 都換成臨時資料夾。PowerShell 版升級上來（舊的開著、舊的開機捷徑）、
+      # exe 改版時舊 exe 還開著（檔案鎖住）、同一版再開、vsix 沒附 exe 時退回 desk-pals.ps1
+      - name: Extension from the win32 vsix runs the bundled DeskPals.exe, not PowerShell (public + personal)
+        shell: powershell
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          foreach ($v in @(@{ n = "pub"; vsix = "dist\desk-pals-*-win32-x64.vsix" }, @{ n = "per"; vsix = "dist-personal\desk-pals-*-win32-x64-personal.vsix" })) {
+            $d = "$env:RUNNER_TEMP\vsix-" + $v.n
+            [IO.Compression.ZipFile]::ExtractToDirectory((Get-ChildItem $v.vsix).FullName, $d)
+            node test/ext-exe.js "$d\extension" ("$env:RUNNER_TEMP\ext-exe-" + $v.n) ("desk-pals-extexe-" + $v.n)
+            if ($LASTEXITCODE -ne 0) { throw ("ext-exe test failed (" + $v.n + ")") }
+          }
       - name: Smoke-test public DeskPals.exe (offscreen) + study tools + share GIF
         shell: powershell
         run: |
@@ -680,6 +696,38 @@ jobs:
           $env:SHELF_LINEUP = "original"
           node test/desktop-shelf.js desk-pals-exeshelf (Resolve-Path exe-shots\shelf).Path
           if ($LASTEXITCODE -ne 0) { throw "shelf test failed (exe)" }
+      # 窩伴小世界跑在 exe 上（vsix 附的就是這支）：lineups.txt、woban.txt、動作圖、書包小屋都要從內嵌的資源讀到（exe 旁邊沒有 pals）
+      - name: Woban test on DeskPals.exe (setup first page, pals, 書包小屋; embedded resources)
+        shell: powershell
+        run: |
+          $runs = @(
+            @{ n = "setup-pub"; exe = "dist\DeskPals.exe"; mode = "setup"; per = "0"; fresh = $true; test = "woban"; out = "exe-shots\woban-setup" },
+            @{ n = "pals-pub"; exe = "dist\DeskPals.exe"; mode = "pals"; per = "0"; fresh = $false; test = "woban"; out = "exe-shots\woban-pals" },
+            @{ n = "shelf-pub"; exe = "dist\DeskPals.exe"; mode = ""; per = "0"; fresh = $false; test = "shelf"; out = "exe-shots\woban-shelf" },
+            @{ n = "pals-per"; exe = "dist-personal\DeskPals-personal.exe"; mode = "pals"; per = "1"; fresh = $false; test = "woban"; out = "personal-exe-shots\woban-pals" })
+          foreach ($v in $runs) {
+            $env:DESKPALS_OFFSCREEN = "1"; $env:DESKPALS_ISOLATED = "1"
+            $env:DESKPALS_DATA_DIR = "$env:RUNNER_TEMP\dp-exe-woban-" + $v.n
+            New-Item -ItemType Directory -Force $env:DESKPALS_DATA_DIR, $v.out | Out-Null
+            $pipe = "desk-pals-exewoban-" + $v.n
+            $a = "--pipe $pipe"
+            if (-not $v.fresh) {
+              Set-Content "$env:DESKPALS_DATA_DIR\profile.txt" "done" -NoNewline
+              Set-Content "$env:DESKPALS_DATA_DIR\mode.txt" "shelf" -NoNewline
+              Set-Content "$env:DESKPALS_DATA_DIR\lineup.txt" "woban" -NoNewline
+              $a += " --pet bobo --lineup woban"
+            }
+            $p = Start-Process $v.exe -ArgumentList $a -PassThru
+            node .github/ping.js $pipe
+            if ($LASTEXITCODE -ne 0) { throw ("exe did not start (woban " + $v.n + ")") }
+            $env:WOBAN_MODE = $v.mode; $env:WOBAN_PERSONAL = $v.per; $env:SHELF_LINEUP = "woban"
+            if ($v.test -eq "woban") { node test/desktop-woban.js $pipe (Resolve-Path $v.out).Path "$env:TEMP\desk-pals.log" }
+            else { node test/desktop-shelf.js $pipe (Resolve-Path $v.out).Path }
+            if ($LASTEXITCODE -ne 0) { throw ("woban test failed on the exe (" + $v.n + ")") }
+            if (-not $p.WaitForExit(15000)) { throw ("exe did not quit (woban " + $v.n + ")") }
+          }
+          $miss = Get-Content "$env:TEMP\desk-pals.log" -Encoding UTF8 | Select-String "lineups.txt missing|art missing"
+          if ($miss) { $miss; throw "exe could not read embedded art" }
       - name: Smoke-test personal DeskPals-personal.exe (offscreen, all lineups)
         shell: powershell
         run: |
@@ -729,6 +777,7 @@ jobs:
             public-ps1-shots/shelf/*.png
             exe-shots/*.png
             exe-shots/shelf/*.png
+            exe-shots/woban-*/*.png
       # 個人版的測試結果（含同人角色的截圖）：只給自己看，不會附到 Release
       - uses: actions/upload-artifact@v4
         if: always()
@@ -739,6 +788,7 @@ jobs:
             ps1-shots/mischief/*.png
             ps1-shots/shelf/*.png
             personal-exe-shots/*.png
+            personal-exe-shots/woban-*/*.png
       # 公開版：Release 會附上這些
       - uses: actions/upload-artifact@v4
         with:
@@ -790,7 +840,8 @@ jobs:
           |---|---|
           | \`DeskPals-Setup-$VER.exe\` | Windows 10／11（不用 VS Code）。還沒簽章：SmartScreen 擋下來時按「其他資訊」→「仍要執行」 |
           | \`DeskPals-$VER.dmg\` | macOS 13（Ventura）以後（Apple 晶片、Intel 都可以）。還沒公證：第一次打開請看 DMG 裡的說明 |
-          | \`desk-pals-$VER.vsix\` | VS Code 擴充套件（含 VS Code 才有的功能） |
+          | \`desk-pals-$VER-win32-x64.vsix\` | VS Code 擴充套件，Windows（ARM 的電腦用 \`-win32-arm64\`）。附桌面版 DeskPals.exe |
+          | \`desk-pals-$VER.vsix\` | VS Code 擴充套件，macOS（通用版；Windows 請用上面那個） |
           | \`DeskPals-$VER.msix\` | 給 Microsoft Store 上架用（未簽章，不能直接安裝） |
 
           EOF

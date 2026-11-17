@@ -127,7 +127,7 @@
 
 | | Windows 安裝程式 | Mac App（DMG） | VS Code 擴充套件 |
 |---|---|---|---|
-| 檔案 | `DeskPals-Setup-<版號>.exe` | `DeskPals-<版號>.dmg` | `desk-pals-<版號>.vsix` |
+| 檔案 | `DeskPals-Setup-<版號>.exe` | `DeskPals-<版號>.dmg` | Windows：`desk-pals-<版號>-win32-x64.vsix`（ARM 電腦 `-win32-arm64`）；Mac：`desk-pals-<版號>.vsix` |
 | 要先有 | Windows 10／11（不用 VS Code） | macOS 13（Ventura）以後，Apple 晶片、Intel 都可以（不用 VS Code、不用 Xcode） | VS Code（Mac 還要 Xcode Command Line Tools） |
 | 桌面公仔櫃、各櫃公仔、串門子、午餐、下班時間 | ✓ | ✓ | ✓ |
 | 做自己的公仔、分享短片、`.deskpal` 匯出匯入 | ✓ | ✓ | ✓ |
@@ -158,10 +158,10 @@
 
 ### VS Code 擴充套件
 
-1. VS Code →「延伸模組」→ 右上角「⋯」→「從 VSIX 安裝…」→ 選 `desk-pals-<版號>.vsix`。
-2. 重新開啟 VS Code。第一次會在背景編譯桌面版（30 秒到 1 分鐘），之後開機會自動出現，不用開 VS Code。
+1. VS Code →「延伸模組」→ 右上角「⋯」→「從 VSIX 安裝…」→ 選 `desk-pals-<版號>-win32-x64.vsix`（Windows）或 `desk-pals-<版號>.vsix`（Mac）。
+2. 重新開啟 VS Code。Windows 版的 vsix 附了編好的桌面版 `DeskPals.exe`（放到 `%LOCALAPPDATA%\DeskPals\app` 執行）；Mac 第一次會在背景編譯（30 秒到 1 分鐘）。之後開機會自動出現，不用開 VS Code。
 
-細節：[Windows安裝說明.md](Windows安裝說明.md)、[Mac安裝說明.md](Mac安裝說明.md)。自己打包：`python build_vsix.py`（`dist/` 裡會有公開版 `desk-pals-<版號>.vsix` 和個人版 `desk-pals-<版號>-personal.vsix`；只要一種加 `--public` 或 `--personal`）。
+細節：[Windows安裝說明.md](Windows安裝說明.md)、[Mac安裝說明.md](Mac安裝說明.md)。自己打包：`python build_vsix.py`（`dist/` 裡會有公開版 `desk-pals-<版號>.vsix` 和個人版 `desk-pals-<版號>-personal.vsix`；只要一種加 `--public` 或 `--personal`）。這兩個是通用版（不帶 exe，Windows 上會退回 `desk-pals.ps1` 即時編譯）；Windows 專用版先用 `build.ps1 -Steps exe` 編 exe，再 `python build_vsix.py --public --target win32-x64 --exe dist\DeskPals.exe`（個人版：`--personal --target win32-x64 --exe dist-personal\DeskPals-personal.exe --out dist-personal`）。
 
 ### 兩種都裝
 
@@ -176,7 +176,7 @@
 | `extension/extension.js` | VS Code 擴充：側邊欄、狀態列、啟動桌面版 |
 | `extension/practical.js` | 實用功能的資料來源：終端機、CI、行事曆、Jira、GitLab、天氣、工作日誌、提醒 |
 | `extension/media/pet.html` | 側邊欄裡的公仔 |
-| `extension/desktop/DeskPals.cs` | Windows 桌面版：公仔櫃、各櫃公仔、通知（由 `desk-pals.ps1` 用 PowerShell 編譯執行，連同下面兩個 partial 檔） |
+| `extension/desktop/DeskPals.cs` | Windows 桌面版：公仔櫃、各櫃公仔、通知（連同下面的 partial 檔由 `build.ps1` 編成 `DeskPals.exe`，附在 Windows 版 vsix 和安裝程式裡；從原始碼跑時由 `desk-pals.ps1` 用 PowerShell 編譯執行） |
 | `extension/desktop/DeskPals.Original.cs` | 續命小隊（躲躲、沒電、刺刺）：讀圖、沒電的電量（液體上色、跟工作時間連動）、角色、動作、串場、舊資料轉移 |
 | `extension/desktop/pals/squad/` | 續命小隊的圖（每隻 16 個動作 × 1x／2x，沒電另有電量液體的遮罩）；`tools/squad_art/` 是產生它們的腳本 |
 | `extension/desktop/DeskPals.Fan.cs` | 經典一櫃、天線寶寶一櫃（粉絲作品，只在個人版） |

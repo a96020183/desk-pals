@@ -378,13 +378,18 @@ class Desktop {
 		const user = (os.userInfo().username || "me").replace(/[^A-Za-z0-9_.-]/g, "_");
 		this.win = process.platform === "win32";
 		this.user = user;
-		this.name = "desk-pals-" + user;
+		// 測試用：DESKPALS_PIPE＝用別的 pipe（離屏測試不碰使用者正在跑的那一個）
+		this.name = /^[A-Za-z0-9_.-]+$/.test(process.env.DESKPALS_PIPE || "") ? process.env.DESKPALS_PIPE : "desk-pals-" + user;
 		this.supported = this.win || process.platform === "darwin";
 		const local = process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
 		this.home = this.win
 			? path.join(local, "DeskPals")
 			: path.join(os.homedir(), "Library", "Application Support", "DeskPals");
 		this.ps1 = "desk-pals.ps1";
+		// Windows 的 vsix 附了編好的 DeskPals.exe：放到 %LOCALAPPDATA%\DeskPals\app（擴充套件升級會刪掉舊版資料夾，不能從那裡跑），
+		// 直接執行它（不再用隱藏的 PowerShell 即時編譯）。沒附 exe（從原始碼跑、Mac 用的通用版 vsix）才用 desk-pals.ps1。
+		this.exeSrc = this.win ? path.join(context.extensionPath, "desktop", "DeskPals.exe") : "";
+		this.exe = this.win ? path.join(this.home, "app", "DeskPals.exe") : "";
 		this.sh = "desk-pals.sh";
 		this.lnkName = "公仔櫃 Desk Pals.lnk";
 		this.onActive = () => {};
@@ -431,11 +436,21 @@ class Desktop {
 			if (userAsked) vscode.window.showInformationMessage("公仔櫃桌面版目前支援 Windows 和 macOS。");
 			return;
 		}
-		try { this.install(); } catch (e) { console.error("deskpals install", e); }
+		let fresh = false;
+		try { fresh = this.install(); } catch (e) { console.error("deskpals install", e); }
 		this.userStopped = false;
 		this.want = true;
 		this.spawns = 0;
-		this.connect(60, false);
+		if (fresh) {
+			// 剛放上新的 exe（從 PowerShell 版升級、或 exe 改版了）：--replace 請開著的舊版收工，換新的上來（資料不動）。
+			// 舊版收工時會說 bye，這次不算使用者按收工
+			this.replacing = true;
+			clearTimeout(this.replaceTimer);
+			this.replaceTimer = setTimeout(() => { this.replacing = false; }, 30000);
+			this.spawns = 1;
+			this.spawn(true);
+			this.connect(60, true);
+		} else this.connect(60, false);
 		if (userAsked) this.sendLater("act hi");
 	}
 
@@ -501,7 +516,7 @@ class Desktop {
 			while ((i = buf.indexOf("\n")) >= 0) {
 				const line = buf.slice(0, i).trim();
 				buf = buf.slice(i + 1);
-				if (line === "bye") { if (this.restarting) this.restarting = false; else this.want = false; } // 使用者從桌面右鍵「收工」（換櫃重開不算）
+				if (line === "bye") { if (this.restarting) this.restarting = false; else if (this.replacing) this.replacing = false; else this.want = false; } // 使用者從桌面右鍵「收工」（換櫃重開、換新版 exe 不算）
 				const lu = /^lineup (\w+)$/.exec(line);
 				if (lu) { this.lineupAck = lu[1]; this.onLineup(lu[1]); }
 				const m = /^active (\w+)$/.exec(line);
@@ -540,13 +555,19 @@ class Desktop {
 		});
 	}
 
-	// 把桌面版複製到固定位置（擴充套件更新後路徑會變，開機啟動要指向固定的地方）
+	// 把桌面版複製到固定位置（擴充套件更新後路徑會變，開機啟動要指向固定的地方）。回傳 true＝剛換上新的 exe（要換掉開著的舊版）
 	install() {
 		const src = path.join(this.context.extensionPath, "desktop");
 		fs.mkdirSync(this.home, { recursive: true });
-		// Windows：DeskPals.cs 和所有 DeskPals.*.cs（皮克敏、自己做的公仔、分享短片…）都要帶過去
 		const sa = this.standalone();
-		const files = sa ? ["claude-hook.js", "ci-watch.js"]   // 獨立版：只放 hooks／CI 用的小腳本，桌面版本體和開機啟動都交給它
+		// Windows 有附 exe：只放 exe（＋hooks／CI 小腳本）；放不上去（例如被防毒軟體拿走）才退回 PowerShell 版
+		let fresh = false;
+		this.useExe = false;
+		if (!sa && this.win && fs.existsSync(this.exeSrc)) {
+			try { fresh = this.installExe(); this.useExe = true; } catch (e) { console.error("deskpals exe", e); }
+		}
+		// Windows（PowerShell 版）：DeskPals.cs 和所有 DeskPals.*.cs（皮克敏、自己做的公仔、分享短片…）都要帶過去
+		const files = sa || this.useExe ? ["claude-hook.js", "ci-watch.js"]   // 獨立版：只放 hooks／CI 用的小腳本，桌面版本體和開機啟動都交給它
 			: this.win
 			? fs.readdirSync(src).filter((f) => /^DeskPals(\.[A-Za-z]+)?\.cs$/.test(f)).concat(["desk-pals.ps1", "claude-hook.js", "ci-watch.js"])
 			: ["DeskPals.swift", this.sh, "claude-hook.js", "ci-watch.js"];
@@ -558,7 +579,8 @@ class Desktop {
 			if (!same) fs.writeFileSync(to, a);
 		};
 		for (const f of files) copy(f, this.home);
-		if (sa) return;
+		if (sa) return false;
+		if (this.useExe) { this.installAutostart(); return fresh; }   // 圖都內嵌在 exe 裡
 		// 圖（續命小隊 pals/squad、紙箱櫃 pals/shelf）：桌面版從自己旁邊的 pals 讀
 		const copyDir = (rel) => {
 			const from = path.join(src, rel);
@@ -570,21 +592,79 @@ class Desktop {
 		try { fs.mkdirSync(path.join(this.home, "pals"), { recursive: true }); copyDir("pals"); } catch (e) { console.error("deskpals pals", e); }
 		if (process.platform === "darwin") fs.chmodSync(path.join(this.home, this.sh), 0o755);
 		this.installAutostart();
+		return false;
+	}
+
+	// vsix 裡的 DeskPals.exe → %LOCALAPPDATA%\DeskPals\app\DeskPals.exe。一樣就不動，回傳 false；不一樣（第一次、擴充套件升級）就換上去，回傳 true。
+	// 開著的 exe 不能覆寫但可以改名：舊的先改名成 DeskPals.exe.old-…（還開著也沒關係，收工後下次再刪），新的再放上去。
+	installExe() {
+		const dir = path.dirname(this.exe);
+		fs.mkdirSync(dir, { recursive: true });
+		for (const f of fs.readdirSync(dir)) {
+			const full = path.join(dir, f);
+			try {
+				if (/^DeskPals\.exe\.old-/.test(f) || (/^DeskPals\.exe\.new-/.test(f) && Date.now() - fs.statSync(full).mtimeMs > 60000)) fs.unlinkSync(full);
+			} catch (e) {}   // 舊的還開著：下次再刪
+		}
+		const want = fs.readFileSync(this.exeSrc);
+		let have = null;
+		try { have = fs.readFileSync(this.exe); } catch (e) {}
+		if (have && Buffer.compare(want, have) === 0) return false;
+		const tmp = `${this.exe}.new-${process.pid}`;
+		fs.writeFileSync(tmp, want);
+		// 防毒軟體剛掃新檔時會鎖一下：改名失敗就等一下再試
+		const retry = (fn) => {
+			for (let i = 0; ; i++) {
+				try { return fn(); } catch (e) {
+					if (i >= 10 || !["EBUSY", "EPERM", "EACCES"].includes(e.code)) throw e;
+					Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
+				}
+			}
+		};
+		const old = `${this.exe}.old-${process.pid}-${Date.now()}`;
+		try {
+			if (have) retry(() => fs.renameSync(this.exe, old));
+			retry(() => fs.renameSync(tmp, this.exe));
+		} catch (e) {
+			try { fs.unlinkSync(tmp); } catch (e2) {}
+			if (have && !fs.existsSync(this.exe)) { try { fs.renameSync(old, this.exe); } catch (e2) {} }
+			if (have && fs.existsSync(this.exe)) { console.error("deskpals exe: kept the old one", e); return false; }   // 換不掉：先用舊的，下次再換
+			throw e;
+		}
+		return true;
 	}
 
 	installAutostart() {
 		if (process.platform === "win32") {
 			const startup = path.join(process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming"), "Microsoft", "Windows", "Start Menu", "Programs", "Startup");
 			const lnk = path.join(startup, this.lnkName);
+			if (this.useExe) {
+				// exe 版：捷徑由 exe 自己建／改（舊版擴充套件留下、指著 powershell.exe 的同名捷徑也直接換成 exe）。
+				// 做過就記在 app\autostart.txt，之後每次啟動不用再叫 exe
+				const mark = path.join(path.dirname(this.exe), "autostart.txt");
+				const key = `${lnk}|${this.name}|${this.exe}`;
+				let have = "";
+				try { have = fs.readFileSync(mark, "utf8"); } catch (e) {}
+				if (have === key && fs.existsSync(lnk)) return;
+				cp.execFile(this.exe, ["--autostart", lnk, "--pipe", this.name], { windowsHide: true, timeout: 30000 }, (err) => {
+					if (err) { console.error("deskpals autostart", err); return; }
+					try { fs.writeFileSync(mark, key); } catch (e) {}
+				});
+				return;
+			}
 			if (fs.existsSync(lnk)) return;
 			const ps1 = path.join(this.home, this.ps1);
 			const script = [
-				"$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:DESKPALS_LNK)",
+				// WScript.Shell 存檔走系統 ANSI 字碼頁：英文 Windows 存不了中文檔名 → 先存成英文暫存名，再改名
+				"$d = Split-Path -LiteralPath $env:DESKPALS_LNK; New-Item -ItemType Directory -Force -Path $d | Out-Null",
+				"$t = Join-Path $d ('desk-pals-' + $PID + '.lnk')",
+				"$s = (New-Object -ComObject WScript.Shell).CreateShortcut($t)",
 				"$s.TargetPath = \"$env:SystemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\"",
 				"$s.Arguments = '-NoProfile -WindowStyle Hidden -File \"' + $env:DESKPALS_PS1 + '\" -PipeName ' + $env:DESKPALS_PIPE",
 				"$s.WindowStyle = 7",
 				"$s.Description = '公仔櫃 Desk Pals（整個螢幕的像素公仔）'",
 				"$s.Save()",
+				"Move-Item -LiteralPath $t -Destination $env:DESKPALS_LNK -Force",
 			].join("; ");
 			cp.execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
 				windowsHide: true,
@@ -620,7 +700,7 @@ class Desktop {
 		}
 	}
 
-	spawn() {
+	spawn(replace) {
 		try {
 			let p;
 			const sa = this.standalone();
@@ -633,6 +713,13 @@ class Desktop {
 				p = this.win
 					? cp.spawn(sa.exe, ["--pipe", this.name, "--pet", pp].concat(lineupExplicit() ? ["--lineup", lu] : []), { detached: true, stdio: "ignore", windowsHide: true })
 					: cp.spawn("/usr/bin/open", ["-a", sa.app, "--args", this.endpoint, pp, lineupExplicit() ? lu : ""], { detached: true, stdio: "ignore" });
+			} else if (this.win && this.useExe) {
+				// vsix 附的 exe（已放到 app\DeskPals.exe）：直接執行，不經過 PowerShell。replace＝剛換上新版，先請開著的舊版收工
+				const lu = lineupSetting();
+				const pet = charSetting("spidey");   //@fan
+				// <public> const pet = charSetting("duoduo");
+				const pp = inLineup(pet, lu) && /^\w+$/.test(pet) ? pet : lineupDefaultPet(lu);
+				p = cp.spawn(this.exe, (replace ? ["--replace"] : []).concat(["--pipe", this.name, "--pet", pp], lineupExplicit() ? ["--lineup", lu] : []), { detached: true, stdio: "ignore", windowsHide: true });
 			} else if (process.platform === "win32") {
 				// detached 的 powershell 沒有主控台會直接結束；改由短命的 powershell 用 Start-Process 叫一支獨立的起來
 				const lu = lineupSetting();
