@@ -887,49 +887,38 @@ extension Pet {
     }
 }
 
-// ================= 公仔櫃：方格紙背板（像筆記本）=================
+// ================= 公仔櫃：大格背板上釘一張小便利貼 =================
 //@@IN ShelfForm
-    var Orig = false                    // 續命小隊：格子背板是淡淡的方格紙，大格釘一張小便利貼
+    var Orig = false                    // 續命小隊：大格的背板右上角釘一張小便利貼（畫一顆愛心）；空的格子是「做一隻你的公仔」入口
 //@@END
 
 extension ShelfForm {
-    func DrawGridPaper(_ g: Graphics, _ inner: RectangleF, _ tall: Bool) {
-        let st = g.Save()
-        g.SetClip(inner)
-        let step = Math.Max(4.0, Double(U) * 2.6)
-        let gp = Pen(Night ? Color.FromArgb(26, 200, 210, 255) : Color.FromArgb(40, 80, 120, 170), 1.0)
-        var gx = inner.X + step * 0.5
-        while gx < inner.Right { g.DrawLine(gp, gx, inner.Y, gx, inner.Bottom); gx += step }
-        var gy = inner.Y + step * 0.5
-        while gy < inner.Bottom { g.DrawLine(gp, inner.X, gy, inner.Right, gy); gy += step }
-        if tall {
-            // 大格右上角釘一張小便利貼（畫一顆愛心）
-            let u = Math.Max(2, U * 3 / 4)
-            let du = Double(u)
-            let nx = inner.Right - 13 * du, ny = inner.Y + 4 * du
-            g.FillRectangle(SolidBrush(Color.FromArgb(50, 60, 40, 10)), nx + du, ny + du, 9 * du, 9 * du)
-            g.FillRectangle(SolidBrush(Night ? C(0xC8B05A) : C(0xFFE45C)), nx, ny, 9 * du, 9 * du)
-            g.FillRectangle(SolidBrush(Night ? C(0xAC9440) : C(0xF2CC3A)), nx, ny, 9 * du, 2 * du)
-            let heart: [String] = [".pp.pp.", "ppppppp", ".ppppp.", "..ppp..", "...p..."]
-            let hb = SolidBrush(Night ? C(0xC87A88) : C(0xFF8FA8))
-            for r in 0..<heart.count {
-                let row = Array(heart[r])
-                for c in 0..<row.count { if row[c] != "." { g.FillRectangle(hb, nx + Double(1 + c) * du, ny + Double(3 + r) * du, du, du) } }
-            }
-            g.FillEllipse(SolidBrush(Night ? C(0x9A3A3A) : C(0xE04848)), nx + 3.5 * du, ny - 0.8 * du, 2 * du, 2 * du)
+    func DrawStickyNote(_ g: Graphics, _ bk: Rectangle) {
+        let u = Math.Max(2, U * 3 / 4)
+        let du = Double(u)
+        let nx = Double(bk.Right) - 12 * du, ny = Double(bk.Y) + 4 * du
+        g.FillRectangle(SolidBrush(Color.FromArgb(50, 60, 40, 10)), nx + du, ny + du, 9 * du, 9 * du)
+        g.FillRectangle(SolidBrush(Night ? C(0xC8B05A) : C(0xFFE45C)), nx, ny, 9 * du, 9 * du)
+        g.FillRectangle(SolidBrush(Night ? C(0xAC9440) : C(0xF2CC3A)), nx, ny, 9 * du, 2 * du)
+        g.DrawRectangle(Pen(Color.FromArgb(200, 0x1E, 0x1E, 0x24), Math.Max(1.0, du * 0.5)), nx, ny, 9 * du, 9 * du)
+        let heart: [String] = [".pp.pp.", "ppppppp", ".ppppp.", "..ppp..", "...p..."]
+        let hb = SolidBrush(Night ? C(0xC87A88) : C(0xFF8FA8))
+        for r in 0..<heart.count {
+            let row = Array(heart[r])
+            for c in 0..<row.count { if row[c] != "." { g.FillRectangle(hb, nx + Double(1 + c) * du, ny + Double(3 + r) * du, du, du) } }
         }
-        g.Restore(st)
+        g.FillEllipse(SolidBrush(Night ? C(0x9A3A3A) : C(0xE04848)), nx + 3.5 * du, ny - 0.8 * du, 2 * du, 2 * du)
     }
 }
 
 // 續命小隊的第 4 格：「＋ 做一隻你的公仔」入口（點了開做公仔視窗；做好了第 4 格就放那一隻）
 extension ShelfForm {
     func DrawMakeSlot(_ g: Graphics, _ c: Rectangle, _ fx: Int, _ fy: Int) {
-        // 淡淡的虛線剪影（圓頭＋身體）＋身體上一顆加號＋底下一行小字
+        // 背板上方一行小字＋底下淡淡的虛線剪影（圓頭＋身體，站在地板上）＋身體上一顆加號
         let h = Double(fy - c.Y), cwd = Double(c.Width), dfx = Double(fx), dfy = Double(fy)
-        let fs = Math.Max(9.0, cwd * 0.115)
-        let th = fs * 1.35
-        let top = Double(c.Y) + h * 0.1, bot = dfy - th - h * 0.03, sh = bot - top
+        let fs = Math.Max(9.0, Math.Min(cwd * 0.115, 3.2 * Double(TU)))
+        let th = fs * 1.35, ty = Double(c.Y) + h * 0.05
+        let top = ty + th + h * 0.02, bot = dfy - h * 0.01, sh = bot - top
         let hd = sh * 0.36, gap = sh * 0.05
         let bw = Math.Min(cwd * 0.56, sh * 0.78), bh = sh - hd - gap
         let head = RectangleF(dfx - hd / 2, top, hd, hd)
@@ -947,10 +936,11 @@ extension ShelfForm {
         g.DrawLine(pl, cx - cr * 0.5, cy, cx + cr * 0.5, cy)
         g.DrawLine(pl, cx, cy - cr * 0.5, cx, cy + cr * 0.5)
         let f = Font("Microsoft JhengHei UI", fs, FontStyle.Bold, GraphicsUnit.Pixel)
-        let tb = SolidBrush(Night ? Color.FromArgb(200, 232, 224, 244) : Color.FromArgb(225, 128, 84, 52))
+        let tb = SolidBrush(Night ? Color.FromArgb(220, 240, 230, 250) : Color.FromArgb(235, 110, 70, 40))
         let sf = StringFormat()
-        sf.Alignment = StringAlignment.Center; sf.LineAlignment = StringAlignment.Center
-        g.DrawString("做一隻你的公仔", f, tb, RectangleF(Double(c.X), dfy - th, cwd, th), sf)
+        sf.Alignment = StringAlignment.Center; sf.LineAlignment = StringAlignment.Center; sf.FormatFlags = StringFormatFlags.NoWrap
+        g.TextRenderingHint = TextRenderingHint.AntiAlias
+        g.DrawString("做一隻你的公仔", f, tb, RectangleF(Double(c.X) - 8, ty, cwd + 16, th), sf)
     }
 }
 

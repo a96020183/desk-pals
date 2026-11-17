@@ -31,8 +31,8 @@ namespace DeskPals
             return "";
         }
 
-        // 讀一個檔：資料夾有就讀資料夾，沒有就讀 exe 內嵌的資源（build.ps1 用 /resource 放進去，名字＝pals/squad/…）
-        static byte[] Read(string rel)
+        // 讀一個檔：資料夾有就讀資料夾，沒有就讀 exe 內嵌的資源（build.ps1 用 /resource 放進去，名字＝pals/squad/…、pals/shelf/…）
+        public static byte[] Read(string rel)
         {
             string root = Root();
             try
@@ -47,7 +47,7 @@ namespace DeskPals
             catch { return null; }
         }
 
-        static Bitmap Png(string rel)
+        public static Bitmap Png(string rel)
         {
             byte[] b = Read(rel);
             if (b == null) return null;
@@ -961,35 +961,23 @@ namespace DeskPals
         }
     }
 
-    // ================= 公仔櫃：方格紙背板（像筆記本）=================
+    // ================= 公仔櫃：大格背板上釘一張小便利貼 =================
     partial class ShelfForm
     {
-        public bool Orig;                    // 續命小隊：格子背板是淡淡的方格紙，大格釘一張小便利貼
+        public bool Orig;                    // 續命小隊：大格的背板右上角釘一張小便利貼（畫一顆愛心）；空的格子是「做一隻你的公仔」入口
 
-        void DrawGridPaper(Graphics g, RectangleF inner, bool tall)
+        void DrawStickyNote(Graphics g, Rectangle bk)
         {
-            System.Drawing.Drawing2D.GraphicsState st = g.Save();
-            g.SetClip(inner);
-            float step = Math.Max(4f, U * 2.6f);
-            using (Pen gp = new Pen(Night ? Color.FromArgb(26, 200, 210, 255) : Color.FromArgb(40, 80, 120, 170), 1f))
-            {
-                for (float gx = inner.X + step * 0.5f; gx < inner.Right; gx += step) g.DrawLine(gp, gx, inner.Y, gx, inner.Bottom);
-                for (float gy = inner.Y + step * 0.5f; gy < inner.Bottom; gy += step) g.DrawLine(gp, inner.X, gy, inner.Right, gy);
-            }
-            if (tall)
-            {
-                // 大格右上角釘一張小便利貼（畫一顆愛心）
-                int u = Math.Max(2, U * 3 / 4);
-                float nx = inner.Right - 13 * u, ny = inner.Y + 4 * u;
-                using (SolidBrush sh = new SolidBrush(Color.FromArgb(50, 60, 40, 10))) g.FillRectangle(sh, nx + u, ny + u, 9 * u, 9 * u);
-                using (SolidBrush nb = new SolidBrush(Night ? C(0xC8B05A) : C(0xFFE45C))) g.FillRectangle(nb, nx, ny, 9 * u, 9 * u);
-                using (SolidBrush gb = new SolidBrush(Night ? C(0xAC9440) : C(0xF2CC3A))) g.FillRectangle(gb, nx, ny, 9 * u, 2 * u);
-                string[] heart = { ".pp.pp.", "ppppppp", ".ppppp.", "..ppp..", "...p..." };
-                using (SolidBrush hb = new SolidBrush(Night ? C(0xC87A88) : C(0xFF8FA8)))
-                    for (int r = 0; r < heart.Length; r++) for (int c = 0; c < heart[r].Length; c++) if (heart[r][c] != '.') g.FillRectangle(hb, nx + (1 + c) * u, ny + (3 + r) * u, u, u);
-                using (SolidBrush pin = new SolidBrush(Night ? C(0x9A3A3A) : C(0xE04848))) g.FillEllipse(pin, nx + 3.5f * u, ny - 0.8f * u, 2 * u, 2 * u);
-            }
-            g.Restore(st);
+            int u = Math.Max(2, U * 3 / 4);
+            float nx = bk.Right - 12 * u, ny = bk.Y + 4 * u;
+            using (SolidBrush sh = new SolidBrush(Color.FromArgb(50, 60, 40, 10))) g.FillRectangle(sh, nx + u, ny + u, 9 * u, 9 * u);
+            using (SolidBrush nb = new SolidBrush(Night ? C(0xC8B05A) : C(0xFFE45C))) g.FillRectangle(nb, nx, ny, 9 * u, 9 * u);
+            using (SolidBrush gb = new SolidBrush(Night ? C(0xAC9440) : C(0xF2CC3A))) g.FillRectangle(gb, nx, ny, 9 * u, 2 * u);
+            using (Pen ink = new Pen(Color.FromArgb(200, 0x1E, 0x1E, 0x24), Math.Max(1f, u * 0.5f))) g.DrawRectangle(ink, nx, ny, 9 * u, 9 * u);
+            string[] heart = { ".pp.pp.", "ppppppp", ".ppppp.", "..ppp..", "...p..." };
+            using (SolidBrush hb = new SolidBrush(Night ? C(0xC87A88) : C(0xFF8FA8)))
+                for (int r = 0; r < heart.Length; r++) for (int c = 0; c < heart[r].Length; c++) if (heart[r][c] != '.') g.FillRectangle(hb, nx + (1 + c) * u, ny + (3 + r) * u, u, u);
+            using (SolidBrush pin = new SolidBrush(Night ? C(0x9A3A3A) : C(0xE04848))) g.FillEllipse(pin, nx + 3.5f * u, ny - 0.8f * u, 2 * u, 2 * u);
         }
     }
 
@@ -998,11 +986,11 @@ namespace DeskPals
     {
         void DrawMakeSlot(Graphics g, Rectangle c, int fx, int fy)
         {
-            // 淡淡的虛線剪影（圓頭＋身體）＋身體上一顆加號＋底下一行小字
+            // 背板上方一行小字＋底下淡淡的虛線剪影（圓頭＋身體，站在地板上）＋身體上一顆加號
             float h = fy - c.Y;
-            float fs = Math.Max(9f, c.Width * 0.115f);
-            float th = fs * 1.35f;
-            float top = c.Y + h * 0.1f, bot = fy - th - h * 0.03f, sh = bot - top;
+            float fs = Math.Max(9f, Math.Min(c.Width * 0.115f, 3.2f * TU));
+            float th = fs * 1.35f, ty = c.Y + h * 0.05f;
+            float top = ty + th + h * 0.02f, bot = fy - h * 0.01f, sh = bot - top;
             float hd = sh * 0.36f, gap = sh * 0.05f;
             float bw = Math.Min(c.Width * 0.56f, sh * 0.78f), bh = sh - hd - gap;
             RectangleF head = new RectangleF(fx - hd / 2, top, hd, hd);
@@ -1025,11 +1013,12 @@ namespace DeskPals
                 g.DrawLine(pl, cx, cy - cr * 0.5f, cx, cy + cr * 0.5f);
             }
             using (Font f = new Font("Microsoft JhengHei UI", fs, FontStyle.Bold, GraphicsUnit.Pixel))
-            using (SolidBrush tb = new SolidBrush(Night ? Color.FromArgb(200, 232, 224, 244) : Color.FromArgb(225, 128, 84, 52)))
+            using (SolidBrush tb = new SolidBrush(Night ? Color.FromArgb(220, 240, 230, 250) : Color.FromArgb(235, 110, 70, 40)))
             using (StringFormat sf = new StringFormat())
             {
-                sf.Alignment = StringAlignment.Center; sf.LineAlignment = StringAlignment.Center;
-                g.DrawString("做一隻你的公仔", f, tb, new RectangleF(c.X, fy - th, c.Width, th), sf);
+                sf.Alignment = StringAlignment.Center; sf.LineAlignment = StringAlignment.Center; sf.FormatFlags = StringFormatFlags.NoWrap;
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
+                g.DrawString("做一隻你的公仔", f, tb, new RectangleF(c.X - 8, ty, c.Width + 16, th), sf);
             }
         }
     }

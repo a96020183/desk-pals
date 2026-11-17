@@ -117,6 +117,26 @@ jobs:
           sleep 2
           if kill -0 $PID 2>/dev/null; then echo "::error::public squad: desktop did not quit"; kill $PID; RC=1; fi
           exit $RC
+      # 紙箱櫃（pals/shelf）：圖讀得到、三隻在格子裡、名牌、第 4 格入口、晚上變暗、外出中、點格子、收合鈕
+      - name: Public shelf test (紙箱櫃)
+        run: |
+          export DESKPALS_OFFSCREEN=1 DESKPALS_ISOLATED=1
+          export DESKPALS_DATA_DIR="$RUNNER_TEMP/dp-pub-shelf"
+          mkdir -p "$DESKPALS_DATA_DIR"
+          printf done > "$DESKPALS_DATA_DIR/profile.txt"; printf shelf > "$DESKPALS_DATA_DIR/mode.txt"; printf original > "$DESKPALS_DATA_DIR/lineup.txt"
+          SOCK="$RUNNER_TEMP/dp-pub-shelf.sock"
+          build/public/extension/desktop/DeskPals "$SOCK" duoduo original > run-public-shelf.log 2>&1 &
+          PID=$!
+          sleep 8
+          kill -0 $PID || { echo "::error::public shelf: died at startup"; cat run-public-shelf.log; exit 1; }
+          set +e
+          SHELF_LINEUP=original node test/desktop-shelf.js "$SOCK" "$GITHUB_WORKSPACE/public-shots/shelf"
+          RC=$?
+          set -e
+          grep -E "shelf" "$HOME/Library/Logs/desk-pals.log" | tail -n 20 || true
+          sleep 2
+          if kill -0 $PID 2>/dev/null; then echo "::error::public shelf: desktop did not quit"; kill $PID; RC=1; fi
+          exit $RC
       # ---------- 個人版（全部角色，含同人）：跟以前一樣的測試，截圖只放 personal-mac-result ----------
       - name: Personal smoke run (offscreen, all pets, snapshot, quit)
         run: |
@@ -146,6 +166,24 @@ jobs:
           tail -n 80 "$HOME/Library/Logs/desk-pals.log" || true
           if kill -0 $PID 2>/dev/null; then echo "did not quit"; kill $PID; exit 1; fi
           test -f shot-pikmin.png || { echo "no snapshot"; exit 1; }
+      - name: Personal shelf test, pikmin lineup (紙箱櫃＋大格的休息花; screenshots only in the personal artifact)
+        run: |
+          export DESKPALS_OFFSCREEN=1 DESKPALS_ISOLATED=1
+          export DESKPALS_DATA_DIR="$RUNNER_TEMP/dp-data-shelf-pik"
+          mkdir -p "$DESKPALS_DATA_DIR"
+          printf done > "$DESKPALS_DATA_DIR/profile.txt"; printf shelf > "$DESKPALS_DATA_DIR/mode.txt"; printf pikmin > "$DESKPALS_DATA_DIR/lineup.txt"
+          SOCK="$RUNNER_TEMP/dp-shelf-pik.sock"
+          extension/desktop/DeskPals "$SOCK" pkred pikmin > run-shelf-pikmin.log 2>&1 &
+          PID=$!
+          sleep 8
+          kill -0 $PID || { echo "::error::personal shelf: died at startup"; cat run-shelf-pikmin.log; exit 1; }
+          set +e
+          SHELF_LINEUP=pikmin node test/desktop-shelf.js "$SOCK" "$GITHUB_WORKSPACE/shots-shelf"
+          RC=$?
+          set -e
+          sleep 2
+          if kill -0 $PID 2>/dev/null; then echo "::error::personal shelf: desktop did not quit"; kill $PID; RC=1; fi
+          exit $RC
 
       - name: Personal smoke run, fresh install → 續命小隊 (original lineup default)
         run: |
@@ -343,9 +381,11 @@ jobs:
             run-study.log
             run-custom.log
             run-mischief.log
+            run-shelf-pikmin.log
             shot*.png
             shots-study/*.png
             shots-mischief/*.png
+            shots-shelf/*.png
             custom-out/*.png
             custom-out/*.deskpal
             custom-out/share/*
@@ -447,6 +487,28 @@ jobs:
           $env:SQUAD_LEGACY = "1"
           node test/desktop-squad.js desk-pals-squad (Resolve-Path public-ps1-shots\squad).Path $env:DESKPALS_DATA_DIR
           if ($LASTEXITCODE -ne 0) { throw "squad test failed" }
+      # 紙箱櫃（pals/shelf）：公開版續命小隊＋個人版皮克敏（大格休息花）。圖讀得到、三隻在格子裡、名牌、第 4 格入口、晚上、外出中、點格子、收合鈕
+      - name: Shelf test (public original + personal pikmin, desk-pals.ps1)
+        shell: powershell
+        run: |
+          $runs = @(@{ n = "pub"; ps1 = "build\public\extension\desktop\desk-pals.ps1"; lu = "original"; pet = "duoduo"; out = "public-ps1-shots\shelf" }, @{ n = "per"; ps1 = "extension\desktop\desk-pals.ps1"; lu = "pikmin"; pet = "pkred"; out = "ps1-shots\shelf" })
+          foreach ($v in $runs) {
+            $env:DESKPALS_OFFSCREEN = "1"; $env:DESKPALS_ISOLATED = "1"
+            $env:DESKPALS_DATA_DIR = "$env:RUNNER_TEMP\dp-shelf-" + $v.n
+            New-Item -ItemType Directory -Force $env:DESKPALS_DATA_DIR | Out-Null
+            Set-Content "$env:DESKPALS_DATA_DIR\profile.txt" "done" -NoNewline
+            Set-Content "$env:DESKPALS_DATA_DIR\mode.txt" "shelf" -NoNewline
+            Set-Content "$env:DESKPALS_DATA_DIR\lineup.txt" $v.lu -NoNewline
+            $ps1 = (Resolve-Path $v.ps1).Path
+            $pipe = "desk-pals-shelf-" + $v.n
+            Start-Process powershell.exe -ArgumentList "-NoProfile -File `"$ps1`" -PipeName $pipe -Pet $($v.pet) -Lineup $($v.lu)"
+            node .github/ping.js $pipe
+            if ($LASTEXITCODE -ne 0) { throw ("desktop did not start (shelf " + $v.n + ")") }
+            New-Item -ItemType Directory -Force $v.out | Out-Null
+            $env:SHELF_LINEUP = $v.lu
+            node test/desktop-shelf.js $pipe (Resolve-Path $v.out).Path
+            if ($LASTEXITCODE -ne 0) { throw ("shelf test failed (" + $v.n + ")") }
+          }
       # 舊版「Spidey 小夥伴」升級接手（個人版）＋全新安裝不會建出舊名字的東西：都在臨時資料夾，不碰 runner 的 %LOCALAPPDATA%、「啟動」資料夾
       - name: Legacy upgrade takeover (personal) + fresh installs create nothing old (personal, public)
         shell: powershell
@@ -524,6 +586,22 @@ jobs:
           $log = Get-Content "$env:TEMP\desk-pals.log" -Encoding UTF8
           $log | Select-Object -Last 30
           if (-not ($log | Select-String "exe .* STA")) { throw "exe main thread is not STA (clipboard would fail)" }
+      # exe 旁邊沒有 pals 資料夾：紙箱櫃的圖要從內嵌的資源讀
+      - name: Shelf test on public DeskPals.exe (shelf art from embedded resources)
+        shell: powershell
+        run: |
+          $env:DESKPALS_OFFSCREEN = "1"; $env:DESKPALS_ISOLATED = "1"
+          $env:DESKPALS_DATA_DIR = "$env:RUNNER_TEMP\dp-exe-shelf"
+          New-Item -ItemType Directory -Force $env:DESKPALS_DATA_DIR, exe-shots\shelf | Out-Null
+          Set-Content "$env:DESKPALS_DATA_DIR\profile.txt" "done" -NoNewline
+          Set-Content "$env:DESKPALS_DATA_DIR\mode.txt" "shelf" -NoNewline
+          Set-Content "$env:DESKPALS_DATA_DIR\lineup.txt" "original" -NoNewline
+          Start-Process dist\DeskPals.exe -ArgumentList "--pipe desk-pals-exeshelf --pet duoduo --lineup original"
+          node .github/ping.js desk-pals-exeshelf
+          if ($LASTEXITCODE -ne 0) { throw "exe did not start (shelf)" }
+          $env:SHELF_LINEUP = "original"
+          node test/desktop-shelf.js desk-pals-exeshelf (Resolve-Path exe-shots\shelf).Path
+          if ($LASTEXITCODE -ne 0) { throw "shelf test failed (exe)" }
       - name: Smoke-test personal DeskPals-personal.exe (offscreen, all lineups)
         shell: powershell
         run: |
@@ -570,7 +648,9 @@ jobs:
           path: |
             public-ps1-shots/*.png
             public-ps1-shots/mischief/*.png
+            public-ps1-shots/shelf/*.png
             exe-shots/*.png
+            exe-shots/shelf/*.png
       # 個人版的測試結果（含同人角色的截圖）：只給自己看，不會附到 Release
       - uses: actions/upload-artifact@v4
         if: always()
@@ -579,6 +659,7 @@ jobs:
           path: |
             ps1-shots/*.png
             ps1-shots/mischief/*.png
+            ps1-shots/shelf/*.png
             personal-exe-shots/*.png
       # 公開版：Release 會附上這些
       - uses: actions/upload-artifact@v4
