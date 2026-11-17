@@ -79,6 +79,8 @@ s.on("connect", async () => {
 		assert.equal(field(d, "backend"), "fake");
 		assert.deepEqual(["grab", "clear", "shop", "typing", "grabmin"].map((k) => field(d, k)), ["0", "1", "1", "0", "3"]);
 	});
+	// 公開版全新安裝四個都關（test/desktop-store.js 測）；這裡的資料夾已經有 profile.txt＝舊使用者升級：照原本的預設轉過去、不再問
+	if (field(d, "edition") === "public") await check("公開版舊使用者：照原本的開關轉過去（下班清場、購物警察算打開過，不跳說明）", () => assert.equal(field(d, "ack"), "clear,shop"));
 
 	// ---------- 搶游標 ----------
 	send(`mischief-fake cursor ${cx} ${cy}`);

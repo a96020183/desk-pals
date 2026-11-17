@@ -35,6 +35,7 @@ mac/
     57_share.swift      DeskPals.Share.cs（分享短片 GIF89a 編碼器、`.deskpal` 匯出匯入）
     58_fan.swift        DeskPals.Fan.cs（經典一櫃、天線寶寶一櫃的 Pal 資料、專屬動作、串場；個人版才有）
     59_mischief.swift   DeskPals.Mischief.cs（搗蛋：搶游標、下班清場、購物警察、打字太兇；MisSys／MisFake）
+    61_stats.swift      DeskPals.Stats.cs（匿名統計：只有公開版；GA4 Measurement Protocol、anon-stats.txt、小屋開關、stats-dump）
     60_woban.swift      DeskPals.Woban.cs（窩伴小世界：翻翻・破破・綿綿的 Pal 資料、Wb* 專屬行為、喝水／休息／專注提醒、兩兩串場；圖片載入在 51_original.swift 的 SqArt，照 pals/lineups.txt）
     03_shim_custom_a.swift / 04_shim_custom_b.swift  做公仔用到的 shim（Matrix、ColorMatrix 像素處理、拖放、NSOpenPanel／NSSavePanel）
 ```
@@ -244,6 +245,16 @@ Mac differences (all marked `// mac:`):
   is requested (`IOHIDRequestAccess`) only when the user turns the switch on in the 小屋 menu — never at startup, never from VS Code pushes.
 - `MisWin.Pid` (mac only) — the app to hide／unhide.
 - Long `+`／`?:` string chains are split (`MisFlags()`) so the Swift type checker doesn't time out.
+
+## 搗蛋第一次打開的說明、匿名統計（公開版）— `59_mischief.swift`、`61_stats.swift`
+
+- `App.Public`（10_platform.swift，`//@fan`＋`// <public>` 兩行）：公開版 true。搗蛋 `MisDefaultOff` 四個都關、`MisToggle` 第一次打開先開 `MisAskForm`（跟
+  SetupForm 同一套畫法；離屏 `MisSnapAsk`），`mischief-consent.txt` 記看過說明的、舊使用者第一次跑這一版時照原本的開關轉（`MisConsentLoad`）。
+  mac 的說明文字照 Mac 的做法寫（下班清場＝隱藏 App、不擷取畫面；打字太兇＝系統按鍵計數＋輸入監控權限），都標了 `// mac:`。
+- `Stats`：ID 只從 `pals/ga4.txt` 讀（打包時 `tools/variant.py` 從 `GA4_MEASUREMENT_ID`／`GA4_API_SECRET` 寫），沒有就停用。
+  mac: URLSession（ephemeral、5 秒、不跟隨轉址）＋固定 `User-Agent: DeskPals`、`Accept-Language: *`（URLSession 預設會帶 macOS 版本和語系）；platform 一律 `mac`。
+- C# 裡 Microsoft Store 版才有的東西（`App.StartupState`／`StartupEnable`／`StartNote`、SetupForm 第二頁「開機時自動出現」、小屋 `StartupHouseMenu`）Mac 沒有。
+- 測試：`test/desktop-store.js`（兩個平台同一支；自己開關桌面版、本機假的 GA4 端點）。
 
 ## 公開版（`python3 mac/assemble.py --public`）
 

@@ -11,6 +11,8 @@
 // 二、exe 改版（擴充套件升級）時舊 exe 還開著：開著的檔案改名讓開、新的放上去、舊的收工換新的
 // 三、同一版再開一次 VS Code：什麼都不換、不重開，上次改名的舊 exe 刪掉
 // 四、vsix 沒附 exe（從原始碼跑）：退回 desk-pals.ps1（另一個工作資料夾、另一個 pipe）
+// 五、裝了 Microsoft Store 版（MSIX 的檔案被虛擬化，看不到它寫的 standalone.json）：靠執行別名
+//     %LOCALAPPDATA%\Microsoft\WindowsApps\DeskPals.exe 認出來 → 不放 exe、不建開機捷徑，叫別名起來、連過去
 const cp = require("child_process");
 const fs = require("fs");
 const net = require("net");
@@ -263,8 +265,26 @@ async function main() {
 		procs(pipe4);
 		await ask(pipe4, "quit", null, 1500);
 		await sleep(3000);
+
+		// ---------- 五、Microsoft Store 版：認執行別名 ----------
+		console.log("== 5. Microsoft Store version installed (found by its execution alias, no standalone.json)");
+		const W5 = path.join(W, "store"), pipe5 = pipe + "-msix";
+		const env5 = envFor(W5, pipe5);
+		const alias = path.join(W5, "local", "Microsoft", "WindowsApps", "DeskPals.exe");
+		fs.mkdirSync(path.dirname(alias), { recursive: true });
+		fs.copyFileSync(path.join(extDir, "desktop", "DeskPals.exe"), alias);   // 測試用：真的別名是 AppExecLink，這裡放一支一樣的 exe
+		const s5 = runSession(extDir, env5);
+		check(s5.connected && !s5.useExe, "connected to the Store app");
+		check((s5.calls || []).some((c) => path.resolve(c.file) === alias && c.args.includes("--pipe")), "started the execution alias");
+		check(!(s5.calls || []).some((c) => c.args[0] === "--autostart" || c.args[0] === "--replace"), "no --autostart / --replace (the Store app owns its startup)");
+		check(!fs.existsSync(path.join(W5, "local", "DeskPals", "app")), "no app folder (did not install its own exe)");
+		check(!fs.existsSync(startupDir(W5)) || fs.readdirSync(startupDir(W5)).length === 0, "no startup shortcut");
+		const ps5 = procs(pipe5);
+		check(ps5.length === 1 && path.resolve(ps5[0].exe || "") === alias, "one process on the pipe, and it is the Store app");
+		await ask(pipe5, "quit", null, 1500);
+		await sleep(3000);
 	} finally {
-		for (const p of [pipe, pipe + "-ps1"]) procs(p);
+		for (const p of [pipe, pipe + "-ps1", pipe + "-msix"]) procs(p);
 		await sleep(1000);
 		for (const pid of mine) if (pid !== process.pid && alive(pid)) { try { process.kill(pid); console.log("stopped leftover pid " + pid); } catch (e) {} }
 		const lg = read(log, "utf8");

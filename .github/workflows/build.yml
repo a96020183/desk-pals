@@ -307,6 +307,12 @@ jobs:
           node .github/legacy-upgrade.js upgrade "$T/a.sock" "$T/SpideyDesktop" "$T/LaunchAgents" "$T/data" - -- extension/desktop/DeskPals "$T/a.sock" "" ""
           node .github/legacy-upgrade.js fresh "$T/b.sock" "$T/none-b" "$T/LaunchAgents-b" "$T/data-b" - -- extension/desktop/DeskPals "$T/b.sock" "" ""
           node .github/legacy-upgrade.js fresh "$T/c.sock" "$T/none-c" "$T/LaunchAgents-c" "$T/data-c" - -- build/public/extension/desktop/DeskPals "$T/c.sock" "" ""
+      # ---------- 上架前：匿名回報（只送到本機假端點）、搗蛋預設關＋第一次打開的說明、舊使用者轉換（公開版＋個人版）----------
+      - name: Store readiness (anonymous stats to a local fake endpoint, mischief consent; public + personal)
+        run: |
+          mkdir -p public-shots/store
+          node test/desktop-store.js "$RUNNER_TEMP/dps" "$RUNNER_TEMP/dps-pub" public-shots/store public mac -- build/public/extension/desktop/DeskPals {ep} "" ""
+          node test/desktop-store.js "$RUNNER_TEMP/dpsp" "$RUNNER_TEMP/dps-per" "$RUNNER_TEMP/dps-per-shots" personal mac -- extension/desktop/DeskPals {ep} "" ""
       # ---------- standalone Desk Pals.app / DMG ----------
       - name: Developer ID certificate (only if the secrets exist)
         env:
@@ -332,6 +338,9 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           MAC_BUNDLE_ID: ${{ vars.MAC_BUNDLE_ID }}
+          # 匿名回報（公開版）：沒設＝這個 .app 不回報
+          GA4_MEASUREMENT_ID: ${{ vars.GA4_MEASUREMENT_ID }}
+          GA4_API_SECRET: ${{ secrets.GA4_API_SECRET }}
         run: |
           python3 -m venv "$RUNNER_TEMP/venv"
           "$RUNNER_TEMP/venv/bin/pip" install --quiet pillow
@@ -510,6 +519,17 @@ jobs:
             node test/desktop-mischief.js $pipe (Resolve-Path $v.out).Path "$env:TEMP\desk-pals.log"
             if ($LASTEXITCODE -ne 0) { throw "mischief test failed (" + $v.n + ")" }
           }
+      # 上架前：匿名回報（只送到本機假端點）、搗蛋預設關＋第一次打開的說明、舊使用者轉換（公開版＋個人版，VS Code 的 desk-pals.ps1 路徑）
+      - name: Store readiness (anonymous stats to a local fake endpoint, mischief consent; public + personal, desk-pals.ps1)
+        shell: powershell
+        run: |
+          $pub = (Resolve-Path "build\public\extension\desktop\desk-pals.ps1").Path
+          $per = (Resolve-Path "extension\desktop\desk-pals.ps1").Path
+          New-Item -ItemType Directory -Force public-ps1-shots\store | Out-Null
+          node test/desktop-store.js desk-pals-store "$env:RUNNER_TEMP\dps-pub" public-ps1-shots\store public win-vscode -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File $pub -PipeName "{ep}"
+          if ($LASTEXITCODE -ne 0) { throw "store test failed (public)" }
+          node test/desktop-store.js desk-pals-storep "$env:RUNNER_TEMP\dps-per" "$env:RUNNER_TEMP\dps-per-shots" personal win-vscode -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File $per -PipeName "{ep}"
+          if ($LASTEXITCODE -ne 0) { throw "store test failed (personal)" }
       # 續命小隊（躲躲、沒電、刺刺）：圖讀得到（VS Code 的 desk-pals.ps1 路徑）、沒電的液面跟 levels.json 一樣、電量改顏色、舊的像素版資料轉過去
       - name: Squad test (public, desk-pals.ps1)
         shell: powershell
@@ -615,6 +635,9 @@ jobs:
           MSIX_IDENTITY_NAME: ${{ vars.MSIX_IDENTITY_NAME }}
           MSIX_PUBLISHER: ${{ vars.MSIX_PUBLISHER }}
           MSIX_PUBLISHER_DISPLAY_NAME: ${{ vars.MSIX_PUBLISHER_DISPLAY_NAME }}
+          # 匿名回報（公開版）：tools/variant.py 寫成 pals\ga4.txt 內嵌進 exe；沒設＝這一版不回報
+          GA4_MEASUREMENT_ID: ${{ vars.GA4_MEASUREMENT_ID }}
+          GA4_API_SECRET: ${{ secrets.GA4_API_SECRET }}
         run: |
           if ($env:WINDOWS_SIGN_PFX_BASE64) {
             $pfx = Join-Path $env:RUNNER_TEMP "sign.pfx"
@@ -630,6 +653,9 @@ jobs:
       # vsix 要在 exe 編好之後才打：通用版（Mac 用，不帶 exe）＋ Windows 專用版（TargetPlatform win32-x64／arm64，附剛編好的 DeskPals.exe：
       # 公開版附公開版的 exe、個人版附個人版的；擴充套件直接執行它，不再用 PowerShell 即時編譯）
       - name: Build vsix (universal + win32 with the bundled DeskPals.exe; public → dist, personal → dist-personal)
+        env:
+          GA4_MEASUREMENT_ID: ${{ vars.GA4_MEASUREMENT_ID }}
+          GA4_API_SECRET: ${{ secrets.GA4_API_SECRET }}
         run: |
           python -I build_vsix.py --public
           python -I build_vsix.py --public --target win32-x64,win32-arm64 --exe dist/DeskPals.exe
@@ -728,6 +754,15 @@ jobs:
           }
           $miss = Get-Content "$env:TEMP\desk-pals.log" -Encoding UTF8 | Select-String "lineups.txt missing|art missing"
           if ($miss) { $miss; throw "exe could not read embedded art" }
+      # 公開版 exe：platform＝win-exe；DESKPALS_FAKE_PACKAGED 假裝是 Store 版，看第一次設定第二頁的「開機時自動出現」
+      - name: Store readiness on DeskPals.exe (platform win-exe, Store setup page 2)
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force exe-shots\store | Out-Null
+          $exe = (Resolve-Path dist\DeskPals.exe).Path
+          $env:STORE_FAKE_PACKAGED = "1"
+          node test/desktop-store.js desk-pals-store-exe "$env:RUNNER_TEMP\dps-exe" exe-shots\store public win-exe -- $exe --pipe "{ep}"
+          if ($LASTEXITCODE -ne 0) { throw "store test failed (exe)" }
       - name: Smoke-test personal DeskPals-personal.exe (offscreen, all lineups)
         shell: powershell
         run: |
@@ -775,7 +810,9 @@ jobs:
             public-ps1-shots/*.png
             public-ps1-shots/mischief/*.png
             public-ps1-shots/shelf/*.png
+            public-ps1-shots/store/*.png
             exe-shots/*.png
+            exe-shots/store/*.png
             exe-shots/shelf/*.png
             exe-shots/woban-*/*.png
       # 個人版的測試結果（含同人角色的截圖）：只給自己看，不會附到 Release

@@ -199,6 +199,7 @@ extension World {
         LoadState()
         LoadFeatures()
         MisStart()   // 搗蛋（59_mischief.swift）
+        StatsStart()   // 匿名回報：滿 7 天那次（61_stats.swift；個人版什麼都不做）
         LoadMode()
         SeasonNow = Season()
         Night = NightNow()
@@ -1372,7 +1373,7 @@ extension World {
                 }
             }
         case "quit": QuitAll()
-        default: if !MisMsg(c, p, line) && !OrigMsg(c, p, line) { StudyMsg(c, p, line) }   // mischief-…（59_mischief.swift）；course／exam／study-…（52_study.swift）
+        default: if !MisMsg(c, p, line) && !OrigMsg(c, p, line) && !StatsMsg(c, p, line) { StudyMsg(c, p, line) }   // mischief-…（59_mischief.swift）；stats-…（61_stats.swift）；course／exam／study-…（52_study.swift）
         }
     }
 
@@ -1437,6 +1438,7 @@ extension World {
         case "setup": if arg == "" { ShowSetup(false) } else if setupForm != nil && !setupForm.IsDisposed { setupForm.Press(arg) }; return
         case "feature": do { let q = arg.components(separatedBy: "="); if q.count == 2 { SetFeat(q[0], q[1] == "1") } }; return
         case "mischief": MisAct(arg); return   // 搗蛋：act mischief cursor|clear|shop|typing|restore|stop（59_mischief.swift）
+        case "stats": StatsAct(arg); return   // 匿名回報的開關：act stats 0|1（61_stats.swift）
         default: break
         }
         if target != nil && arg != "" { target!.Act(a) } else { l.Act(a) }

@@ -11,6 +11,10 @@
   3. 留下來的註解裡如果提到同人角色，那段註解拿掉（只動註解，程式碼一律靠上面的標記）。
   4. 最後用 guard() 掃一遍：任何同人角色的名字、id、口頭禪出現在公開版的原始碼、二進位檔、vsix／msix 裡 → 失敗。
 
+另外公開版有、個人版沒有的：搗蛋全部預設關（第一次打開先說明）、匿名回報（DeskPals.Stats.cs）。匿名回報的 ID 不在原始碼裡：
+產生公開版時，環境變數 GA4_MEASUREMENT_ID＋GA4_API_SECRET 都有的話寫成 extension/desktop/pals/ga4.txt（build.ps1 內嵌進 exe、
+build_vsix.py 放進 vsix、packaging/mac/build_app.sh 放進 .app 的 Resources/pals）；沒有＝這一包不回報。格式不對直接失敗。
+
 用法：
   python -I tools/variant.py public [輸出資料夾]      → 產生公開版的 extension/（預設 build/public/extension），順便 guard
   python -I tools/variant.py guard 路徑…              → 掃檔案／資料夾／.vsix／.msix／.zip／.exe（找到就 exit 1）
@@ -237,6 +241,9 @@ def to_public(text, path, linemap=None):
 
 
 # ---------------------------------------------------------------- package.json
+# 公開版：搗蛋四個全部預設關（VS Code 設定也一樣）
+PUBLIC_MISCHIEF_OFF = ("deskPals.mischief.clearAtOffWork", "deskPals.mischief.shoppingPolice")
+
 PUBLIC_PKG_TEXT = {
     "description": "右下角一個公仔櫃（或一顆蛋），住著原創的「續命小隊」（躲躲、沒電、刺刺）或「窩伴小世界」（翻翻、破破、綿綿）；也可以把你家的貓狗（或任何照片）變成桌面公仔。"
                    "選一隻出來，他就在整個螢幕陪你：散步、爬視窗、催你休息、提醒開會和死線。",
@@ -259,7 +266,34 @@ def public_package_json(text):
         if p["default"] in drop:
             raise SystemExit(f"package.json: {key} default {p['default']} is a fan value")
     props["deskPals.lineup"]["description"] = props["deskPals.lineup"]["description"]
+    for key in PUBLIC_MISCHIEF_OFF:
+        props[key]["default"] = False
+        props[key]["description"] += "預設關（要玩的人自己開）。"
     return json.dumps(pkg, ensure_ascii=False, indent="\t") + "\n"
+
+
+# ---------------------------------------------------------------- 匿名回報的 ID（打包時注入）
+GA4_ID_RE = re.compile(r"^G-[A-Z0-9]{4,20}$")
+GA4_SECRET_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+
+
+def write_ga4(desktop_dir):
+    """GA4_MEASUREMENT_ID／GA4_API_SECRET → <desktop>/pals/ga4.txt。兩個都有才寫；只有一個、格式不對＝失敗。回傳有沒有寫。"""
+    mid = (os.environ.get("GA4_MEASUREMENT_ID") or "").strip()
+    secret = (os.environ.get("GA4_API_SECRET") or "").strip()
+    out = os.path.join(desktop_dir, "pals", "ga4.txt")
+    if os.path.exists(out):
+        os.remove(out)
+    if not mid and not secret:
+        print("GA4: GA4_MEASUREMENT_ID / GA4_API_SECRET not set — anonymous stats disabled in this build")
+        return False
+    if not GA4_ID_RE.match(mid) or not GA4_SECRET_RE.match(secret):
+        raise SystemExit("GA4: GA4_MEASUREMENT_ID must look like G-XXXXXXX and GA4_API_SECRET must be set (letters, digits, _ or -)")
+    ver = json.load(open(os.path.join(ROOT, "extension", "package.json"), encoding="utf-8"))["version"]
+    with open(out, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(f"measurement_id={mid}\napi_secret={secret}\nversion={ver}\n")
+    print(f"GA4: anonymous stats enabled ({mid[:4]}…{mid[-2:]})")
+    return True
 
 
 # ---------------------------------------------------------------- 產生公開版
@@ -303,6 +337,7 @@ def build_public(out_ext):
     swift = os.path.join(out_ext, "desktop", "DeskPals.swift")
     with open(swift, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(public_swift())
+    write_ga4(os.path.join(out_ext, "desktop"))
     return out_ext
 
 

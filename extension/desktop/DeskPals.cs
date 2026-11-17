@@ -26,6 +26,13 @@ namespace DeskPals
         public static readonly bool Offscreen = Environment.GetEnvironmentVariable("DESKPALS_OFFSCREEN") == "1";
         // 測試用：離屏＋DESKPALS_ISOLATED=1 時不看真的視窗（不跳上你的視窗、你全螢幕也不會躲起來），截圖比較乾淨
         public static readonly bool Isolated = Offscreen && Environment.GetEnvironmentVariable("DESKPALS_ISOLATED") == "1";
+        // 公開版（上架、公開下載）＝true：搗蛋全部預設關＋第一次打開先說明、匿名回報（DeskPals.Stats.cs）。個人版維持原樣、完全不回報
+        public static readonly bool Public = false;   // 個人版   //@fan
+        // <public> public static readonly bool Public = true;
+        // Microsoft Store（MSIX）版才有（DeskPals.Main.cs 的 Packaged）：開機自動啟動（StartupTask）現況／開關、這次開起來要跟你說的一句話
+        public static Func<int> StartupState;         // -1 還不知道、0 關、1 開、2 你在 Windows 設定裡關掉了（要去那邊開）
+        public static Action<bool> StartupEnable;
+        public static string StartNote;
 
         // 診斷用：不受行數上限限制
         public static void LogAlways(string s)
@@ -4080,6 +4087,7 @@ namespace DeskPals
             LoadState();
             LoadFeatures();
             MisStart();   // 搗蛋（DeskPals.Mischief.cs）
+            StatsStart();   // 匿名回報：滿 7 天那次（DeskPals.Stats.cs；個人版什麼都不做）
             LoadMode();
             SeasonNow = Season();
             Night = NightNow();
@@ -4127,6 +4135,7 @@ namespace DeskPals
             timer.Tick += delegate { Tick(); };
             timer.Start();
             if (!File.Exists(FilePath("profile.txt"))) Later(1.2, delegate { ShowSetup(true); });   // 第一次：設定視窗（做一隻自己的或選一櫃、擺法）
+            if (App.StartNote != null) { string note = App.StartNote; App.StartNote = null; Later(6, delegate { Lead().Say(note, 6); }); }   // Store 版：舊的開機捷徑換成 Store 的開機啟動
             App.Log("started pipe=" + pipeName + " lineup=" + lineup + " out=" + string.Join(",", outIds.ToArray()) + " data=" + DataDir);
         }
 
@@ -5290,7 +5299,7 @@ namespace DeskPals
                     }
                     break;
                 case "quit": QuitAll(); break;
-                default: if (!MisMsg(c, p, line) && !OrigMsg(c, p, line)) StudyMsg(c, p, line); break;   // mischief-…（DeskPals.Mischief.cs）；course／exam／study-…（DeskPals.Study.cs）
+                default: if (!MisMsg(c, p, line) && !OrigMsg(c, p, line) && !StatsMsg(c, p, line)) StudyMsg(c, p, line); break;   // mischief-…（DeskPals.Mischief.cs）；stats-…（DeskPals.Stats.cs）；course／exam／study-…（DeskPals.Study.cs）
             }
         }
 
@@ -5352,6 +5361,7 @@ namespace DeskPals
                 case "setup": if (arg == "") ShowSetup(false); else if (setupForm != null && !setupForm.IsDisposed) setupForm.Press(arg); return;
                 case "feature": { string[] q = arg.Split('='); if (q.Length == 2) SetFeat(q[0], q[1] == "1"); } return;
                 case "mischief": MisAct(arg); return;   // 搗蛋：act mischief cursor|clear|shop|typing|restore|stop（DeskPals.Mischief.cs）
+                case "stats": StatsAct(arg); return;   // 匿名回報的開關：act stats 0|1（DeskPals.Stats.cs）
             }
             if (target != null && arg != "") target.Act(a); else l.Act(a);
         }
@@ -6223,6 +6233,7 @@ namespace DeskPals
                 if (flowerBub != null && flowerBub.VVisible) flowerBub.PaintTo(g);   //@fan
                 if (flash != null && flash.VVisible) flash.PaintTo(g);
                 if (setupForm != null && !setupForm.IsDisposed && setupForm.VVisible) setupForm.PaintTo(g);
+                MisSnapAsk(g);   // 搗蛋第一次打開的說明（公開版）
                 StudySnap(g);
                 CuSnap(g);
                 if (pmenu != null && pmenu.VVisible) pmenu.PaintTo(g);
@@ -7946,6 +7957,8 @@ namespace DeskPals
                 m.Items.Add(mi);
             }
             MisHouseMenu(m);  // 搗蛋的開關、把推走的視窗叫回來（DeskPals.Mischief.cs）
+            StatsHouseMenu(m);   // 匿名回報的開關（公開版、有 ID 才有；DeskPals.Stats.cs）
+            StartupHouseMenu(m);   // 開機自動出現（只有 Microsoft Store 版）
             m.Items.Add(new ToolStripSeparator());
             ToolStripMenuItem help = new ToolStripMenuItem("小幫手（專注、安靜、提醒）");
             AddHelpers(help.DropDownItems);
@@ -7971,6 +7984,24 @@ namespace DeskPals
             m.Items.Add(new ToolStripSeparator());
             m.Items.Add("收工（關掉 Desk Pals）", null, delegate { QuitAll(); });
             ShowMenu(m, "公仔小屋", true, at);
+        }
+
+        // Microsoft Store 版：開機自動出現（StartupTask）。在 Windows 設定裡關掉的，要回那邊才開得回來
+        void StartupHouseMenu(ContextMenuStrip m)
+        {
+            if (App.StartupEnable == null || App.StartupState == null) return;
+            int st = App.StartupState();
+            ToolStripMenuItem mi = new ToolStripMenuItem("開機時自動出現");
+            mi.CheckOnClick = true;
+            mi.Checked = st == 1;
+            mi.Click += delegate
+            {
+                if (App.StartupState() == 2) { Lead().Say("開機啟動在 Windows「設定 → 應用程式 → 啟動」被關掉了，要從那裡打開喔", 5); return; }
+                bool on = App.StartupState() != 1;
+                App.StartupEnable(on);
+                Lead().Say(on ? "好～開機時我會自動出現" : "好～開機時不自動出現了", 2);
+            };
+            m.Items.Add(mi);
         }
 
         // 測試用：act menu pet｜house（開在公仔／蛋旁邊，不看游標）
@@ -8006,6 +8037,7 @@ namespace DeskPals
         // 設定好了：馬上套用（不用重開）
         public void ApplySetup(string lu, bool single, string pet, bool first)
         {
+            bool firstPick = first && !File.Exists(FilePath("profile.txt"));   // 真的是第一次設定（匿名回報只算這一次）
             WriteText("profile.txt", "done");
             lu = Pal.NormLineup(lu);
             bool wasSingle = Single;
@@ -8013,6 +8045,7 @@ namespace DeskPals
             singleId = single ? pet : "";
             WriteText("mode.txt", single ? "single " + pet : "shelf");
             App.Log("setup lineup=" + lu + " mode=" + (single ? "single " + pet : "shelf"));
+            if (firstPick) StatsPicked(lu);   // 匿名回報 lineup_pick（公開版；DeskPals.Stats.cs）
             if (single)
             {
                 if (!shelf.Collapsed) { shelf.Collapsed = true; WriteText("shelf-state.txt", "egg"); }
@@ -8519,7 +8552,7 @@ namespace DeskPals
     // 全部自己畫（木框＋大按鈕），點哪裡自己算。第一次開：兩櫃都不先選（左右順序隨機，避免誰在左邊比較多人選），選了哪櫃只記在本機 log。
     class SetupForm : Form
     {
-        class Btn { public string Id, Text, Sub, Note; public Rectangle R; public int Kind; public bool On, Enabled = true; }   // Kind：0 大卡片 1 公仔小卡 2 普通按鈕 3 主要按鈕
+        class Btn { public string Id, Text, Sub, Note; public Rectangle R; public int Kind; public bool On, Enabled = true; }   // Kind：0 大卡片 1 公仔小卡 2 普通按鈕 3 主要按鈕 4 勾選
         readonly World w;
         readonly bool first;
         readonly double d;
@@ -8528,6 +8561,10 @@ namespace DeskPals
         string lu, mode, pet;
         readonly List<Btn> btns = new List<Btn>();
         string hoverId = "";
+        readonly bool statsNote;                 // 第一頁最下面一行：匿名回報說明（公開版、有 ID、第一次）
+        readonly bool autoBox;                   // 第二頁：「開機時自動出現」勾選（只有 Microsoft Store 版、第一次）
+        bool autoOn = true;
+        public const string StatsLine = "匿名回報你選了哪一櫃，幫我們決定下一櫃做什麼（小屋選單裡可以關）";
         readonly Font titleF, qF, bigF, subF, btnF;
         readonly Dictionary<string, Bitmap> shelfPics = new Dictionary<string, Bitmap>();
         readonly Dictionary<string, Bitmap> petPics = new Dictionary<string, Bitmap>();
@@ -8589,7 +8626,10 @@ namespace DeskPals
             bigF = new Font("Microsoft JhengHei UI", 13f, FontStyle.Bold);
             subF = new Font("Microsoft JhengHei UI", 9f, FontStyle.Bold);
             btnF = new Font("Microsoft JhengHei UI", 11f, FontStyle.Bold);
-            ClientSize = new Size(Sc(620), Sc(MoreLineups().Length > 0 ? 720 : 590));
+            statsNote = first && Stats.Available;
+            autoBox = first && App.StartupEnable != null;
+            if (autoBox && App.StartupState != null) { int st = App.StartupState(); autoOn = st != 0 && st != 2; }
+            ClientSize = new Size(Sc(620), Sc(MoreLineups().Length > 0 ? 720 : 590) + (statsNote ? Sc(26) : 0));
             KeyPreview = true;
             KeyDown += delegate(object s, KeyEventArgs e) { if (e.KeyCode == Keys.Escape) Close(); };
             LayoutBtns();
@@ -8636,7 +8676,7 @@ namespace DeskPals
         void LayoutBtns()
         {
             btns.Clear();
-            int W0 = ClientSize.Width, H0 = ClientSize.Height, top = Sc(154), bottom = H0 - Sc(72);
+            int W0 = ClientSize.Width, H0 = ClientSize.Height, top = Sc(154), bottom = H0 - Sc(72) - (statsNote ? Sc(26) : 0);
             if (step == 0)
             {
                 // 主打：兩櫃原創大大的二選一；下面：用自己的照片做一隻、匯入朋友的公仔；（個人版、做過公仔）再一排其他櫃
@@ -8684,6 +8724,7 @@ namespace DeskPals
                 }
             }
             int by = H0 - Sc(64), bh = Sc(44);
+            if (step == 1 && autoBox) Add("autostart", "開機時自動出現", "", new Rectangle((W0 - Sc(250)) / 2, by - Sc(44), Sc(250), Sc(30)), 4, autoOn);   // Store 版：看得到、可以不要
             if (step > 0) Add("back", "上一步", "", new Rectangle(Sc(30), by, Sc(130), bh), 2, false);
             else if (first) Add("skip", "以後再說", "", new Rectangle(Sc(30), by, Sc(130), bh), 2, false);
             Btn nx = Add("next", step < 1 ? "下一步" : "完成！", "", new Rectangle(W0 - Sc(30) - Sc(160), by, Sc(160), bh), 3, false);
@@ -8705,7 +8746,7 @@ namespace DeskPals
         public string Info()
         {
             System.Text.StringBuilder sb = new System.Text.StringBuilder();
-            sb.Append("setup step=" + step + " first=" + (first ? 1 : 0) + " lu=" + (lu == "" ? "-" : lu) + " mode=" + mode + " w=" + ClientSize.Width + " h=" + ClientSize.Height + " featured=" + string.Join(",", featured) + "\n");
+            sb.Append("setup step=" + step + " first=" + (first ? 1 : 0) + " lu=" + (lu == "" ? "-" : lu) + " mode=" + mode + " w=" + ClientSize.Width + " h=" + ClientSize.Height + " featured=" + string.Join(",", featured) + " note=" + (statsNote ? 1 : 0) + "\n");
             foreach (Btn b in btns) sb.Append("btn " + b.Id + " " + b.R.X + " " + b.R.Y + " " + b.R.Width + " " + b.R.Height + " " + (b.On ? 1 : 0) + " " + (b.Enabled ? 1 : 0) + "\n");
             return sb.ToString();
         }
@@ -8722,13 +8763,15 @@ namespace DeskPals
             else if (id == "mode:shelf") mode = "shelf";
             else if (id == "mode:single") { mode = "single"; if (!InLineup(pet)) pet = Pal.LineupIds(lu)[0]; }
             else if (id.StartsWith("pet:")) { pet = id.Substring(4); mode = "single"; }
+            else if (id == "autostart") autoOn = !autoOn;
             else if (id == "back") { if (step > 0) step--; }
             else if (id == "next")
             {
                 if (step < 1) step++;
                 else
                 {
-                    if (first) App.LogAlways("setup: first-run pick " + lu + " (" + mode + ", order " + string.Join(",", featured) + ")");   // 只記在本機 log，不回報
+                    if (first) App.LogAlways("setup: first-run pick " + lu + " (" + mode + ", order " + string.Join(",", featured) + ")");   // 本機 log；公開版另外匿名回報選了哪一櫃（DeskPals.Stats.cs）
+                    if (autoBox) App.StartupEnable(autoOn);   // Store 版：沒勾＝關掉開機啟動
                     w.ApplySetup(lu, mode == "single", pet, first); Close(); return;
                 }
             }
@@ -8778,6 +8821,7 @@ namespace DeskPals
             {
                 Btn mk = Find("make");
                 if (mk != null && MoreLineups().Length > 0) TextRenderer.DrawText(g, "其他櫃：", btnF, new Rectangle(Sc(32), mk.R.Bottom + Sc(6), Sc(300), Sc(26)), Pix.TextC, Pix.LeftMid);
+                if (statsNote) TextRenderer.DrawText(g, StatsLine, subF, new Rectangle(Sc(30), H0 - Sc(64) - Sc(28), W0 - Sc(60), Sc(22)), Pix.C(0x6A5A48), Pix.Mid);
             }
             if (step == 1 && mode == "single")
             {
@@ -8809,6 +8853,16 @@ namespace DeskPals
         {
             Rectangle r = b.R;
             bool hot = b.Id == hoverId && b.Enabled;
+            if (b.Kind == 4)
+            {
+                // 勾選：像素方框（勾了是綠底白勾）＋字
+                int s = 9 * U, bx = r.X + Sc(6), by2 = r.Y + (r.Height - s) / 2;
+                Pix.Round(g, Pix.Ink, bx, by2, s, s, U);
+                Pix.Box(g, b.On ? Pix.C(0x5FB04A) : (hot ? Pix.C(0xFFF3D6) : Pix.C(0xFFFDF7)), bx + U, by2 + U, s - 2 * U, s - 2 * U);
+                if (b.On) Pix.Mono(g, Pix.CHECK, Color.White, bx + 2 * U, by2 + 2 * U, U);
+                TextRenderer.DrawText(g, b.Text, btnF, new Rectangle(bx + s + Sc(10), r.Y, r.Right - bx - s - Sc(10), r.Height), Pix.TextC, Pix.LeftMid);
+                return;
+            }
             if (b.Kind >= 2)
             {
                 // 下面的按鈕：有厚度的像素按鈕（主要按鈕是蜂蜜色）

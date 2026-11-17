@@ -409,14 +409,23 @@ class Desktop {
 
 	// 有裝獨立版（Windows 安裝程式／Microsoft Store、Mac 的 Desk Pals.app）嗎？有的話它寫了 standalone.json：
 	// 這邊就不再自己編一份、不建開機啟動，只負責連上它（沒開就叫它起來）。檔案在、程式不在了（被刪掉）＝當作沒裝。
+	// Microsoft Store 版（MSIX，檔案系統被虛擬化）寫的 standalone.json 通常只有它自己看得到：改看它的執行別名
+	// %LOCALAPPDATA%\Microsoft\WindowsApps\DeskPals.exe（AppxManifest 的 AppExecutionAlias；裝了 Store 版才有）。
 	standalone() {
+		const exists = (target) => {
+			try { fs.lstatSync(target); } catch (e) { if (e.code === "ENOENT" || e.code === "ENOTDIR") return false; }   // Store 版的 WindowsApps 捷徑 stat 會報別的錯：算在
+			return true;
+		};
 		try {
 			const j = JSON.parse(fs.readFileSync(path.join(this.home, "standalone.json"), "utf8").replace(/^\uFEFF/, ""));
 			const target = this.win ? j.exe : j.app;
-			if (!target) return null;
-			try { fs.lstatSync(target); } catch (e) { if (e.code === "ENOENT" || e.code === "ENOTDIR") return null; }   // Store 版的 WindowsApps 捷徑 stat 會報別的錯：算在
-			return j;
-		} catch (e) { return null; }
+			if (target && exists(target)) return j;
+		} catch (e) {}
+		if (this.win) {
+			const alias = path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "Microsoft", "WindowsApps", "DeskPals.exe");
+			if (exists(alias)) return { kind: "msix", exe: alias };
+		}
+		return null;
 	}
 
 	// 桌面那邊收工了（使用者按的、或獨立版安裝／升級時先關掉舊的）：之後獨立版又開起來就自動接回去（不會自己去開它）

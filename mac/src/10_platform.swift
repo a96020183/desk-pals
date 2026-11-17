@@ -14,6 +14,10 @@ enum App {
     static let Offscreen = ProcessInfo.processInfo.environment["DESKPALS_OFFSCREEN"] == "1"
     // 測試用：離屏＋DESKPALS_ISOLATED=1 時不看真的視窗（不跳上你的視窗、你全螢幕也不會躲起來），截圖比較乾淨
     static let Isolated = Offscreen && ProcessInfo.processInfo.environment["DESKPALS_ISOLATED"] == "1"
+    // 公開版（上架、公開下載）＝true：搗蛋全部預設關＋第一次打開先說明、匿名回報（61_stats.swift）。個人版維持原樣、完全不回報
+    static let Public = false   // 個人版   //@fan
+    // <public> static let Public = true
+    // mac: C# 的 StartupState／StartupEnable／StartNote 是 Microsoft Store（MSIX）版的開機啟動，Mac 沒有（.app 用 LaunchAgent，95_standalone.swift）
 
     // mac: ~/Library/Logs/desk-pals.log
     static let LogPath: String = (NSHomeDirectory() as NSString).appendingPathComponent("Library/Logs/desk-pals.log")

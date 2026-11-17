@@ -7,6 +7,8 @@
 // DeskPals.exe --replace [...]                                 先叫開著的那個收工（例如 VS Code 擴充套件編的那份），再自己開起來
 // DeskPals.exe --autostart <捷徑.lnk> [--pipe <名稱>]           開機捷徑改成指著這支 exe（VS Code 擴充套件用；已經是了就不動），不會開起來
 // 預設 pipe＝desk-pals-<帳號>，資料夾 %LOCALAPPDATA%\DeskPals、紀錄 %TEMP%\desk-pals.log —— 跟 VS Code 擴充套件同一套，兩邊互通。
+// （Microsoft Store 版的資料夾在 MSIX 裡會被虛擬化，見下面 Packaged 的說明。）
+// build.ps1 編的時候參考 Windows 內建的 WinMetadata（Store 版的開機啟動 StartupTask）；找不到就定義 NO_WINRT，Store 版不顯示開機啟動的勾選。
 using System;
 using System.IO;
 using System.IO.Pipes;
@@ -44,11 +46,23 @@ namespace DeskPals
             else if (Send(pipe, "act show")) return 0;   // 已經開著：叫它出來，這個就不用開了
 
             Packaged.Setup(pipe);
+            Stats.Platform = Packaged.IsPackaged() ? "win-msix" : (FromVsCode() ? "win-vscode" : "win-exe");   // 匿名回報的平台（公開版；DeskPals.Stats.cs）
             App.Run(pipe, pet, lineup);
             return 0;
         }
 
         static bool Safe(string s) { return s != "" && Regex.IsMatch(s, "^[A-Za-z0-9_.-]+$"); }
+
+        // VS Code 擴充套件放的那支（%LOCALAPPDATA%\DeskPals\app\DeskPals.exe）
+        static bool FromVsCode()
+        {
+            try
+            {
+                string dir = Path.GetDirectoryName(Path.GetFullPath(Assembly.GetExecutingAssembly().Location)).TrimEnd('\\');
+                return dir.EndsWith("\\DeskPals\\app", StringComparison.OrdinalIgnoreCase);
+            }
+            catch { return false; }
+        }
 
         // 跟 VS Code 擴充套件、claude-hook.js 同一個名字：desk-pals-<帳號（非英數字換成 _）>
         public static string DefaultPipe()
@@ -193,8 +207,14 @@ namespace DeskPals
         }
     }
 
-    // Microsoft Store（MSIX）版：開機啟動交給 StartupTask，所以把 VS Code 擴充套件的開機捷徑拿掉（不然開機會先跑到舊的那份）；
-    // 再留一個 standalone.json 讓擴充套件知道「裝了獨立版」，它就不會自己編一份、也不會再建開機捷徑。
+    // Microsoft Store（MSIX）版：
+    // - 開機啟動交給 StartupTask（AppxManifest 預設開；第一次設定第二頁「開機時自動出現」看得到、可以不要，小屋選單也能開關）。
+    //   「啟動」資料夾裡如果有自家的舊開機捷徑（指著 DeskPals.exe，或 powershell.exe＋desk-pals.ps1）就拿掉，並用泡泡告訴你；別人的捷徑不動。
+    // - 沒有宣告 unvirtualizedResources（Store 很少核准）：%LOCALAPPDATA% 底下「新建」的檔案會被 Windows 轉到 Store 版自己的私人資料夾
+    //   （解除安裝時一起清掉）；本來就存在的檔案（VS Code 擴充套件那份 %LOCALAPPDATA%\DeskPals 裡已經有的設定）讀得到、改了會直接改原檔。
+    //   所以這裡寫的 standalone.json、claude-hook.js 通常只有 Store 版自己看得到 —— VS Code 擴充套件改看 Store 版的執行別名
+    //   %LOCALAPPDATA%\Microsoft\WindowsApps\DeskPals.exe 來判斷「裝了 Store 版」（extension.js 的 standalone()），一樣只連過去、不另外開一份。
+    //   Claude Code hooks 指著的 %LOCALAPPDATA%\DeskPals\claude-hook.js 要靠 VS Code 擴充套件放（Store 版只有它自己看得到這份）。
     // （安裝程式版的 standalone.json 由安裝程式寫、解除安裝時刪掉。）
     static class Packaged
     {
@@ -211,9 +231,24 @@ namespace DeskPals
             catch { return false; }   // Windows 7／8.0 沒有這個 API
         }
 
+        static volatile int startup = -1;   // App.StartupState 的快取：-1 還不知道、0 關、1 開、2 在 Windows 設定裡被關掉
+
         public static void Setup(string pipe)
         {
+            // 離屏測試：DESKPALS_FAKE_PACKAGED=1 假裝是 Store 版（只有開機啟動的勾選，什麼都不真的改）
+            if (App.Offscreen && Environment.GetEnvironmentVariable("DESKPALS_FAKE_PACKAGED") == "1")
+            {
+                startup = 1;
+                App.StartupState = delegate { return startup; };
+                App.StartupEnable = delegate(bool on) { startup = on ? 1 : 0; App.Log("msix(fake): startup " + (on ? "on" : "off")); };
+                return;
+            }
             if (!IsPackaged()) return;   // 本機測試、安裝程式版都不是 packaged
+#if !NO_WINRT
+            App.StartupState = delegate { return startup; };
+            App.StartupEnable = delegate(bool on) { ThreadPool.QueueUserWorkItem(delegate { StartupSet(on); }); };
+            ThreadPool.QueueUserWorkItem(delegate { StartupRead(); });
+#endif
             try
             {
                 string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -228,9 +263,79 @@ namespace DeskPals
                     if (File.Exists(from) && (!File.Exists(to) || File.ReadAllText(to) != File.ReadAllText(from))) File.Copy(from, to, true);
                 }
                 string lnk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "公仔櫃 Desk Pals.lnk");
-                if (File.Exists(lnk)) { File.Delete(lnk); App.Log("msix: removed startup shortcut (StartupTask takes over)"); }
+                if (File.Exists(lnk))
+                {
+                    if (OurShortcut(lnk))
+                    {
+                        File.Delete(lnk);
+                        App.Log("msix: removed our old startup shortcut (StartupTask takes over)");
+                        App.StartNote = "我改用 Microsoft Store 版的開機啟動了，舊的開機捷徑已經拿掉（要關：小屋選單「開機時自動出現」）";
+                    }
+                    else App.Log("msix: startup shortcut is not ours, left alone");
+                }
             }
             catch (Exception ex) { App.Log("msix setup: " + ex.Message); }
         }
+
+        // 捷徑指著自家的嗎：DeskPals.exe（安裝程式版、VS Code 擴充套件放的那支），或 powershell.exe ＋ desk-pals.ps1（舊的 VS Code 擴充套件）
+        static bool OurShortcut(string lnk)
+        {
+            try
+            {
+                Type t = Type.GetTypeFromProgID("WScript.Shell");
+                object sh = Activator.CreateInstance(t);
+                try
+                {
+                    object s = t.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, sh, new object[] { lnk });
+                    Type st = s.GetType();
+                    string target = (string)st.InvokeMember("TargetPath", BindingFlags.GetProperty, null, s, null) ?? "";
+                    string args = (string)st.InvokeMember("Arguments", BindingFlags.GetProperty, null, s, null) ?? "";
+                    Marshal.FinalReleaseComObject(s);
+                    string exe = Path.GetFileName(target);
+                    if (string.Equals(exe, "DeskPals.exe", StringComparison.OrdinalIgnoreCase)) return true;
+                    return string.Equals(exe, "powershell.exe", StringComparison.OrdinalIgnoreCase) && args.IndexOf("desk-pals.ps1", StringComparison.OrdinalIgnoreCase) >= 0;
+                }
+                finally { Marshal.FinalReleaseComObject(sh); }
+            }
+            catch (Exception ex) { App.Log("msix: read shortcut " + ex.Message); return false; }
+        }
+
+#if !NO_WINRT
+        // ---- StartupTask（WinRT，Windows 內建）：都在背景執行緒做，不卡畫面 ----
+        static void StartupRead()
+        {
+            try { startup = Code(Task().State); App.Log("msix: startup state " + startup); }
+            catch (Exception ex) { App.Log("msix: startup state " + ex.Message); }
+        }
+        static void StartupSet(bool on)
+        {
+            try
+            {
+                global::Windows.ApplicationModel.StartupTask t = Task();
+                if (!on) t.Disable();
+                else if (Code(t.State) == 0) Wait(t.RequestEnableAsync());
+                startup = Code(t.State);
+                App.Log("msix: startup " + (on ? "enable" : "disable") + " -> " + startup);
+            }
+            catch (Exception ex) { App.Log("msix: startup set " + ex.Message); }
+        }
+        static global::Windows.ApplicationModel.StartupTask Task() { return Wait(global::Windows.ApplicationModel.StartupTask.GetAsync("DeskPalsStartup")); }   // AppxManifest 的 TaskId
+        static T Wait<T>(global::Windows.Foundation.IAsyncOperation<T> op)
+        {
+            for (int i = 0; i < 500 && op.Status == global::Windows.Foundation.AsyncStatus.Started; i++) Thread.Sleep(10);
+            return op.GetResults();
+        }
+        static int Code(global::Windows.ApplicationModel.StartupTaskState s)
+        {
+            switch (s)
+            {
+                case global::Windows.ApplicationModel.StartupTaskState.Enabled:
+                case global::Windows.ApplicationModel.StartupTaskState.EnabledByPolicy: return 1;
+                case global::Windows.ApplicationModel.StartupTaskState.DisabledByUser:
+                case global::Windows.ApplicationModel.StartupTaskState.DisabledByPolicy: return 2;
+                default: return 0;
+            }
+        }
+#endif
     }
 }
