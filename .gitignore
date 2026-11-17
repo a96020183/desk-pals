@@ -8,6 +8,7 @@ art/
 /extension.vsixmanifest
 /[[]Content_Types].xml
 dist/
+dist-personal/
 **/desktop/DeskPals
 build/
 __pycache__/

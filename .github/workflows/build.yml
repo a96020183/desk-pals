@@ -600,11 +600,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "fresh install test (personal) failed" }
           node .github/legacy-upgrade.js fresh desk-pals-lg-c "$T\none-c" "$T\Startup-c" "$T\data-c" spidey-pet-lg-c -- powershell.exe -NoProfile -ExecutionPolicy Bypass -File $pub -PipeName desk-pals-lg-c
           if ($LASTEXITCODE -ne 0) { throw "fresh install test (public) failed" }
-      - name: Build vsix (public → dist, personal → dist-personal)
-        run: |
-          python -I build_vsix.py --public
-          python -I build_vsix.py --personal --out dist-personal
-
       # ---------- standalone DeskPals.exe / installer / MSIX ----------
       - name: Tools (Pillow, Inno Setup)
         shell: powershell
@@ -632,10 +627,31 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "build.ps1 (personal) failed" }
           if ($pfx) { Remove-Item $pfx }
           Get-ChildItem dist, dist-personal | Format-Table Directory, Name, Length
+      # vsix 要在 exe 編好之後才打：通用版（Mac 用，不帶 exe）＋ Windows 專用版（TargetPlatform win32-x64／arm64，附剛編好的 DeskPals.exe：
+      # 公開版附公開版的 exe、個人版附個人版的；擴充套件直接執行它，不再用 PowerShell 即時編譯）
+      - name: Build vsix (universal + win32 with the bundled DeskPals.exe; public → dist, personal → dist-personal)
+        run: |
+          python -I build_vsix.py --public
+          python -I build_vsix.py --public --target win32-x64,win32-arm64 --exe dist/DeskPals.exe
+          python -I build_vsix.py --personal --out dist-personal
+          python -I build_vsix.py --personal --target win32-x64 --exe dist-personal/DeskPals-personal.exe --out dist-personal
       - name: Fan-content guard on everything that gets published (dist)
         run: |
           python -I tools/variant.py guard dist build/win/DeskPals.all.cs build/win/msix
           python -c "import glob,sys; bad=[f for f in glob.glob('dist/*') if 'personal' in f]; print('personal files in dist:', bad); sys.exit(1 if bad else 0)"
+      # 擴充套件從 Windows 專用的 vsix 啟動：跑的是附上的 exe（放到 %LOCALAPPDATA%\DeskPals\app），不是 powershell.exe。
+      # 假的 vscode 模組＋離屏；LOCALAPPDATA／APPDATA／TEMP 都換成臨時資料夾。PowerShell 版升級上來（舊的開著、舊的開機捷徑）、
+      # exe 改版時舊 exe 還開著（檔案鎖住）、同一版再開、vsix 沒附 exe 時退回 desk-pals.ps1
+      - name: Extension from the win32 vsix runs the bundled DeskPals.exe, not PowerShell (public + personal)
+        shell: powershell
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          foreach ($v in @(@{ n = "pub"; vsix = "dist\desk-pals-*-win32-x64.vsix" }, @{ n = "per"; vsix = "dist-personal\desk-pals-*-win32-x64-personal.vsix" })) {
+            $d = "$env:RUNNER_TEMP\vsix-" + $v.n
+            [IO.Compression.ZipFile]::ExtractToDirectory((Get-ChildItem $v.vsix).FullName, $d)
+            node test/ext-exe.js "$d\extension" ("$env:RUNNER_TEMP\ext-exe-" + $v.n) ("desk-pals-extexe-" + $v.n)
+            if ($LASTEXITCODE -ne 0) { throw ("ext-exe test failed (" + $v.n + ")") }
+          }
       - name: Smoke-test public DeskPals.exe (offscreen) + study tools + share GIF
         shell: powershell
         run: |
@@ -790,7 +806,8 @@ jobs:
           |---|---|
           | \`DeskPals-Setup-$VER.exe\` | Windows 10／11（不用 VS Code）。還沒簽章：SmartScreen 擋下來時按「其他資訊」→「仍要執行」 |
           | \`DeskPals-$VER.dmg\` | macOS 13（Ventura）以後（Apple 晶片、Intel 都可以）。還沒公證：第一次打開請看 DMG 裡的說明 |
-          | \`desk-pals-$VER.vsix\` | VS Code 擴充套件（含 VS Code 才有的功能） |
+          | \`desk-pals-$VER-win32-x64.vsix\` | VS Code 擴充套件，Windows（ARM 的電腦用 \`-win32-arm64\`）。附桌面版 DeskPals.exe |
+          | \`desk-pals-$VER.vsix\` | VS Code 擴充套件，macOS（通用版；Windows 請用上面那個） |
           | \`DeskPals-$VER.msix\` | 給 Microsoft Store 上架用（未簽章，不能直接安裝） |
 
           EOF

@@ -5,6 +5,7 @@
 // DeskPals.exe [--pipe <名稱>] [--pet <id>] [--lineup <櫃>]   開起來（已經開著：叫它出來打招呼，然後結束）
 // DeskPals.exe --quit                                          叫開著的公仔櫃收工（安裝／解除安裝／升級用），等它真的關掉
 // DeskPals.exe --replace [...]                                 先叫開著的那個收工（例如 VS Code 擴充套件編的那份），再自己開起來
+// DeskPals.exe --autostart <捷徑.lnk> [--pipe <名稱>]           開機捷徑改成指著這支 exe（VS Code 擴充套件用；已經是了就不動），不會開起來
 // 預設 pipe＝desk-pals-<帳號>，資料夾 %LOCALAPPDATA%\DeskPals、紀錄 %TEMP%\desk-pals.log —— 跟 VS Code 擴充套件同一套，兩邊互通。
 using System;
 using System.IO;
@@ -22,7 +23,7 @@ namespace DeskPals
         [STAThread]
         static int Main(string[] args)
         {
-            string pipe = DefaultPipe(), pet = "", lineup = "", mode = "run";
+            string pipe = DefaultPipe(), pet = "", lineup = "", mode = "run", lnk = "";
             for (int i = 0; i < args.Length; i++)
             {
                 string a = args[i];
@@ -32,11 +33,13 @@ namespace DeskPals
                 else if (a == "--lineup" && Safe(next)) { lineup = next; i++; }
                 else if (a == "--quit") mode = "quit";
                 else if (a == "--replace") mode = "replace";
+                else if (a == "--autostart" && next.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase) && Path.IsPathRooted(next)) { mode = "autostart"; lnk = next; i++; }
                 else if (a == "--version") { Console.WriteLine(Version()); return 0; }
             }
             App.Log("exe " + Version() + " " + mode + " pipe=" + pipe + " " + Thread.CurrentThread.GetApartmentState());   // STA：剪貼簿（分享短片）要
 
             if (mode == "quit") return QuitRunning(pipe, 15000) ? 0 : 1;
+            if (mode == "autostart") return Autostart.Ensure(lnk, pipe) ? 0 : 1;
             if (mode == "replace") QuitRunning(pipe, 15000);
             else if (Send(pipe, "act show")) return 0;   // 已經開著：叫它出來，這個就不用開了
 
@@ -100,6 +103,46 @@ namespace DeskPals
             }
             App.Log("exe: previous instance did not quit");
             return !Running(pipe);
+        }
+    }
+
+    // VS Code 擴充套件附的 exe（放在 %LOCALAPPDATA%\DeskPals\app）：開機捷徑由 exe 自己建，擴充套件不用再叫 PowerShell。
+    // 舊版擴充套件留下的捷徑（指著 powershell.exe ＋ desk-pals.ps1）同名，直接改成指著這支 exe；資料夾、資料都不動。
+    static class Autostart
+    {
+        public static bool Ensure(string lnk, string pipe)
+        {
+            try
+            {
+                string exe = Path.GetFullPath(Assembly.GetExecutingAssembly().Location);
+                string args = "--pipe " + pipe;
+                Type t = Type.GetTypeFromProgID("WScript.Shell");
+                object sh = Activator.CreateInstance(t);
+                try
+                {
+                    object s = t.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, sh, new object[] { lnk });
+                    Type st = s.GetType();
+                    if (File.Exists(lnk))
+                    {
+                        string have = (string)st.InvokeMember("TargetPath", BindingFlags.GetProperty, null, s, null);
+                        string haveArgs = (string)st.InvokeMember("Arguments", BindingFlags.GetProperty, null, s, null);
+                        if (string.Equals(have, exe, StringComparison.OrdinalIgnoreCase) && haveArgs == args) return true;
+                        App.Log("autostart: " + Path.GetFileName(have) + " -> " + exe);
+                    }
+                    else App.Log("autostart: new " + exe);
+                    Directory.CreateDirectory(Path.GetDirectoryName(lnk));
+                    st.InvokeMember("TargetPath", BindingFlags.SetProperty, null, s, new object[] { exe });
+                    st.InvokeMember("Arguments", BindingFlags.SetProperty, null, s, new object[] { args });
+                    st.InvokeMember("WorkingDirectory", BindingFlags.SetProperty, null, s, new object[] { Path.GetDirectoryName(exe) });
+                    st.InvokeMember("IconLocation", BindingFlags.SetProperty, null, s, new object[] { exe + ",0" });
+                    st.InvokeMember("Description", BindingFlags.SetProperty, null, s, new object[] { "公仔櫃 Desk Pals（整個螢幕的像素公仔）" });
+                    st.InvokeMember("Save", BindingFlags.InvokeMethod, null, s, null);
+                    Marshal.FinalReleaseComObject(s);
+                }
+                finally { Marshal.FinalReleaseComObject(sh); }
+                return true;
+            }
+            catch (Exception ex) { App.Log("autostart: " + ex.Message); return false; }
         }
     }
 

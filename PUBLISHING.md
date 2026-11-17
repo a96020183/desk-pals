@@ -7,7 +7,8 @@
 | `DeskPals-Setup-<版號>.exe`（Windows 安裝程式） | 未簽章 | SmartScreen「Windows 已保護您的電腦」→ 要按「其他資訊 → 仍要執行」 |
 | `DeskPals-<版號>.msix`（Microsoft Store 用） | 未簽章、身分是佔位值 | 不能直接安裝；填好身分後上傳 Partner Center，由 Microsoft 簽 |
 | `DeskPals-<版號>.dmg`（Mac） | ad-hoc 簽章、未公證 | 「無法打開」→ 系統設定「仍要打開」（DMG 裡附了說明） |
-| `desk-pals-<版號>.vsix` | — | — |
+| `desk-pals-<版號>-win32-x64.vsix`、`-win32-arm64.vsix`（Windows，附 `DeskPals.exe`） | exe 跟安裝程式同一支：設了簽章 secret 就是簽過的 | — |
+| `desk-pals-<版號>.vsix`（通用版，Mac 用） | — | — |
 
 下面每一段都是「之後想做再做」：做完把值填進 GitHub，**程式和建置腳本都不用改**，下一次建置就會自動簽章／換上正式身分。
 

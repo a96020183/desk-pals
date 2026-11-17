@@ -34,7 +34,7 @@ FAN_FILES = {
 }
 FAN_IDS = {"spidey", "po", "stitch", "hangyodon", "tinky", "dipsy", "laalaa", "pkred", "pkyellow", "pkblue"}
 FAN_LINEUPS = {"classic", "teletubbies", "pikmin"}
-SKIP_NAMES = {"SpideyDesktop", "DeskPals", ".DS_Store"}   # 編譯產物、雜檔（同 build_vsix.py）
+SKIP_NAMES = {"SpideyDesktop", "DeskPals", "DeskPals.exe", ".DS_Store"}   # 編譯產物、雜檔（同 build_vsix.py；vsix 裡的 DeskPals.exe 由 build_vsix.py --exe 另外放，不從原始碼資料夾帶）
 
 # ---------------------------------------------------------------- guard
 # 同人角色的名字、id、口頭禪、版權方。大小寫不分。
