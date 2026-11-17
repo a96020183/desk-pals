@@ -1034,7 +1034,7 @@ final class ShelfForm: OverlayForm
             // 名牌
             let name = pet == nil ? (i == 0 && Pik ? "★ 休息花" : (Orig ? "＋ 做公仔" : "？")) : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)   //@fan
             // <public> let name = pet == nil ? (Orig ? "＋ 做公仔" : "？") : (i == 0 ? "★ " + pet!.P.Name : pet!.P.Name)
-            DrawPlate(g, plate[i], name, i == 0)
+            DrawPlate(g, plate[i], name ?? "", i == 0)   // mac: P.Name 是 String!，三元運算的結果是 String?
         }
     }
 
