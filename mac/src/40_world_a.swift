@@ -1343,6 +1343,9 @@ extension World {
             for f in World.FeatureList { fb += " " + f[0] + "=" + (Feat(f[0]) ? "1" : "0") }
             let nn: String = NightNow() ? "1" : "0"
             World.Send(c, fb + " nightnow=" + nn + " set=" + featSet.ToArray().joined(separator: ",") + "\nend\n")
+        case "menu-info":   // 測試用：現在開著的像素選單有哪幾列（test/desktop-egg.js）
+            let mt: String = pmenu != nil && !pmenu.Done ? pmenu.Info() : "menu none\n"
+            World.Send(c, mt + "end\n")
         case "mode-info":   // 測試用（test/desktop-egg.js）
             let md: String = Single ? "single " + SinglePet() : "shelf -"
             let col: String = shelf != nil && shelf.Collapsed ? "1" : "0", prof: String = File.Exists(World.FilePath("profile.txt")) ? "1" : "0", hint: String = World.ReadText("egg-hint.txt") == "" ? "0" : "1"

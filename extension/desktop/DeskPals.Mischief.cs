@@ -16,7 +16,7 @@
 //
 // 掛在核心的地方（都只有一行）：Pet.Step → MisStep()、Pet.Watch／Free → MisBusy、Pet.PaintPet → MisDraw()、
 //   World.TickInner → MisTick()、OnMsg 的 default → MisMsg()、Act → "mischief"、Start → MisStart()、QuitAll → MisQuit()、
-//   NoticeClicked → MisClicked()、Feat／SaveFeatures／SetFeat → MisFeatureList、HouseMenu → MisHouseMenu()、
+//   NoticeClicked → MisClicked()、Feat／SaveFeatures／SetFeat → MisFeatureList、HouseMenu → MisHouseMenu()／MisRestoreMenu()、
 //   Snap → MisSnapWins()／MisSnapCursor()。
 // 動畫邏輯跟角色造型分開：演法用現有的狀態（走路、跳、抱、暈、跳舞）；角色專屬的演法、道具在 Pet.MisCharPose／MisPropArt。
 //
@@ -1389,7 +1389,8 @@ namespace DeskPals
         }
 
         // ---------- 小屋選單 ----------
-        void MisHouseMenu(ContextMenuStrip m)
+        // 小屋「娛樂」裡的搗蛋子選單
+        void MisHouseMenu(ToolStripItemCollection items)
         {
             ToolStripMenuItem sub = new ToolStripMenuItem("搗蛋（惡作劇開關）");
             foreach (string[] f in MisFeatureList)
@@ -1410,8 +1411,12 @@ namespace DeskPals
                 gm.DropDownItems.Add(it);
             }
             sub.DropDownItems.Add(gm);
-            m.Items.Add(sub);
-            if (misPushed.Count > 0) m.Items.Add("把推走的視窗叫回來（" + misPushed.Count + " 個）", null, delegate { MisRestore(true); });
+            items.Add(sub);
+        }
+        // 小屋最上層：把推走的視窗叫回來（有推走的才有；要馬上找得到，不放進子選單）
+        void MisRestoreMenu(ToolStripItemCollection items)
+        {
+            if (misPushed.Count > 0) items.Add("把推走的視窗叫回來（" + misPushed.Count + " 個）", null, delegate { MisRestore(true); });
         }
 
         // ---------- 離屏截圖：假視窗、假游標 ----------

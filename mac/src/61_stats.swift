@@ -189,13 +189,13 @@ extension World {
     }
 
     // 小屋的開關（有 ID 的公開版才有）
-    func StatsHouseMenu(_ m: ContextMenuStrip) {
+    func StatsHouseMenu(_ items: ToolStripItemCollection) {
         if !Stats.Available { return }
         let mi = ToolStripMenuItem("匿名回報選了哪一櫃（幫我們決定下一櫃）")
         mi.CheckOnClick = true
         mi.Checked = StatsOn
         mi.Click = { [unowned mi] in self.StatsSet(!self.StatsOn); mi.Checked = self.StatsOn }
-        m.Items.Add(mi)
+        items.Add(mi)
     }
     func StatsSet(_ on: Bool) {
         if !Stats.Available { return }

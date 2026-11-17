@@ -5433,6 +5433,7 @@ namespace DeskPals
                     break;
                 case "shelf-info": Send(c, (shelf == null ? "" : shelf.Info()) + "maker " + (maker != null && !maker.IsDisposed && maker.VVisible ? 1 : 0) + "\nend\n"); break;   // 測試用（test/desktop-shelf.js）
                 case "feat-info": { StringBuilder fb = new StringBuilder("feat"); foreach (string[] f in FeatureList) fb.Append(" " + f[0] + "=" + (Feat(f[0]) ? 1 : 0)); Send(c, fb + " nightnow=" + (NightNow() ? 1 : 0) + " set=" + string.Join(",", featSet.ToArray()) + "\nend\n"); } break;   // 測試用（test/desktop-egg.js）
+                case "menu-info": Send(c, (pmenu != null && !pmenu.Done ? pmenu.Info() : "menu none\n") + "end\n"); break;   // 測試用：現在開著的像素選單有哪幾列（test/desktop-egg.js）
                 case "mode-info": Send(c, "mode " + (Single ? "single" : "shelf") + " " + (Single ? SinglePet() : "-") + " collapsed=" + (shelf != null && shelf.Collapsed ? 1 : 0) + " profile=" + (File.Exists(FilePath("profile.txt")) ? 1 : 0) + " hint=" + (ReadText("egg-hint.txt") == "" ? 0 : 1) + "\nend\n"); break;   // 測試用（test/desktop-egg.js）
                 case "setup-info": Send(c, (setupForm != null && !setupForm.IsDisposed && (setupForm.VVisible || setupForm.Visible) ? setupForm.Info() : "setup none\n") + "end\n"); break;   // 測試用（test/desktop-woban.js）：設定視窗現在有哪些按鈕
                 case "notify":
@@ -8138,31 +8139,23 @@ namespace DeskPals
 
         // ---- 公仔小屋選單：開關＋小幫手＋公仔們 ----
         public void HouseMenu() { HouseMenu(Cursor.Position); }
+        // 最上層只留最常用的（打開／收起櫃子、叫出來、回家），其他照類型分成四個子選單（點一下在選單裡展開，同一層一次開一個）：
+        //   我的公仔：換一櫃（個人版的同人櫃也在這裡）、做公仔、我的公仔、我的櫃放誰、匯入、分享短片、躲起來
+        //   娛樂：串門子、午餐、閒聊、跟著視窗跑、節日、煙火、搗蛋（子選單）
+        //   工作：下班時間、早上點名、沒電連動、喝水提醒、小幫手（專注／安靜／提醒）
+        //   設定：重新設定、讀書小幫手設定（學校行事曆、熬夜）、匿名回報（公開版有 ID 才有）、開機自動出現（Store 版）
+        // 每個項目只出現在一個地方；開關（FeatureList）不在 WorkFeats 裡的都算娛樂，新加的開關不會漏掉。收工在最下面。
+        static readonly string[] WorkFeats = { "night", "rollcall", "bat_link", "wb_water" };
         public void HouseMenu(Point at)
         {
             ContextMenuStrip m = new ContextMenuStrip();
-            m.Items.Add(new ToolStripLabel("開關（打勾＝開著）"));
-            foreach (string[] f in FeatureList)
-            {
-                string key = f[0];
-                ToolStripMenuItem mi = new ToolStripMenuItem(f[1]);
-                mi.CheckOnClick = true;
-                mi.Checked = Feat(key);
-                mi.Click += delegate { SetFeat(key, !Feat(key)); mi.Checked = Feat(key); };
-                m.Items.Add(mi);
-            }
-            MisHouseMenu(m);  // 搗蛋的開關、把推走的視窗叫回來（DeskPals.Mischief.cs）
-            StatsHouseMenu(m);   // 匿名回報的開關（公開版、有 ID 才有；DeskPals.Stats.cs）
-            StartupHouseMenu(m);   // 開機自動出現（只有 Microsoft Store 版）
-            m.Items.Add(new ToolStripSeparator());
-            ToolStripMenuItem help = new ToolStripMenuItem("小幫手（專注、安靜、提醒）");
-            AddHelpers(help.DropDownItems);
-            m.Items.Add(help);
-            m.Items.Add(new ToolStripSeparator());
-            m.Items.Add(new ToolStripLabel(Single ? "我的公仔" : "公仔們"));
             if (!Single) m.Items.Add(shelf.Collapsed ? "打開公仔櫃" : MenuFold, null, delegate { ToggleEgg(!shelf.Collapsed); });
             m.Items.Add(Single ? "叫" + Get(SinglePet()).P.Name + "出來" : "全部出來", null, delegate { AllOut(); });
             m.Items.Add(Single ? "回" + MiniName + "裡" : "全部回家", null, delegate { AllHome(); });
+            MisRestoreMenu(m.Items);   // 把推走的視窗叫回來（有推走的才有；DeskPals.Mischief.cs）
+            m.Items.Add(new ToolStripSeparator());
+
+            ToolStripMenuItem mine = new ToolStripMenuItem("我的公仔");
             ToolStripMenuItem sw = new ToolStripMenuItem("換一櫃");
             foreach (string lu in Pal.LineupsNow())
             {
@@ -8171,18 +8164,47 @@ namespace DeskPals
                 li.Checked = lu == lineup;
                 sw.DropDownItems.Add(li);
             }
-            m.Items.Add(sw);
-            m.Items.Add("重新設定…", null, delegate { ShowSetup(false); });
-            m.Items.Add("讀書小幫手設定（學校行事曆、熬夜）…", null, delegate { ShowStudySettings(); });
-            m.Items.Add("躲起來（Ctrl+Alt+S）", null, delegate { ToggleHide(); });
-            CuHouseMenu(m);   // 自己做的公仔、分享短片（DeskPals.Custom.cs）
+            mine.DropDownItems.Add(sw);
+            CuHouseMenu(mine.DropDownItems);   // 做公仔、我的公仔、我的櫃放誰、匯入、分享短片（DeskPals.Custom.cs）
+            mine.DropDownItems.Add("躲起來（Ctrl+Alt+S）", null, delegate { ToggleHide(); });
+            m.Items.Add(mine);
+
+            ToolStripMenuItem fun = new ToolStripMenuItem("娛樂");
+            foreach (string[] f in FeatureList) if (Array.IndexOf(WorkFeats, f[0]) < 0) fun.DropDownItems.Add(FeatItem(f[0], f[1]));
+            MisHouseMenu(fun.DropDownItems);  // 搗蛋的開關（DeskPals.Mischief.cs）
+            m.Items.Add(fun);
+
+            ToolStripMenuItem work = new ToolStripMenuItem("工作");
+            foreach (string[] f in FeatureList) if (Array.IndexOf(WorkFeats, f[0]) >= 0) work.DropDownItems.Add(FeatItem(f[0], f[1]));
+            ToolStripMenuItem help = new ToolStripMenuItem("小幫手（專注、安靜、提醒）");
+            AddHelpers(help.DropDownItems);
+            work.DropDownItems.Add(help);
+            m.Items.Add(work);
+
+            ToolStripMenuItem set = new ToolStripMenuItem("設定");
+            set.DropDownItems.Add("重新設定…", null, delegate { ShowSetup(false); });
+            set.DropDownItems.Add("讀書小幫手設定（學校行事曆、熬夜）…", null, delegate { ShowStudySettings(); });
+            StatsHouseMenu(set.DropDownItems);   // 匿名回報的開關（公開版、有 ID 才有；DeskPals.Stats.cs）
+            StartupHouseMenu(set.DropDownItems);   // 開機自動出現（只有 Microsoft Store 版）
+            m.Items.Add(set);
+
             m.Items.Add(new ToolStripSeparator());
             m.Items.Add("收工（關掉 Desk Pals）", null, delegate { QuitAll(); });
             ShowMenu(m, "公仔小屋", true, at);
         }
 
+        // 小屋的一個開關（打勾＝開著；按了選單不關）
+        ToolStripMenuItem FeatItem(string key, string text)
+        {
+            ToolStripMenuItem mi = new ToolStripMenuItem(text);
+            mi.CheckOnClick = true;
+            mi.Checked = Feat(key);
+            mi.Click += delegate { SetFeat(key, !Feat(key)); mi.Checked = Feat(key); };
+            return mi;
+        }
+
         // Microsoft Store 版：開機自動出現（StartupTask）。在 Windows 設定裡關掉的，要回那邊才開得回來
-        void StartupHouseMenu(ContextMenuStrip m)
+        void StartupHouseMenu(ToolStripItemCollection items)
         {
             if (App.StartupEnable == null || App.StartupState == null) return;
             int st = App.StartupState();
@@ -8196,7 +8218,7 @@ namespace DeskPals
                 App.StartupEnable(on);
                 Lead().Say(on ? "好～開機時我會自動出現" : "好～開機時不自動出現了", 2);
             };
-            m.Items.Add(mi);
+            items.Add(mi);
         }
 
         // 測試用：act menu pet｜house（開在公仔／蛋旁邊，不看游標）
@@ -8506,6 +8528,19 @@ namespace DeskPals
         }
 
         public void SetHover(int i) { hover = i >= 0 && i < rows.Count && Selectable(i) ? i : -1; Invalidate(); }
+        // 測試用（pipe menu-info）：每一列「row 第幾列 深度 子選單 展開 打勾 文字」
+        public string Info()
+        {
+            StringBuilder sb = new StringBuilder("menu " + (House ? "house" : "pet") + " " + rows.Count + " " + Bounds.X + " " + Bounds.Y + " " + Bounds.Width + " " + Bounds.Height + "\n");
+            for (int i = 0; i < rows.Count; i++)
+            {
+                Row r = rows[i];
+                ToolStripMenuItem mi = r.It as ToolStripMenuItem;
+                string kind = r.Sep ? "sep" : (r.Header ? "header" : "item");
+                sb.Append("row " + i + " " + r.Depth + " " + kind + " " + (r.Sub ? 1 : 0) + " " + (opened.Contains(r.It) ? 1 : 0) + " " + (mi != null && mi.Checked ? 1 : 0) + " " + RowText(r) + "\n");
+            }
+            return sb.ToString();
+        }
 
         void MoveHover(int dir)
         {

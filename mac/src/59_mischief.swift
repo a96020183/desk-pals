@@ -1228,7 +1228,8 @@ extension World {
     }
 
     // ---------- 小屋選單 ----------
-    func MisHouseMenu(_ m: ContextMenuStrip) {
+    // 小屋「娛樂」裡的搗蛋子選單
+    func MisHouseMenu(_ items: ToolStripItemCollection) {
         let sub = ToolStripMenuItem("搗蛋（惡作劇開關）")
         for f in World.MisFeatureList {
             let key = f[0]
@@ -1246,8 +1247,11 @@ extension World {
             gm.DropDownItems.Add(it)
         }
         sub.DropDownItems.Add(gm)
-        m.Items.Add(sub)
-        if misPushed.Count > 0 { m.Items.Add("把推走的視窗叫回來（" + String(misPushed.Count) + " 個）", nil, { self.MisRestore(true) }) }
+        items.Add(sub)
+    }
+    // 小屋最上層：把推走的視窗叫回來（有推走的才有；要馬上找得到，不放進子選單）
+    func MisRestoreMenu(_ items: ToolStripItemCollection) {
+        if misPushed.Count > 0 { items.Add("把推走的視窗叫回來（" + String(misPushed.Count) + " 個）", nil, { self.MisRestore(true) }) }
     }
 
     // ---------- 離屏截圖：假視窗、假游標 ----------

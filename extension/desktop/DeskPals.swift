@@ -11715,6 +11715,9 @@ extension World {
             for f in World.FeatureList { fb += " " + f[0] + "=" + (Feat(f[0]) ? "1" : "0") }
             let nn: String = NightNow() ? "1" : "0"
             World.Send(c, fb + " nightnow=" + nn + " set=" + featSet.ToArray().joined(separator: ",") + "\nend\n")
+        case "menu-info":   // 測試用：現在開著的像素選單有哪幾列（test/desktop-egg.js）
+            let mt: String = pmenu != nil && !pmenu.Done ? pmenu.Info() : "menu none\n"
+            World.Send(c, mt + "end\n")
         case "mode-info":   // 測試用（test/desktop-egg.js）
             let md: String = Single ? "single " + SinglePet() : "shelf -"
             let col: String = shelf != nil && shelf.Collapsed ? "1" : "0", prof: String = File.Exists(World.FilePath("profile.txt")) ? "1" : "0", hint: String = World.ReadText("egg-hint.txt") == "" ? "0" : "1"
@@ -14368,29 +14371,22 @@ extension World {
 
     // ---- 公仔小屋選單：開關＋小幫手＋公仔們 ----
     func HouseMenu() { HouseMenu(Cursor.Position) }
+    // 最上層只留最常用的（打開／收起櫃子、叫出來、回家），其他照類型分成四個子選單（點一下在選單裡展開，同一層一次開一個）：
+    //   我的公仔：換一櫃（個人版的同人櫃也在這裡）、做公仔、我的公仔、我的櫃放誰、匯入、分享短片、躲起來
+    //   娛樂：串門子、午餐、閒聊、跟著視窗跑、節日、煙火、搗蛋（子選單）
+    //   工作：下班時間、早上點名、沒電連動、喝水提醒、小幫手（專注／安靜／提醒）
+    //   設定：重新設定、讀書小幫手設定（學校行事曆、熬夜）、匿名回報（公開版有 ID 才有）（mac：沒有 C# 的開機自動出現）
+    // 每個項目只出現在一個地方；開關（FeatureList）不在 WorkFeats 裡的都算娛樂，新加的開關不會漏掉。收工在最下面。
+    static let WorkFeats: [String] = ["night", "rollcall", "bat_link", "wb_water"]
     func HouseMenu(_ at: Point) {
         let m = ContextMenuStrip()
-        m.Items.Add(ToolStripLabel("開關（打勾＝開著）"))
-        for f in World.FeatureList {
-            let key = f[0]
-            let mi = ToolStripMenuItem(f[1])
-            mi.CheckOnClick = true
-            mi.Checked = Feat(key)
-            mi.Click = { [unowned mi] in self.SetFeat(key, !self.Feat(key)); mi.Checked = self.Feat(key) }
-            m.Items.Add(mi)
-        }
-        MisHouseMenu(m)  // 搗蛋的開關、把推走的視窗叫回來（59_mischief.swift）
-        StatsHouseMenu(m)   // 匿名回報的開關（公開版、有 ID 才有；61_stats.swift）
-        // mac: C# 這裡還有 StartupHouseMenu（Microsoft Store 版的開機啟動），Mac 沒有
-        m.Items.Add(ToolStripSeparator())
-        let help = ToolStripMenuItem("小幫手（專注、安靜、提醒）")
-        AddHelpers(help.DropDownItems)
-        m.Items.Add(help)
-        m.Items.Add(ToolStripSeparator())
-        m.Items.Add(ToolStripLabel(Single ? "我的公仔" : "公仔們"))
         if !Single { m.Items.Add(shelf.Collapsed ? "打開公仔櫃" : MenuFold, nil, { self.ToggleEgg(!self.shelf.Collapsed) }) }
         m.Items.Add(Single ? "叫" + Get(SinglePet()).P.Name + "出來" : "全部出來", nil, { self.AllOut() })
         m.Items.Add(Single ? "回" + MiniName + "裡" : "全部回家", nil, { self.AllHome() })
+        MisRestoreMenu(m.Items)   // 把推走的視窗叫回來（有推走的才有；59_mischief.swift）
+        m.Items.Add(ToolStripSeparator())
+
+        let mine = ToolStripMenuItem("我的公仔")
         let sw = ToolStripMenuItem("換一櫃")
         for lu in Pal.LineupsNow() {
             let l2 = lu
@@ -14398,14 +14394,42 @@ extension World {
             li.Checked = lu == lineup
             sw.DropDownItems.Add(li)
         }
-        m.Items.Add(sw)
-        m.Items.Add("重新設定…", nil, { self.ShowSetup(false) })
-        m.Items.Add("讀書小幫手設定（學校行事曆、熬夜）…", nil, { self.ShowStudySettings() })
-        m.Items.Add("躲起來（⌃⌥S）", nil, { self.ToggleHide() })
-        CuHouseMenu(m)   // 自己做的公仔、分享短片（53_custom.swift）
+        mine.DropDownItems.Add(sw)
+        CuHouseMenu(mine.DropDownItems)   // 做公仔、我的公仔、我的櫃放誰、匯入、分享短片（53_custom.swift）
+        mine.DropDownItems.Add("躲起來（⌃⌥S）", nil, { self.ToggleHide() })
+        m.Items.Add(mine)
+
+        let fun = ToolStripMenuItem("娛樂")
+        for f in World.FeatureList { if !World.WorkFeats.contains(f[0]) { fun.DropDownItems.Add(FeatItem(f[0], f[1])) } }
+        MisHouseMenu(fun.DropDownItems)  // 搗蛋的開關（59_mischief.swift）
+        m.Items.Add(fun)
+
+        let work = ToolStripMenuItem("工作")
+        for f in World.FeatureList { if World.WorkFeats.contains(f[0]) { work.DropDownItems.Add(FeatItem(f[0], f[1])) } }
+        let help = ToolStripMenuItem("小幫手（專注、安靜、提醒）")
+        AddHelpers(help.DropDownItems)
+        work.DropDownItems.Add(help)
+        m.Items.Add(work)
+
+        let setm = ToolStripMenuItem("設定")
+        setm.DropDownItems.Add("重新設定…", nil, { self.ShowSetup(false) })
+        setm.DropDownItems.Add("讀書小幫手設定（學校行事曆、熬夜）…", nil, { self.ShowStudySettings() })
+        StatsHouseMenu(setm.DropDownItems)   // 匿名回報的開關（公開版、有 ID 才有；61_stats.swift）
+        // mac: C# 這裡還有 StartupHouseMenu（Microsoft Store 版的開機啟動），Mac 沒有
+        m.Items.Add(setm)
+
         m.Items.Add(ToolStripSeparator())
         m.Items.Add("收工（關掉 Desk Pals）", nil, { self.QuitAll() })
         ShowMenu(m, "公仔小屋", true, at)
+    }
+
+    // 小屋的一個開關（打勾＝開著；按了選單不關）
+    func FeatItem(_ key: String, _ text: String) -> ToolStripMenuItem {
+        let mi = ToolStripMenuItem(text)
+        mi.CheckOnClick = true
+        mi.Checked = Feat(key)
+        mi.Click = { [unowned mi] in self.SetFeat(key, !self.Feat(key)); mi.Checked = self.Feat(key) }
+        return mi
     }
 
     // 測試用：act menu pet｜house（開在公仔／蛋旁邊，不看游標）
@@ -14698,6 +14722,23 @@ class PixelMenu: OverlayForm {
     }
 
     func SetHover(_ i: Int) { hover = i >= 0 && i < rows.Count && Selectable(i) ? i : -1; Invalidate() }
+    // 測試用（pipe menu-info）：每一列「row 第幾列 深度 子選單 展開 打勾 文字」
+    func Info() -> String {
+        let b = Bounds
+        var sb: String = "menu " + (House ? "house" : "pet") + " " + String(rows.Count) + " " + String(b.X) + " " + String(b.Y) + " " + String(b.Width) + " " + String(b.Height) + "\n"
+        var i = 0
+        while i < rows.Count {
+            let r = rows[i]
+            let mi = r.It as? ToolStripMenuItem
+            let kind: String = r.Sep ? "sep" : (r.Header ? "header" : "item")
+            let isOpen: Bool = opened.Exists({ $0 === r.It })
+            let ck: Bool = mi != nil && mi!.Checked
+            let a: String = "row " + String(i) + " " + String(r.Depth) + " " + kind + " " + (r.Sub ? "1" : "0")
+            sb += a + " " + (isOpen ? "1" : "0") + " " + (ck ? "1" : "0") + " " + RowText(r) + "\n"
+            i += 1
+        }
+        return sb
+    }
 
     func MoveHover(_ dir: Int) {
         let n = rows.Count
@@ -21400,11 +21441,10 @@ extension World
     }
 
     // ---------- 小屋選單：做一隻自己的公仔、我的公仔（編輯／匯出／刪除）、我的櫃放誰、分享短片 ----------
-    func CuHouseMenu(_ m: ContextMenuStrip)
+    // 小屋「我的公仔」子選單：做一隻自己的公仔、我的公仔（編輯／匯出／刪除）、我的櫃放誰、匯入、分享短片
+    func CuHouseMenu(_ items: ToolStripItemCollection)
     {
-        m.Items.Add(ToolStripSeparator())
-        m.Items.Add(ToolStripLabel("自己做的公仔"))
-        m.Items.Add("做一隻自己的公仔（貓狗照片也可以）…", nil, { [self] in CuOpenMaker(nil, false) })
+        items.Add("做一隻自己的公仔（貓狗照片也可以）…", nil, { [self] in CuOpenMaker(nil, false) })
         let cus = CuStore.All()
         if cus.Count > 0
         {
@@ -21421,17 +21461,17 @@ extension World
                 it.DropDownItems.Add(del)
                 my.DropDownItems.Add(it)
             }
-            m.Items.Add(my)
+            items.Add(my)
             let room = ToolStripMenuItem("我的櫃要放誰（最多 4 隻）")
             let mine = List<String>(Pal.MineIds())
             for cm in cus { CuMineItem(room, cm.Id, cm.Name, mine) }
             let guests = ToolStripMenuItem("請內建公仔來作客")
             for gid in Pal.Guests { let gp: Pal! = Pal.Get(gid); if gp != nil { CuMineItem(guests, gid, gp.Name, mine) } }
             room.DropDownItems.Add(guests)
-            m.Items.Add(room)
+            items.Add(room)
         }
-        m.Items.Add("匯入朋友的公仔（.deskpal）…", nil, { [self] in CuImportDialog(false) })
-        m.Items.Add("做分享短片（GIF）…", nil, { [self] in ShareClip(nil) })
+        items.Add("匯入朋友的公仔（.deskpal）…", nil, { [self] in CuImportDialog(false) })
+        items.Add("做分享短片（GIF）…", nil, { [self] in ShareClip(nil) })
     }
 
     func CuMineItem(_ parent: ToolStripMenuItem, _ id: String, _ name: String, _ mine: List<String>)
@@ -27701,7 +27741,8 @@ extension World {
     }
 
     // ---------- 小屋選單 ----------
-    func MisHouseMenu(_ m: ContextMenuStrip) {
+    // 小屋「娛樂」裡的搗蛋子選單
+    func MisHouseMenu(_ items: ToolStripItemCollection) {
         let sub = ToolStripMenuItem("搗蛋（惡作劇開關）")
         for f in World.MisFeatureList {
             let key = f[0]
@@ -27719,8 +27760,11 @@ extension World {
             gm.DropDownItems.Add(it)
         }
         sub.DropDownItems.Add(gm)
-        m.Items.Add(sub)
-        if misPushed.Count > 0 { m.Items.Add("把推走的視窗叫回來（" + String(misPushed.Count) + " 個）", nil, { self.MisRestore(true) }) }
+        items.Add(sub)
+    }
+    // 小屋最上層：把推走的視窗叫回來（有推走的才有；要馬上找得到，不放進子選單）
+    func MisRestoreMenu(_ items: ToolStripItemCollection) {
+        if misPushed.Count > 0 { items.Add("把推走的視窗叫回來（" + String(misPushed.Count) + " 個）", nil, { self.MisRestore(true) }) }
     }
 
     // ---------- 離屏截圖：假視窗、假游標 ----------
@@ -28393,13 +28437,13 @@ extension World {
     }
 
     // 小屋的開關（有 ID 的公開版才有）
-    func StatsHouseMenu(_ m: ContextMenuStrip) {
+    func StatsHouseMenu(_ items: ToolStripItemCollection) {
         if !Stats.Available { return }
         let mi = ToolStripMenuItem("匿名回報選了哪一櫃（幫我們決定下一櫃）")
         mi.CheckOnClick = true
         mi.Checked = StatsOn
         mi.Click = { [unowned mi] in self.StatsSet(!self.StatsOn); mi.Checked = self.StatsOn }
-        m.Items.Add(mi)
+        items.Add(mi)
     }
     func StatsSet(_ on: Bool) {
         if !Stats.Available { return }

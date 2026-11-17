@@ -1609,12 +1609,10 @@ namespace DeskPals
             CuBroadcast();
         }
 
-        // ---------- 小屋選單：做一隻自己的公仔、我的公仔（編輯／匯出／刪除）、我的櫃放誰、分享短片 ----------
-        void CuHouseMenu(ContextMenuStrip m)
+        // ---------- 小屋「我的公仔」子選單：做一隻自己的公仔、我的公仔（編輯／匯出／刪除）、我的櫃放誰、匯入、分享短片 ----------
+        void CuHouseMenu(ToolStripItemCollection items)
         {
-            m.Items.Add(new ToolStripSeparator());
-            m.Items.Add(new ToolStripLabel("自己做的公仔"));
-            m.Items.Add("做一隻自己的公仔（貓狗照片也可以）…", null, delegate { CuOpenMaker(null, false); });
+            items.Add("做一隻自己的公仔（貓狗照片也可以）…", null, delegate { CuOpenMaker(null, false); });
             List<CuMeta> cus = CuStore.All();
             if (cus.Count > 0)
             {
@@ -1631,17 +1629,17 @@ namespace DeskPals
                     it.DropDownItems.Add(del);
                     my.DropDownItems.Add(it);
                 }
-                m.Items.Add(my);
+                items.Add(my);
                 ToolStripMenuItem room = new ToolStripMenuItem("我的櫃要放誰（最多 4 隻）");
                 List<string> mine = new List<string>(Pal.MineIds());
                 foreach (CuMeta cm in cus) CuMineItem(room, cm.Id, cm.Name, mine);
                 ToolStripMenuItem guests = new ToolStripMenuItem("請內建公仔來作客");
                 foreach (string gid in Pal.Guests) { Pal gp = Pal.Get(gid); if (gp != null) CuMineItem(guests, gid, gp.Name, mine); }
                 room.DropDownItems.Add(guests);
-                m.Items.Add(room);
+                items.Add(room);
             }
-            m.Items.Add("匯入朋友的公仔（.deskpal）…", null, delegate { CuImportDialog(false); });
-            m.Items.Add("做分享短片（GIF）…", null, delegate { ShareClip(null); });
+            items.Add("匯入朋友的公仔（.deskpal）…", null, delegate { CuImportDialog(false); });
+            items.Add("做分享短片（GIF）…", null, delegate { ShareClip(null); });
         }
 
         void CuMineItem(ToolStripMenuItem parent, string id, string name, List<string> mine)

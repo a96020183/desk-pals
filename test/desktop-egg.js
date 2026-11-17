@@ -2,6 +2,7 @@
 //   沒有 mode.txt（全新安裝、設定精靈沒按完）＝整櫃，櫃子是打開的；以前預設「只要一隻」，有人一直不知道有櫃子。
 //   存過 mode.txt 的照舊（single 的還是只要一隻）。
 //   只要一隻：左鍵點收起來的小紙箱＝叫那隻出來（第一次會說明一下，只說一次）；整櫃：左鍵點它＝打開櫃子。
+//   小屋選單（右鍵小紙箱）：最上層只有常用的幾項＋「我的公仔／娛樂／工作／設定」四個子選單＋收工；每個項目只出現一次。
 //   「下班時間」（晚上黑化、催下班）預設關：全新安裝關、舊版存檔時順手寫進去的 night=1（沒自己動過）也當作關；自己打開過的（set=night）照舊。
 //
 // 用法：node test/desktop-egg.js <endpoint 開頭> <工作資料夾> <截圖資料夾> -- <開桌面版的指令…>
@@ -186,6 +187,73 @@ const field = (line, k) => (new RegExp(`\\b${k}=(\\S*)`).exec(line) || [])[1];
 			assert.equal(I2.collapsed, 0, I2.raw);
 			assert.deepEqual(Object.keys(pos), [], JSON.stringify(pos));
 		});
+		await app.quit();
+	}
+
+	// 6. 小屋選單：分類
+	{
+		const app = await launch("menu", fresh("menu", { "profile.txt": "done", "lineup.txt": "original", "mode.txt": "shelf" }));
+		await sleep(2000);
+		const rows = async () => {
+			const d = await app.block("menu-info");
+			const h = /menu (\w+) (\d+) (-?\d+) (-?\d+) (\d+) (\d+)/.exec(d);
+			const r = [...d.matchAll(/row (\d+) (\d+) (\w+) (\d) (\d) (\d) (.*)/g)].map((m) => ({ i: +m[1], depth: +m[2], kind: m[3], sub: +m[4], open: +m[5], check: +m[6], text: m[7] }));
+			return { r, box: h && { x: +h[3], y: +h[4], w: +h[5], h: +h[6] }, raw: d };
+		};
+		app.send("act menu house");
+		await sleep(800);
+		let M = await rows();
+		const top = M.r.filter((x) => x.kind === "item").map((x) => x.text);
+		const cats = ["我的公仔", "娛樂", "工作", "設定"];
+		await check("小屋選單最上層：常用的幾項＋四個分類＋最後收工（開關都收進分類）", () => {
+			assert.deepEqual(top.slice(0, 3), ["收起公仔櫃（變成小紙箱）", "全部出來", "全部回家"], M.raw);
+			assert.deepEqual(top.slice(3, 7), cats, M.raw);
+			assert.ok(top[top.length - 1].startsWith("收工"), M.raw);
+			assert.ok(top.length <= 9, "最上層太多項: " + top.length);
+			for (const c of cats) assert.equal(M.r.find((x) => x.text === c).sub, 1, c + " 不是子選單");
+			assert.ok(!top.some((t) => /下班時間|串門子|午餐變身/.test(t)), "開關還在最上層: " + top.join("、"));
+		});
+		if (M.box) await snap(app, "menu-top", M.box);
+		const seen = {};
+		for (const c of cats) {
+			const idx = M.r.find((x) => x.text === c).i;
+			app.send(`act menuclick ${idx}`);
+			await sleep(500);
+			M = await rows();
+			const kids = M.r.filter((x) => x.depth === 1 && x.kind === "item").map((x) => x.text);
+			seen[c] = kids;
+			await check(`「${c}」點下去展開下一層（${kids.length} 項）`, () => {
+				assert.equal(M.r.find((x) => x.text === c).open, 1, M.raw);
+				assert.ok(kids.length >= 2, M.raw);
+			});
+			if (M.box) await snap(app, "menu-" + ["mine", "fun", "work", "settings"][cats.indexOf(c)], M.box);
+		}
+		await check("分類內容：娛樂有串門子／午餐／搗蛋，工作有下班時間／小幫手，我的公仔有換一櫃／做公仔／躲起來，設定有重新設定／讀書小幫手設定", () => {
+			for (const t of ["串門子劇情", "午餐變身", "閒聊泡泡", "煙火", "搗蛋"]) assert.ok(seen["娛樂"].some((k) => k.startsWith(t)), "娛樂少了 " + t + ": " + seen["娛樂"]);
+			for (const t of ["下班時間", "早上點名", "小幫手"]) assert.ok(seen["工作"].some((k) => k.startsWith(t)), "工作少了 " + t + ": " + seen["工作"]);
+			for (const t of ["換一櫃", "做一隻自己的公仔", "匯入朋友的公仔", "做分享短片", "躲起來"]) assert.ok(seen["我的公仔"].some((k) => k.startsWith(t)), "我的公仔少了 " + t + ": " + seen["我的公仔"]);
+			for (const t of ["重新設定", "讀書小幫手設定"]) assert.ok(seen["設定"].some((k) => k.startsWith(t)), "設定少了 " + t + ": " + seen["設定"]);
+		});
+		await check("每個項目只出現在一個地方", () => {
+			const all = [...top, ...cats.flatMap((c) => seen[c])];
+			const dup = all.filter((t, i) => all.indexOf(t) !== i);
+			assert.deepEqual(dup, [], dup.join("、"));
+		});
+		// 在分類裡按開關：選單不關、打勾換掉
+		const wi = M.r.find((x) => x.text === "工作").i;
+		app.send(`act menuclick ${wi}`);
+		await sleep(400);
+		M = await rows();
+		const night = M.r.find((x) => x.text.startsWith("下班時間"));
+		app.send(`act menuclick ${night.i}`);
+		await sleep(600);
+		const M2 = await rows(), f = await feat(app);
+		await check("在「工作」裡打開下班時間：選單不關、打勾、開關真的打開", () => {
+			assert.ok(M2.r.length > 0, M2.raw);
+			assert.equal(M2.r.find((x) => x.text.startsWith("下班時間")).check, 1, M2.raw);
+			assert.equal(field(f, "night"), "1", f);
+		});
+		app.send("act menuclose");
 		await app.quit();
 	}
 

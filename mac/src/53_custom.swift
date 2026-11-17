@@ -1675,11 +1675,10 @@ extension World
     }
 
     // ---------- 小屋選單：做一隻自己的公仔、我的公仔（編輯／匯出／刪除）、我的櫃放誰、分享短片 ----------
-    func CuHouseMenu(_ m: ContextMenuStrip)
+    // 小屋「我的公仔」子選單：做一隻自己的公仔、我的公仔（編輯／匯出／刪除）、我的櫃放誰、匯入、分享短片
+    func CuHouseMenu(_ items: ToolStripItemCollection)
     {
-        m.Items.Add(ToolStripSeparator())
-        m.Items.Add(ToolStripLabel("自己做的公仔"))
-        m.Items.Add("做一隻自己的公仔（貓狗照片也可以）…", nil, { [self] in CuOpenMaker(nil, false) })
+        items.Add("做一隻自己的公仔（貓狗照片也可以）…", nil, { [self] in CuOpenMaker(nil, false) })
         let cus = CuStore.All()
         if cus.Count > 0
         {
@@ -1696,17 +1695,17 @@ extension World
                 it.DropDownItems.Add(del)
                 my.DropDownItems.Add(it)
             }
-            m.Items.Add(my)
+            items.Add(my)
             let room = ToolStripMenuItem("我的櫃要放誰（最多 4 隻）")
             let mine = List<String>(Pal.MineIds())
             for cm in cus { CuMineItem(room, cm.Id, cm.Name, mine) }
             let guests = ToolStripMenuItem("請內建公仔來作客")
             for gid in Pal.Guests { let gp: Pal! = Pal.Get(gid); if gp != nil { CuMineItem(guests, gid, gp.Name, mine) } }
             room.DropDownItems.Add(guests)
-            m.Items.Add(room)
+            items.Add(room)
         }
-        m.Items.Add("匯入朋友的公仔（.deskpal）…", nil, { [self] in CuImportDialog(false) })
-        m.Items.Add("做分享短片（GIF）…", nil, { [self] in ShareClip(nil) })
+        items.Add("匯入朋友的公仔（.deskpal）…", nil, { [self] in CuImportDialog(false) })
+        items.Add("做分享短片（GIF）…", nil, { [self] in ShareClip(nil) })
     }
 
     func CuMineItem(_ parent: ToolStripMenuItem, _ id: String, _ name: String, _ mine: List<String>)
