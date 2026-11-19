@@ -8186,11 +8186,20 @@ namespace DeskPals
             set.DropDownItems.Add("讀書小幫手設定（學校行事曆、熬夜）…", null, delegate { ShowStudySettings(); });
             StatsHouseMenu(set.DropDownItems);   // 匿名回報的開關（公開版、有 ID 才有；DeskPals.Stats.cs）
             StartupHouseMenu(set.DropDownItems);   // 開機自動出現（只有 Microsoft Store 版）
+            set.DropDownItems.Add("使用說明（網頁）…", null, delegate { OpenGuide(); });
             m.Items.Add(set);
 
             m.Items.Add(new ToolStripSeparator());
             m.Items.Add("收工（關掉 Desk Pals）", null, delegate { QuitAll(); });
             ShowMenu(m, "公仔小屋", true, at);
+        }
+
+        // 使用說明：公開的說明網頁（跟隱私權政策同一個站）
+        public const string GuideUrl = "https://a96020183.github.io/wowo-pals/guide.html";
+        void OpenGuide()
+        {
+            try { Process.Start(new ProcessStartInfo(GuideUrl) { UseShellExecute = true }); }
+            catch (Exception ex) { App.Log("guide: " + ex.Message); }
         }
 
         // 小屋的一個開關（打勾＝開著；按了選單不關）
