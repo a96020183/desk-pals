@@ -833,11 +833,18 @@ jobs:
           Start-Sleep -Seconds 3
           if (-not (Test-Path personal-exe-shots\shot-teletubbies.png)) { throw "no snapshot" }
           if (-not $a.HasExited) { throw "exe did not quit" }
-      - name: Installer end-to-end (install over the extension's copy, upgrade, uninstall)
+      - name: Installer end-to-end (install over the extension's copy, upgrade from 0.10.4 with the rename, uninstall)
         shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $setup = (Get-ChildItem dist\DeskPals-Setup-*.exe).FullName
-          powershell -NoProfile -ExecutionPolicy Bypass -File .github\test-installer.ps1 -Setup $setup
+          # 0.11 改名：先真的裝 0.10.4（舊名字的捷徑），再升級（拿不到就只測擴充套件留下的舊名字捷徑）
+          $old = Join-Path $env:RUNNER_TEMP "old-setup"
+          gh release download v0.10.4 --repo $env:GITHUB_REPOSITORY --pattern "DeskPals-Setup-0.10.4.exe" --dir $old 2>$null
+          $oldSetup = Join-Path $old "DeskPals-Setup-0.10.4.exe"
+          if (-not (Test-Path $oldSetup)) { $oldSetup = "" }
+          powershell -NoProfile -ExecutionPolicy Bypass -File .github\test-installer.ps1 -Setup $setup -OldSetup "$oldSetup"
           if ($LASTEXITCODE -ne 0) { throw "installer test failed" }
       # 上面的安裝程式、獨立版都是真的裝在 runner 上（全新安裝）：不能留下舊名字的資料夾、開機捷徑、紀錄檔
       - name: Real fresh install left nothing with the old name

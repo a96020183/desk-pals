@@ -63,7 +63,7 @@ $SignTool = if ($Sign) { Find-SdkTool "signtool.exe" } else { $null }
 if ($Sign -and -not $SignTool) { throw "DESKPALS_SIGN_PFX is set but signtool.exe was not found" }
 function Sign-File([string]$file) {
     if (-not $Sign) { return }
-    & $SignTool sign /fd sha256 /f $env:DESKPALS_SIGN_PFX /p $env:DESKPALS_SIGN_PASSWORD /tr http://timestamp.digicert.com /td sha256 /d "公仔櫃 Desk Pals" $file
+    & $SignTool sign /fd sha256 /f $env:DESKPALS_SIGN_PFX /p $env:DESKPALS_SIGN_PASSWORD /tr http://timestamp.digicert.com /td sha256 /d "WoWo Pals" $file
     if ($LASTEXITCODE -ne 0) { throw "signtool failed on $file" }
     Write-Host "signed $file"
 }
@@ -104,9 +104,9 @@ if ($Steps -contains "exe") {
     $year = (Get-Date).Year
     $info = @"
 using System.Reflection;
-[assembly: AssemblyTitle("公仔櫃 Desk Pals")]
+[assembly: AssemblyTitle("WoWo Pals")]
 [assembly: AssemblyDescription("桌面上的像素公仔櫃")]
-[assembly: AssemblyProduct("公仔櫃 Desk Pals")]
+[assembly: AssemblyProduct("WoWo Pals")]
 [assembly: AssemblyCompany("Desk Pals")]
 [assembly: AssemblyCopyright("© $year Desk Pals")]
 [assembly: AssemblyVersion("$Version4")]

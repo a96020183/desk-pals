@@ -391,7 +391,8 @@ class Desktop {
 		this.exeSrc = this.win ? path.join(context.extensionPath, "desktop", "DeskPals.exe") : "";
 		this.exe = this.win ? path.join(this.home, "app", "DeskPals.exe") : "";
 		this.sh = "desk-pals.sh";
-		this.lnkName = "公仔櫃 Desk Pals.lnk";
+		this.lnkName = "WoWo Pals.lnk";   // 跟安裝程式同一個名字（0.11 改名）
+		this.oldLnkName = "公仔櫃 Desk Pals.lnk";   // 0.10.x 以前的名字：建好新的就把舊的拿掉（開機只會開一次）
 		this.onActive = () => {};
 		this.onLineup = () => {};
 		this.skipLineup = null;
@@ -654,14 +655,16 @@ class Desktop {
 				const key = `${lnk}|${this.name}|${this.exe}`;
 				let have = "";
 				try { have = fs.readFileSync(mark, "utf8"); } catch (e) {}
-				if (have === key && fs.existsSync(lnk)) return;
+				if (have === key && fs.existsSync(lnk) && !fs.existsSync(path.join(startup, this.oldLnkName))) return;
+				// exe 建好新名字的捷徑後，會把同一個資料夾裡自家的舊名字捷徑拿掉（DeskPals.Main.cs 的 Autostart.Ensure）
 				cp.execFile(this.exe, ["--autostart", lnk, "--pipe", this.name], { windowsHide: true, timeout: 30000 }, (err) => {
 					if (err) { console.error("deskpals autostart", err); return; }
 					try { fs.writeFileSync(mark, key); } catch (e) {}
 				});
 				return;
 			}
-			if (fs.existsSync(lnk)) return;
+			const old = path.join(startup, this.oldLnkName);
+			if (fs.existsSync(lnk)) { try { if (fs.existsSync(old)) fs.unlinkSync(old); } catch (e) {} return; }
 			const ps1 = path.join(this.home, this.ps1);
 			const script = [
 				// WScript.Shell 存檔走系統 ANSI 字碼頁：英文 Windows 存不了中文檔名 → 先存成英文暫存名，再改名
@@ -671,13 +674,14 @@ class Desktop {
 				"$s.TargetPath = \"$env:SystemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\"",
 				"$s.Arguments = '-NoProfile -WindowStyle Hidden -File \"' + $env:DESKPALS_PS1 + '\" -PipeName ' + $env:DESKPALS_PIPE",
 				"$s.WindowStyle = 7",
-				"$s.Description = '公仔櫃 Desk Pals（整個螢幕的像素公仔）'",
+				"$s.Description = 'WoWo Pals（整個螢幕的像素公仔）'",
 				"$s.Save()",
 				"Move-Item -LiteralPath $t -Destination $env:DESKPALS_LNK -Force",
+				"if (Test-Path -LiteralPath $env:DESKPALS_OLD_LNK) { Remove-Item -LiteralPath $env:DESKPALS_OLD_LNK -Force }",
 			].join("; ");
 			cp.execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
 				windowsHide: true,
-				env: Object.assign({}, process.env, { DESKPALS_LNK: lnk, DESKPALS_PS1: ps1, DESKPALS_PIPE: this.name }),
+				env: Object.assign({}, process.env, { DESKPALS_LNK: lnk, DESKPALS_OLD_LNK: old, DESKPALS_PS1: ps1, DESKPALS_PIPE: this.name }),
 			}, () => {});
 		} else if (process.platform === "darwin") {
 			const dir = path.join(os.homedir(), "Library", "LaunchAgents");
@@ -701,8 +705,10 @@ class Desktop {
 
 	uninstallAutostart() {
 		if (process.platform === "win32") {
-			const lnk = path.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs", "Startup", this.lnkName);
-			if (fs.existsSync(lnk)) fs.unlinkSync(lnk);
+			for (const n of [this.lnkName, this.oldLnkName]) {
+				const lnk = path.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs", "Startup", n);
+				if (fs.existsSync(lnk)) fs.unlinkSync(lnk);
+			}
 		} else if (process.platform === "darwin") {
 			const plist = path.join(os.homedir(), "Library", "LaunchAgents", "local.desk-pals.plist");
 			if (fs.existsSync(plist)) fs.unlinkSync(plist);

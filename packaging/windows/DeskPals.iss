@@ -1,7 +1,8 @@
 ﻿; 公仔櫃 Desk Pals：Windows 安裝程式（Inno Setup 6，免費）。由 packaging\windows\build.ps1 呼叫：
 ;   ISCC /DAppVersion=x.y.z /DRoot=<repo> [/DSrcDir=<js 來源>] [/DOutSuffix=-personal] /DBuildDir=<build\win> /DIconDir=<build\icons> /DLangFile=<ChineseTraditional.isl> /O<dist> DeskPals.iss
 ; 安裝給「目前這個使用者」（不用系統管理員）：%LOCALAPPDATA%\Programs\DeskPals
-; 開機自動啟動＝「啟動」資料夾裡的「公仔櫃 Desk Pals.lnk」（跟 VS Code 擴充套件同一個名字 → 直接換成 exe 版，不會開兩次）
+; 開機自動啟動＝「啟動」資料夾裡的「WoWo Pals.lnk」（跟 VS Code 擴充套件同一個名字 → 直接換成 exe 版，不會開兩次）
+; 0.11 改名：以前叫「公仔櫃 Desk Pals」。升級時把舊名字的開始功能表、桌面、開機捷徑拿掉（[InstallDelete]），資料（%LOCALAPPDATA%\DeskPals）不動
 ; 裝好會寫 %LOCALAPPDATA%\DeskPals\standalone.json：VS Code 擴充套件看到它就不再自己編一份、不再建開機捷徑，只負責連上這個 exe。
 
 #ifndef AppVersion
@@ -15,7 +16,9 @@
   ; 個人版：-personal
   #define OutSuffix ""
 #endif
-#define AppName "公仔櫃 Desk Pals"
+#define AppName "WoWo Pals"
+; 0.10.x 以前的名字：升級時拿掉這個名字的捷徑
+#define OldName "公仔櫃 Desk Pals"
 #define ExeName "DeskPals.exe"
 
 [Setup]
@@ -24,8 +27,8 @@ AppId={{63CF3CC4-F964-4964-A39D-B1703A4A9496}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
-AppPublisher=Desk Pals
-AppCopyright=Desk Pals
+AppPublisher=WoWo Pals
+AppCopyright=WoWo Pals
 VersionInfoVersion={#AppVersion}
 VersionInfoProductName={#AppName}
 VersionInfoDescription={#AppName} 安裝程式
@@ -62,7 +65,7 @@ Name: "zhtw"; MessagesFile: "{#LangFile}"
 zhtw.TaskGroup=要不要：
 zhtw.AutoStart=開機時自動出現在桌面（建議）
 zhtw.DesktopIcon=在桌面放一個捷徑
-zhtw.LaunchNow=現在就打開公仔櫃
+zhtw.LaunchNow=現在就打開 WoWo Pals
 zhtw.AskDeleteData=要一併刪除你的公仔設定和紀錄嗎？%n%n（%1）%n%n選「否」會保留：之後重新安裝，或用 VS Code 擴充套件，都會接著用。
 zhtw.StartComment=整個螢幕的像素公仔
 
@@ -87,6 +90,10 @@ Name: "{userstartup}\{#AppName}"; Filename: "{app}\{#ExeName}"; Comment: "{cm:St
 [InstallDelete]
 ; 沒勾開機啟動：連擴充套件之前建的那個也拿掉（不然開機還是會跑出舊的那份）
 Type: files; Name: "{userstartup}\{#AppName}.lnk"; Tasks: not autostart
+; 舊名字（0.10.x 的安裝程式、舊版擴充套件）的捷徑：一律拿掉，新的照上面 [Icons] 建（開機捷徑只會剩一個）
+Type: files; Name: "{userstartup}\{#OldName}.lnk"
+Type: files; Name: "{autoprograms}\{#OldName}.lnk"
+Type: files; Name: "{autodesktop}\{#OldName}.lnk"
 
 [Registry]
 Root: HKCU; Subkey: "Software\DeskPals"; ValueType: string; ValueName: "InstallDir"; ValueData: "{app}"; Flags: uninsdeletekey
