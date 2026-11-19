@@ -18,7 +18,7 @@ log() { echo "$(date '+%Y-%m-%dT%H:%M:%S') sh[$NAME]: $*" >> "$LOG"; }
 if [ ! -x "$BIN" ] || [ "$SRC" -nt "$BIN" ]; then
   if ! /usr/bin/xcrun --find swiftc >/dev/null 2>&1; then
     log "swiftc not found (Command Line Tools missing)"
-    /usr/bin/osascript -e 'display dialog "公仔櫃需要 Apple 的 Command Line Tools 才能啟動。\n\n請打開「終端機」執行：\nxcode-select --install\n\n裝好之後重新開 VS Code（或登出再登入）就會出現。" buttons {"好"} default button 1 with title "公仔櫃 Desk Pals"' >/dev/null 2>&1
+    /usr/bin/osascript -e 'display dialog "公仔櫃需要 Apple 的 Command Line Tools 才能啟動。\n\n請打開「終端機」執行：\nxcode-select --install\n\n裝好之後重新開 VS Code（或登出再登入）就會出現。" buttons {"好"} default button 1 with title "WoWo Pals"' >/dev/null 2>&1
     exit 1
   fi
   log "compiling $SRC"
