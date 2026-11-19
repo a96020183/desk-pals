@@ -34,6 +34,19 @@ namespace DeskPals
         public static Action<bool> StartupEnable;
         public static string StartNote;
 
+        // 生日：測試用的假時鐘。只在離屏（測試）時看 DESKPALS_FAKE_NOW（ISO 日期），其他時候就是真的現在。
+        // 絕不依賴真實日期來驗生日：測試把這個設成生日當天，就能驗整條流程。
+        public static DateTime Now()
+        {
+            if (Offscreen)
+            {
+                string f = Environment.GetEnvironmentVariable("DESKPALS_FAKE_NOW");
+                DateTime d;
+                if (!string.IsNullOrEmpty(f) && DateTime.TryParse(f, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out d)) return d;
+            }
+            return DateTime.Now;
+        }
+
         // 診斷用：不受行數上限限制
         public static void LogAlways(string s)
         {
@@ -869,6 +882,7 @@ namespace DeskPals
         public void Clicked()
         {
             if (w.NoticeClicked(this)) return;
+            if (w.BirthdayCakeClick(this)) return;   // 生日：點捧著的蛋糕＝再看一次大驚喜（DeskPals.Birthday.cs）
             Pat();
         }
 
@@ -2421,6 +2435,7 @@ namespace DeskPals
         static readonly string[] GLASSES = { "..P.P..P.P..", "..PPPkkPPP..", "...P....P..." };
         static readonly string[] ENVELOPE = { "SSS", "SYS", "SSS", "SSS" };
         static readonly string[] CAKE = { ".Y..", "PPPP", "WWWW", "PPPP" };
+        static readonly string[] PARTYHAT = { ".....Y......", "....PYP.....", "...PYPYP....", "..YPYPYPY...", ".WWWWWWWWWW." };   // 生日派對帽（bday 造型美術還沒好時的像素版）
         static readonly string[] FLAKE = { ".B.", "BBB", ".B." };
         static readonly string[] STAR = { ".y.", "yyy", ".y." };
         static readonly string[] HEART = { ".pp.pp.", "ppppppp", "ppppppp", ".ppppp.", "..ppp..", "...p..." };
@@ -2577,6 +2592,11 @@ namespace DeskPals
             }
             if (w.SeasonNow == "cny") DrawAt(g, ENVELOPE, 11, P.SideRow + dy, bx0, by0, ps, fx, false, true);
             if (w.SeasonNow == "birthday") DrawAt(g, CAKE, 11, P.SideRow - 1 + dy, bx0, by0, ps, fx, false, true);
+            // 生日：慶祝中戴派對帽（bday 造型美術進來前的 fallback；戴自己帽子的角色不換）
+            if (w.BdayHatOn && !w.BdayCostumeAvailable() && !HatOnHead() && !WearHat && !P.Pik)   //@fan
+                DrawAt(g, PARTYHAT, P.HatCol, P.HatRow + dy - PARTYHAT.Length, bx0, by0, ps, fx, false, true);   //@fan
+            // <public> if (w.BdayHatOn && !w.BdayCostumeAvailable())
+            // <public>     DrawAt(g, PARTYHAT, P.HatCol, P.HatRow + dy - PARTYHAT.Length, bx0, by0, ps, fx, false, true);
         }
 
         // ---- Codex／Claude 狀態：小波顯示在肚子螢幕上，其他人在頭旁邊一個小圖示 ----
@@ -4260,6 +4280,7 @@ namespace DeskPals
             Migrate();
             LegacyTakeOver();   //@fan
             LoadState();
+            LoadBirthday();   // 生日：讀本機存的生日（跟 VS Code 設定／pipe 同步；DeskPals.Birthday.cs）
             LoadFeatures();
             MisStart();   // 搗蛋（DeskPals.Mischief.cs）
             StatsStart();   // 匿名回報：滿 7 天那次（DeskPals.Stats.cs；個人版什麼都不做）
@@ -4311,6 +4332,7 @@ namespace DeskPals
             timer.Start();
             if (!File.Exists(FilePath("profile.txt"))) Later(1.2, delegate { ShowSetup(true); });   // 第一次：設定視窗（做一隻自己的或選一櫃、擺法）
             if (App.StartNote != null) { string note = App.StartNote; App.StartNote = null; Later(6, delegate { Lead().Say(note, 6); }); }   // Store 版：舊的開機捷徑換成 Store 的開機啟動
+            BirthdayAutoCheck();   // 生日：當天第一次看到就自動播一次大驚喜（DeskPals.Birthday.cs）
             App.Log("started pipe=" + pipeName + " lineup=" + lineup + " out=" + string.Join(",", outIds.ToArray()) + " data=" + DataDir);
         }
 
@@ -4922,6 +4944,7 @@ namespace DeskPals
             if (n.Minute == nightChecked) return;
             nightChecked = n.Minute;
             SeasonNow = Season();
+            BirthdayAutoCheck();   // 生日：跨過午夜進到生日當天也會自動播一次（DeskPals.Birthday.cs）
             bool d = NightNow();
             if (d == Night) return;
             Night = d;
@@ -4937,7 +4960,7 @@ namespace DeskPals
         static readonly string[] CNY = { "2027-02-06", "2028-01-26", "2029-02-13", "2030-02-03", "2031-01-23", "2032-02-11" };
         string Season()
         {
-            DateTime n = DateTime.Now;
+            DateTime n = App.Now();   // 生日：假時鐘（測試用；平常＝現在）
             if (!Feat("season")) return "";          // 小屋關掉「節日造型」
             if (birthday.Length == 5 && n.ToString("MM-dd") == birthday) return "birthday";
             foreach (string c in CNY)
@@ -5412,7 +5435,7 @@ namespace DeskPals
                         if (outs.Count == 0) l.Celebrate(env, true);
                     }
                     break;
-                case "birthday": birthday = p.Length >= 2 ? p[1].Trim() : ""; SeasonNow = Season(); break;
+                case "birthday": SetBirthday(p.Length >= 2 ? p[1].Trim() : ""); break;   // 生日：VS Code 設定／pipe 進來的都存到本機，兩邊同步（DeskPals.Birthday.cs）
                 case "typing":
                     int chars;
                     if (p.Length >= 2 && int.TryParse(p[1], out chars))
@@ -5439,6 +5462,7 @@ namespace DeskPals
                 case "menu-info": Send(c, (pmenu != null && !pmenu.Done ? pmenu.Info() : "menu none\n") + "end\n"); break;   // 測試用：現在開著的像素選單有哪幾列（test/desktop-egg.js）
                 case "mode-info": Send(c, "mode " + (Single ? "single" : "shelf") + " " + (Single ? SinglePet() : "-") + " collapsed=" + (shelf != null && shelf.Collapsed ? 1 : 0) + " profile=" + (File.Exists(FilePath("profile.txt")) ? 1 : 0) + " hint=" + (ReadText("egg-hint.txt") == "" ? 0 : 1) + "\nend\n"); break;   // 測試用（test/desktop-egg.js）
                 case "setup-info": Send(c, (setupForm != null && !setupForm.IsDisposed && (setupForm.VVisible || setupForm.Visible) ? setupForm.Info() : "setup none\n") + "end\n"); break;   // 測試用（test/desktop-woban.js）：設定視窗現在有哪些按鈕
+                case "bday-info": Send(c, BdayInfo() + "end\n"); break;   // 生日：測試用（test/desktop-birthday.js）
                 case "notify":
                     if (p.Length >= 4 && !WorkDropsNotify(p[1]))   // 工作來源：桌面版已經在管的不講兩次（DeskPals.Work.cs）
                     {
@@ -5503,6 +5527,7 @@ namespace DeskPals
                 case "hide": ToggleHide(); return;
                 case "show": if (userHidden) ToggleHide(); else l.Act("hi"); return;   // 獨立版又被打開一次（開始功能表／Dock）：躲起來的就出來，不然打個招呼
                 case "fireworks": foreach (Pet x in OutPets()) x.Celebrate("dev", x == l); if (OutCount() == 0) l.Celebrate("dev", true); return;
+                case "bday": BirthdayShow(); return;   // 生日：再看一次大驚喜（DeskPals.Birthday.cs）
                 case "dark": case "night": forceNight = 1; nightChecked = -1; CheckNight(); return;
                 case "light": case "day": forceNight = 0; nightChecked = -1; CheckNight(); return;
                 case "auto": forceNight = -1; nightChecked = -1; CheckNight(); forceLunch = -1; LunchTick(true); return;
@@ -8182,6 +8207,7 @@ namespace DeskPals
             m.Items.Add(mine);
 
             ToolStripMenuItem fun = new ToolStripMenuItem("娛樂");
+            if (BirthdayOn) fun.DropDownItems.Add("生日驚喜 再看一次 🎂", null, delegate { BirthdayShow(); });   // 生日：當天才有，想看幾次就幾次（DeskPals.Birthday.cs）
             foreach (string[] f in FeatureList) if (Array.IndexOf(WorkFeats, f[0]) < 0) fun.DropDownItems.Add(FeatItem(f[0], f[1]));
             MisHouseMenu(fun.DropDownItems);  // 搗蛋的開關（DeskPals.Mischief.cs）
             m.Items.Add(fun);
@@ -8824,6 +8850,8 @@ namespace DeskPals
         readonly bool statsNote;                 // 第一頁最下面一行：匿名回報說明（公開版、有 ID、第一次）
         readonly bool autoBox;                   // 第二頁：「開機時自動出現」勾選（只有 Microsoft Store 版、第一次）
         bool autoOn = true;
+        string bday = "";                        // 生日：輸入中的 MMDD（0～4 個數字；跟 lineup／擺法／開機啟動同一頁）
+        bool bdayFocus;                          // 生日欄位正在輸入
         public const string StatsLine = "匿名回報你選了哪一櫃，幫我們決定下一櫃做什麼（小屋選單裡可以關）";
         readonly Font titleF, qF, bigF, subF, btnF;
         readonly Dictionary<string, Bitmap> shelfPics = new Dictionary<string, Bitmap>();
@@ -8872,6 +8900,7 @@ namespace DeskPals
             if (first) App.LogAlways("setup: first-run page, order " + string.Join(",", featured));
             mode = single ? "single" : "shelf";
             this.pet = pet ?? "";
+            bday = (w.Birthday ?? "").Replace("-", "");   // 生日：帶入已設定的（MM-DD → MMDD），沒設就空白
             d = w.S / 4.0;
             U = Math.Max(2, (int)Math.Round(2 * d));
             Text = first ? "歡迎來到公仔櫃" : "公仔櫃・重新設定";
@@ -8889,9 +8918,9 @@ namespace DeskPals
             statsNote = first && Stats.Available;
             autoBox = first && App.StartupEnable != null;
             if (autoBox && App.StartupState != null) { int st = App.StartupState(); autoOn = st != 0 && st != 2; }
-            ClientSize = new Size(Sc(620), Sc(MoreLineups().Length > 0 ? 720 : 590) + (statsNote ? Sc(26) : 0));
+            ClientSize = new Size(Sc(620), Sc(MoreLineups().Length > 0 ? 720 : 590) + (statsNote ? Sc(26) : 0) + Sc(66));   // 生日：第二頁多一排生日欄位，整個視窗加高一點
             KeyPreview = true;
-            KeyDown += delegate(object s, KeyEventArgs e) { if (e.KeyCode == Keys.Escape) Close(); };
+            KeyDown += delegate(object s, KeyEventArgs e) { if (e.KeyCode == Keys.Escape) Close(); else BdayKey(e); };   // 生日：輸入中吃數字／退格
             LayoutBtns();
         }
 
@@ -8984,7 +9013,16 @@ namespace DeskPals
                 }
             }
             int by = H0 - Sc(64), bh = Sc(44);
-            if (step == 1 && autoBox) Add("autostart", "開機時自動出現", "", new Rectangle((W0 - Sc(250)) / 2, by - Sc(44), Sc(250), Sc(30)), 4, autoOn);   // Store 版：看得到、可以不要
+            if (step == 1)
+            {
+                // 生日欄位（跟擺法／開機啟動同一頁；可留空）
+                int fieldW = Sc(320), clearW = Sc(70), gap2 = Sc(8), bdh = Sc(42), bdy = by - Sc(54);
+                bool hasClear = bday.Length > 0;
+                int groupW = fieldW + (hasClear ? gap2 + clearW : 0), gx = (W0 - groupW) / 2;
+                Add("bday", "", "", new Rectangle(gx, bdy, fieldW, bdh), 5, hasClear);
+                if (hasClear) Add("bdayclear", "清除", "", new Rectangle(gx + fieldW + gap2, bdy + (bdh - Sc(30)) / 2, clearW, Sc(30)), 2, false);
+                if (autoBox) Add("autostart", "開機時自動出現", "", new Rectangle((W0 - Sc(250)) / 2, bdy - Sc(42), Sc(250), Sc(30)), 4, autoOn);   // Store 版：看得到、可以不要
+            }
             if (step > 0) Add("back", "上一步", "", new Rectangle(Sc(30), by, Sc(130), bh), 2, false);
             else if (first) Add("skip", "以後再說", "", new Rectangle(Sc(30), by, Sc(130), bh), 2, false);
             Btn nx = Add("next", step < 1 ? "下一步" : "完成！", "", new Rectangle(W0 - Sc(30) - Sc(160), by, Sc(160), bh), 3, false);
@@ -9006,7 +9044,7 @@ namespace DeskPals
         public string Info()
         {
             System.Text.StringBuilder sb = new System.Text.StringBuilder();
-            sb.Append("setup step=" + step + " first=" + (first ? 1 : 0) + " lu=" + (lu == "" ? "-" : lu) + " mode=" + mode + " w=" + ClientSize.Width + " h=" + ClientSize.Height + " featured=" + string.Join(",", featured) + " note=" + (statsNote ? 1 : 0) + "\n");
+            sb.Append("setup step=" + step + " first=" + (first ? 1 : 0) + " lu=" + (lu == "" ? "-" : lu) + " mode=" + mode + " w=" + ClientSize.Width + " h=" + ClientSize.Height + " featured=" + string.Join(",", featured) + " note=" + (statsNote ? 1 : 0) + " bday=" + (BdayValue() == "" ? "-" : BdayValue()) + " bdayfocus=" + (bdayFocus ? 1 : 0) + "\n");
             foreach (Btn b in btns) sb.Append("btn " + b.Id + " " + b.R.X + " " + b.R.Y + " " + b.R.Width + " " + b.R.Height + " " + (b.On ? 1 : 0) + " " + (b.Enabled ? 1 : 0) + "\n");
             return sb.ToString();
         }
@@ -9019,19 +9057,24 @@ namespace DeskPals
             if (b != null && !b.Enabled) return;
             if (id == "make") { bool f = first; Close(); w.CuOpenMaker(null, f); return; }
             if (id == "import") { bool f = first; Close(); w.CuImportDialog(f); return; }
-            if (id.StartsWith("lu:")) { lu = Pal.NormLineup(id.Substring(3)); if (!InLineup(pet)) pet = Pal.LineupIds(lu).Length > 0 ? Pal.LineupIds(lu)[0] : ""; }
-            else if (id == "mode:shelf") mode = "shelf";
-            else if (id == "mode:single") { mode = "single"; if (!InLineup(pet)) pet = Pal.LineupIds(lu)[0]; }
-            else if (id.StartsWith("pet:")) { pet = id.Substring(4); mode = "single"; }
-            else if (id == "autostart") autoOn = !autoOn;
-            else if (id == "back") { if (step > 0) step--; }
+            if (id.StartsWith("lu:")) { lu = Pal.NormLineup(id.Substring(3)); if (!InLineup(pet)) pet = Pal.LineupIds(lu).Length > 0 ? Pal.LineupIds(lu)[0] : ""; bdayFocus = false; }
+            else if (id == "mode:shelf") { mode = "shelf"; bdayFocus = false; }
+            else if (id == "mode:single") { mode = "single"; if (!InLineup(pet)) pet = Pal.LineupIds(lu)[0]; bdayFocus = false; }
+            else if (id.StartsWith("pet:")) { pet = id.Substring(4); mode = "single"; bdayFocus = false; }
+            else if (id == "autostart") { autoOn = !autoOn; bdayFocus = false; }
+            else if (id == "bday") bdayFocus = !bdayFocus;   // 生日：點欄位＝開始／停止輸入
+            else if (id.StartsWith("bday:")) { bday = OnlyDigits(id.Substring(5), 4); bdayFocus = false; }   // 生日：測試用 act setup bday:03-15（也吃 0315）
+            else if (id == "bdayclear") { bday = ""; bdayFocus = false; }   // 生日：清除
+            else if (id == "back") { if (step > 0) step--; bdayFocus = false; }
             else if (id == "next")
             {
+                bdayFocus = false;
                 if (step < 1) step++;
                 else
                 {
                     if (first) App.LogAlways("setup: first-run pick " + lu + " (" + mode + ", order " + string.Join(",", featured) + ")");   // 本機 log；公開版另外匿名回報選了哪一櫃（DeskPals.Stats.cs）
                     if (autoBox) App.StartupEnable(autoOn);   // Store 版：沒勾＝關掉開機啟動
+                    w.SetBirthday(BdayValue());   // 生日：存到本機（跟 VS Code／pipe 同步）；留空＝不設
                     w.ApplySetup(lu, mode == "single", pet, first); Close(); return;
                 }
             }
@@ -9040,6 +9083,31 @@ namespace DeskPals
             LayoutBtns();
             hoverId = "";
             Invalidate();
+        }
+
+        // 生日：只留數字、最多 n 個
+        static string OnlyDigits(string s, int n)
+        {
+            System.Text.StringBuilder sb = new System.Text.StringBuilder();
+            foreach (char c in s ?? "") if (c >= '0' && c <= '9' && sb.Length < n) sb.Append(c);
+            return sb.ToString();
+        }
+        // 生日：輸入中的 MMDD → MM-DD；還沒輸滿 4 碼＝當作留空（跳過）
+        string BdayValue() { return bday.Length == 4 ? bday.Substring(0, 2) + "-" + bday.Substring(2) : ""; }
+
+        // 生日：欄位在輸入時吃數字／退格（KeyPreview 轉進來）
+        void BdayKey(KeyEventArgs e)
+        {
+            if (!bdayFocus || step != 1) return;
+            int d = -1;
+            if (e.KeyCode >= Keys.D0 && e.KeyCode <= Keys.D9) d = e.KeyCode - Keys.D0;
+            else if (e.KeyCode >= Keys.NumPad0 && e.KeyCode <= Keys.NumPad9) d = e.KeyCode - Keys.NumPad0;
+            if (d >= 0) { if (bday.Length < 4) bday += (char)('0' + d); }
+            else if (e.KeyCode == Keys.Back) { if (bday.Length > 0) bday = bday.Substring(0, bday.Length - 1); }
+            else if (e.KeyCode == Keys.Enter || e.KeyCode == Keys.Tab) bdayFocus = false;
+            else return;
+            e.Handled = true; e.SuppressKeyPress = true;
+            LayoutBtns(); Invalidate();
         }
 
         protected override void OnMouseMove(MouseEventArgs e)
@@ -9113,6 +9181,7 @@ namespace DeskPals
         {
             Rectangle r = b.R;
             bool hot = b.Id == hoverId && b.Enabled;
+            if (b.Kind == 5) { DrawBdayField(g, b); return; }   // 生日：像素輸入框
             if (b.Kind == 4)
             {
                 // 勾選：像素方框（勾了是綠底白勾）＋字
@@ -9162,6 +9231,34 @@ namespace DeskPals
                 Pix.Mono(g, Pix.CHECK, Color.White, bx + 2 * U, by2 + 2 * U, U);
             }
         }
+
+        // 生日：像素風輸入框（點一下開始輸入，打 4 個數字 MMDD；可留空）
+        static readonly string[] CAKE_ICON = { "..y..", "..c..", "WWWWW", "PWPWP", "WWWWW", "PPPPP" };
+        void DrawBdayField(Graphics g, Btn b)
+        {
+            Rectangle r = b.R;
+            bool hot = b.Id == hoverId;
+            // 內凹的框（聚焦＝金色粗框）
+            Pix.Round(g, bdayFocus ? Pix.Gold : Pix.Ink, r.X, r.Y, r.Width, r.Height, U);
+            if (bdayFocus) Pix.Box(g, Pix.Gold, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U);
+            int ins = bdayFocus ? 2 * U : U;
+            Pix.Box(g, hot ? Pix.C(0xFFF6DE) : Pix.C(0xFFFDF7), r.X + ins, r.Y + ins, r.Width - 2 * ins, r.Height - 2 * ins);
+            // 小蛋糕圖示
+            Dictionary<char, Color> pal = new Dictionary<char, Color>();
+            pal['y'] = Pix.C(0xF6C453); pal['c'] = Pix.C(0xE2B550); pal['W'] = Pix.C(0xFFF0C4); pal['P'] = Pix.C(0xF27A90);
+            int ic = Math.Max(2, Sc(3)), ih = CAKE_ICON.Length * ic, ix = r.X + Sc(12), iy = r.Y + (r.Height - ih) / 2;
+            Pix.Art(g, CAKE_ICON, pal, ix, iy, ic);
+            int tx = ix + CAKE_ICON[0].Length * ic + Sc(10);
+            Rectangle tr = new Rectangle(tx, r.Y, r.Right - tx - Sc(10), r.Height);
+            if (bday.Length == 0 && !bdayFocus)
+                PixText.DrawText(g, "生日（MM-DD，到時給你驚喜）", subF, tr, Pix.Dim, Pix.LeftMid);
+            else
+            {
+                string val = "生日　" + Slot(0) + Slot(1) + "-" + Slot(2) + Slot(3) + (bdayFocus ? " ｜" : "");
+                PixText.DrawText(g, val, btnF, tr, Pix.TextC, Pix.LeftMid);
+            }
+        }
+        char Slot(int i) { return i < bday.Length ? bday[i] : '_'; }
 
         void Arrow(Graphics g, int x, int cy, int dir, Color c)
         {
