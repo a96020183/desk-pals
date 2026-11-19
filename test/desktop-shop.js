@@ -132,6 +132,20 @@ function png(file) {
 }
 const opaque = (im, x0 = 0, y0 = 0, x1 = im.w, y1 = im.h) => { let c = 0; for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) if (im.px[(y * im.w + x) * 4 + 3] > 60) c++; return c; };
 
+// ---------------- 四個商店視窗（cui pipe；離屏畫面）----------------
+function parseCui(o) {
+	const r = { kind: "", focus: "", link: "", size: "", scroll: "", hits: new Set(), tb: {}, extra: [] };
+	for (const l of o.split("\n")) {
+		const t = l.split(" ");
+		if (t[0] === "cui") { for (const kv of t.slice(1)) { const e = kv.indexOf("="); if (e > 0 && r[kv.slice(0, e)] !== undefined) r[kv.slice(0, e)] = kv.slice(e + 1); } }
+		else if (t[0] === "hit") r.hits.add(t[1]);
+		else if (t[0] === "tb") r.tb[t[1]] = t.slice(2).join(" ");
+		else if (t[0] && t[0] !== "end") r.extra.push(l);
+	}
+	r.extraText = r.extra.join("\n");
+	return r;
+}
+
 (async () => {
 	const K = keypair(), OTHER = keypair();
 	const keyEnv = { DESKPALS_CODE_TESTKEY: K.hex, DESKPALS_CLOCK: "2026-12-01T10:00" };
@@ -228,14 +242,14 @@ const opaque = (im, x0 = 0, y0 = 0, x1 = im.w, y1 = im.h) => { let c = 0; for (l
 		i = await app4.info();
 		await check("第 30 個章：講一句、小圍巾可以穿了", async () => {
 			assert.equal(i.stamps, "30 today=1 last=2026-12-20");
-			assert.equal(i.said, "第 30 個章，小圍巾是你的了");
+			assert.equal(i.said, "第 30 個章，同款小圍巾是你的了");
 			assert.equal(await app4.wear("costume", "scarf"), "wear ok");
 			const j = await app4.info();
 			for (const id of ["duoduo", "meidian", "cici"]) assert.equal(j.pal[id], "scarf", id);
 		});
 		app4.send("study-clock 2026-12-21T08:00");
 		await sleep(1600);
-		await check("30 個以後照樣蓋（第 31 個）", async () => { const j = await app4.info(); assert.equal(j.stamps, "31 today=1 last=2026-12-21"); assert.equal(j.said, "今天的章蓋好了，第 31 個"); });
+		await check("30 個以後照樣蓋（第 31 個，往下一階 60 前進）", async () => { const j = await app4.info(); assert.equal(j.stamps, "31 today=1 last=2026-12-21"); assert.equal(j.said, "今天的章蓋好了 31／60"); });
 		await app4.quit();
 	}
 
@@ -328,6 +342,138 @@ const opaque = (im, x0 = 0, y0 = 0, x1 = im.w, y1 = im.h) => { let c = 0; for (l
 		r = "";
 		for (let k = 0; k < 10 && !/last=bobo/.test(r); k++) { r = await water(0); if (!/last=bobo/.test(r)) await sleep(500); }
 		await check("窩伴小世界：一樣的時間，破破講", () => assert.match(r, /last=bobo/));
+		await app.quit();
+	}
+
+	// ================= 四個畫面（cui）：開、互動、鎖住→商店、兌換→解鎖→穿、打卡章、空設定備援 =================
+	{
+		const stamp30 = Array.from({ length: 30 }, (_, k) => new Date(Date.UTC(2026, 0, 1 + k)).toISOString().slice(0, 10)).join("\n") + "\n";
+		const d = fresh("ui", { "stamps.txt": stamp30 });
+		const app = await launch("ui", d, Object.assign({}, keyEnv, { DESKPALS_CLOCK: "2026-12-20T09:00" }));
+		const open = async (which) => { app.send("cui open " + which); await sleep(400); };
+		const press = async (id) => { app.send("cui press " + id); await sleep(350); };
+		const typeIn = async (key, text) => { app.send(`cui type ${key} ${text}`); await sleep(150); };
+		const info = async () => parseCui(await app.block("cui info"));
+
+		// 打卡冊（B 繪本跨頁）：開得起來、章數顯示（12/20 補第 31 個，已滿 30）
+		await open("checkin");
+		let ci = await info();
+		await check("打卡冊：開得起來、顯示章數（滿 30、未滿 60）", () => {
+			assert.equal(ci.kind, "checkin");
+			assert.match(ci.extraText, /stamps 31 today=1 goal30=1 goal60=0/);
+			assert.ok(ci.hits.has("close") && ci.hits.has("picker"), [...ci.hits].join(","));
+		});
+		await app.reply(`snap ${shots}/ui-checkin.png`, (b) => b.includes("snapped"));
+
+		// 打卡冊 →「去我的公仔穿」→ 造型選擇（C 試穿舞台）
+		await press("picker");
+		let pk = await info();
+		await check("打卡冊的『去我的公仔穿』：切到造型選擇", () => assert.equal(pk.kind, "picker"));
+
+		// 造型選擇：穿已解鎖的小圍巾（打卡滿 30），馬上就穿上
+		await press("costume:scarf");
+		pk = await info();
+		await check("造型選擇：選小圍巾，公仔馬上穿上（costume=scarf）", () => assert.match(pk.extraText, /costume=scarf /));
+		await app.reply(`snap ${shots}/ui-picker.png`, (b) => b.includes("snapped"));
+
+		// 造型選擇：鎖著的聖誕造型（還沒買）→ 跳去季節商店（A 分區）
+		await press("costume:xmas");
+		let sh = await info();
+		await check("造型選擇：點鎖住的聖誕造型 → 打開季節商店", () => assert.equal(sh.kind, "shop"));
+
+		// 季節商店：空設定備援（shop.txt 連結全空）：香港 FPS 顯示「—」、信箱在；咖啡／訂做沒有連結 → 不給按（即將推出）
+		await check("季節商店：空設定備援（FPS=-、信箱在、咖啡／訂做『即將推出』沒有按鈕）", () => {
+			assert.match(sh.extraText, /cfg mail=a96020183@gmail.com fps=- ecpay=-/);
+			assert.ok(sh.hits.has("item:xmas-costume") && sh.hits.has("item:exam-cabinet"), [...sh.hits].join(","));
+			assert.ok(!sh.hits.has("buy:coffee") && !sh.hits.has("buy:custom"), "空連結不該有購買按鈕");
+			assert.ok(sh.hits.has("code"), "有『輸入解鎖碼』");
+		});
+		await app.reply(`snap ${shots}/ui-shop-empty.png`, (b) => b.includes("snapped"));
+
+		// 季節商店 →「輸入解鎖碼」→ 票根（C）
+		await press("code");
+		let co = await info();
+		await check("季節商店的『輸入解鎖碼』：切到票根輸入畫面", () => { assert.equal(co.kind, "code"); assert.ok("code" in co.tb, JSON.stringify(co.tb)); });
+
+		// 票根：貼上有效的碼 → 解鎖成功
+		await typeIn("code", code(K, ["xmas-costume", "exam-costume"], { id: 40 }));
+		await press("unlock");
+		co = await info();
+		await check("票根：貼上有效的碼、按解鎖 → 成功、收進櫃子", () => assert.match(co.extraText, /result ok items (xmas-costume,exam-costume|exam-costume,xmas-costume)/));
+		await app.reply(`snap ${shots}/ui-code.png`, (b) => b.includes("snapped"));
+
+		// 票根：亂打的碼 → 不對
+		await typeIn("code", "ZZZZ-ZZZZ-ZZZZ");
+		await press("unlock");
+		co = await info();
+		await check("票根：亂打的碼 → 看起來不對", () => assert.match(co.extraText, /result bad /));
+
+		// 解鎖後回造型選擇：聖誕造型現在穿得上了（redeem→unlock→wear 整條）
+		await open("picker");
+		await press("costume:xmas");
+		pk = await info();
+		await check("解鎖後：聖誕造型穿得上了（costume=xmas，不再跳商店）", () => { assert.equal(pk.kind, "picker"); assert.match(pk.extraText, /costume=xmas /); });
+
+		// 造型選擇：換季節櫃子外觀（已買聖誕櫃？沒有 → 鎖住 → 跳商店）；買了的考試週櫃可穿
+		await press("skin:exam");
+		sh = await info();
+		await check("造型選擇：點沒買的考試週櫃 → 打開季節商店", () => assert.equal(sh.kind, "shop"));
+
+		// 已擁有的項目在商店顯示（給截圖對 mockup 的『已擁有』狀態）
+		await check("季節商店：已兌換的聖誕造型標為已擁有", () => assert.match(sh.extraText, /item xmas-costume owned=1/));
+		await app.reply(`snap ${shots}/ui-shop-owned.png`, (b) => b.includes("snapped"));
+
+		// 關閉：沒有視窗了
+		app.send("cui close");
+		await sleep(250);
+		await check("關閉：商店視窗收掉（cui none）", async () => assert.match(await app.block("cui info"), /cui none/));
+
+		// 設定檔有填連結時：咖啡／訂做會出現可按的按鈕（對照空設定）
+		const cfg = path.join(work, "ui-shop-filled.txt");
+		fs.writeFileSync(cfg, "price_item_twd=100\nprice_item_hkd=25\ncoffee_twd=60\necpay_coffee_1=https://pay.example.test/c1\ncustom_early_twd=300\ncustom_form=https://form.example.test/c\nfps_id=1234567\nmail=a96020183@gmail.com\n");
+		await app.quit();
+		const app2 = await launch("ui-filled", fresh("ui-filled"), Object.assign({}, keyEnv, { DESKPALS_SHOP_FILE: cfg }));
+		app2.send("cui open shop");
+		await sleep(400);
+		const sh2 = parseCui(await app2.block("cui info"));
+		await check("季節商店：連結有填時，咖啡／訂做出現可按的按鈕、FPS 顯示識別碼", () => {
+			assert.ok(sh2.hits.has("buy:coffee") && sh2.hits.has("buy:custom"), [...sh2.hits].join(","));
+			assert.match(sh2.extraText, /cfg mail=a96020183@gmail.com fps=1234567/);
+		});
+		await app2.quit();
+	}
+
+	// ================= 資料驅動：打卡獎勵階梯＋季節商品清單都吃設定（加一行就多一項，不用改程式）=================
+	{
+		const cfg = path.join(work, "catalog.txt");
+		fs.writeFileSync(cfg,
+			"price_item_twd=100\nprice_item_hkd=25\nmail=a96020183@gmail.com\n" +
+			"reward.30=scarf 同款小圍巾\nreward.60=grad 畢業帽\nreward.90=pajama 睡衣\n" +
+			"costume.xmas=聖誕造型 | xmas-costume\ncabinet.xmas=聖誕 | xmas-cabinet\n" +
+			"costume.snow=雪裝 | snow-costume | 120 | 30\ncabinet.snow=雪 | snow-cabinet\n");
+		const app = await launch("catalog", fresh("catalog"), Object.assign({}, keyEnv, { DESKPALS_SHOP_FILE: cfg, DESKPALS_CLOCK: "2026-12-20T09:00" }));
+		app.send("cui open checkin"); await sleep(400);
+		const ci = parseCui(await app.block("cui info"));
+		await check("打卡獎勵階梯吃設定：三階 30／60／90，睡衣(90)美術未到", () => {
+			assert.match(ci.extraText, /reward 30 scarf /);
+			assert.match(ci.extraText, /reward 60 grad /);
+			assert.match(ci.extraText, /reward 90 pajama got=0 art=0/);
+		});
+		await app.reply(`snap ${shots}/ui-catalog-checkin.png`, (b) => b.includes("snapped"));
+		app.send("cui open picker"); await sleep(400);
+		const pk = parseCui(await app.block("cui info"));
+		await check("造型清單吃設定：多了睡衣(即將)、雪裝(季節，無美術也是即將)", () => {
+			assert.match(pk.extraText, /tile pajama soon/);
+			assert.match(pk.extraText, /tile snow soon/);
+			assert.match(pk.extraText, /skin snow lock/);
+		});
+		app.send("cui open shop"); await sleep(400);
+		const sh = parseCui(await app.block("cui info"));
+		await check("季節商店吃設定：多了雪裝／雪櫃（兌換碼項目 snow-*）", () => {
+			assert.ok(sh.hits.has("item:snow-costume") && sh.hits.has("item:snow-cabinet"), [...sh.hits].join(","));
+			assert.match(sh.extraText, /item snow-costume owned=0/);
+		});
+		await app.reply(`snap ${shots}/ui-catalog-shop.png`, (b) => b.includes("snapped"));
 		await app.quit();
 	}
 
