@@ -158,7 +158,8 @@ async function launch(name, iso) {
 		DESKPALS_FAKE_CLI: path.join(__dirname, "fixtures", "fake-cli.js"), FAKE_CLI_STATE: stateFile, FAKE_CLI_LOG: cliLog,
 		DESKPALS_FAKE_WEB: `http://127.0.0.1:${port}`,
 	});
-	if (iso) { delete env.CLAUDE_CONFIG_DIR; delete env.CODEX_HOME; }   // 沒設：桌面版自己決定看哪裡（離屏時不能是你的家目錄）
+	if (iso) { delete env.CLAUDE_CONFIG_DIR; delete env.CODEX_HOME; delete env.DESKPALS_DOWNLOADS_DIR; }
+	if (iso === "no-data-dir") delete env.DESKPALS_DATA_DIR;   // 連資料資料夾都沒指定   // 沒設：桌面版自己決定看哪裡（離屏時不能是你的家目錄）
 	const args = cmd.map((x) => x.replace(/\{ep\}/g, ep));
 	const child = cp.spawn(args[0], args.slice(1), { env, stdio: "ignore", windowsHide: true });
 	let exited = false;
@@ -570,13 +571,14 @@ const todayStr = dayOf(fmtLocal(new Date()));
 	app = await launch("iso", isoData);
 	app.send("work-poll");
 	await sleep(3000);
-	await check("離屏測試沒設 CLAUDE_CONFIG_DIR／CODEX_HOME：只看資料資料夾裡的空資料夾，你家目錄的對話一筆都沒讀", async () => {
+	await check("離屏測試沒設 CLAUDE_CONFIG_DIR／CODEX_HOME：只看資料資料夾裡的空資料夾，你家目錄的對話、下載、圖片、桌面一個都沒碰", async () => {
 		const d = await app.dump();
 		const roots = Object.fromEntries((/^work-roots (.*)$/m.exec(d) || ["", ""])[1].split(" ").filter(Boolean).map((kv) => kv.split("=")));
 		const inIso = (p) => p.toLowerCase().startsWith((path.resolve(isoData) + path.sep).replace(/ /g, "_").toLowerCase());   // dump 把空白換成 _
 		assert.ok(inIso(roots["home-claude"]), d);
 		assert.ok(inIso(roots["home-codex"]), d);
 		for (const r of (roots.claude + "|" + roots.codex).split("|").filter(Boolean)) assert.ok(inIso(r), "看了資料資料夾以外的地方：" + r);
+		for (const k of ["downloads", "pictures", "desktop"]) assert.ok(inIso(roots[k]), k + "：" + roots[k]);
 		const home = os.homedir().toLowerCase();
 		assert.ok(!d.toLowerCase().includes(path.join(home, ".claude")) && !d.toLowerCase().includes(path.join(home, ".codex")), d);
 		const files = [];
@@ -585,6 +587,15 @@ const todayStr = dayOf(fmtLocal(new Date()));
 		assert.ok(!fs.existsSync(path.join(isoData, "notebook")), "沒有對話被寫進小本子");
 	});
 	await app.quit();
+	await check("離屏連 DESKPALS_DATA_DIR 都沒設：資料放暫存資料夾，不用你真的 %LOCALAPPDATA%\\DeskPals", async () => {
+		app = await launch("iso2", "no-data-dir");
+		const d = await app.dump();
+		const roots = Object.fromEntries((/^work-roots (.*)$/m.exec(d) || ["", ""])[1].split(" ").filter(Boolean).map((kv) => kv.split("=")));
+		await app.quit();
+		const want = path.join(tmp, "DeskPals-offscreen").replace(/ /g, "_").toLowerCase();
+		assert.equal(roots.data.toLowerCase(), want, d);
+		for (const k of ["home-claude", "home-codex", "downloads", "pictures", "desktop"]) assert.ok(roots[k].toLowerCase().startsWith(want + path.sep), k + "：" + roots[k]);
+	});
 
 	server.close();
 	let fail = 0;

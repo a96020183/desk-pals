@@ -4109,6 +4109,7 @@ namespace DeskPals
         static string DataDirInit()
         {
             string d = Environment.GetEnvironmentVariable("DESKPALS_DATA_DIR");
+            if (string.IsNullOrEmpty(d) && App.Offscreen) d = Path.Combine(Path.GetTempPath(), "DeskPals-offscreen");   // 離屏（測試）沒指定：不用你真的資料
             if (string.IsNullOrEmpty(d)) d = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DeskPals");
             return d;
         }
@@ -7150,7 +7151,7 @@ namespace DeskPals
         {
             try
             {
-                string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+                string dir = DownloadsDir();   // 離屏（測試）不看真的下載資料夾（DeskPals.Work.cs）
                 if (!Directory.Exists(dir)) return;
                 dlWatch = new FileSystemWatcher(dir);
                 dlWatch.IncludeSubdirectories = false;

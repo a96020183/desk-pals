@@ -14,7 +14,7 @@
 //
 // 掛在別的檔的地方（都只有一兩行，註解寫「工作來源」）：
 //   DeskPals.cs：TickInner → WorkTick()、OnMsg 的 hello → WorkHello()、notify → WorkDropsNotify()、config-host → WorkOwns("vpn")、
-//     default → WorkMsg()、ClaudeProjectsDir／CodexSessionsDir → AiHomeDefault()（離屏測試不讀真的家目錄）、ClaudeWatchOnce／CodexWatchOnce → WorkClaudeRoots()／WorkCodexRoots()／WorkWslAlive()、HealthLoop → VpnReachable()、
+//     default → WorkMsg()、ClaudeProjectsDir／CodexSessionsDir → AiHomeDefault()、StartDownloadWatch → DownloadsDir()、DataDirInit（離屏測試不碰真的家目錄、資料）、ClaudeWatchOnce／CodexWatchOnce → WorkClaudeRoots()／WorkCodexRoots()／WorkWslAlive()、HealthLoop → VpnReachable()、
 //     小屋選單「工作」→ ShowWorkSettings()（設定視窗做好後才掛）。
 //   DeskPals.Study.cs：PlanTick → WorkLogClass()（上課寫進小本子）、SchoolFetchLoop → WorkMeetUrl()（跟開會同一份行事曆不提醒兩次）。
 //
@@ -216,7 +216,7 @@ namespace DeskPals
         // 測試（只在離屏模式）：DESKPALS_FAKE_CLI＝一支 node 小程式，「node <它> glab|gh <參數…>」假裝是 glab／gh
         static string Fake() { return App.Offscreen ? Environment.GetEnvironmentVariable("DESKPALS_FAKE_CLI") : null; }
 
-        public static bool Available(string tool) { return !string.IsNullOrEmpty(Fake()) || Find(tool) != null; }
+        public static bool Available(string tool) { return !string.IsNullOrEmpty(Fake()) || (!App.Offscreen && Find(tool) != null); }
 
         // 回傳結束碼（-1＝沒裝、跑不起來或超時）；stdout／stderr 只給呼叫的人解析，不寫進紀錄
         public static int Run(string tool, string[] args, int timeoutMs, out string stdout, out string stderr)
@@ -226,6 +226,7 @@ namespace DeskPals
             List<string> a = new List<string>();
             string fake = Fake();
             if (!string.IsNullOrEmpty(fake)) { exe = Find("node") ?? "node"; a.Add(fake); a.Add(tool); }
+            else if (App.Offscreen) return -1;   // 離屏（測試）沒給假的：絕不叫你真的 glab／gh（它們會用你的登入）
             else exe = Find(tool);
             if (exe == null) return -1;
             a.AddRange(args);
@@ -1271,12 +1272,26 @@ namespace DeskPals
         // ================= Claude Code／Codex：做完的對話寫進小本子 =================
         // ~/.claude、~/.codex 的預設位置（CLAUDE_CONFIG_DIR／CODEX_HOME 沒設時）。
         // 離屏（測試，含 DESKPALS_ISOLATED）一律改成資料資料夾裡的空資料夾：測試絕不讀使用者真的對話紀錄
-        static string AiHomeDefault(string name)
+        static string AiHomeDefault(string name) { return UserFolder(Environment.SpecialFolder.UserProfile, name, name); }
+
+        // 使用者的資料夾（家目錄、下載、圖片、桌面）。離屏（測試）一律換成資料資料夾裡的 test-home 底下的空資料夾，絕不碰真的
+        public static string UserFolder(Environment.SpecialFolder f, string sub, string testName)
         {
-            if (!App.Offscreen) return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), name);
-            string d = Path.Combine(DataDir, "test-home", name);
+            if (!App.Offscreen)
+            {
+                string real = Environment.GetFolderPath(f);
+                return string.IsNullOrEmpty(sub) ? real : Path.Combine(real, sub);
+            }
+            string d = Path.Combine(DataDir, "test-home", testName);
             try { Directory.CreateDirectory(d); } catch { }
             return d;
+        }
+
+        // 「下載好了」看的資料夾：DESKPALS_DOWNLOADS_DIR 有設就用它，不然是家目錄的 Downloads（離屏：test-home 的 Downloads）
+        public static string DownloadsDir()
+        {
+            string e = Environment.GetEnvironmentVariable("DESKPALS_DOWNLOADS_DIR");
+            return !string.IsNullOrEmpty(e) ? e : UserFolder(Environment.SpecialFolder.UserProfile, "Downloads", "Downloads");
         }
 
         // 進階：別的資料夾（WSL 裡的 Claude／Codex）。給 .claude 或 .claude\projects 都可以
@@ -1537,7 +1552,9 @@ namespace DeskPals
                 + " gh=" + (ghState == "" ? "-" : ghState) + " ghuser=" + (ghUser == "" ? "-" : ghUser) + " dropped=" + workDropped + " polled=" + workPolled + " ai=" + aiWritten
                 + " quiet=" + (quietOn ? QuietLeft() : 0) + " meets=" + meetPlan.Count + (meetErr != "" ? " meeterr=" + meetErr.Replace(' ', '_') : "") + "\n");
             sb.Append("work-roots claude=" + string.Join("|", WorkClaudeRoots().ToArray()).Replace(' ', '_') + " codex=" + string.Join("|", WorkCodexRoots().ToArray()).Replace(' ', '_')
-                + " home-claude=" + ClaudeProjectsDir().Replace(' ', '_') + " home-codex=" + CodexSessionsDir().Replace(' ', '_') + "\n");
+                + " home-claude=" + ClaudeProjectsDir().Replace(' ', '_') + " home-codex=" + CodexSessionsDir().Replace(' ', '_')
+                + " downloads=" + DownloadsDir().Replace(' ', '_') + " pictures=" + UserFolder(Environment.SpecialFolder.MyPictures, "", "Pictures").Replace(' ', '_')
+                + " desktop=" + UserFolder(Environment.SpecialFolder.DesktopDirectory, "", "Desktop").Replace(' ', '_') + " data=" + DataDir.Replace(' ', '_') + "\n");
             lock (ciWatches) foreach (CiWatch w in ciWatches) sb.Append("watch " + w.Kind + " " + w.Repo + " " + w.Tag + (w.Announced ? " running" : "") + "\n");
             lock (workNotices) foreach (string n in workNotices) sb.Append("notice " + n + "\n");
             sb.Append("end\n");

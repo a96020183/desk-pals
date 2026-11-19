@@ -407,7 +407,7 @@ namespace DeskPals
                 dlg.Title = "匯出「" + m.Name + "」";
                 dlg.Filter = "WoWo Pals 公仔|*.deskpal";
                 dlg.FileName = CuMeta.CleanName(m.Name) + ".deskpal";
-                dlg.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+                dlg.InitialDirectory = World.UserFolder(Environment.SpecialFolder.DesktopDirectory, "", "Desktop");
                 if (dlg.ShowDialog() != DialogResult.OK) return;
                 if (CuExport(id, dlg.FileName)) Lead().Say("匯出好了！把「" + Path.GetFileName(dlg.FileName) + "」傳給朋友，他在小屋按「匯入朋友的公仔」就能養 🧸", 5);
             }
@@ -440,7 +440,7 @@ namespace DeskPals
             {
                 dlg.Title = "匯入朋友的公仔";
                 dlg.Filter = "WoWo Pals 公仔|*.deskpal|所有檔案|*.*";
-                dlg.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+                dlg.InitialDirectory = World.UserFolder(Environment.SpecialFolder.DesktopDirectory, "", "Desktop");
                 if (dlg.ShowDialog() != DialogResult.OK) { if (first) ShowSetup(true); return; }
                 CuImportFile(dlg.FileName, first);
             }

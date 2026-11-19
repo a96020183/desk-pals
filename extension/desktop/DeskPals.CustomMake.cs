@@ -347,7 +347,7 @@ namespace DeskPals
             {
                 dlg.Title = sheet ? "選畫好的動作表" : "選一張照片或圖片";
                 dlg.Filter = "圖片（PNG、JPG、GIF、BMP）|*.png;*.jpg;*.jpeg;*.gif;*.bmp|所有檔案|*.*";
-                dlg.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
+                dlg.InitialDirectory = World.UserFolder(Environment.SpecialFolder.MyPictures, "", "Pictures");
                 if (dlg.ShowDialog(this) == DialogResult.OK) LoadImage(dlg.FileName, sheet);
             }
         }
@@ -920,7 +920,7 @@ namespace DeskPals
                 dlg.Title = "存動作表範本";
                 dlg.Filter = "PNG 圖片|*.png";
                 dlg.FileName = "DeskPals動作表範本.png";
-                dlg.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+                dlg.InitialDirectory = World.UserFolder(Environment.SpecialFolder.DesktopDirectory, "", "Desktop");
                 if (dlg.ShowDialog() != DialogResult.OK) return;
                 CuSaveTemplate(dlg.FileName);
                 Lead().Say("範本存好了：每一格畫一個動作，畫好再按「上傳畫好的動作表」🎨", 4);
