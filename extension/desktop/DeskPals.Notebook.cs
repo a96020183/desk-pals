@@ -17,6 +17,7 @@ namespace DeskPals
     using System.Drawing;
     using System.Drawing.Drawing2D;
     using System.Drawing.Imaging;
+    using System.Drawing.Text;
     using System.IO;
     using System.Runtime.InteropServices;
     using System.Text;
@@ -171,22 +172,24 @@ namespace DeskPals
             KeyPreview = true;
             SetStyle(ControlStyles.OptimizedDoubleBuffer | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
             string jh = "Microsoft JhengHei UI";
-            fPlate = new Font(jh, 11f, FontStyle.Bold);
-            fBody = new Font(jh, 11f, FontStyle.Bold);
-            fWord = new Font(jh, 10f, FontStyle.Bold);
-            fSmall = new Font(jh, 8.5f, FontStyle.Bold);
-            fBar = new Font(jh, 9f, FontStyle.Bold);
-            fBtn = new Font(jh, 10f, FontStyle.Bold);
-            fBtnS = new Font(jh, 8.5f, FontStyle.Bold);
-            fNote = new Font(jh, 11f, FontStyle.Regular);
-            fPv = new Font(jh, 10f, FontStyle.Regular);
-            fPvB = new Font(jh, 10f, FontStyle.Bold);
-            fField = new Font(jh, 10f, FontStyle.Bold);
-            tbTodo = MakeBox(fField, "寫一件要做的事，按 Enter");
-            tbDone = MakeBox(fField, "補一件做過的事，按 Enter");
-            tbEdit = MakeBox(fBody, "");
+            // 自己畫的字：像素大小（跟 mockup 一樣 14.7／13.3／11.3／12px），用 GDI+ 反鋸齒畫（見 DT）
+            fPlate = Px(jh, 14.667f * (float)d, FontStyle.Bold);
+            fBody = Px(jh, 14.667f * (float)d, FontStyle.Bold);
+            fWord = Px(jh, 13.333f * (float)d, FontStyle.Bold);
+            fSmall = Px(jh, 11.333f * (float)d, FontStyle.Bold);
+            fBar = Px(jh, 12f * (float)d, FontStyle.Bold);
+            fBtn = Px(jh, 13.333f * (float)d, FontStyle.Bold);
+            fBtnS = Px(jh, 11.333f * (float)d, FontStyle.Bold);
+            fNote = Px(jh, 14.667f * (float)d, FontStyle.Regular);
+            fPv = Px(jh, 13.333f * (float)d, FontStyle.Regular);
+            fPvB = Px(jh, 13.333f * (float)d, FontStyle.Bold);
+            fField = Px(jh, 13.333f * (float)d, FontStyle.Bold);
+            // 真的打字框（TextBox／RichTextBox）用 pt 字型，跟系統縮放走
+            tbTodo = MakeBox(new Font(jh, 10f, FontStyle.Bold), "寫一件要做的事，按 Enter");
+            tbDone = MakeBox(new Font(jh, 10f, FontStyle.Bold), "補一件做過的事，按 Enter");
+            tbEdit = MakeBox(new Font(jh, 11f, FontStyle.Bold), "");
             note = new NbNoteBox();
-            note.Font = fNote; note.BackColor = CPaper; note.ForeColor = CNote; note.LineH = Sc(28); note.Visible = false;
+            note.Font = new Font(jh, 11f, FontStyle.Regular); note.BackColor = CPaper; note.ForeColor = CNote; note.LineH = Sc(28); note.Visible = false;
             note.TextChanged += delegate { if (note.Tag == null) { noteDirty = true; noteSaveAt = w.Now + 0.7; } };
             note.LostFocus += delegate { Invalidate(); };
             Controls.Add(note);
@@ -701,7 +704,7 @@ namespace DeskPals
             Graphics g = e.Graphics;
             g.SmoothingMode = SmoothingMode.None;
             g.Clear(KEY);
-            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;   // 字一律反鋸齒（遠端桌面預設關掉字型平滑，mockup 的字是平滑的）
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;   // 字見 DT()
             hits.Clear(); todoRows.Clear(); clipR.Clear(); Drawn.Clear();
             again = false; hitClip = Rectangle.Empty;
             rTodo = Rectangle.Empty; rDone = Rectangle.Empty; rEdit = Rectangle.Empty; rNote = Rectangle.Empty;
@@ -737,9 +740,10 @@ namespace DeskPals
         void Crown(Graphics g, int X, int W0)
         {
             string t = "小本子";
-            int tw = Pix.TextW(t, fPlate), plw = tw + Sc(44), plh = Sc(25);
+            int tw = TW(t, fPlate), plw = tw + Sc(44), plh = Sc(25);
             Rectangle pr = new Rectangle(X + (W0 - plw) / 2, Sc(10), plw, plh);
-            Pix.Plate(g, t, fPlate, pr, U);
+            Pix.Plate(g, "", fPlate, pr, U);
+            DT(g, t, fPlate, new Rectangle(pr.X, pr.Y, pr.Width, pr.Height - U / 2), CText, Pix.Mid);
             Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.X - Sc(8) - 5 * U, pr.Y + plh / 2 - 2 * U, U);
             Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.Right + Sc(8), pr.Y + plh / 2 - 2 * U, U);
             Rectangle xr = new Rectangle(X + W0 - Sc(10) - Sc(20), Sc(12), Sc(20), Sc(20));
@@ -874,16 +878,34 @@ namespace DeskPals
             Rectangle clip = new Rectangle(paper.X + padL - Sc(8), paper.Y + Sc(6), paper.Width - padL + Sc(8) - Sc(14) + Sc(12), paper.Height - Sc(12));
             clipR[Preview ? "preview" : "done"] = clip;
             int tx = paper.X + padL, right = paper.Right - Sc(14);
+            // 「補一件做過的事」：清單放得下就接在後面；放不下就釘在紙的最下面（捲動時不會被切一半）
+            int fieldH = Sc(28) + Sc(4), prev;
+            contentH.TryGetValue("donelist", out prev);
+            bool pin = !Preview && prev + fieldH > clip.Height;
+            Rectangle lclip = pin ? new Rectangle(clip.X, clip.Y, clip.Width, clip.Height - fieldH - Sc(4)) : clip;
+            clipR[Preview ? "preview" : "done"] = lclip;
             GraphicsState st = g.Save();
-            g.SetClip(new Rectangle(paper.X, paper.Y, paper.Width - (single ? Sc(6) : 0), paper.Height));
-            int s = ScrollOf(Preview ? "preview" : "done", clip);
-            hitClip = new Rectangle(paper.X - Sc(12), paper.Y, paper.Width + Sc(12), paper.Height);
-            int h = Preview ? PreviewPage(g, tx, paper.Y + Sc(6) - s, right) : DonePage(g, tx, paper.Y + Sc(6) - s, right, clip);
+            g.SetClip(new Rectangle(paper.X, paper.Y, paper.Width - (single ? Sc(6) : 0), pin ? lclip.Bottom - paper.Y : paper.Height));
+            int s = ScrollOf(Preview ? "preview" : "done", lclip);
+            hitClip = new Rectangle(paper.X - Sc(12), paper.Y, paper.Width + Sc(12), pin ? lclip.Bottom - paper.Y : paper.Height);
+            int y0 = paper.Y + Sc(6) - s;
+            int h = Preview ? PreviewPage(g, tx, y0, right) : DonePage(g, tx, y0, right, lclip);
+            if (!Preview)
+            {
+                contentH["donelist"] = h;
+                if ((h + fieldH > clip.Height) != pin) again = true;
+                Rectangle fr = pin ? new Rectangle(tx - Sc(8), lclip.Bottom + Sc(4), right - tx + Sc(8), Sc(28)) : new Rectangle(tx - Sc(8), y0 + h, right - tx + Sc(8), Sc(28));
+                if (pin) { g.ResetClip(); hitClip = Rectangle.Empty; }
+                Field(g, fr, tbDone, "補一件做過的事，按 Enter", false, clip);
+                rDone = Inside(fr, clip) ? fr : Rectangle.Empty;
+                AddHit("adddone", "", fr);
+                if (!pin) h += fieldH;
+            }
             hitClip = Rectangle.Empty;
-            ScrollDone(Preview ? "preview" : "done", h, clip);
+            ScrollDone(Preview ? "preview" : "done", h, lclip);
             g.Restore(st);
             Rings(g, paper);
-            Scrollbar(g, Preview ? "preview" : "done", paper, clip);
+            Scrollbar(g, Preview ? "preview" : "done", paper, lclip);
             // 貼出去會長這樣
             Rectangle br = new Rectangle(area.X, paper.Bottom + U + Sc(8) - U, area.Width, bar);
             br.Y = paper.Bottom + Sc(8);
@@ -966,13 +988,7 @@ namespace DeskPals
                 }
                 y += ThingRow(g, t, bx, y, right, clip);
             }
-            // 補一件做過的事
-            y += Sc(4);
-            Rectangle fr = new Rectangle(bx, y, bw, Sc(28));
-            Field(g, fr, tbDone, "補一件做過的事，按 Enter", false, clip);
-            rDone = Inside(fr, clip) ? fr : Rectangle.Empty;
-            AddHit("adddone", "", fr);
-            y += Sc(28) + Sc(4);
+            y += Sc(4);   // 「補一件做過的事」由 DoneArea 畫
             return y - y0;
         }
 
@@ -1065,12 +1081,7 @@ namespace DeskPals
                 }
                 y += Sc(32);
             }
-            y += Sc(14);
-            Rectangle fr = new Rectangle(bx, y, right - bx, Sc(28));
-            Field(g, fr, tbDone, "補一件做過的事，按 Enter", false, clip);
-            rDone = Inside(fr, clip) ? fr : Rectangle.Empty;
-            AddHit("adddone", "", fr);
-            return y + Sc(28) + Sc(4);
+            return y + Sc(14);   // 「補一件做過的事」由 DoneArea 畫
         }
 
         // 預覽：白紙上就是要貼出去的字（簡單／詳細、附不附連結）
@@ -1100,16 +1111,23 @@ namespace DeskPals
             Rectangle paper = Paper(g, area, CPaper, 0, true);
             Rectangle clip = new Rectangle(paper.X + Sc(36), paper.Y + Sc(6), paper.Width - Sc(36) - Sc(2), paper.Height - Sc(12));
             clipR["todo"] = clip;
+            bool pin;
+            Rectangle lclip = TodoClip(clip, out pin);
+            clipR["todo"] = lclip;
             GraphicsState st = g.Save();
-            g.SetClip(new Rectangle(paper.X, paper.Y, paper.Width - Sc(6), paper.Height));
-            int s = ScrollOf("todo", clip);
-            hitClip = new Rectangle(paper.X - Sc(12), paper.Y, paper.Width + Sc(12), paper.Height);
-            int h = TodoPage(g, paper.X + Sc(44), paper.Y + Sc(6) - s, paper.Right - Sc(14), clip);
+            g.SetClip(new Rectangle(paper.X, paper.Y, paper.Width - Sc(6), lclip.Bottom - paper.Y + (pin ? 0 : Sc(6))));
+            int s = ScrollOf("todo", lclip);
+            hitClip = new Rectangle(paper.X - Sc(12), paper.Y, paper.Width + Sc(12), lclip.Bottom - paper.Y + (pin ? 0 : Sc(6)));
+            todoPin = pin;
+            int h = TodoPage(g, paper.X + Sc(44), paper.Y + Sc(6) - s, paper.Right - Sc(14), lclip);
+            todoPin = false;
             hitClip = Rectangle.Empty;
-            ScrollDone("todo", h, clip);
+            TodoMeasured(h, pin, clip);
+            ScrollDone("todo", h, lclip);
             g.Restore(st);
+            if (pin) TodoField(g, new Rectangle(paper.X + Sc(36), lclip.Bottom + Sc(4), paper.Right - Sc(14) - paper.X - Sc(36), Sc(28)), clip);
             Rings(g, paper);
-            Scrollbar(g, "todo", paper, clip);
+            Scrollbar(g, "todo", paper, lclip);
             DuePopup(g, clip);
         }
 
@@ -1165,17 +1183,13 @@ namespace DeskPals
                     if (dt != null) { int ly = Math.Max(clip.Y - Sc(10), Math.Min(clip.Bottom - Sc(20), dragY - Sc(14))); TodoRow(g, dt, bx + Sc(8), ly - Sc(3), right + Sc(4), now, true); }
                 }
             }
-            // 新增一行（右邊小日曆：期限）
-            y += Sc(4);
-            Rectangle fr = new Rectangle(bx, y, right - bx, Sc(28));
-            string chip = dueDay != DateTime.MinValue ? DueChip() : "";
-            Field(g, fr, tbTodo, "寫一件要做的事，按 Enter", true, clip, chip);
-            rTodo = Inside(fr, clip) ? new Rectangle(fr.X, fr.Y, fr.Width - Sc(8) - (chip != "" ? TW(chip, fWord) + Sc(8) : 7 * U + Sc(4)), fr.Height) : Rectangle.Empty;
-            AddHit("addtodo", "", fr);
-            Rectangle cal = new Rectangle(fr.Right - Sc(8) - (chip != "" ? TW(chip, fWord) : 7 * U) - Sc(4), fr.Y, (chip != "" ? TW(chip, fWord) : 7 * U) + Sc(12), fr.Height);
-            AddHit("due", "", cal);
-            dueAnchor = fr;
-            y += Sc(28) + Sc(4);
+            // 新增一行（右邊小日曆：期限）；放不下時由呼叫的地方釘在最下面
+            if (!todoPin)
+            {
+                y += Sc(4);
+                TodoField(g, new Rectangle(bx, y, right - bx, Sc(28)), clip);
+                y += Sc(28) + Sc(4);
+            }
             if (jira.Count > 0)
             {
                 Rectangle gr = new Rectangle(tx, y, right - tx, Sc(40));
@@ -1196,6 +1210,31 @@ namespace DeskPals
             return y - y0;
         }
         Rectangle dueAnchor;
+        bool todoPin;
+        void TodoField(Graphics g, Rectangle fr, Rectangle clip)
+        {
+            string chip = dueDay != DateTime.MinValue ? DueChip() : "";
+            Field(g, fr, tbTodo, "寫一件要做的事，按 Enter", true, clip, chip);
+            rTodo = Inside(fr, clip) ? new Rectangle(fr.X, fr.Y, fr.Width - Sc(8) - (chip != "" ? TW(chip, fWord) + Sc(8) : 7 * U + Sc(4)), fr.Height) : Rectangle.Empty;
+            AddHit("addtodo", "", fr);
+            Rectangle cal = new Rectangle(fr.Right - Sc(8) - (chip != "" ? TW(chip, fWord) : 7 * U) - Sc(4), fr.Y, (chip != "" ? TW(chip, fWord) : 7 * U) + Sc(12), fr.Height);
+            AddHit("due", "", cal);
+            dueAnchor = fr;
+        }
+        // 待辦清單（不含新增那一行）有多高：上一輪量的；放得下＝新增那一行接在清單裡
+        Rectangle TodoClip(Rectangle clip, out bool pin)
+        {
+            int fieldH = Sc(28) + Sc(8), prev;
+            contentH.TryGetValue("todolist", out prev);
+            pin = prev + fieldH > clip.Height;
+            return pin ? new Rectangle(clip.X, clip.Y, clip.Width, clip.Height - fieldH - Sc(4)) : clip;
+        }
+        void TodoMeasured(int h, bool pin, Rectangle clip)
+        {
+            int listH = pin ? h : h - Sc(28) - Sc(8);
+            contentH["todolist"] = listH;
+            if ((listH + Sc(28) + Sc(8) > clip.Height) != pin) again = true;
+        }
 
         string DueChip()
         {
@@ -1372,17 +1411,23 @@ namespace DeskPals
             int tx = paper.X + Sc(14), right = paper.Right - Sc(14);
             int noteMin = Sc(40) + Sc(28) * 4 + Sc(6);
             Rectangle clip = new Rectangle(paper.X + Sc(6), paper.Y + Sc(6), paper.Width - Sc(8), paper.Height - Sc(12) - noteMin);
-            int s = ScrollOf("todo", clip);
+            bool pin;
+            Rectangle lclip = TodoClip(clip, out pin);
+            int s = ScrollOf("todo", lclip);
             GraphicsState st = g.Save();
-            g.SetClip(clip);
-            hitClip = new Rectangle(paper.X - Sc(12), clip.Y, paper.Width + Sc(12), clip.Height);
-            int h = TodoPage(g, tx, paper.Y + Sc(6) - s, right, clip);
+            g.SetClip(lclip);
+            hitClip = new Rectangle(paper.X - Sc(12), lclip.Y, paper.Width + Sc(12), lclip.Height);
+            todoPin = pin;
+            int h = TodoPage(g, tx, paper.Y + Sc(6) - s, right, lclip);
+            todoPin = false;
             hitClip = Rectangle.Empty;
             g.Restore(st);
-            ScrollDone("todo", h, clip);
-            int used = Math.Min(h, clip.Height);
+            TodoMeasured(h, pin, clip);
+            ScrollDone("todo", h, lclip);
+            if (pin) TodoField(g, new Rectangle(tx - Sc(8), lclip.Bottom + Sc(4), right - tx + Sc(8), Sc(28)), clip);
+            int used = pin ? clip.Height : Math.Min(h, clip.Height);
             clip.Height = used;
-            clipR["todo"] = clip;
+            clipR["todo"] = pin ? lclip : clip;
             Scrollbar(g, "todo", new Rectangle(paper.X, clip.Y - Sc(6), paper.Width, clip.Height + Sc(12)), clip);
             // 筆記：標題列（已存、複製）＋下面的紙
             int ny = clip.Bottom;
@@ -1538,23 +1583,56 @@ namespace DeskPals
             int v;
             if (tw.TryGetValue(k, out v)) return v;
             if (tw.Count > 4000) tw.Clear();
-            v = s == "" ? 0 : TextRenderer.MeasureText(s, f, new Size(4000, 400), TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix).Width;
+            v = s == "" ? 0 : (int)Math.Ceiling(Measure(s, f) - 0.01f);
             tw[k] = v;
             return v;
         }
         // TextRenderer 預設不管 Graphics 的裁切：捲動的紙上要保留裁切，字才不會畫到紙外面
-        static void DT(Graphics g, string s, Font f, Rectangle r, Color c, TextFormatFlags fl) { TextRenderer.DrawText(g, s, f, r, c, fl | TextFormatFlags.PreserveGraphicsClipping); }
-        static void DT(Graphics g, string s, Font f, Point p, Color c, TextFormatFlags fl) { TextRenderer.DrawText(g, s, f, p, c, fl | TextFormatFlags.PreserveGraphicsClipping); }
+        // 字一律用 GDI+ 反鋸齒（AntiAliasGridFit）畫：
+        //   TextRenderer（GDI）畫正黑體粗體 11pt 這種小字會用字型裡內嵌的點陣字，筆畫擠成一團（遠端桌面、截圖都一樣）；
+        //   GDI+ 一定畫外框、灰階反鋸齒，跟系統的字型平滑設定無關，所以螢幕上跟離屏截圖長得一樣。起點對齊整數像素，筆畫才不會糊。
+        static readonly StringFormat SF = MakeSF();
+        static StringFormat MakeSF()
+        {
+            StringFormat f = (StringFormat)StringFormat.GenericTypographic.Clone();
+            f.FormatFlags |= StringFormatFlags.MeasureTrailingSpaces | StringFormatFlags.NoWrap | StringFormatFlags.NoClip;
+            return f;
+        }
+        static Font Px(string family, float px, FontStyle st) { return new Font(family, px, st, GraphicsUnit.Pixel); }
+        static float CellH(Font f)
+        {
+            FontFamily ff = f.FontFamily;
+            return f.Size * (ff.GetCellAscent(f.Style) + ff.GetCellDescent(f.Style)) / ff.GetEmHeight(f.Style);
+        }
+        static void DT(Graphics g, string s, Font f, Rectangle r, Color c, TextFormatFlags fl)
+        {
+            if (string.IsNullOrEmpty(s)) return;
+            float w = Measure(s, f), h = CellH(f), x = r.X, y = r.Y;
+            if ((fl & TextFormatFlags.HorizontalCenter) != 0) x = r.X + (r.Width - w) / 2f;
+            else if ((fl & TextFormatFlags.Right) != 0) x = r.Right - w;
+            if ((fl & TextFormatFlags.VerticalCenter) != 0) y = r.Y + (r.Height - h) / 2f;
+            else if ((fl & TextFormatFlags.Bottom) != 0) y = r.Bottom - h;
+            Draw(g, s, f, c, x, y);
+        }
+        static void DT(Graphics g, string s, Font f, Point p, Color c, TextFormatFlags fl) { if (!string.IsNullOrEmpty(s)) Draw(g, s, f, c, p.X, p.Y); }
+        static void Draw(Graphics g, string s, Font f, Color c, float x, float y)
+        {
+            TextRenderingHint was = g.TextRenderingHint;
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            using (SolidBrush b = new SolidBrush(c)) g.DrawString(s, f, b, (float)Math.Round(x), (float)Math.Round(y), SF);
+            g.TextRenderingHint = was;
+        }
+        static Bitmap measureBmp;
+        static Graphics measureG;
+        static float Measure(string s, Font f)
+        {
+            if (measureG == null) { measureBmp = new Bitmap(1, 1); measureG = Graphics.FromImage(measureBmp); measureG.TextRenderingHint = TextRenderingHint.AntiAliasGridFit; }
+            return measureG.MeasureString(s, f, PointF.Empty, SF).Width;
+        }
         // 畫的時候用同一個 Graphics 量（螢幕跟離屏點陣圖的字寬可能差一點，不然字跟字之間會空一格）
         int TWg(Graphics g, string s, Font f)
         {
-            if (g == null) return TW(s, f);
-            string k = "G" + f.Size + (f.Bold ? "b" : "r") + "|" + s;
-            int v;
-            if (tw.TryGetValue(k, out v)) return v;
-            v = s == "" ? 0 : TextRenderer.MeasureText(g, s, f, new Size(4000, 400), TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix).Width;
-            tw[k] = v;
-            return v;
+            return TW(s, f);   // GDI+ 的像素字型：量出來跟在哪裡畫無關
         }
         string Ellipsis(string s, Font f, int w0)
         {
@@ -1572,7 +1650,7 @@ namespace DeskPals
             int v;
             if (asc.TryGetValue(f, out v)) return v;
             FontFamily ff = f.FontFamily;
-            double px = f.SizeInPoints * 96.0 * d / 72.0;
+            double px = f.Unit == GraphicsUnit.Pixel ? f.Size : f.SizeInPoints * 96.0 * d / 72.0;
             v = (int)Math.Round(px * ff.GetCellAscent(f.Style) / ff.GetEmHeight(f.Style));
             asc[f] = v;
             return v;
