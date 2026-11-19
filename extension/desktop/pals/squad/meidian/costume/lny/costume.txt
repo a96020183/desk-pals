@@ -1,0 +1,55 @@
+# 新年（NT$100）｜meidian（tools/costume.py build 產生，別手改；改 tools/defs.py 再重跑）
+# 座標＝2x 圖的像素（1x 全部除以 2），原點＝公仔原圖左上角；x y＝配件圖「中心」要放的位置；角度順時針；倍率 1＝配件圖原尺寸
+# pad 左 上 右 下：配件最多超出公仔原畫布多少，畫的時候畫布要先加大這麼多
+# piece 名稱 寬 高（2x 圖；檔案在這個資料夾的 <1x|2x>/<名稱>.png，白邊 <名稱>.halo.png 同尺寸）
+# <動作> <配件> <back|front> x y 角度 倍率 左右翻轉(0/1)；一個動作可以有好幾行，照順序畫；沒有任何一行的動作＝不戴
+pad 0 50 16 0
+piece l_cap 100 88
+piece l_jacket 128 100
+piece l_lantern 46 66
+stand l_cap front 134 13 0 1.05 0
+stand l_jacket front 136 140 0 0.8 0
+stand l_lantern front 236.6 147.6 -55 1 0
+walk1 l_cap front 136.8 13.6 2.7 1.05 0
+walk1 l_jacket front 132.9 140.6 2.7 0.8 0
+walk1 l_lantern front 209.4 184.3 10 1 0
+walk2 l_cap front 140 14.4 5.3 1.05 0
+walk2 l_jacket front 130.3 141.1 5.3 0.8 0
+walk2 l_lantern front 201.4 184.3 10 1 0
+jump l_cap front 139.2 4.6 2.6 1.05 0
+jump l_jacket front 135.4 131.6 2.6 0.8 0
+jump l_lantern front 243.8 116.1 -70 1 0
+sleep l_cap front 104.8 61 -22.4 1.05 0
+sleep l_jacket front 165.3 160.5 -22.4 0.8 0
+sleep l_lantern front 239.5 118.5 -60 1 0
+happy l_cap front 136 10 0 1.05 0
+happy l_jacket front 138 137 0 0.8 0
+happy l_lantern front 235.6 140.6 -55 1 0
+held l_cap front 145.6 15.6 2.5 1.05 0
+held l_jacket front 142 142.6 2.5 0.8 0
+held l_lantern front 110 198 90 1 0
+sit l_cap front 145 18.3 9 1.05 0
+sit l_jacket front 127 144 9 0.8 0
+sit l_lantern front 223.7 165.1 -20 1 0
+grab l_cap front 157.8 14.8 6.3 1.05 0
+grab l_jacket front 145.7 141.2 6.3 0.8 0
+grab l_lantern front 236.6 135.6 -55 1 0
+push l_cap front 152.4 11 -3.3 1.05 0
+push l_jacket front 151.7 138.3 -3.3 0.8 0
+push l_lantern front 71.3 91.2 -130 1 0
+cry l_cap front 141 7 0 1.05 0
+cry l_jacket front 143 134 0 0.8 0
+cry l_lantern front 231.5 149.6 -50 1 0
+blown l_cap front 188.3 25.9 30.5 1.05 0
+blown l_jacket front 125.7 136.4 30.5 0.8 0
+blown l_lantern front 87.1 58.3 -110 1 0
+sig1 l_cap front 139.5 8 0 1.05 0
+sig1 l_jacket front 141.5 135 0 0.8 0
+sig2 l_cap front 72 134 -82 1.05 0
+sig2 l_lantern front 238.5 156.5 -30 1 0
+surprised l_cap front 138.5 -0.4 2.4 1.05 0
+surprised l_jacket front 135.1 126.5 2.4 0.8 0
+surprised l_lantern front 229.6 140.6 -55 1 0
+pout l_cap front 140.1 -2.2 1.3 1.05 0
+pout l_jacket front 139.3 124.8 1.3 0.8 0
+pout l_lantern front 230.5 117.6 -50 1 0

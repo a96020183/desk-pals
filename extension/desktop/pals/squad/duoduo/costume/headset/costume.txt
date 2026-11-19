@@ -1,0 +1,23 @@
+# 耳機（常駐，打卡）｜duoduo（tools/costume.py build 產生，別手改；改 tools/defs.py 再重跑）
+# 座標＝2x 圖的像素（1x 全部除以 2），原點＝公仔原圖左上角；x y＝配件圖「中心」要放的位置；角度順時針；倍率 1＝配件圖原尺寸
+# pad 左 上 右 下：配件最多超出公仔原畫布多少，畫的時候畫布要先加大這麼多
+# piece 名稱 寬 高（2x 圖；檔案在這個資料夾的 <1x|2x>/<名稱>.png，白邊 <名稱>.halo.png 同尺寸）
+# <動作> <配件> <back|front> x y 角度 倍率 左右翻轉(0/1)；一個動作可以有好幾行，照順序畫；沒有任何一行的動作＝不戴
+pad 0 16 0 0
+piece h_cat 130 124
+stand h_cat front 119.2 88.3 5.2 0.9 0
+walk1 h_cat front 121.4 75.4 11.8 0.9 0
+walk2 h_cat front 106.5 69 0 0.9 0
+jump h_cat front 115.6 63.3 5.1 0.9 0
+sleep h_cat front 115.7 91.1 9 0.9 0
+happy h_cat front 115.2 67.3 5.2 0.9 0
+held h_cat front 117.3 65.9 15.4 0.9 0
+sit h_cat front 105.2 70.7 4 0.9 0
+grab h_cat front 119.7 69.8 15 0.9 0
+push h_cat front 121.8 67.1 -6.5 0.9 0
+cry h_cat front 121.9 49.7 4.6 0.9 0
+blown h_cat front 129.1 65.1 22.6 0.9 0
+sig1 h_cat front 99 108 0 0.9 0
+sig2 h_cat front 149.8 66.1 16.7 0.9 0
+surprised h_cat front 120.8 47.9 6.8 0.9 0
+pout h_cat front 101.4 88.7 3.4 0.9 0

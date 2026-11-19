@@ -1,0 +1,38 @@
+# 新年（NT$100）｜duoduo（tools/costume.py build 產生，別手改；改 tools/defs.py 再重跑）
+# 座標＝2x 圖的像素（1x 全部除以 2），原點＝公仔原圖左上角；x y＝配件圖「中心」要放的位置；角度順時針；倍率 1＝配件圖原尺寸
+# pad 左 上 右 下：配件最多超出公仔原畫布多少，畫的時候畫布要先加大這麼多
+# piece 名稱 寬 高（2x 圖；檔案在這個資料夾的 <1x|2x>/<名稱>.png，白邊 <名稱>.halo.png 同尺寸）
+# <動作> <配件> <back|front> x y 角度 倍率 左右翻轉(0/1)；一個動作可以有好幾行，照順序畫；沒有任何一行的動作＝不戴
+pad 0 40 2 0
+piece l_cap 100 88
+piece l_env 52 60
+stand l_cap front 128.8 49 5.2 0.95 0
+stand l_env front 136.7 143.5 12 1 0
+walk1 l_cap front 135.4 37.5 11.8 0.95 0
+walk1 l_env front 125.8 127.7 4 1 0
+walk2 l_cap front 112.5 29 0 0.95 0
+walk2 l_env front 176.4 128.5 17 1 0
+jump l_cap front 125.1 24 5.1 0.95 0
+jump l_env front 137.4 124.5 12 1 0
+sleep l_cap front 128 52.6 9 0.95 0
+sleep l_env front 138 146.2 12 1 0
+happy l_cap front 124.8 28 5.2 0.95 0
+happy l_env front 136.9 144.1 12 1 0
+held l_cap front 133.7 28.9 15.4 0.95 0
+held l_env front 138.7 123.7 24 1 0
+sit l_cap front 113.9 31.2 4 0.95 0
+sit l_env front 135.7 135.1 12 1 0
+grab l_cap front 135.8 32.8 15 0.95 0
+grab l_env front 133.9 135.2 12 1 0
+push l_cap front 123.2 26.6 -6.5 0.95 0
+push l_env front 124.9 134.6 12 1 0
+cry l_cap front 131.1 10.4 4.6 0.95 0
+blown l_cap front 150 30.5 22.6 0.95 0
+blown l_env front 124 135.2 37 1 0
+sig1 l_cap front 105 68 0 0.95 0
+sig2 l_cap front 167.1 29.5 16.7 0.95 0
+sig2 l_env front 175.8 133.4 24 1 0
+surprised l_cap front 131.5 8.9 6.8 0.95 0
+surprised l_env front 146.1 114.4 16 1 0
+pout l_cap front 109.8 49.1 3.4 0.95 0
+pout l_env front 137.3 144.2 12 1 0

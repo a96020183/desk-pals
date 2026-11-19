@@ -1,0 +1,40 @@
+# 耳機（常駐，打卡）｜cici（tools/costume.py build 產生，別手改；改 tools/defs.py 再重跑）
+# 座標＝2x 圖的像素（1x 全部除以 2），原點＝公仔原圖左上角；x y＝配件圖「中心」要放的位置；角度順時針；倍率 1＝配件圖原尺寸
+# pad 左 上 右 下：配件最多超出公仔原畫布多少，畫的時候畫布要先加大這麼多
+# piece 名稱 寬 高（2x 圖；檔案在這個資料夾的 <1x|2x>/<名稱>.png，白邊 <名稱>.halo.png 同尺寸）
+# <動作> <配件> <back|front> x y 角度 倍率 左右翻轉(0/1)；一個動作可以有好幾行，照順序畫；沒有任何一行的動作＝不戴
+pad 0 12 0 4
+piece h_neck 122 84
+piece h_notes 56 50
+stand h_neck front 121.8 133.1 -4.2 0.95 0
+stand h_notes front 167.4 43.5 3.8 0.8 0
+walk1 h_neck front 124 131.7 -7 0.95 0
+walk1 h_notes front 165.2 40 1 0.8 0
+walk2 h_neck front 119.7 131.7 4.1 0.95 0
+walk2 h_notes front 177.7 49.6 12.1 0.8 0
+jump h_neck front 121.4 136.1 -4.3 0.95 0
+jump h_notes front 166.9 46.4 3.7 0.8 0
+sleep h_neck front 98.2 152.7 16.6 0.95 0
+sleep h_notes front 172.6 85.1 24.6 0.8 0
+happy h_neck front 122.1 146.8 -9 0.95 0
+happy h_notes front 160.1 53.8 -1 0.8 0
+held h_neck front 93.1 140.8 16.1 0.95 0
+held h_notes front 166.9 72.6 24.1 0.8 0
+sit h_neck front 110.2 151.2 6 0.95 0
+sit h_notes front 170.9 71.1 14 0.8 0
+grab h_neck front 121.3 138.7 -2.9 0.95 0
+grab h_notes front 168.9 50.3 5.1 0.8 0
+push h_neck front 113.8 131 -9.5 0.95 0
+push h_notes front 160.8 36 -1.5 0.8 0
+cry h_neck front 114.8 137.8 -9.2 0.95 0
+cry h_notes front 152.4 44.6 -1.2 0.8 0
+blown h_neck front 98.1 114.3 -24.3 0.95 0
+blown h_notes front 110.1 14.5 -16.3 0.8 0
+sig1 h_neck front 107 133.5 9.9 0.95 0
+sig1 h_notes front 173.1 57.8 17.9 0.8 0
+sig2 h_neck front 113 136 0 0.95 0
+sig2 h_notes front 165 50 8 0.8 0
+surprised h_neck front 125.4 139 -4.9 0.95 0
+surprised h_notes front 169.9 48.9 3.1 0.8 0
+pout h_neck front 114.6 133.4 -1.3 0.95 0
+pout h_notes front 164.6 46.2 6.7 0.8 0

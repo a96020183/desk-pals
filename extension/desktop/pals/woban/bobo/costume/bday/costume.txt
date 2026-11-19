@@ -1,0 +1,40 @@
+# 生日（NT$100）｜bobo（tools/costume.py build 產生，別手改；改 tools/defs.py 再重跑）
+# 座標＝2x 圖的像素（1x 全部除以 2），原點＝公仔原圖左上角；x y＝配件圖「中心」要放的位置；角度順時針；倍率 1＝配件圖原尺寸
+# pad 左 上 右 下：配件最多超出公仔原畫布多少，畫的時候畫布要先加大這麼多
+# piece 名稱 寬 高（2x 圖；檔案在這個資料夾的 <1x|2x>/<名稱>.png）
+# <動作> <配件> <back|front> x y 角度 倍率 左右翻轉(0/1)；一個動作可以有好幾行，照順序畫；沒有任何一行的動作＝不戴
+pad 0 0 0 0
+piece b_bow_c 72 40
+piece b_crown_c 78 58
+stand b_crown_c front 87.3 79.1 -13.2 1 0
+stand b_bow_c front 118.9 158.5 -1.2 1.1 0
+walk1 b_crown_c front 97.8 70.7 -10.8 1 0
+walk1 b_bow_c front 126 151.3 1.2 1.1 0
+walk2 b_crown_c front 97 70.1 -8.2 1 0
+walk2 b_bow_c front 121.6 151.9 3.8 1.1 0
+jump b_crown_c front 99.5 60.8 -9.6 1 0
+jump b_bow_c front 126.2 142 2.4 1.1 0
+sleep b_crown_c front 51.3 138.4 -52.2 1 0
+sleep b_bow_c front 125.9 180.1 -40.2 1.1 0
+happy b_crown_c front 88 68 -12 1 0
+happy b_bow_c front 118 148 0 1.1 0
+held b_crown_c front 96.7 78.2 -6.3 1 0
+held b_bow_c front 118.6 160.8 5.7 1.1 0
+sit b_crown_c front 85 97.3 -14.4 1 0
+sit b_bow_c front 118.4 176 -2.4 1.1 0
+grab b_crown_c front 84 78 -12 1 0
+grab b_bow_c front 114 158 0 1.1 0
+push b_crown_c front 103.2 75.6 -1.7 1 0
+push b_bow_c front 114.5 159 10.3 1.1 0
+cry b_crown_c front 83.6 74.2 -14.3 1 0
+cry b_bow_c front 116.8 153 -2.3 1.1 0
+blown b_crown_c front 132 53.8 23.5 1 0
+blown b_bow_c front 109.9 136.3 35.5 1.1 0
+sig1 b_crown_c front 74.3 82.8 -10.7 1 0
+sig1 b_bow_c front 102.5 163.5 1.3 1.1 0
+sig2 b_crown_c front 75 105.7 -10.5 1 0
+sig2 b_bow_c front 102.8 186.5 1.5 1.1 0
+surprised b_crown_c front 75.8 83.4 -18.2 1 0
+surprised b_bow_c front 114.2 159.7 -6.2 1.1 0
+pout b_crown_c front 80.5 92 -12 1 0
+pout b_bow_c front 110.5 172 0 1.1 0

@@ -1,0 +1,40 @@
+# 生日（NT$100）｜duoduo（tools/costume.py build 產生，別手改；改 tools/defs.py 再重跑）
+# 座標＝2x 圖的像素（1x 全部除以 2），原點＝公仔原圖左上角；x y＝配件圖「中心」要放的位置；角度順時針；倍率 1＝配件圖原尺寸
+# pad 左 上 右 下：配件最多超出公仔原畫布多少，畫的時候畫布要先加大這麼多
+# piece 名稱 寬 高（2x 圖；檔案在這個資料夾的 <1x|2x>/<名稱>.png，白邊 <名稱>.halo.png 同尺寸）
+# <動作> <配件> <back|front> x y 角度 倍率 左右翻轉(0/1)；一個動作可以有好幾行，照順序畫；沒有任何一行的動作＝不戴
+pad 0 36 20 0
+piece b_balloon 52 82
+piece b_hat 66 80
+stand b_hat front 128.4 53 13.2 1 0
+stand b_balloon front 162.7 105.5 0 1 0
+walk1 b_hat front 134.6 41.4 19.8 1 0
+walk1 b_balloon front 146.3 86.5 -8 1 0
+walk2 b_hat front 112.5 33 8 1 0
+walk2 b_balloon front 205.7 92.9 5 1 0
+jump b_hat front 124.8 27.9 13.1 1 0
+jump b_balloon front 163.4 86.5 0 1 0
+sleep b_hat front 127.3 56.5 17 1 0
+sleep b_balloon front 164 108.2 0 1 0
+happy b_hat front 124.4 32 13.2 1 0
+happy b_balloon front 162.9 106.1 0 1 0
+held b_hat front 132.6 32.8 23.4 1 0
+held b_balloon front 172 92 12 1 0
+sit b_hat front 113.7 35.2 12 1 0
+sit b_balloon front 161.7 97.1 0 1 0
+grab b_hat front 134.8 36.6 23 1 0
+grab b_balloon front 159.9 97.2 0 1 0
+push b_hat front 123.7 30.6 1.5 1 0
+push b_balloon front 150.9 96.6 0 1 0
+cry b_hat front 130.8 14.3 12.6 1 0
+cry b_balloon front 161.2 97.1 0 1 0
+blown b_hat front 148.5 34.2 30.6 1 0
+blown b_balloon front 163.6 111.7 25 1 0
+sig1 b_hat front 105 72 8 1 0
+sig1 b_balloon front 174.6 107.5 0 1 0
+sig2 b_hat front 165.9 33.3 24.7 1 0
+sig2 b_balloon front 209.1 101.7 12 1 0
+surprised b_hat front 131 12.9 14.8 1 0
+surprised b_balloon front 174.7 78.3 4 1 0
+pout b_hat front 109.6 53.1 11.4 1 0
+pout b_balloon front 163.3 106.2 0 1 0

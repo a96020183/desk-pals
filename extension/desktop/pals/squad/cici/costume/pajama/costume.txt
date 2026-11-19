@@ -1,0 +1,57 @@
+# 睡衣（常駐，打卡）｜cici（tools/costume.py build 產生，別手改；改 tools/defs.py 再重跑）
+# 座標＝2x 圖的像素（1x 全部除以 2），原點＝公仔原圖左上角；x y＝配件圖「中心」要放的位置；角度順時針；倍率 1＝配件圖原尺寸
+# pad 左 上 右 下：配件最多超出公仔原畫布多少，畫的時候畫布要先加大這麼多
+# piece 名稱 寬 高（2x 圖；檔案在這個資料夾的 <1x|2x>/<名稱>.png，白邊 <名稱>.halo.png 同尺寸）
+# <動作> <配件> <back|front> x y 角度 倍率 左右翻轉(0/1)；一個動作可以有好幾行，照順序畫；沒有任何一行的動作＝不戴
+pad 0 10 0 2
+piece p_mask 100 60
+piece p_moon 56 46
+piece p_top 120 82
+stand p_mask front 120 53 -4.2 1 0
+stand p_top front 122 135.1 -4.2 0.9 0
+stand p_moon front 145.5 45.1 -4.2 0.8 0
+walk1 p_mask front 118.3 51.8 -7 1 0
+walk1 p_top front 124.3 133.7 -7 0.9 0
+walk1 p_moon front 143.4 42.7 -7 0.8 0
+walk2 p_mask front 129.4 52.2 4.1 1 0
+walk2 p_top front 119.6 133.7 4.1 0.9 0
+walk2 p_moon front 155.8 48 4.1 0.8 0
+jump p_mask front 119.4 56 -4.3 1 0
+jump p_top front 121.6 138.1 -4.3 0.9 0
+jump p_moon front 144.9 48.1 -4.3 0.8 0
+sleep p_mask front 124.9 77.2 16.6 1 0
+sleep p_top front 97.7 154.6 16.6 0.9 0
+sleep p_moon front 151.5 78.8 16.6 0.8 0
+happy p_mask front 113.6 67.2 -9 1 0
+happy p_top front 122.4 148.8 -9 0.9 0
+happy p_moon front 138.3 57.2 -9 0.8 0
+held p_mask front 119.1 65.1 16.1 1 0
+held p_top front 92.5 142.7 16.1 0.9 0
+held p_moon front 145.8 66.5 16.1 0.8 0
+sit p_mask front 122.5 72 6 1 0
+sit p_top front 110 153.2 6 0.9 0
+sit p_moon front 149 68.8 6 0.8 0
+grab p_mask front 121.3 58.6 -2.9 1 0
+grab p_top front 121.4 140.7 -2.9 0.9 0
+grab p_moon front 147 51.4 -2.9 0.8 0
+push p_mask front 114.4 49.8 -9.5 1 0
+push p_top front 114.1 133 -9.5 0.9 0
+push p_moon front 139.1 39.6 -9.5 0.8 0
+cry p_mask front 106 58.2 -9.2 1 0
+cry p_top front 115.1 139.7 -9.2 0.9 0
+cry p_moon front 130.7 48.1 -9.2 0.8 0
+blown p_mask front 68.8 39.7 -24.3 1 0
+blown p_top front 98.9 116.1 -24.3 0.9 0
+blown p_moon front 90 23.6 -24.3 0.8 0
+sig1 p_mask front 124.7 55.4 9.9 1 0
+sig1 p_top front 106.7 135.5 9.9 0.9 0
+sig1 p_moon front 151.4 54 9.9 0.8 0
+sig2 p_mask front 117 56 0 1 0
+sig2 p_top front 113 138 0 0.9 0
+sig2 p_moon front 143 50 0 0.8 0
+surprised p_mask front 122.6 58.9 -4.9 1 0
+surprised p_top front 125.6 141 -4.9 0.9 0
+surprised p_moon front 148 50.7 -4.9 0.8 0
+pout p_mask front 116.7 53.3 -1.3 1 0
+pout p_top front 114.6 135.4 -1.3 0.9 0
+pout p_moon front 142.6 46.7 -1.3 0.8 0

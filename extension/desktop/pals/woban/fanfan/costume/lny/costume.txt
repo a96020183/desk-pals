@@ -1,0 +1,39 @@
+# 新年（NT$100）｜fanfan（tools/costume.py build 產生，別手改；改 tools/defs.py 再重跑）
+# 座標＝2x 圖的像素（1x 全部除以 2），原點＝公仔原圖左上角；x y＝配件圖「中心」要放的位置；角度順時針；倍率 1＝配件圖原尺寸
+# pad 左 上 右 下：配件最多超出公仔原畫布多少，畫的時候畫布要先加大這麼多
+# piece 名稱 寬 高（2x 圖；檔案在這個資料夾的 <1x|2x>/<名稱>.png）
+# <動作> <配件> <back|front> x y 角度 倍率 左右翻轉(0/1)；一個動作可以有好幾行，照順序畫；沒有任何一行的動作＝不戴
+pad 0 0 0 2
+piece l_cap_c 100 88
+piece l_jacket_c 136 98
+stand l_cap_c front 141.6 77.8 -2.7 0.9 0
+stand l_jacket_c front 145.4 201.7 -2.7 0.85 0
+walk1 l_cap_c front 152 78 0 0.9 0
+walk1 l_jacket_c front 150 202 0 0.85 0
+walk2 l_cap_c front 152 76 0 0.9 0
+walk2 l_jacket_c front 150 200 0 0.85 0
+jump l_cap_c front 137.5 66.6 -15.3 0.9 0
+jump l_jacket_c front 168.2 186.8 -15.3 0.85 0
+sleep l_cap_c front 155 142 0 0.9 0
+happy l_cap_c front 142 74.7 -4.6 0.9 0
+happy l_jacket_c front 149.9 198.5 -4.6 0.85 0
+held l_cap_c front 145.4 88.3 2.7 0.9 0
+held l_jacket_c front 137.6 212.1 2.7 0.85 0
+sit l_cap_c front 139.2 89.2 -4 0.9 0
+sit l_jacket_c front 145.8 213.1 -4 0.85 0
+grab l_cap_c front 136.6 87.2 -7.3 0.9 0
+grab l_jacket_c front 150.4 210.5 -7.3 0.85 0
+push l_cap_c front 155.6 90.9 -12.3 0.9 0
+push l_jacket_c front 176.1 213.3 -12.3 0.85 0
+cry l_cap_c front 134.6 78.2 -6.3 0.9 0
+cry l_jacket_c front 146.3 201.7 -6.3 0.85 0
+blown l_cap_c front 135 62.3 -25.2 0.9 0
+blown l_jacket_c front 186 175.4 -25.2 0.85 0
+sig1 l_cap_c front 142.8 92.4 -1.5 0.9 0
+sig1 l_jacket_c front 144.2 216.4 -1.5 0.85 0
+sig2 l_cap_c front 137.3 68.2 -7.5 0.9 0
+sig2 l_jacket_c front 151.6 191.4 -7.5 0.85 0
+surprised l_cap_c front 150.9 76.8 -2.9 0.9 0
+surprised l_jacket_c front 155.1 200.7 -2.9 0.85 0
+pout l_cap_c front 135.3 79.9 -10.3 0.9 0
+pout l_jacket_c front 155.5 202.3 -10.3 0.85 0
