@@ -1804,7 +1804,7 @@ namespace DeskPals
             DrawButton(g, "save", "儲存", new Rectangle(W0 - Sc(30) - Sc(160), by, Sc(160), bh), true);
         }
 
-        void DrawLabel(Graphics g, string s, int x, int y, Font f, Color c) { TextRenderer.DrawText(g, World.NoEmoji(s), f, new Point(x, y), c, TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding); }
+        void DrawLabel(Graphics g, string s, int x, int y, Font f, Color c) { PixText.DrawText(g, World.NoEmoji(s), f, new Point(x, y), c, TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding); }
 
         // 輸入框的像素框（深木色外框、上面一條陰影）
         void Frame(Graphics g, Rectangle r, bool locked)
@@ -1838,7 +1838,7 @@ namespace DeskPals
             Pix.Box(g, face, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U);
             Pix.Box(g, shade, r.X + U, r.Bottom - 3 * U, r.Width - 2 * U, 2 * U);
             Pix.Box(g, Pix.Mix(face, Color.White, 0.6), r.X + 2 * U, r.Y + U, r.Width - 4 * U, U);
-            TextRenderer.DrawText(g, text, btnF, new Rectangle(r.X, r.Y, r.Width, r.Height - 2 * U), Pix.TextC, Pix.Mid);
+            PixText.DrawText(g, text, btnF, new Rectangle(r.X, r.Y, r.Width, r.Height - 2 * U), Pix.TextC, Pix.Mid);
             hits[id] = r;
         }
     }

@@ -290,12 +290,12 @@ namespace DeskPals
         public Size Measure(string s, bool a, int th, string h)
         {
             if (s != text || a != alert || th != theme || h != hint) { text = s; alert = a; theme = th; hint = h; Invalidate(); }
-            Size ts = TextRenderer.MeasureText(s, font, new Size(4000, 400), TextFormatFlags.NoPadding);
+            Size ts = PixText.MeasureText(s, font, new Size(4000, 400), TextFormatFlags.NoPadding);
             hintH = 0;
             int wd = ts.Width;
             if (!string.IsNullOrEmpty(h))
             {
-                Size hs = TextRenderer.MeasureText(h, hintFont, new Size(4000, 400), TextFormatFlags.NoPadding);
+                Size hs = PixText.MeasureText(h, hintFont, new Size(4000, 400), TextFormatFlags.NoPadding);
                 hintH = hs.Height + 2; wd = Math.Max(wd, hs.Width + hs.Height + 2);
             }
             return new Size(wd + 22, ts.Height + hintH + 12 + 7);
@@ -355,15 +355,15 @@ namespace DeskPals
                 for (int i = 0; i < 5; i++) g.FillRectangle(fill, cx - 5 + i, h - 2 + i, 10 - 2 * i, 1);
             }
             if (text.IndexOf('\n') >= 0)
-                TextRenderer.DrawText(g, text, font, new Rectangle(0, 6, w, h - hintH - 6), fg, TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding);
+                PixText.DrawText(g, text, font, new Rectangle(0, 6, w, h - hintH - 6), fg, TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding);
             else
-                TextRenderer.DrawText(g, text, font, new Rectangle(0, 0, w, h - hintH), fg,
+                PixText.DrawText(g, text, font, new Rectangle(0, 0, w, h - hintH), fg,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             if (hintH > 0)
             {
                 // 小小的「↗」連結圖示（自己畫，不靠 emoji 字型）＋提示字
                 Color hc = theme == 0 ? Color.FromArgb(0x3D, 0x7B, 0xD9) : Color.FromArgb(0x9F, 0xC8, 0xFF);
-                Size hs = TextRenderer.MeasureText(hint, hintFont, new Size(4000, 400), TextFormatFlags.NoPadding);
+                Size hs = PixText.MeasureText(hint, hintFont, new Size(4000, 400), TextFormatFlags.NoPadding);
                 int ic = Math.Max(7, hs.Height - 4), tw = ic + 4 + hs.Width, x0 = (w - tw) / 2, y0 = h - hintH - 5 + (hintH - ic) / 2;
                 using (Pen p = new Pen(hc, Math.Max(1.4f, ic / 6f)))
                 {
@@ -372,7 +372,7 @@ namespace DeskPals
                     g.DrawLine(p, x0 + ic / 2, y0, x0 + ic, y0);
                     g.DrawLine(p, x0 + ic, y0, x0 + ic, y0 + ic / 2);
                 }
-                TextRenderer.DrawText(g, hint, hintFont, new Point(x0 + ic + 4, h - hintH - 5 + (hintH - hs.Height) / 2), hc, TextFormatFlags.NoPadding);
+                PixText.DrawText(g, hint, hintFont, new Point(x0 + ic + 4, h - hintH - 5 + (hintH - hs.Height) / 2), hc, TextFormatFlags.NoPadding);
             }
         }
     }
@@ -8409,9 +8409,9 @@ namespace DeskPals
             Box(g, C(0xC08A2C), r.X + 2 * u, r.Bottom - 2 * u, r.Width - 4 * u, u);
             Box(g, C(0x8A5A2A), r.X + 2 * u, r.Y + r.Height / 2 - u / 2, u, u);
             Box(g, C(0x8A5A2A), r.Right - 3 * u, r.Y + r.Height / 2 - u / 2, u, u);
-            TextRenderer.DrawText(g, s, f, new Rectangle(r.X, r.Y, r.Width, r.Height - u / 2), TextC, Mid);
+            PixText.DrawText(g, s, f, new Rectangle(r.X, r.Y, r.Width, r.Height - u / 2), TextC, Mid);
         }
-        public static int TextW(string s, Font f) { return TextRenderer.MeasureText(s, f, new Size(4000, 400), TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix).Width; }
+        public static int TextW(string s, Font f) { return PixText.MeasureText(s, f, new Size(4000, 400), TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix).Width; }
     }
 
     // ================= 像素選單（取代原生右鍵選單）=================
@@ -8674,7 +8674,7 @@ namespace DeskPals
                 string s = RowText(r);
                 int cy = r.Y + r.H / 2, tw = Pix.TextW(s, small);
                 Pix.Box(g, Pix.Gold, x + U, cy - U - U / 2, U, 3 * U); Pix.Box(g, Pix.Gold, x, cy - U / 2, 3 * U, U);   // 小星星
-                TextRenderer.DrawText(g, s, small, new Rectangle(x + 4 * U, r.Y, tw + 4, r.H), night ? Pix.C(0x8A5A2A) : Pix.C(0x9A6338), Pix.LeftMid);
+                PixText.DrawText(g, s, small, new Rectangle(x + 4 * U, r.Y, tw + 4, r.H), night ? Pix.C(0x8A5A2A) : Pix.C(0x9A6338), Pix.LeftMid);
                 for (int sx = x + 6 * U + tw; sx + U <= right; sx += 2 * U) Pix.Box(g, Pix.C(0xE4D0AC), sx, cy, U, U);
                 return;
             }
@@ -8701,7 +8701,7 @@ namespace DeskPals
                 }
                 tx += 9 * U;
             }
-            TextRenderer.DrawText(g, RowText(r), font, new Rectangle(tx, r.Y, Math.Max(1, right - tx), r.H), en ? Pix.TextC : Pix.Dim, Pix.LeftMid);
+            PixText.DrawText(g, RowText(r), font, new Rectangle(tx, r.Y, Math.Max(1, right - tx), r.H), en ? Pix.TextC : Pix.Dim, Pix.LeftMid);
             if (r.Sub) PaintArrow(g, right - 2 * U, r.Y + r.H / 2, opened.Contains(r.It), hot ? Pix.C(0x8A5A2A) : Pix.C(0xB08A5A));
             else if (hot) Pix.Mono(g, Pix.HEART, Pix.C(0xE8607A), right - 5 * U, r.Y + r.H / 2 - 2 * U, U);
         }
@@ -8756,10 +8756,10 @@ namespace DeskPals
             {
                 Rectangle tr = new Rectangle(0, smokeH + roofH * 2 / 5, W0, roofH * 3 / 5 - U);
                 Color sh = night ? Pix.C(0x3A1A12) : Pix.C(0x5E2418);
-                TextRenderer.DrawText(g, title, titleFont, new Rectangle(tr.X + 1, tr.Y + 1, tr.Width, tr.Height), sh, Pix.Mid);
-                TextRenderer.DrawText(g, title, titleFont, new Rectangle(tr.X - 1, tr.Y + 1, tr.Width, tr.Height), sh, Pix.Mid);
-                TextRenderer.DrawText(g, title, titleFont, new Rectangle(tr.X, tr.Y + 2, tr.Width, tr.Height), sh, Pix.Mid);
-                TextRenderer.DrawText(g, title, titleFont, tr, Pix.C(0xFFF3DA), Pix.Mid);
+                PixText.DrawText(g, title, titleFont, new Rectangle(tr.X + 1, tr.Y + 1, tr.Width, tr.Height), sh, Pix.Mid);
+                PixText.DrawText(g, title, titleFont, new Rectangle(tr.X - 1, tr.Y + 1, tr.Width, tr.Height), sh, Pix.Mid);
+                PixText.DrawText(g, title, titleFont, new Rectangle(tr.X, tr.Y + 2, tr.Width, tr.Height), sh, Pix.Mid);
+                PixText.DrawText(g, title, titleFont, tr, Pix.C(0xFFF3DA), Pix.Mid);
             }
             // 窗戶（白天淡藍、晚上亮黃燈）＋花台
             int ww = 7 * U, wy = H0 - botH + 5 * U;
@@ -9073,18 +9073,18 @@ namespace DeskPals
             Steps(g, W0, Sc(68));
             string q = step == 0 ? "選你的公仔" : "怎麼擺？";
             string hint = step == 0 ? "兩櫃原創公仔選一櫃，或用自己的照片做一隻（之後在小屋、選單都能換櫃）" : (mode == "single" ? "選一隻，他會住在右下角的" + ShelfArt.For(lu).MiniName + "裡" : "公仔櫃放在右下角，點格子就叫他們出來");
-            TextRenderer.DrawText(g, q, qF, new Rectangle(0, Sc(100), W0, Sc(30)), Pix.TextC, Pix.Mid);
-            TextRenderer.DrawText(g, hint, subF, new Rectangle(0, Sc(130), W0, Sc(18)), Pix.C(0x9A6338), Pix.Mid);
+            PixText.DrawText(g, q, qF, new Rectangle(0, Sc(100), W0, Sc(30)), Pix.TextC, Pix.Mid);
+            PixText.DrawText(g, hint, subF, new Rectangle(0, Sc(130), W0, Sc(18)), Pix.C(0x9A6338), Pix.Mid);
             if (step == 0)
             {
                 Btn mk = Find("make");
-                if (mk != null && MoreLineups().Length > 0) TextRenderer.DrawText(g, "其他櫃：", btnF, new Rectangle(Sc(32), mk.R.Bottom + Sc(6), Sc(300), Sc(26)), Pix.TextC, Pix.LeftMid);
-                if (statsNote) TextRenderer.DrawText(g, StatsLine, subF, new Rectangle(Sc(30), H0 - Sc(64) - Sc(28), W0 - Sc(60), Sc(22)), Pix.C(0x6A5A48), Pix.Mid);
+                if (mk != null && MoreLineups().Length > 0) PixText.DrawText(g, "其他櫃：", btnF, new Rectangle(Sc(32), mk.R.Bottom + Sc(6), Sc(300), Sc(26)), Pix.TextC, Pix.LeftMid);
+                if (statsNote) PixText.DrawText(g, StatsLine, subF, new Rectangle(Sc(30), H0 - Sc(64) - Sc(28), W0 - Sc(60), Sc(22)), Pix.C(0x6A5A48), Pix.Mid);
             }
             if (step == 1 && mode == "single")
             {
                 Btn first2 = Find("mode:shelf");
-                if (first2 != null) TextRenderer.DrawText(g, "選哪一隻？", btnF, new Rectangle(0, first2.R.Bottom + Sc(6), W0, Sc(26)), Pix.TextC, Pix.Mid);
+                if (first2 != null) PixText.DrawText(g, "選哪一隻？", btnF, new Rectangle(0, first2.R.Bottom + Sc(6), W0, Sc(26)), Pix.TextC, Pix.Mid);
             }
             foreach (Btn b in btns) DrawBtn(g, b);
         }
@@ -9103,7 +9103,7 @@ namespace DeskPals
                 string s = (i + 1) + ". " + names[i];
                 int sw = Pix.TextW(s, subF), cx = x + (pw - sw) / 2;
                 if (i < step) { cx += 3 * U; Pix.Mono(g, Pix.CHECK, Pix.C(0x3F8A30), cx - 7 * U, y + ph / 2 - 3 * U, U); }
-                TextRenderer.DrawText(g, s, subF, new Rectangle(cx, y, sw + 4, ph), i <= step ? Pix.TextC : Pix.Dim, Pix.LeftMid);
+                PixText.DrawText(g, s, subF, new Rectangle(cx, y, sw + 4, ph), i <= step ? Pix.TextC : Pix.Dim, Pix.LeftMid);
             }
         }
 
@@ -9118,7 +9118,7 @@ namespace DeskPals
                 Pix.Round(g, Pix.Ink, bx, by2, s, s, U);
                 Pix.Box(g, b.On ? Pix.C(0x5FB04A) : (hot ? Pix.C(0xFFF3D6) : Pix.C(0xFFFDF7)), bx + U, by2 + U, s - 2 * U, s - 2 * U);
                 if (b.On) Pix.Mono(g, Pix.CHECK, Color.White, bx + 2 * U, by2 + 2 * U, U);
-                TextRenderer.DrawText(g, b.Text, btnF, new Rectangle(bx + s + Sc(10), r.Y, r.Right - bx - s - Sc(10), r.Height), Pix.TextC, Pix.LeftMid);
+                PixText.DrawText(g, b.Text, btnF, new Rectangle(bx + s + Sc(10), r.Y, r.Right - bx - s - Sc(10), r.Height), Pix.TextC, Pix.LeftMid);
                 return;
             }
             if (b.Kind >= 2)
@@ -9134,8 +9134,8 @@ namespace DeskPals
                 int tw = Pix.TextW(b.Text, bf), ax = 7 * U, tx = r.X + (r.Width - tw - (b.Id == "back" || b.Id == "next" ? ax : 0)) / 2, cy = r.Y + (r.Height - 2 * U) / 2;
                 Color tc = b.Enabled ? Pix.TextC : Pix.Dim;
                 if (b.Id == "back") { Arrow(g, tx + U, cy, -1, tc); tx += ax; }
-                TextRenderer.DrawText(g, b.Text, bf, new Rectangle(tx, r.Y, tw + 4, r.Height - 2 * U), tc, Pix.LeftMid);
-                if (b.Id == "next" && step < 1) Arrow(g, tx + tw + 2 * U, cy, 1, tc);
+                PixText.DrawText(g, b.Text, bf, new Rectangle(tx, r.Y, tw + 4, r.Height - 2 * U), tc, Pix.LeftMid);
+                if (b.Id == "next" && step < 1) Arrow(g, tx + tw + 3 * U, cy, 1, tc);
                 return;
             }
             // 卡片：底下一層影子；選到的是金色粗框、右上角綠色勾勾；「做一隻自己的」是暖黃色的主打卡
@@ -9178,8 +9178,8 @@ namespace DeskPals
             int c = Math.Max(2, Math.Min(Sc(5), (r.Height - Sc(18)) / MAKE.Length)), aw = MAKE[0].Length * c, ah = MAKE.Length * c, ix = r.X + Sc(16);
             Pix.Art(g, MAKE, pal, ix, r.Y + (r.Height - ah) / 2, c);
             int tx = ix + aw + Sc(14);
-            TextRenderer.DrawText(g, b.Text, bigF, new Rectangle(tx, r.Y + Sc(8), r.Right - tx - Sc(12), Sc(26)), Pix.TextC, Pix.LeftMid);
-            TextRenderer.DrawText(g, b.Sub, subF, new Rectangle(tx, r.Y + Sc(34), r.Right - tx - Sc(12), r.Height - Sc(38)), Pix.C(0x9A6338), TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+            PixText.DrawText(g, b.Text, bigF, new Rectangle(tx, r.Y + Sc(8), r.Right - tx - Sc(12), Sc(26)), Pix.TextC, Pix.LeftMid);
+            PixText.DrawText(g, b.Sub, subF, new Rectangle(tx, r.Y + Sc(34), r.Right - tx - Sc(12), r.Height - Sc(38)), Pix.C(0x9A6338), TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
         }
 
         void DrawShelfCard(Graphics g, Btn b, string id)
@@ -9197,9 +9197,9 @@ namespace DeskPals
                 g.InterpolationMode = im;
                 textY = r.Y + Sc(14) + ph;
             }
-            TextRenderer.DrawText(g, b.Text, bigF, new Rectangle(r.X, textY, r.Width, Sc(30)), Pix.TextC, Pix.Mid);
-            TextRenderer.DrawText(g, b.Sub, subF, new Rectangle(r.X + Sc(6), textY + Sc(28), r.Width - Sc(12), Sc(38)), Pix.C(0x9A6338), TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);   // 四櫃並排時名單換行，不要被切掉
-            if (b.Note != null) TextRenderer.DrawText(g, b.Note, subF, new Rectangle(r.X + Sc(10), textY + Sc(48), r.Width - Sc(20), r.Bottom - textY - Sc(52)), Pix.C(0x6A5A48), TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);   // 兩櫃主打：一句介紹
+            PixText.DrawText(g, b.Text, bigF, new Rectangle(r.X, textY, r.Width, Sc(30)), Pix.TextC, Pix.Mid);
+            PixText.DrawText(g, b.Sub, subF, new Rectangle(r.X + Sc(6), textY + Sc(28), r.Width - Sc(12), Sc(38)), Pix.C(0x9A6338), TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);   // 四櫃並排時名單換行，不要被切掉
+            if (b.Note != null) PixText.DrawText(g, b.Note, subF, new Rectangle(r.X + Sc(10), textY + Sc(48), r.Width - Sc(20), r.Bottom - textY - Sc(52)), Pix.C(0x6A5A48), TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);   // 兩櫃主打：一句介紹
         }
 
         void DrawModeCard(Graphics g, Btn b)
@@ -9236,8 +9236,8 @@ namespace DeskPals
                 Pix.Art(g, ShelfForm.EGG, pal, ix + (iconW - ew) / 2, r.Y + (r.Height - eh) / 2, c);
             }
             int tx = ix + iconW + Sc(8);
-            TextRenderer.DrawText(g, b.Text, bigF, new Rectangle(tx, r.Y + r.Height / 2 - Sc(30), r.Right - tx - Sc(8), Sc(30)), Pix.TextC, Pix.LeftMid);
-            TextRenderer.DrawText(g, b.Sub, subF, new Rectangle(tx, r.Y + r.Height / 2 + Sc(2), r.Right - tx - Sc(8), Sc(40)), Pix.C(0x9A6338), TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+            PixText.DrawText(g, b.Text, bigF, new Rectangle(tx, r.Y + r.Height / 2 - Sc(30), r.Right - tx - Sc(8), Sc(30)), Pix.TextC, Pix.LeftMid);
+            PixText.DrawText(g, b.Sub, subF, new Rectangle(tx, r.Y + r.Height / 2 + Sc(2), r.Right - tx - Sc(8), Sc(40)), Pix.C(0x9A6338), TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
         }
 
         void DrawPetCard(Graphics g, Btn b)
@@ -9251,7 +9251,7 @@ namespace DeskPals
                 if (pw > r.Width - Sc(8)) { pw = r.Width - Sc(8); ph = pic.Height * pw / pic.Width; }
                 g.DrawImage(pic, r.X + (r.Width - pw) / 2, r.Y + Sc(6) + (avail - ph), pw, ph);
             }
-            TextRenderer.DrawText(g, b.Text, btnF, new Rectangle(r.X, r.Bottom - nameH - Sc(4), r.Width, nameH), Pix.TextC, Pix.Mid | TextFormatFlags.EndEllipsis);
+            PixText.DrawText(g, b.Text, btnF, new Rectangle(r.X, r.Bottom - nameH - Sc(4), r.Width, nameH), Pix.TextC, Pix.Mid | TextFormatFlags.EndEllipsis);
         }
     }
 }

@@ -518,14 +518,14 @@ namespace DeskPals
                 case 2: q = "動起來"; hint = meta.Sheet ? "動作表的每一格會直接拿來用；空格會自動補動畫" : "兩條線把圖切成頭、身體、腳：走路會擺腳、點頭（拖線調位置）"; break;
                 default: q = "取名字、選個性"; hint = "個性會決定他講什麼話、怎麼動"; break;
             }
-            TextRenderer.DrawText(g, q, qF, new Rectangle(0, Sc(98), W0, Sc(28)), Pix.TextC, Pix.Mid);
-            TextRenderer.DrawText(g, hint, subF, new Rectangle(Sc(20), Sc(126), W0 - Sc(40), Sc(18)), Pix.C(0x9A6338), Pix.Mid | TextFormatFlags.EndEllipsis);
+            PixText.DrawText(g, q, qF, new Rectangle(0, Sc(98), W0, Sc(28)), Pix.TextC, Pix.Mid);
+            PixText.DrawText(g, hint, subF, new Rectangle(Sc(20), Sc(126), W0 - Sc(40), Sc(18)), Pix.C(0x9A6338), Pix.Mid | TextFormatFlags.EndEllipsis);
             if (step == 0) PaintPick(g);
             else if (step == 1) PaintBg(g);
             else if (step == 2) PaintRig(g);
             else PaintName(g);
             foreach (Btn b in btns) DrawBtn(g, b);
-            if (err != "") TextRenderer.DrawText(g, err, subF, new Rectangle(Sc(170), H0 - Sc(64), W0 - Sc(370), Sc(44)), Pix.C(0xC0392B), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
+            if (err != "") PixText.DrawText(g, err, subF, new Rectangle(Sc(170), H0 - Sc(64), W0 - Sc(370), Sc(44)), Pix.C(0xC0392B), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
         }
 
         void Steps(Graphics g, int W0, int y)
@@ -541,7 +541,7 @@ namespace DeskPals
                 string s = (i + 1) + ". " + names[i];
                 int sw = Pix.TextW(s, subF), cx = x + (pw - sw) / 2;
                 if (i < step) { cx += 3 * U; Pix.Mono(g, Pix.CHECK, Pix.C(0x3F8A30), cx - 7 * U, y + ph / 2 - 3 * U, U); }
-                TextRenderer.DrawText(g, s, subF, new Rectangle(cx, y, sw + 4, ph), i <= step ? Pix.TextC : Pix.Dim, Pix.LeftMid);
+                PixText.DrawText(g, s, subF, new Rectangle(cx, y, sw + 4, ph), i <= step ? Pix.TextC : Pix.Dim, Pix.LeftMid);
             }
         }
 
@@ -560,10 +560,10 @@ namespace DeskPals
             pal['k'] = Pix.Ink; pal['w'] = Pix.C(0xFFFDF7); pal['b'] = Pix.C(0xBFE3F2); pal['p'] = Pix.C(0xF27A90); pal['o'] = Pix.C(0xE8A25A); pal['y'] = Pix.C(0xF6C453); pal['g'] = Pix.C(0x7CC36A);
             int c = Math.Max(3, Sc(5)), aw = CAT[0].Length * c;
             Pix.Art(g, CAT, pal, r.X + (r.Width - aw) / 2, r.Y + Sc(22), c);
-            TextRenderer.DrawText(g, "把照片拖進來，或點這裡選一張", bigF, new Rectangle(r.X, r.Y + Sc(22) + CAT.Length * c + Sc(10), r.Width, Sc(28)), Pix.TextC, Pix.Mid);
-            TextRenderer.DrawText(g, "PNG・JPG・GIF・BMP 都可以", subF, new Rectangle(r.X, r.Y + Sc(22) + CAT.Length * c + Sc(40), r.Width, Sc(20)), Pix.C(0x9A6338), Pix.Mid);
+            PixText.DrawText(g, "把照片拖進來，或點這裡選一張", bigF, new Rectangle(r.X, r.Y + Sc(22) + CAT.Length * c + Sc(10), r.Width, Sc(28)), Pix.TextC, Pix.Mid);
+            PixText.DrawText(g, "PNG・JPG・GIF・BMP 都可以", subF, new Rectangle(r.X, r.Y + Sc(22) + CAT.Length * c + Sc(40), r.Width, Sc(20)), Pix.C(0x9A6338), Pix.Mid);
             // 使用者指定的原字（v011 SPEC §4），不要改字
-            TextRenderer.DrawText(g, CopyrightNote, subF, new Rectangle(r.X, r.Y + Sc(22) + CAT.Length * c + Sc(62), r.Width, Sc(20)), Pix.C(0xB04040), Pix.Mid);
+            PixText.DrawText(g, CopyrightNote, subF, new Rectangle(r.X, r.Y + Sc(22) + CAT.Length * c + Sc(62), r.Width, Sc(20)), Pix.C(0xB04040), Pix.Mid);
             // 小技巧
             Rectangle tip = new Rectangle(r.X, r.Bottom + Sc(14), r.Width, Sc(78));
             Pix.Round(g, Pix.C(0xE6D3B0), tip.X, tip.Y, tip.Width, tip.Height, U);
@@ -572,9 +572,9 @@ namespace DeskPals
                 "・去背好的透明 PNG 效果最好；主角站在單純的背景前（白牆、地板）也很好去背。",
                 "・背景很亂的照片：可以先用免費的線上去背工具做成透明 PNG，再放進來。",
                 "・照片只存在你的電腦裡，不會上傳到任何地方。" };
-            for (int i = 0; i < tips.Length; i++) TextRenderer.DrawText(g, tips[i], subF, new Rectangle(tip.X + Sc(12), tip.Y + Sc(8) + i * Sc(22), tip.Width - Sc(24), Sc(20)), Pix.TextC, Pix.LeftMid | TextFormatFlags.EndEllipsis);
+            for (int i = 0; i < tips.Length; i++) PixText.DrawText(g, tips[i], subF, new Rectangle(tip.X + Sc(12), tip.Y + Sc(8) + i * Sc(22), tip.Width - Sc(24), Sc(20)), Pix.TextC, Pix.LeftMid | TextFormatFlags.EndEllipsis);
             Btn tb = Find("template");
-            if (tb != null) TextRenderer.DrawText(g, "進階：自己畫每個動作（動作表）、或匯入朋友傳來的公仔", smallF, new Rectangle(r.X, tb.R.Y - Sc(22), r.Width, Sc(18)), Pix.C(0x9A6338), Pix.LeftMid);
+            if (tb != null) PixText.DrawText(g, "進階：自己畫每個動作（動作表）、或匯入朋友傳來的公仔", smallF, new Rectangle(r.X, tb.R.Y - Sc(22), r.Width, Sc(18)), Pix.C(0x9A6338), Pix.LeftMid);
         }
 
         public const string CopyrightNote = "千萬不要使用有版權的照片";
@@ -642,19 +642,19 @@ namespace DeskPals
             Rectangle r = RightRect();
             // 背景
             Section(g, "背景", r.X, r.Y);
-            if (meta.Sheet) TextRenderer.DrawText(g, "動作表每一格會自己去背", subF, new Rectangle(r.X + Sc(10), r.Y + Sc(30), r.Width - Sc(20), Sc(20)), Pix.TextC, Pix.LeftMid);
-            else if (srcAlpha && meta.UseAlpha) TextRenderer.DrawText(g, "本來就是透明背景 ✓", subF, new Rectangle(r.X + Sc(190), r.Y + Sc(42), r.Width - Sc(200), Sc(30)), Pix.C(0x3F8A30), Pix.LeftMid);
+            if (meta.Sheet) PixText.DrawText(g, "動作表每一格會自己去背", subF, new Rectangle(r.X + Sc(10), r.Y + Sc(30), r.Width - Sc(20), Sc(20)), Pix.TextC, Pix.LeftMid);
+            else if (srcAlpha && meta.UseAlpha) PixText.DrawText(g, "本來就是透明背景 ✓", subF, new Rectangle(r.X + Sc(190), r.Y + Sc(42), r.Width - Sc(200), Sc(30)), Pix.C(0x3F8A30), Pix.LeftMid);
             else
             {
                 Rectangle s = SliderRect();
-                TextRenderer.DrawText(g, "去背強度  " + meta.Tol, subF, new Rectangle(r.X + Sc(10), r.Y + Sc(26), r.Width, Sc(20)), Pix.TextC, Pix.LeftMid);
+                PixText.DrawText(g, "去背強度  " + meta.Tol, subF, new Rectangle(r.X + Sc(10), r.Y + Sc(26), r.Width, Sc(20)), Pix.TextC, Pix.LeftMid);
                 Pix.Round(g, Pix.C(0x8A6A4A), s.X, s.Y + s.Height / 2 - 2 * U, s.Width, 4 * U, U);
                 Pix.Box(g, Pix.C(0xF6C453), s.X + U, s.Y + s.Height / 2 - U, (int)((s.Width - 2 * U) * meta.Tol / 100.0), 2 * U);
                 int kx = s.X + (int)(s.Width * meta.Tol / 100.0) - 4 * U;
                 Pix.Round(g, Pix.Ink, kx, s.Y, 8 * U, s.Height, U);
                 Pix.Box(g, Pix.C(0xFFFBF0), kx + U, s.Y + U, 6 * U, s.Height - 2 * U);
-                TextRenderer.DrawText(g, "少去一點", smallF, new Rectangle(s.X, s.Bottom + U, Sc(80), Sc(16)), Pix.C(0x9A6338), Pix.LeftMid);
-                TextRenderer.DrawText(g, "多去一點", smallF, new Rectangle(s.Right - Sc(80), s.Bottom + U, Sc(80), Sc(16)), Pix.C(0x9A6338), TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
+                PixText.DrawText(g, "少去一點", smallF, new Rectangle(s.X, s.Bottom + U, Sc(80), Sc(16)), Pix.C(0x9A6338), Pix.LeftMid);
+                PixText.DrawText(g, "多去一點", smallF, new Rectangle(s.Right - Sc(80), s.Bottom + U, Sc(80), Sc(16)), Pix.C(0x9A6338), TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
             }
             Section(g, "修一下（在左邊的圖上塗）", r.X, r.Y + Sc(92));
             Section(g, "風格", r.X, r.Y + Sc(204));
@@ -667,13 +667,13 @@ namespace DeskPals
                 using (LinearGradientBrush lb = new LinearGradientBrush(mini, Color.FromArgb(0x7D, 0x9E, 0xC8), Color.FromArgb(0x5B, 0x7D, 0xA8), 90f)) g.FillRectangle(lb, mini);
                 using (SolidBrush bar = new SolidBrush(Color.FromArgb(0x20, 0x22, 0x2A))) g.FillRectangle(bar, mini.X, mini.Bottom - Sc(16), mini.Width, Sc(16));
                 Pet.CuDrawStill(g, spr, mini.X + mini.Width / 2.0, mini.Bottom - Sc(16), w.S, false, false, Color.White);
-                TextRenderer.DrawText(g, "桌面上的大小", smallF, new Rectangle(mini.X, mini.Bottom - Sc(16), mini.Width, Sc(16)), Color.White, Pix.Mid);
+                PixText.DrawText(g, "桌面上的大小", smallF, new Rectangle(mini.X, mini.Bottom - Sc(16), mini.Width, Sc(16)), Color.White, Pix.Mid);
             }
         }
 
         void Section(Graphics g, string s, int x, int y)
         {
-            TextRenderer.DrawText(g, s, btnF, new Rectangle(x, y, Sc(320), Sc(24)), Pix.TextC, Pix.LeftMid);
+            PixText.DrawText(g, s, btnF, new Rectangle(x, y, Sc(320), Sc(24)), Pix.TextC, Pix.LeftMid);
             Pix.Box(g, Pix.C(0xE6D3B0), x, y + Sc(24), RightRect().Width, U);
         }
 
@@ -703,7 +703,7 @@ namespace DeskPals
                         g.DrawImage(fb, new Rectangle(c.X + (c.Width - (int)(fb.Width * s)) / 2, c.Y + Sc(8), (int)(fb.Width * s), (int)(fb.Height * s)));
                         g.PixelOffsetMode = PixelOffsetMode.Default;
                     }
-                    TextRenderer.DrawText(g, CuSprite.SheetLabels[i] + (has ? "" : "（自動）"), subF, new Rectangle(c.X, c.Bottom - Sc(24), c.Width, Sc(20)), has ? Pix.TextC : Pix.Dim, Pix.Mid);
+                    PixText.DrawText(g, CuSprite.SheetLabels[i] + (has ? "" : "（自動）"), subF, new Rectangle(c.X, c.Bottom - Sc(24), c.Width, Sc(20)), has ? Pix.TextC : Pix.Dim, Pix.Mid);
                 }
             }
             else
@@ -726,7 +726,7 @@ namespace DeskPals
             // 右邊：動起來
             Rectangle pr = PreviewRect();
             DrawStage(g, pr);
-            TextRenderer.DrawText(g, meta.Sheet ? "空著的格子用「站」那格自動動起來" : (meta.Rig ? "上下拖粉紅線、藍線，對準脖子和腿" : "沒切線：整隻一起搖搖晃晃（也很可愛）"), subF,
+            PixText.DrawText(g, meta.Sheet ? "空著的格子用「站」那格自動動起來" : (meta.Rig ? "上下拖粉紅線、藍線，對準脖子和腿" : "沒切線：整隻一起搖搖晃晃（也很可愛）"), subF,
                 new Rectangle(pr.X, pr.Bottom + Sc(50), pr.Width, Sc(40)), Pix.C(0x9A6338), TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
         }
 
@@ -737,8 +737,8 @@ namespace DeskPals
             Rectangle tag = new Rectangle(area.Right - tw - Sc(4), y - Sc(30), tw, Sc(58));
             Pix.Round(g, c, tag.X, tag.Y + Sc(8), tag.Width, Sc(18), U);
             Pix.Round(g, c, tag.X, tag.Y + Sc(32), tag.Width, Sc(18), U);
-            TextRenderer.DrawText(g, "▲ " + up, smallF, new Rectangle(tag.X, tag.Y + Sc(8), tag.Width, Sc(18)), Color.White, Pix.Mid);
-            TextRenderer.DrawText(g, "▼ " + down, smallF, new Rectangle(tag.X, tag.Y + Sc(32), tag.Width, Sc(18)), Color.White, Pix.Mid);
+            PixText.DrawText(g, "▲ " + up, smallF, new Rectangle(tag.X, tag.Y + Sc(8), tag.Width, Sc(18)), Color.White, Pix.Mid);
+            PixText.DrawText(g, "▼ " + down, smallF, new Rectangle(tag.X, tag.Y + Sc(32), tag.Width, Sc(18)), Color.White, Pix.Mid);
             // 左邊的把手
             Pix.Round(g, c, area.X - U, y - 3 * U, 6 * U, 6 * U, U);
             Pix.Box(g, Color.White, area.X + U, y - U, 2 * U, 2 * U);
@@ -762,13 +762,13 @@ namespace DeskPals
         void PaintName(Graphics g)
         {
             Rectangle r = ContentRect();
-            TextRenderer.DrawText(g, "他叫什麼名字？", bigF, new Rectangle(r.X, r.Y + Sc(6), Sc(150), Sc(40)), Pix.TextC, Pix.LeftMid);
+            PixText.DrawText(g, "他叫什麼名字？", bigF, new Rectangle(r.X, r.Y + Sc(6), Sc(150), Sc(40)), Pix.TextC, Pix.LeftMid);
             Rectangle nf = new Rectangle(r.X + Sc(150), r.Y + Sc(6), Sc(260), Sc(40));
             Pix.Round(g, Pix.C(0x8A6A4A), nf.X, nf.Y, nf.Width, nf.Height, U);
             Pix.Box(g, Color.FromArgb(0xFF, 0xFD, 0xF7), nf.X + U, nf.Y + U, nf.Width - 2 * U, nf.Height - 2 * U);
-            if (meta.Name == "") TextRenderer.DrawText(g, "例如：小黑、麻糬、阿肥", subF, new Rectangle(nf.X + Sc(14), nf.Y, nf.Width, nf.Height), Pix.Dim, Pix.LeftMid);
-            TextRenderer.DrawText(g, "最多 10 個字", smallF, new Rectangle(nf.Right + Sc(10), nf.Y, Sc(120), nf.Height), Pix.C(0x9A6338), Pix.LeftMid);
-            TextRenderer.DrawText(g, "個性", bigF, new Rectangle(r.X, r.Y + Sc(54), Sc(150), Sc(26)), Pix.TextC, Pix.LeftMid);
+            if (meta.Name == "") PixText.DrawText(g, "例如：小黑、麻糬、阿肥", subF, new Rectangle(nf.X + Sc(14), nf.Y, nf.Width, nf.Height), Pix.Dim, Pix.LeftMid);
+            PixText.DrawText(g, "最多 10 個字", smallF, new Rectangle(nf.Right + Sc(10), nf.Y, Sc(120), nf.Height), Pix.C(0x9A6338), Pix.LeftMid);
+            PixText.DrawText(g, "個性", bigF, new Rectangle(r.X, r.Y + Sc(54), Sc(150), Sc(26)), Pix.TextC, Pix.LeftMid);
             // 選到的個性：他會這樣跟你打招呼
             if (draft != null)
             {
@@ -779,7 +779,7 @@ namespace DeskPals
                     Pix.Round(g, Pix.C(0xE6D3B0), say.X, say.Y, say.Width, say.Height, U);
                     Pix.Box(g, Pix.C(0xFFF8EA), say.X + U, say.Y + U, say.Width - 2 * U, say.Height - 2 * U);
                     Pet.CuDrawStill(g, spr, say.X + Sc(36), say.Bottom - Sc(4), Math.Max(1, w.S / 2 + 1), false, false, Color.White);
-                    TextRenderer.DrawText(g, (meta.Name == "" ? "他" : meta.Name) + "：「" + World.NoEmoji(hi[0]) + "」", btnF, new Rectangle(say.X + Sc(70), say.Y, say.Width - Sc(80), say.Height), Pix.TextC, Pix.LeftMid | TextFormatFlags.EndEllipsis);
+                    PixText.DrawText(g, (meta.Name == "" ? "他" : meta.Name) + "：「" + World.NoEmoji(hi[0]) + "」", btnF, new Rectangle(say.X + Sc(70), say.Y, say.Width - Sc(80), say.Height), Pix.TextC, Pix.LeftMid | TextFormatFlags.EndEllipsis);
                 }
             }
         }
@@ -790,7 +790,7 @@ namespace DeskPals
             if (meta.Name == "") return;
             Rectangle r = ContentRect();
             Rectangle nf = new Rectangle(r.X + Sc(150), r.Y + Sc(6), Sc(260), Sc(40));
-            TextRenderer.DrawText(g, meta.Name, nameBox.Font, new Rectangle(nf.X + Sc(12), nf.Y, nf.Width - Sc(24), nf.Height), Pix.TextC, Pix.LeftMid);
+            PixText.DrawText(g, meta.Name, nameBox.Font, new Rectangle(nf.X + Sc(12), nf.Y, nf.Width - Sc(24), nf.Height), Pix.TextC, Pix.LeftMid);
         }
 
         void DrawBtn(Graphics g, Btn b)
@@ -807,7 +807,7 @@ namespace DeskPals
                 Pix.Box(g, face, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U);
                 Pix.Box(g, shade, r.X + U, r.Bottom - (small ? 2 : 3) * U, r.Width - 2 * U, (small ? 1 : 2) * U);
                 Font f = small ? subF : btnF;
-                TextRenderer.DrawText(g, b.Text, f, new Rectangle(r.X, r.Y, r.Width, r.Height - (small ? U : 2 * U)), b.Enabled ? Pix.TextC : Pix.Dim, Pix.Mid);
+                PixText.DrawText(g, b.Text, f, new Rectangle(r.X, r.Y, r.Width, r.Height - (small ? U : 2 * U)), b.Enabled ? Pix.TextC : Pix.Dim, Pix.Mid);
                 return;
             }
             Color edge = b.On ? Pix.C(0xC08A2C) : Pix.C(0x8A6A4A);
@@ -820,14 +820,14 @@ namespace DeskPals
             if (b.Id.StartsWith("persona:"))
             {
                 string id = b.Id.Substring(8);
-                TextRenderer.DrawText(g, b.Text, bigF, new Rectangle(r.X + Sc(12), r.Y + Sc(8), r.Width - Sc(24), Sc(28)), Pix.TextC, Pix.LeftMid);
-                TextRenderer.DrawText(g, Pal.PersonaDesc(id), subF, new Rectangle(r.X + Sc(12), r.Y + Sc(38), r.Width - Sc(24), Sc(36)), Pix.C(0x9A6338), TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
+                PixText.DrawText(g, b.Text, bigF, new Rectangle(r.X + Sc(12), r.Y + Sc(8), r.Width - Sc(24), Sc(28)), Pix.TextC, Pix.LeftMid);
+                PixText.DrawText(g, Pal.PersonaDesc(id), subF, new Rectangle(r.X + Sc(12), r.Y + Sc(38), r.Width - Sc(24), Sc(36)), Pix.C(0x9A6338), TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
             }
             else
             {
                 string sub = b.Id == "pixel" ? "跟內建公仔同畫風" : "照片原本的樣子";
-                TextRenderer.DrawText(g, b.Text, btnF, new Rectangle(r.X, r.Y + Sc(6), r.Width, Sc(24)), Pix.TextC, Pix.Mid);
-                TextRenderer.DrawText(g, sub, smallF, new Rectangle(r.X + Sc(4), r.Y + Sc(30), r.Width - Sc(8), Sc(20)), Pix.C(0x9A6338), Pix.Mid | TextFormatFlags.EndEllipsis);
+                PixText.DrawText(g, b.Text, btnF, new Rectangle(r.X, r.Y + Sc(6), r.Width, Sc(24)), Pix.TextC, Pix.Mid);
+                PixText.DrawText(g, sub, smallF, new Rectangle(r.X + Sc(4), r.Y + Sc(30), r.Width - Sc(8), Sc(20)), Pix.C(0x9A6338), Pix.Mid | TextFormatFlags.EndEllipsis);
             }
             if (b.On)
             {

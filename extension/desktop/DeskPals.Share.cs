@@ -325,7 +325,7 @@ namespace DeskPals
         // 像素風泡泡（跟桌面上的一樣：切角方框＋往下的小尾巴）
         static void ShareBubble(Graphics g, string s, Font f, double cx, double bottom, int W0, Color accent)
         {
-            Size ts = TextRenderer.MeasureText(s, f, new Size(4000, 400), TextFormatFlags.NoPadding);
+            Size ts = PixText.MeasureText(s, f, new Size(4000, 400), TextFormatFlags.NoPadding);
             int w = ts.Width + 28, h = ts.Height + 18;
             int x = (int)Math.Max(10, Math.Min(W0 - w - 10, cx - w / 2.0)), y = (int)(bottom - h - 8);
             using (SolidBrush lb = new SolidBrush(accent))
@@ -338,7 +338,7 @@ namespace DeskPals
                 for (int i = 0; i < 9; i++) g.FillRectangle(lb, tx - 9 + i, y + h - 1 + i, 18 - 2 * i, 1);
                 for (int i = 0; i < 7; i++) g.FillRectangle(fill, tx - 7 + i, y + h - 3 + i, 14 - 2 * i, 1);
             }
-            TextRenderer.DrawText(g, s, f, new Rectangle(x, y, w, h), Color.FromArgb(0x2A, 0x2F, 0x45), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            PixText.DrawText(g, s, f, new Rectangle(x, y, w, h), Color.FromArgb(0x2A, 0x2F, 0x45), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         }
 
         // 背景：一面淡淡的牆（色帶）、窗戶、小星星、木頭桌面、右下角浮水印
@@ -380,10 +380,10 @@ namespace DeskPals
                 using (Font f = new Font("Microsoft JhengHei UI", 16f, FontStyle.Bold, GraphicsUnit.Pixel))
                 {
                     string s = "WoWo Pals";
-                    Size ts = TextRenderer.MeasureText(s, f, new Size(4000, 400), TextFormatFlags.NoPadding);
+                    Size ts = PixText.MeasureText(s, f, new Size(4000, 400), TextFormatFlags.NoPadding);
                     int tx = W0 - ts.Width - 18, ty = H0 - ts.Height - 14;
-                    TextRenderer.DrawText(g, s, f, new Point(tx + 1, ty + 1), Pix.C(0x7A4A28), TextFormatFlags.NoPadding);
-                    TextRenderer.DrawText(g, s, f, new Point(tx, ty), Pix.C(0xFFF6E4), TextFormatFlags.NoPadding);
+                    PixText.DrawText(g, s, f, new Point(tx + 1, ty + 1), Pix.C(0x7A4A28), TextFormatFlags.NoPadding);
+                    PixText.DrawText(g, s, f, new Point(tx, ty), Pix.C(0xFFF6E4), TextFormatFlags.NoPadding);
                     using (SolidBrush hb = new SolidBrush(Pix.C(0xF27A90)))
                     {
                         string[] h = { ".#.#.", "#####", ".###.", "..#.." };
