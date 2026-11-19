@@ -5124,6 +5124,7 @@ namespace DeskPals
             ToolStripMenuItem help = new ToolStripMenuItem("小幫手（專注、安靜、提醒）");
             AddHelpers(help.DropDownItems);
             m.Items.Add(help);
+            m.Items.Add("小本子…", null, delegate { ShowNotebook(); });   // 小本子（DeskPals.Notebook.cs）
             m.Items.Add("公仔小屋（開關、設定）…", null, delegate { HouseMenu(); });
             m.Items.Add(new ToolStripSeparator());
             m.Items.Add(new ToolStripLabel(Single ? "我的公仔" : "公仔們"));
@@ -5479,7 +5480,7 @@ namespace DeskPals
                     }
                     break;
                 case "quit": QuitAll(); break;
-                default: if (!MisMsg(c, p, line) && !OrigMsg(c, p, line) && !StatsMsg(c, p, line)) StudyMsg(c, p, line); break;   // mischief-…（DeskPals.Mischief.cs）；stats-…（DeskPals.Stats.cs）；course／exam／study-…（DeskPals.Study.cs）
+                default: if (!MisMsg(c, p, line) && !OrigMsg(c, p, line) && !StatsMsg(c, p, line) && !NbMsg(c, p, line)) StudyMsg(c, p, line); break;   // mischief-…（DeskPals.Mischief.cs）；stats-…（DeskPals.Stats.cs）；nb-…（小本子，DeskPals.Notebook.cs）；course／exam／study-…（DeskPals.Study.cs）
             }
         }
 
@@ -6417,6 +6418,7 @@ namespace DeskPals
                 MisSnapAsk(g);   // 搗蛋第一次打開的說明（公開版）
                 StudySnap(g);
                 CuSnap(g);
+                NbSnap(g);   // 小本子（DeskPals.Notebook.cs）
                 if (pmenu != null && pmenu.VVisible) pmenu.PaintTo(g);
                 // 游標位置（只畫一個小十字，方便看）
                 Point c = Cursor.Position;
@@ -8175,6 +8177,7 @@ namespace DeskPals
             m.Items.Add(fun);
 
             ToolStripMenuItem work = new ToolStripMenuItem("工作");
+            work.DropDownItems.Add("小本子…", null, delegate { ShowNotebook(); });   // 小本子：待辦、今天做了、筆記（DeskPals.Notebook.cs）
             foreach (string[] f in FeatureList) if (Array.IndexOf(WorkFeats, f[0]) >= 0) work.DropDownItems.Add(FeatItem(f[0], f[1]));
             ToolStripMenuItem help = new ToolStripMenuItem("小幫手（專注、安靜、提醒）");
             AddHelpers(help.DropDownItems);
