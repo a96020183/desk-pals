@@ -1816,7 +1816,12 @@ enum Path {
     }
     static func Combine(_ a: String, _ b: String, _ c: String) -> String { return Combine(Combine(a, b), c) }
     static func Combine(_ a: String, _ b: String, _ c: String, _ d: String) -> String { return Combine(Combine(Combine(a, b), c), d) }
-    static func GetTempPath() -> String { let t = NSTemporaryDirectory(); return t.hasSuffix("/") ? t : t + "/" }
+    // .NET on Unix: $TMPDIR first (NSTemporaryDirectory() ignores a TMPDIR set by the parent process)
+    static func GetTempPath() -> String {
+        let e = ProcessInfo.processInfo.environment["TMPDIR"] ?? ""
+        let t = e.isEmpty ? NSTemporaryDirectory() : e
+        return t.hasSuffix("/") ? t : t + "/"
+    }
     static func GetTempFileName() -> String {
         let p = Combine(GetTempPath(), "tmp" + String(UInt32.random(in: 0...0xFFFFF), radix: 16).uppercased() + ".tmp")
         FileManager.default.createFile(atPath: p, contents: nil)
@@ -29728,12 +29733,12 @@ extension World {
         var rc = Cli.Run("glab", ["auth", "status"], 30000, &o, &e)
         for m in World.GlabLogin.Matches(o + "\n" + e) { if !hosts.Contains(m.Groups[1].Value) { hosts.Add(m.Groups[1].Value) } }
         lock(glabHosts) { glabHosts.Clear(); glabHosts.AddRange(hosts) }
-        let glabMissing = (rc == -1 && !Cli.Available("glab")) || rc == 9009
+        let glabMissing = (rc == -1 && !Cli.Available("glab")) || rc == 9009 || rc == 127   // mac: 127＝找不到指令（Unix 的結束碼只有 8 位元，9009 會變 49）
         glabState = glabMissing ? "missing" : (hosts.Count > 0 ? "ok" : "nologin")
         rc = Cli.Run("gh", ["auth", "status"], 30000, &o, &e)
         let g = World.GhLogin.Match(o + "\n" + e)
         ghUser = g.Success ? g.Groups[2].Value.Trim("(", ")") : ""
-        let ghMissing = (rc == -1 && !Cli.Available("gh")) || rc == 9009
+        let ghMissing = (rc == -1 && !Cli.Available("gh")) || rc == 9009 || rc == 127   // mac: 同上
         ghState = ghMissing ? "missing" : (ghUser != "" ? "ok" : "nologin")
         App.Log("work auth: glab=" + glabState + " (" + String(hosts.Count) + " host) gh=" + ghState)
     }
