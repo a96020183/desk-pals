@@ -198,7 +198,6 @@ async function testBlank() {
 	else if (MODE === "blank") await testBlank();
 	const failed = results.filter((r) => !r[0]).length;
 	console.log(`\n${MODE}: ${results.length - failed}/${results.length} passed`);
-	send("quit");
 	await sleep(300);
 	process.exit(failed ? 1 : 0);
 })();
