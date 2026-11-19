@@ -1,0 +1,38 @@
+# 雪裝（NT$100）｜duoduo（tools/costume.py build 產生，別手改；改 tools/defs.py 再重跑）
+# 座標＝2x 圖的像素（1x 全部除以 2），原點＝公仔原圖左上角；x y＝配件圖「中心」要放的位置；角度順時針；倍率 1＝配件圖原尺寸
+# pad 左 上 右 下：配件最多超出公仔原畫布多少，畫的時候畫布要先加大這麼多
+# piece 名稱 寬 高（2x 圖；檔案在這個資料夾的 <1x|2x>/<名稱>.png，白邊 <名稱>.halo.png 同尺寸）
+# <動作> <配件> <back|front> x y 角度 倍率 左右翻轉(0/1)；一個動作可以有好幾行，照順序畫；沒有任何一行的動作＝不戴
+pad 0 48 6 0
+piece s_beanie 108 100
+piece s_snowman 56 64
+stand s_beanie front 129.3 43 5.2 0.9 0
+stand s_snowman front 140.7 137.5 10 1 0
+walk1 s_beanie front 136.7 31.6 11.8 0.9 0
+walk1 s_snowman front 129 121.2 2 1 0
+walk2 s_beanie front 112.5 23 0 0.9 0
+walk2 s_snowman front 181 122.9 15 1 0
+jump s_beanie front 125.7 18 5.1 0.9 0
+jump s_snowman front 141.4 118.5 10 1 0
+sleep s_beanie front 128.9 46.6 9 0.9 0
+sleep s_snowman front 142 140.2 10 1 0
+happy s_beanie front 125.3 22 5.2 0.9 0
+happy s_snowman front 140.9 138.1 10 1 0
+held s_beanie front 135.3 23.1 15.4 0.9 0
+held s_snowman front 143.9 118.7 22 1 0
+sit s_beanie front 114.4 25.2 4 0.9 0
+sit s_snowman front 139.7 129.1 10 1 0
+grab s_beanie front 137.4 27 15 0.9 0
+grab s_snowman front 137.9 129.2 10 1 0
+push s_beanie front 122.6 20.7 -6.5 0.9 0
+push s_snowman front 128.9 128.6 10 1 0
+cry s_beanie front 131.6 4.4 4.6 0.9 0
+blown s_beanie front 152.3 25 22.6 0.9 0
+blown s_snowman front 130.1 131.4 35 1 0
+sig1 s_beanie front 105 62 0 0.9 0
+sig2 s_beanie front 168.8 23.8 16.7 0.9 0
+sig2 s_snowman front 180.9 128.4 22 1 0
+surprised s_beanie front 132.2 2.9 6.8 0.9 0
+surprised s_snowman front 150.5 108.7 14 1 0
+pout s_beanie front 110.2 43.1 3.4 0.9 0
+pout s_snowman front 141.3 138.2 10 1 0

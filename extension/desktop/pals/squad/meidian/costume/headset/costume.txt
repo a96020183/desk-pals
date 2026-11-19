@@ -1,0 +1,41 @@
+# 耳機（常駐，打卡）｜meidian（tools/costume.py build 產生，別手改；改 tools/defs.py 再重跑）
+# 座標＝2x 圖的像素（1x 全部除以 2），原點＝公仔原圖左上角；x y＝配件圖「中心」要放的位置；角度順時針；倍率 1＝配件圖原尺寸
+# pad 左 上 右 下：配件最多超出公仔原畫布多少，畫的時候畫布要先加大這麼多
+# piece 名稱 寬 高（2x 圖；檔案在這個資料夾的 <1x|2x>/<名稱>.png，白邊 <名稱>.halo.png 同尺寸）
+# <動作> <配件> <back|front> x y 角度 倍率 左右翻轉(0/1)；一個動作可以有好幾行，照順序畫；沒有任何一行的動作＝不戴
+pad 4 30 0 0
+piece h_notes 56 50
+piece h_phones 134 118
+piece h_side 104 114
+stand h_phones front 136 58 0 1.12 0
+stand h_notes front 196 34 8 0.9 0
+walk1 h_phones front 136.7 58.7 2.7 1.12 0
+walk1 h_notes front 197.7 37.5 10.7 0.9 0
+walk2 h_phones front 137.8 59.4 5.3 1.12 0
+walk2 h_notes front 199.8 41.1 13.3 0.9 0
+jump h_phones front 139.2 49.7 2.6 1.12 0
+jump h_notes front 200.2 28.4 10.6 0.9 0
+sleep h_phones front 123.8 101.8 -22.4 1.12 0
+sleep h_notes front 170.2 56.8 -14.4 0.9 0
+happy h_phones front 138 55 0 1.12 0
+happy h_notes front 198 31 8 0.9 0
+held h_phones front 145.6 60.6 2.5 1.12 0
+held h_notes front 206.6 39.3 10.5 0.9 0
+sit h_phones front 139.9 63 9 1.12 0
+sit h_notes front 202.9 48.7 17 0.9 0
+grab h_phones front 154.8 59.7 6.3 1.12 0
+grab h_notes front 217.1 42.5 14.3 0.9 0
+push h_side front 121.8 69.8 -3.3 0.806 0
+push h_notes front 215.5 28.4 4.7 0.9 0
+cry h_phones front 143 52 0 1.12 0
+cry h_notes front 203 28 8 0.9 0
+blown h_phones front 167.2 65.7 30.5 1.12 0
+blown h_notes front 231.1 75.4 38.5 0.9 0
+sig1 h_phones front 141.5 53 0 1.12 0
+sig1 h_notes front 201.5 29 8 0.9 0
+sig2 h_phones front 72 134 -82 1.12 0
+sig2 h_notes front 72 134 -82 0.9 0
+surprised h_phones front 138.6 44.6 2.4 1.12 0
+surprised h_notes front 199.6 23.2 10.4 0.9 0
+pout h_phones front 141.1 42.8 1.3 1.12 0
+pout h_notes front 201.6 20.2 9.3 0.9 0

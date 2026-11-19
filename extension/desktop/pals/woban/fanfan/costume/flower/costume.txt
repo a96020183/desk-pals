@@ -1,0 +1,40 @@
+# 花冠（常駐，打卡）｜fanfan（tools/costume.py build 產生，別手改；改 tools/defs.py 再重跑）
+# 座標＝2x 圖的像素（1x 全部除以 2），原點＝公仔原圖左上角；x y＝配件圖「中心」要放的位置；角度順時針；倍率 1＝配件圖原尺寸
+# pad 左 上 右 下：配件最多超出公仔原畫布多少，畫的時候畫布要先加大這麼多
+# piece 名稱 寬 高（2x 圖；檔案在這個資料夾的 <1x|2x>/<名稱>.png）
+# <動作> <配件> <back|front> x y 角度 倍率 左右翻轉(0/1)；一個動作可以有好幾行，照順序畫；沒有任何一行的動作＝不戴
+pad 0 0 0 0
+piece f_crown_c 124 66
+piece f_crown_side_c 104 72
+piece f_lei_c 124 70
+stand f_crown_c front 143.2 111.8 -2.7 1 0
+stand f_lei_c front 145.1 195.8 -2.7 0.8 0
+walk1 f_crown_side_c front 136 106 0 1 0
+walk1 f_lei_c front 150 196 0 0.8 0
+walk2 f_crown_side_c front 136 104 0 1 0
+walk2 f_lei_c front 150 194 0 0.8 0
+jump f_crown_c front 146.4 99.4 -15.3 1 0
+jump f_lei_c front 166.6 181 -15.3 0.8 0
+sleep f_crown_c front 155 176 0 1 0
+happy f_crown_c front 144.7 108.6 -4.6 1 0
+happy f_lei_c front 149.5 192.5 -4.6 0.8 0
+held f_crown_c front 143.8 122.3 2.7 1 0
+held f_lei_c front 137.9 206.1 2.7 0.8 0
+sit f_crown_c front 141.5 123.2 -4 1 0
+sit f_lei_c front 145.4 207.1 -4 0.8 0
+grab f_crown_c front 140.9 121 -7.3 1 0
+grab f_lei_c front 149.6 204.5 -7.3 0.8 0
+push f_crown_side_c front 157.7 119.1 -12.3 1 0
+push f_lei_c front 174.9 207.5 -12.3 0.8 0
+cry f_crown_c front 138.4 112 -6.3 1 0
+cry f_lei_c front 145.7 195.7 -6.3 0.8 0
+blown f_crown_c front 149.5 93.1 -25.2 1 0
+blown f_lei_c front 183.5 170 -25.2 0.8 0
+sig1 f_crown_c front 143.7 126.3 -1.5 1 0
+sig1 f_lei_c front 144 210.4 -1.5 0.8 0
+sig2 f_crown_c front 141.8 102 -7.5 1 0
+sig2 f_lei_c front 150.8 185.5 -7.5 0.8 0
+surprised f_crown_c front 152.6 110.7 -2.9 1 0
+surprised f_lei_c front 154.8 194.7 -2.9 0.8 0
+pout f_crown_c front 141.4 113.4 -10.3 1 0
+pout f_lei_c front 154.5 196.4 -10.3 0.8 0

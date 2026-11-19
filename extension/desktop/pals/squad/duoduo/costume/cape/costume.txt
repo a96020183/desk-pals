@@ -1,0 +1,23 @@
+# 小披風（常駐，打卡）｜duoduo（tools/costume.py build 產生，別手改；改 tools/defs.py 再重跑）
+# 座標＝2x 圖的像素（1x 全部除以 2），原點＝公仔原圖左上角；x y＝配件圖「中心」要放的位置；角度順時針；倍率 1＝配件圖原尺寸
+# pad 左 上 右 下：配件最多超出公仔原畫布多少，畫的時候畫布要先加大這麼多
+# piece 名稱 寬 高（2x 圖；檔案在這個資料夾的 <1x|2x>/<名稱>.png，白邊 <名稱>.halo.png 同尺寸）
+# <動作> <配件> <back|front> x y 角度 倍率 左右翻轉(0/1)；一個動作可以有好幾行，照順序畫；沒有任何一行的動作＝不戴
+pad 0 0 0 4
+piece c_front 116 88
+stand c_front front 102.7 155.5 19 1 0
+walk1 c_front front 93.8 144.3 11 1 0
+walk2 c_front front 141.5 137.5 24 1 0
+jump c_front front 103.4 136.5 19 1 0
+sleep c_front front 104 158.2 19 1 0
+happy c_front front 102.9 156.1 19 1 0
+held c_front front 103 128.4 31 1 0
+sit c_front front 101.7 147.1 19 1 0
+grab c_front front 99.9 147.2 19 1 0
+push c_front front 90.9 146.6 19 1 0
+cry c_front front 101.2 147.1 19 1 0
+blown c_front front 88.1 131.7 44 1 0
+sig1 c_front front 114.6 157.5 19 1 0
+sig2 c_front front 140 138.1 31 1 0
+surprised c_front front 111.3 124 23 1 0
+pout c_front front 103.3 156.2 19 1 0

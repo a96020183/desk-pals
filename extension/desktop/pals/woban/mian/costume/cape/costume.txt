@@ -1,0 +1,23 @@
+# 小披風（常駐，打卡）｜mian（tools/costume.py build 產生，別手改；改 tools/defs.py 再重跑）
+# 座標＝2x 圖的像素（1x 全部除以 2），原點＝公仔原圖左上角；x y＝配件圖「中心」要放的位置；角度順時針；倍率 1＝配件圖原尺寸
+# pad 左 上 右 下：配件最多超出公仔原畫布多少，畫的時候畫布要先加大這麼多
+# piece 名稱 寬 高（2x 圖；檔案在這個資料夾的 <1x|2x>/<名稱>.png）
+# <動作> <配件> <back|front> x y 角度 倍率 左右翻轉(0/1)；一個動作可以有好幾行，照順序畫；沒有任何一行的動作＝不戴
+pad 0 0 0 14
+piece c_front_c 150 104
+stand c_front_c front 105.5 135 0 0.8 0
+walk1 c_front_c front 132 135 0 0.8 0
+walk2 c_front_c front 132.5 135 0 0.8 0
+jump c_front_c front 105.5 133 0 0.8 0
+sleep c_front_c front 109.1 150.7 24 0.8 0
+happy c_front_c front 118.6 127.1 -9.5 0.8 0
+held c_front_c front 115 132.5 -3.8 0.8 0
+sit c_front_c front 105.5 144 0 0.8 0
+grab c_front_c front 117.2 136.8 10.3 0.8 0
+push c_front_c front 125.8 130.4 7.1 0.8 0
+cry c_front_c front 108.5 135 0 0.8 0
+blown c_front_c front 97.4 109 17.5 0.8 0
+sig1 c_front_c front 122.1 149.1 -12.9 0.8 0
+sig2 c_front_c front 107 140.5 -3.8 0.8 0
+surprised c_front_c front 106 144 0 0.8 0
+pout c_front_c front 107.3 144.4 1.3 0.8 0

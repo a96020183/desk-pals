@@ -31,7 +31,12 @@ fs.mkdirSync(shots, { recursive: true });
 // ---------------- 碼（跟 DeskPals.Shop.cs 的 ShopCodes、v011 的 issue.py 同一個格式）----------------
 const ALPHA = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const DOMAIN = Buffer.from("WoWoPals-code-v1");
-const BIT = { "xmas-costume": 1, "xmas-cabinet": 2, "exam-costume": 4, "exam-cabinet": 8 };
+// 項目順序＝第 i 個項目用第 i 個位元（0 起算）。要跟 DeskPals.Shop.cs 的 ShopCodes.Items、issue.py 的 ITEMS 一模一樣。
+const ITEM_ORDER = [
+	"xmas-costume", "exam-costume", "snow-costume", "lny-costume", "pajama-costume", "bday-costume",
+	"xmas-cabinet", "exam-cabinet", "snow-cabinet", "lny-cabinet", "space-cabinet", "camp-cabinet",
+];
+const BIT = Object.fromEntries(ITEM_ORDER.map((n, i) => [n, 1 << i]));
 const b64 = (s) => Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64");
 function keypair() {
 	const k = crypto.generateKeyPairSync("ec", { namedCurve: "prime256v1" });
@@ -41,17 +46,20 @@ function keypair() {
 function b32(buf) {
 	let bits = 0n;
 	for (const b of buf) bits = (bits << 8n) | BigInt(b);
+	const nchars = Math.ceil((buf.length * 8) / 5);
+	bits <<= BigInt(nchars * 5 - buf.length * 8);   // 左補 0 到 5 的倍數（跟 issue.py 的 b32 一樣）
 	let s = "";
-	for (let i = buf.length * 8 / 5 - 1; i >= 0; i--) s += ALPHA[Number((bits >> BigInt(i * 5)) & 31n)];
+	for (let i = nchars - 1; i >= 0; i--) s += ALPHA[Number((bits >> BigInt(i * 5)) & 31n)];
 	return s.match(/.{1,4}/g).join("-");
 }
 function code(key, items, opt = {}) {
 	let mask = 0;
 	for (const it of items) mask |= BIT[it];
 	const day = opt.day ?? 323, id = opt.id ?? 1;
-	const payload = Buffer.from([opt.ver ?? 1, mask, day >> 8, day & 255, id >> 8, id & 255]);
+	// 版本 1 ＋ 項目 bitmask 4 位元組（big-endian）＋ 日期 2 ＋ 流水號 2 ＝ 9 位元組
+	const payload = Buffer.from([opt.ver ?? 1, (mask >>> 24) & 255, (mask >>> 16) & 255, (mask >>> 8) & 255, mask & 255, day >> 8, day & 255, id >> 8, id & 255]);
 	const sig = crypto.sign("sha256", Buffer.concat([DOMAIN, payload]), { key: key.priv, dsaEncoding: "ieee-p1363" });
-	if (opt.forgeMask !== undefined) payload[1] = opt.forgeMask;   // 簽完才改項目（假的）
+	if (opt.forgeMask !== undefined) payload.writeUInt32BE(opt.forgeMask >>> 0, 1);   // 簽完才改項目（假的）
 	return b32(Buffer.concat([payload, sig]));
 }
 const flip = (c, i) => { const t = c.split(""); let k = -1; for (let j = 0; j < t.length; j++) if (t[j] !== "-" && ++k === i) { t[j] = t[j] === "Z" ? "Y" : "Z"; break; } return t.join(""); };
@@ -155,7 +163,7 @@ function parseCui(o) {
 		const d = fresh("codes");
 		const app = await launch("codes", d, keyEnv);
 		const xc = code(K, ["xmas-costume"], { id: 11 });
-		await check("兌換碼：112 個字、4 個字一組", () => { assert.equal(xc.replace(/-/g, "").length, 112); assert.match(xc, /^([0-9A-Z]{4}-){27}[0-9A-Z]{4}$/); });
+		await check("兌換碼：117 個字、4 個字一組（最後一組 1 個字）", () => { assert.equal(xc.replace(/-/g, "").length, 117); assert.match(xc, /^([0-9A-Z]{4}-){29}[0-9A-Z]$/); });
 		await check("對的碼：兌換成功、拿到聖誕造型", async () => assert.equal(await app.redeem(xc), "redeem ok xmas-costume"));
 		await check("同一組再輸入一次：已經兌換過（不會重複）", async () => assert.equal(await app.redeem(xc), "redeem again xmas-costume"));
 		const two = code(K, ["xmas-cabinet", "exam-cabinet"], { id: 12 });
@@ -163,7 +171,7 @@ function parseCui(o) {
 		await check("小寫、O 當 0、L 當 1、亂加空白、沒有 -：一樣認得", async () => assert.equal(await app.redeem(messy), "redeem ok xmas-cabinet,exam-cabinet"));
 		await check("改了一個字的碼（簽章那段）：不對", async () => assert.equal(await app.redeem(flip(code(K, ["exam-costume"], { id: 13 }), 80)), "redeem bad -"));
 		await check("改了一個字的碼（日期那段）：不對", async () => assert.equal(await app.redeem(flip(code(K, ["exam-costume"], { id: 14 }), 4)), "redeem bad -"));
-		await check("簽完偷改項目（聖誕造型 → 四樣全部）：不對", async () => assert.equal(await app.redeem(code(K, ["xmas-costume"], { id: 15, forgeMask: 15 })), "redeem bad -"));
+		await check("簽完偷改項目（聖誕造型 → 偷加其他項目）：不對", async () => assert.equal(await app.redeem(code(K, ["xmas-costume"], { id: 15, forgeMask: 0xfff })), "redeem bad -"));
 		await check("別的金鑰簽的碼：不對", async () => assert.equal(await app.redeem(code(OTHER, ["exam-costume"], { id: 16 })), "redeem bad -"));
 		await check("版本不是 1：不對", async () => assert.equal(await app.redeem(code(K, ["exam-costume"], { id: 17, ver: 2 })), "redeem bad -"));
 		await check("少一個字、多一個字、有不是碼的字（U、#）：不對", async () => {
@@ -242,7 +250,7 @@ function parseCui(o) {
 		i = await app4.info();
 		await check("第 30 個章：講一句、小圍巾可以穿了", async () => {
 			assert.equal(i.stamps, "30 today=1 last=2026-12-20");
-			assert.equal(i.said, "第 30 個章，同款小圍巾是你的了");
+			assert.equal(i.said, "第 30 個章，圍巾是你的了");
 			assert.equal(await app4.wear("costume", "scarf"), "wear ok");
 			const j = await app4.info();
 			for (const id of ["duoduo", "meidian", "cici"]) assert.equal(j.pal[id], "scarf", id);
@@ -446,25 +454,28 @@ function parseCui(o) {
 	// ================= 資料驅動：打卡獎勵階梯＋季節商品清單都吃設定（加一行就多一項，不用改程式）=================
 	{
 		const cfg = path.join(work, "catalog.txt");
+		// future／mystery 是故意沒有美術的 id：用來驗「即將推出」（美術未到）那條路；snow 美術已經在了，所以是鎖著（沒買）不是即將。
 		fs.writeFileSync(cfg,
 			"price_item_twd=100\nprice_item_hkd=25\nmail=a96020183@gmail.com\n" +
-			"reward.30=scarf 同款小圍巾\nreward.60=grad 畢業帽\nreward.90=pajama 睡衣\n" +
+			"reward.30=scarf 同款小圍巾\nreward.60=grad 畢業帽\nreward.300=future 未來裝\n" +
 			"costume.xmas=聖誕造型 | xmas-costume\ncabinet.xmas=聖誕 | xmas-cabinet\n" +
-			"costume.snow=雪裝 | snow-costume | 120 | 30\ncabinet.snow=雪 | snow-cabinet\n");
+			"costume.snow=雪裝 | snow-costume | 120 | 30\ncabinet.snow=雪 | snow-cabinet\n" +
+			"costume.mystery=神秘裝 | mystery-costume\n");
 		const app = await launch("catalog", fresh("catalog"), Object.assign({}, keyEnv, { DESKPALS_SHOP_FILE: cfg, DESKPALS_CLOCK: "2026-12-20T09:00" }));
 		app.send("cui open checkin"); await sleep(400);
 		const ci = parseCui(await app.block("cui info"));
-		await check("打卡獎勵階梯吃設定：三階 30／60／90，睡衣(90)美術未到", () => {
+		await check("打卡獎勵階梯吃設定：三階 30／60／300，未來裝(300)美術未到", () => {
 			assert.match(ci.extraText, /reward 30 scarf /);
 			assert.match(ci.extraText, /reward 60 grad /);
-			assert.match(ci.extraText, /reward 90 pajama got=0 art=0/);
+			assert.match(ci.extraText, /reward 300 future got=0 art=0/);
 		});
 		await app.reply(`snap ${shots}/ui-catalog-checkin.png`, (b) => b.includes("snapped"));
 		app.send("cui open picker"); await sleep(400);
 		const pk = parseCui(await app.block("cui info"));
-		await check("造型清單吃設定：多了睡衣(即將)、雪裝(季節，無美術也是即將)", () => {
-			assert.match(pk.extraText, /tile pajama soon/);
-			assert.match(pk.extraText, /tile snow soon/);
+		await check("造型清單吃設定：未來裝／神秘裝(無美術＝即將)、雪裝(有美術、沒買＝鎖著)", () => {
+			assert.match(pk.extraText, /tile future soon/);
+			assert.match(pk.extraText, /tile mystery soon/);
+			assert.match(pk.extraText, /tile snow lock/);
 			assert.match(pk.extraText, /skin snow lock/);
 		});
 		app.send("cui open shop"); await sleep(400);
@@ -475,6 +486,41 @@ function parseCui(o) {
 		});
 		await app.reply(`snap ${shots}/ui-catalog-shop.png`, (b) => b.includes("snapped"));
 		await app.quit();
+	}
+
+	// ================= 付費項目：12 個全部兌換得了、兌換後各自穿得上 =================
+	{
+		const d = fresh("paid-all");
+		const app = await launch("paidall", d, keyEnv);
+		const paidCostumes = [["xmas", "xmas-costume"], ["exam", "exam-costume"], ["snow", "snow-costume"], ["lny", "lny-costume"], ["pajama", "pajama-costume"], ["bday", "bday-costume"]];
+		const paidCabinets = [["xmas", "xmas-cabinet"], ["exam", "exam-cabinet"], ["snow", "snow-cabinet"], ["lny", "lny-cabinet"], ["space", "space-cabinet"], ["camp", "camp-cabinet"]];
+		const allItems = paidCostumes.concat(paidCabinets).map((p) => p[1]);
+		await check("一組碼可以含全部 12 個付費項目（32 位元 bitmask）：兌換成功", async () => {
+			const r = await app.redeem(code(K, allItems, { id: 50 }));
+			assert.match(r, /^redeem ok /, r);
+			assert.deepEqual(r.slice("redeem ok ".length).split(",").sort(), allItems.slice().sort());
+		});
+		for (const [id, item] of paidCostumes) await check(`付費造型 ${id}（${item}）兌換後穿得上`, async () => assert.equal(await app.wear("costume", id), "wear ok"));
+		for (const [id, item] of paidCabinets) await check(`付費櫃子外觀 ${id}（${item}）兌換後換得上`, async () => assert.equal(await app.wear("cabinet", id), "wear ok"));
+		await app.quit();
+	}
+
+	// ================= 打卡階梯：六階各自到門檻就解鎖對應造型 =================
+	{
+		const mkDays = (n) => Array.from({ length: n }, (_, k) => new Date(Date.UTC(2026, 0, 1 + k)).toISOString().slice(0, 10)).join("\n") + "\n";
+		const tiers = [[30, "scarf"], [60, "grad"], [90, "flower"], [120, "animal"], [150, "headset"], [180, "cape"]];
+		const d = fresh("tiers", { "stamps.txt": mkDays(180) });
+		const app = await launch("tiers", d, Object.assign({}, keyEnv, { DESKPALS_CLOCK: "2026-12-01T09:00" }));
+		for (const [days, id] of tiers) await check(`打卡 ${days} 階梯：${id} 解鎖、穿得上`, async () => assert.equal(await app.wear("costume", id), "wear ok"));
+		await app.quit();
+		const d2 = fresh("tiers120", { "stamps.txt": mkDays(120) });
+		const app2 = await launch("tiers120", d2, Object.assign({}, keyEnv, { DESKPALS_CLOCK: "2026-12-01T09:00" }));
+		await check("只打卡 120：animal(120) 解鎖，headset(150)／cape(180) 還鎖著", async () => {
+			assert.equal(await app2.wear("costume", "animal"), "wear ok");
+			assert.equal(await app2.wear("costume", "headset"), "wear locked");
+			assert.equal(await app2.wear("costume", "cape"), "wear locked");
+		});
+		await app2.quit();
 	}
 
 	for (const [s, m] of results) console.log(s + "  " + m);

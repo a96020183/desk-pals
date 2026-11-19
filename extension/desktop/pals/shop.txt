@@ -8,6 +8,14 @@ ecpay_xmas_costume=
 ecpay_xmas_cabinet=
 ecpay_exam_costume=
 ecpay_exam_cabinet=
+ecpay_snow_costume=
+ecpay_snow_cabinet=
+ecpay_lny_costume=
+ecpay_lny_cabinet=
+ecpay_pajama_costume=
+ecpay_bday_costume=
+ecpay_space_cabinet=
+ecpay_camp_cabinet=
 # 請他們喝杯咖啡：一杯 NT$60（約 HK$15），1～3 杯，綠界一杯數一條
 coffee_twd=60
 coffee_hkd=15
@@ -27,18 +35,24 @@ custom_early_slots=20
 custom_form=
 # ===== 打卡獎勵階梯（資料驅動）：reward.<天數>=<造型 id> <顯示名>。到那一階自動解鎖；美術還沒到的顯示「即將推出」。
 #        要加新常駐造型：加一行＋把美術放進 pals/<櫃>/<公仔>/costume/<id>/，不用改程式。漏天不歸零（收集制，不是連續）。
-reward.30=scarf 同款小圍巾
+reward.30=scarf 圍巾
 reward.60=grad 畢業帽
-# 之後的常駐造型（美術到了再把註解拿掉；owner 規劃 90／120／150／180…）：
-# reward.90=pajama 睡衣
-# reward.120=animal 動物裝
-# reward.150=flower 小花
-# reward.180=headset 耳機
-# reward.210=cape 披風
+reward.90=flower 花冠
+reward.120=animal 動物帽
+reward.150=headset 耳機
+reward.180=cape 小披風
 # ===== 季節商店賣的（資料驅動）：costume.<id> 或 cabinet.<id>=<顯示名> | <兌換碼項目> | [NT價] | [HK價]
 #        後三項可省（兌換碼項目省略＝<id>-<kind>、價省略＝用上面的 price_item_*）。要加新季節商品：加一行＋丟美術；
-#        要能用解鎖碼兌換，發碼工具（issue.py／ShopCodes.Items）也要有這個項目（目前共 8 個位元的上限）。
+#        要能用解鎖碼兌換，發碼工具（issue.py／ShopCodes.Items）也要有這個項目（目前 bitmask 32 位元＝最多 32 個付費項目）。
 costume.xmas=聖誕造型 | xmas-costume
 cabinet.xmas=聖誕 | xmas-cabinet
 costume.exam=期末考造型 | exam-costume
 cabinet.exam=期末考 | exam-cabinet
+costume.snow=雪裝 | snow-costume
+cabinet.snow=雪 | snow-cabinet
+costume.lny=新年造型 | lny-costume
+cabinet.lny=新年 | lny-cabinet
+costume.pajama=睡衣 | pajama-costume
+costume.bday=生日造型 | bday-costume | 60 | 15
+cabinet.space=太空 | space-cabinet
+cabinet.camp=露營 | camp-cabinet
