@@ -134,6 +134,8 @@ extension World {
         let help = ToolStripMenuItem("小幫手（專注、安靜、提醒）")
         AddHelpers(help.DropDownItems)
         work.DropDownItems.Add(help)
+        work.DropDownItems.Add("小本子…", nil, { self.ShowNotebook() })   // 小本子：待辦、今天做了、筆記（64_notebook.swift）
+        work.DropDownItems.Add("工作設定…", nil, { self.ShowWorkSettings() })   // 工作來源：Jira、GitLab、GitHub、CI、開會…（65_work_settings.swift）
         m.Items.Add(work)
 
         let setm = ToolStripMenuItem("設定")
@@ -145,7 +147,7 @@ extension World {
         m.Items.Add(setm)
 
         m.Items.Add(ToolStripSeparator())
-        m.Items.Add("收工（關掉 Desk Pals）", nil, { self.QuitAll() })
+        m.Items.Add("收工（關掉 WoWo Pals）", nil, { self.QuitAll() })
         ShowMenu(m, "公仔小屋", true, at)
     }
 
@@ -980,7 +982,7 @@ class SetupForm: Form {
             let tc = b.Enabled ? Pix.TextC : Pix.Dim
             if b.Id == "back" { Arrow(g, tx + U, cy, -1, tc); tx += ax }
             TextRenderer.DrawText(g, b.Text, bf, Rectangle(tx, r.Y, tw + 4, r.Height - 2 * U), tc, Pix.LeftMid)
-            if b.Id == "next" && step < 1 { Arrow(g, tx + tw + 2 * U, cy, 1, tc) }
+            if b.Id == "next" && step < 1 { Arrow(g, tx + tw + 3 * U, cy, 1, tc) }
             return
         }
         // 卡片：底下一層影子；選到的是金色粗框、右上角綠色勾勾；「做一隻自己的」是暖黃色的主打卡

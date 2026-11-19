@@ -2,12 +2,15 @@
 //   假的 Jira／天氣／行事曆＝本機 HTTP 伺服器；假的 glab／gh＝test/fixtures/fake-cli.js（DESKPALS_FAKE_CLI，只在離屏模式有效）；
 //   假的 Claude Code／Codex 對話＝臨時資料夾（CLAUDE_CONFIG_DIR、CODEX_HOME）；公司網路＝本機 TCP 埠。
 //   要看的：全部預設關、預設什麼都不連；小本子紀錄的格式（SPEC 2b）；每個來源的提醒（公仔泡泡，用字跟 VS Code 版一樣）；
-//   Jira token 用 DPAPI 存（PowerShell 解得開、檔案裡沒有明文）；設定重開還在；VS Code 送來的重複通知被丟掉；改名 WoWo Pals。
+//   Jira token 用 DPAPI 存（PowerShell 解得開、檔案裡沒有明文）；Mac 存鑰匙圈（security 看得到、資料夾裡沒有明文、「-」刪掉）；
+//   設定重開還在；VS Code 送來的重複通知被丟掉；改名 WoWo Pals。
 //   有時間的（到期、開會、下雨）都用假時鐘（work-clock），不看跑測試的當下幾點；CI 的 runner 是 UTC 也一樣。
 //
 // 用法：node test/desktop-work.js <endpoint 開頭> <工作資料夾> <截圖資料夾> -- <開桌面版的指令…，{ep} 換成 pipe 名稱>
 //   例：node test/desktop-work.js desk-pals-work %TEMP%\dp-work shots\work -- build\win-personal\DeskPals.exe --pipe {ep}
-// 只在 Windows 跑（DPAPI、pipe）。
+//   Mac：endpoint 開頭是 unix socket 的路徑開頭（{ep}＝<開頭>-<名字>-<n>.sock），Mac 版的參數是「DeskPals <socket> <pet> <lineup>」：
+//   node test/desktop-work.js "$RUNNER_TEMP/dpw" "$RUNNER_TEMP/dpw-pub" shots/work -- build/public/extension/desktop/DeskPals {ep} "" ""
+// Windows（DPAPI、named pipe）和 Mac（鑰匙圈、unix socket）都能跑；Mac 的紀錄檔在 ~/Library/Logs/desk-pals.log。
 const cp = require("child_process");
 const fs = require("fs");
 const http = require("http");
@@ -20,6 +23,7 @@ const argv = process.argv.slice(2);
 const dash = argv.indexOf("--");
 const [epBase, work0, shots0] = argv.slice(0, dash);
 const cmd = argv.slice(dash + 1);
+const win = process.platform === "win32";
 const work = path.resolve(work0);
 const shots = path.resolve(shots0).replace(/\\/g, "/");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -49,6 +53,7 @@ fs.writeFileSync(path.join(data, "mode.txt"), "shelf");
 fs.writeFileSync(path.join(data, "features.txt"), "scenes=0\nlunch=0\nchatter=0\nset=scenes,lunch,chatter\n");   // 劇情、午餐不要在測試中途插進來
 const tmp = path.join(work, "tmp");
 fs.mkdirSync(tmp, { recursive: true });
+const logFile = win ? path.join(tmp, "desk-pals.log") : path.join(os.homedir(), "Library", "Logs", "desk-pals.log");   // mac: App.Log 寫 ~/Library/Logs
 
 // ---------------- 假的 Claude Code／Codex 對話 ----------------
 const now0 = new Date();
@@ -151,20 +156,21 @@ const server = http.createServer((req, res) => {
 // ---------------- 開桌面版 ----------------
 let n = 0, port = 0;
 async function launch(name, iso) {
-	const ep = `${epBase}-${name}-${++n}`;
+	const ep = win ? `${epBase}-${name}-${++n}` : `${epBase}-${name}-${++n}.sock`;
 	const env = Object.assign({}, process.env, {
 		DESKPALS_OFFSCREEN: "1", DESKPALS_ISOLATED: "1", DESKPALS_DATA_DIR: iso || data, TEMP: tmp, TMP: tmp,
 		CLAUDE_CONFIG_DIR: claudeDir, CODEX_HOME: codexDir,
 		DESKPALS_FAKE_CLI: path.join(__dirname, "fixtures", "fake-cli.js"), FAKE_CLI_STATE: stateFile, FAKE_CLI_LOG: cliLog,
 		DESKPALS_FAKE_WEB: `http://127.0.0.1:${port}`,
 	});
+	if (!win) env.TMPDIR = tmp;   // mac: 暫存資料夾看 TMPDIR（Path.GetTempPath＝NSTemporaryDirectory）
 	if (iso) { delete env.CLAUDE_CONFIG_DIR; delete env.CODEX_HOME; delete env.DESKPALS_DOWNLOADS_DIR; }
 	if (iso === "no-data-dir") delete env.DESKPALS_DATA_DIR;   // 連資料資料夾都沒指定   // 沒設：桌面版自己決定看哪裡（離屏時不能是你的家目錄）
 	const args = cmd.map((x) => x.replace(/\{ep\}/g, ep));
 	const child = cp.spawn(args[0], args.slice(1), { env, stdio: "ignore", windowsHide: true });
 	let exited = false;
 	child.on("exit", () => { exited = true; });
-	const target = "\\\\.\\pipe\\" + ep;
+	const target = win ? "\\\\.\\pipe\\" + ep : ep;
 	const sock = await new Promise((resolve, reject) => {
 		const end = Date.now() + 90000;
 		(function attempt() {
@@ -546,17 +552,33 @@ const todayStr = dayOf(fmtLocal(new Date()));
 	// ================= 12. 重開：設定、token、紀錄 =================
 	const before = readLog(todayStr), idsBefore = new Set(Object.keys(before.by));
 	await app.quit();
-	await check("Jira token：DPAPI（目前使用者）加密，檔案裡沒有明文，PowerShell 的 ProtectedData 解得開", () => {
-		const f = path.join(data, "jira-token.dat");
-		const b = fs.readFileSync(f);
-		assert.ok(!b.includes(Buffer.from(TOKEN, "utf8")) && !b.includes(Buffer.from(TOKEN, "utf16le")));
-		assert.equal(b.readUInt32LE(0), 1, "DPAPI blob 的版本");
-		const ps = `Add-Type -AssemblyName System.Security; $b=[IO.File]::ReadAllBytes('${f.replace(/'/g, "''")}'); $p=[Security.Cryptography.ProtectedData]::Unprotect($b,[Text.Encoding]::UTF8.GetBytes('WoWoPals.jira.v1'),'CurrentUser'); [Console]::Out.Write([Convert]::ToBase64String($p))`;
-		const out = cp.execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { encoding: "utf8" }).trim();
-		assert.equal(Buffer.from(out, "base64").toString("utf8"), TOKEN);
-		assert.doesNotMatch(fs.readFileSync(path.join(data, "work-config.txt"), "utf8"), new RegExp(TOKEN));
-		assert.doesNotMatch(fs.readFileSync(path.join(tmp, "desk-pals.log"), "utf8"), new RegExp(TOKEN), "token 不能寫進紀錄檔");
-	});
+	const keychain = (extra) => cp.execFileSync("security", ["find-generic-password", "-s", "WoWo Pals", "-a", "jira-test:" + data, ...extra], { encoding: "utf8", timeout: 15000, stdio: ["ignore", "pipe", "ignore"] });
+	if (win) {
+		await check("Jira token：DPAPI（目前使用者）加密，檔案裡沒有明文，PowerShell 的 ProtectedData 解得開", () => {
+			const f = path.join(data, "jira-token.dat");
+			const b = fs.readFileSync(f);
+			assert.ok(!b.includes(Buffer.from(TOKEN, "utf8")) && !b.includes(Buffer.from(TOKEN, "utf16le")));
+			assert.equal(b.readUInt32LE(0), 1, "DPAPI blob 的版本");
+			const ps = `Add-Type -AssemblyName System.Security; $b=[IO.File]::ReadAllBytes('${f.replace(/'/g, "''")}'); $p=[Security.Cryptography.ProtectedData]::Unprotect($b,[Text.Encoding]::UTF8.GetBytes('WoWoPals.jira.v1'),'CurrentUser'); [Console]::Out.Write([Convert]::ToBase64String($p))`;
+			const out = cp.execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { encoding: "utf8" }).trim();
+			assert.equal(Buffer.from(out, "base64").toString("utf8"), TOKEN);
+			assert.doesNotMatch(fs.readFileSync(path.join(data, "work-config.txt"), "utf8"), new RegExp(TOKEN));
+			assert.doesNotMatch(fs.readFileSync(logFile, "utf8"), new RegExp(TOKEN), "token 不能寫進紀錄檔");
+		});
+	} else {
+		await check("Jira token：鑰匙圈（mac：service「WoWo Pals」、account「jira-test:<資料資料夾>」），資料夾裡沒有明文、紀錄檔沒有 token", () => {
+			keychain([]);   // 只看屬性（不讀密碼、不會跳授權視窗）：項目在
+			// 讀密碼：security 讀得到就要一字不差；鑰匙圈要人按「允許」時（CI 沒人按）就算了——上面 Jira 用這個 token 驗證成功（jira=ok）已經證明存得對
+			let pw = null;
+			try { pw = keychain(["-w"]).replace(/\n$/, ""); } catch (e) { pw = null; }
+			if (pw !== null) assert.equal(pw, TOKEN);
+			const files = [];
+			(function walk(p) { for (const e of fs.readdirSync(p, { withFileTypes: true })) { const f = path.join(p, e.name); if (e.isDirectory()) walk(f); else files.push(f); } })(data);
+			for (const f of files) assert.ok(!fs.readFileSync(f).includes(Buffer.from(TOKEN, "utf8")), "明文 token 在 " + f);
+			assert.ok(!files.some((f) => /jira-token/.test(f)), "mac 不寫 jira-token.dat");
+			assert.doesNotMatch(fs.readFileSync(logFile, "utf8"), new RegExp(TOKEN), "token 不能寫進紀錄檔");
+		});
+	}
 	app = await launch("b");
 	await check("重開：設定都還在（work-config.txt）、token 還在、work-own 一連上就送", async () => {
 		const c = cfgOf(await app.dump());
@@ -580,6 +602,13 @@ const todayStr = dayOf(fmtLocal(new Date()));
 		await sleep(400);
 		assert.equal(+stateOf(await app.dump()).dropped, d0);
 	});
+	if (!win) {
+		await check("Jira token：「work-token -」刪掉鑰匙圈那一項（mac）", async () => {
+			app.send("work-token -");
+			await until("token=0", async () => cfgOf(await app.dump()).token === "0");
+			assert.throws(() => keychain([]), undefined, "鑰匙圈裡還有 jira-test 那一項");
+		});
+	}
 	await app.quit();
 
 	// ================= 13. 離屏（測試）沒設 CLAUDE_CONFIG_DIR／CODEX_HOME：不讀真的家目錄 =================
@@ -604,7 +633,8 @@ const todayStr = dayOf(fmtLocal(new Date()));
 		assert.ok(!fs.existsSync(path.join(isoData, "notebook")), "沒有對話被寫進小本子");
 	});
 	await app.quit();
-	await check("離屏連 DESKPALS_DATA_DIR 都沒設：資料放暫存資料夾，不用你真的 %LOCALAPPDATA%\\DeskPals", async () => {
+	await check(win ? "離屏連 DESKPALS_DATA_DIR 都沒設：資料放暫存資料夾，不用你真的 %LOCALAPPDATA%\\DeskPals"
+		: "離屏連 DESKPALS_DATA_DIR 都沒設：資料放暫存資料夾（mac：TMPDIR），不用你真的 ~/Library/Application Support/DeskPals", async () => {
 		app = await launch("iso2", "no-data-dir");
 		const d = await app.dump();
 		const roots = Object.fromEntries((/^work-roots (.*)$/m.exec(d) || ["", ""])[1].split(" ").filter(Boolean).map((kv) => kv.split("=")));
@@ -618,7 +648,7 @@ const todayStr = dayOf(fmtLocal(new Date()));
 	let fail = 0;
 	for (const [r, name] of results) { console.log(`${r}  ${name}`); if (r !== "PASS") fail++; }
 	console.log(`\n${results.length - fail}/${results.length} passed`);
-	if (fail) { try { console.log(fs.readFileSync(path.join(tmp, "desk-pals.log"), "utf8").split("\n").filter((l) => /work|notebook|cli/.test(l)).slice(-40).join("\n")); } catch (e) {} }
+	if (fail) { try { console.log(fs.readFileSync(logFile, "utf8").split("\n").filter((l) => /work|notebook|cli/.test(l)).slice(-40).join("\n")); } catch (e) {} }
 	process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(2); });
 

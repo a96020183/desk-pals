@@ -823,8 +823,8 @@ extension World {
         while !closing {
             do {
                 let urls: List<String> = lock(schoolUrls) { List<String>(schoolUrls) }
-                let skip = workCal
-                urls.RemoveAll { (u: String) -> Bool in u == skip }   // 跟 VS Code 開會提醒同一份：不要提醒兩次
+                let skip = workCal, skip2 = WorkMeetUrl()
+                urls.RemoveAll { (u: String) -> Bool in u == skip || u == skip2 }   // 跟開會提醒（VS Code 或桌面版的工作設定）同一份：不要提醒兩次
                 let doFetch = fetchNow || DateTime.Now >= nextFetch
                 if urls.Count > 0 && !App.Offscreen && doFetch {
                     fetchNow = false
@@ -999,7 +999,7 @@ extension World {
             planFired.Add(it.Key)
             if now - it.At > (it.Kind.EndsWith("-now") ? 5 : 3) * 60000 { continue }   // 電腦睡著錯過太久的就不補
             App.Log("school " + it.Kind + ": " + it.Text)
-            if it.Kind == "class-now" { Count("classes") }
+            if it.Kind == "class-now" { Count("classes"); WorkLogClass(it) }   // 工作來源：上課也寫進小本子（62_work.swift）
             OnNotify(it.Kind, it.Url != "" ? it.Url : "-", it.Text)
             let q = it.QuietMin
             if q > 0 { Later(10) { self.StartQuiet(q) } }   // 等「上課了」那則講完再安靜（不然馬上被「我安靜待著」蓋掉）

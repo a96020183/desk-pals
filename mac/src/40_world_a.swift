@@ -9,6 +9,7 @@ final class World: Form {
     static func DataDirInit() -> String {
         var d = ProcessInfo.processInfo.environment["DESKPALS_DATA_DIR"] ?? ""
         // mac: ~/Library/Application Support/DeskPals（Windows 是 %LOCALAPPDATA%\DeskPals）
+        if d.isEmpty && App.Offscreen { d = Path.Combine(Path.GetTempPath(), "DeskPals-offscreen") }   // 離屏（測試）沒指定：不用你真的資料
         if d.isEmpty { d = NSHomeDirectory() + "/Library/Application Support/DeskPals" }
         return d
     }
@@ -518,6 +519,7 @@ extension World {
         ReminderTick()
         TicketTick()
         StudyTick()          // 讀書小幫手（52_study.swift）：學校行事曆、作業死線、考試倒數、熬夜
+        WorkTick()           // 工作來源（62_work.swift）：第一次才開背景執行緒
         MisTick(dt)          // 搗蛋（59_mischief.swift）：搶游標、下班清場、購物警察、打字太兇
         DownloadTick(dt)
         ExpireNotice()
@@ -1025,6 +1027,7 @@ extension World {
         let help = ToolStripMenuItem("小幫手（專注、安靜、提醒）")
         AddHelpers(help.DropDownItems)
         m.Items.Add(help)
+        m.Items.Add("小本子…", nil, { self.ShowNotebook() })   // 小本子（64_notebook.swift）
         m.Items.Add("公仔小屋（開關、設定）…", nil, { self.HouseMenu() })
         m.Items.Add(ToolStripSeparator())
         m.Items.Add(ToolStripLabel(Single ? "我的公仔" : "公仔們"))
@@ -1056,7 +1059,7 @@ extension World {
         m.Items.Add(Single ? "回" + MiniName + "裡待著" : "回櫃子裡待著", nil, { p.StowToShelf(true) })
         m.Items.Add("躲起來（⌃⌥S）", nil, { self.ToggleHide() })
         m.Items.Add(ToolStripSeparator())
-        m.Items.Add("收工（關掉 Desk Pals）", nil, { self.QuitAll() })
+        m.Items.Add("收工（關掉 WoWo Pals）", nil, { self.QuitAll() })
     }
 
     // 專注、安靜、提醒、搶票、今天的小結（公仔、櫃子、小屋的選單都有）
@@ -1176,7 +1179,7 @@ extension World {
         m.Items.Add("公仔小屋（開關、設定）…", nil, { self.HouseMenu() })
         m.Items.Add("躲起來（⌃⌥S）", nil, { self.ToggleHide() })
         m.Items.Add(ToolStripSeparator())
-        m.Items.Add("收工（關掉 Desk Pals）", nil, { self.QuitAll() })
+        m.Items.Add("收工（關掉 WoWo Pals）", nil, { self.QuitAll() })
         ShowMenu(m, p != nil ? p.P.Name : "公仔櫃", false)
     }
 
@@ -1293,7 +1296,7 @@ extension World {
         let l: Pet = Lead()
         let outs = OutPets()
         switch p[0] {
-        case "hello": CuHello(c); if active != nil { World.Send(c, "active " + active.P.Id + "\n") }; World.Send(c, "lineup " + lineup + "\n")   // 櫃子以桌面版為準（第一次設定在桌面做）
+        case "hello": CuHello(c); if active != nil { World.Send(c, "active " + active.P.Id + "\n") }; World.Send(c, "lineup " + lineup + "\n"); WorkHello(c)   // 櫃子以桌面版為準（第一次設定在桌面做）；工作來源：桌面版在管哪些（62_work.swift）
         case "custom": CuMsg(c, line)   // 自己做的公仔（53_custom.swift／56_custom_make.swift）
         case "save":
             Count("saves")
@@ -1354,7 +1357,7 @@ extension World {
             let sv: Bool = setupForm != nil && !setupForm.IsDisposed && (setupForm.VVisible || setupForm.Visible)
             World.Send(c, (sv ? setupForm.Info() : "setup none\n") + "end\n")
         case "notify":
-            if p.count >= 4 {
+            if p.count >= 4 && !WorkDropsNotify(p[1]) {   // 工作來源：桌面版已經在管的不講兩次（62_work.swift）
                 // 文字可以有空白：取第三個空白之後全部
                 let t = Array(line.trimmingCharacters(in: .whitespacesAndNewlines))
                 let i1 = World.IdxSpace(t, 0), i2 = World.IdxSpace(t, i1 + 1), i3 = World.IdxSpace(t, i2 + 1)
@@ -1374,7 +1377,7 @@ extension World {
                 if let ms = Int(p[1]), let lead = Int(p[2]) { AddTicket(ms, lead, p[3], i4 > 0 ? World.AfterIdx(t, i4 + 1) : "") }
             }
         case "lineup": SwitchLineup(p.count >= 2 ? p[1] : "", p.count >= 3 ? p[2] : ""); World.Send(c, "lineup " + lineup + "\n")   // 回報現在是哪一櫃（VS Code 用來判斷桌面版是不是舊版）
-        case "config-host": companyHost = p.count >= 2 ? p[1].trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        case "config-host": if !WorkOwns("vpn") { companyHost = p.count >= 2 ? p[1].trimmingCharacters(in: .whitespacesAndNewlines) : "" }   // 工作來源：桌面版有設公司主機就用桌面版的
         case "snap": if p.count >= 2 { Snap(p[1], World.ParseRect(p, 2)) }; World.Send(c, "snapped\n")
         case "snaps":
             // snaps <資料夾> <張數> <間隔ms> [x y w h]
@@ -1388,7 +1391,7 @@ extension World {
                 }
             }
         case "quit": QuitAll()
-        default: if !MisMsg(c, p, line) && !OrigMsg(c, p, line) && !StatsMsg(c, p, line) { StudyMsg(c, p, line) }   // mischief-…（59_mischief.swift）；stats-…（61_stats.swift）；course／exam／study-…（52_study.swift）
+        default: if !MisMsg(c, p, line) && !OrigMsg(c, p, line) && !StatsMsg(c, p, line) && !WorkMsg(c, p, line) && !NbMsg(c, p, line) { StudyMsg(c, p, line) }   // mischief-…（59_mischief.swift）；stats-…（61_stats.swift）；work-…（工作來源，62_work.swift）；nb-…（小本子，64_notebook.swift）；course／exam／study-…（52_study.swift）
         }
     }
 
