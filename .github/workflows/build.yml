@@ -841,7 +841,10 @@ jobs:
           $setup = (Get-ChildItem dist\DeskPals-Setup-*.exe).FullName
           # 0.11 改名：先真的裝 0.10.4（舊名字的捷徑），再升級（拿不到就只測擴充套件留下的舊名字捷徑）
           $old = Join-Path $env:RUNNER_TEMP "old-setup"
-          gh release download v0.10.4 --repo $env:GITHUB_REPOSITORY --pattern "DeskPals-Setup-0.10.4.exe" --dir $old 2>$null
+          # 沒有 v0.10.4 的 Release 時 gh 會寫 stderr，PowerShell 5.1 會把它當成錯誤：先關掉、只看有沒有拿到檔
+          $eap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+          try { & gh release download v0.10.4 --repo $env:GITHUB_REPOSITORY --pattern "DeskPals-Setup-0.10.4.exe" --dir $old 2>&1 | Out-Null } catch { "no v0.10.4 release: " + $_.Exception.Message }
+          $ErrorActionPreference = $eap; $global:LASTEXITCODE = 0
           $oldSetup = Join-Path $old "DeskPals-Setup-0.10.4.exe"
           if (-not (Test-Path $oldSetup)) { $oldSetup = "" }
           powershell -NoProfile -ExecutionPolicy Bypass -File .github\test-installer.ps1 -Setup $setup -OldSetup "$oldSetup"
