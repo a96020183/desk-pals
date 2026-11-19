@@ -15,7 +15,7 @@
 // 掛在別的檔的地方（都只有一兩行，註解寫「工作來源」）：
 //   DeskPals.cs：TickInner → WorkTick()、OnMsg 的 hello → WorkHello()、notify → WorkDropsNotify()、config-host → WorkOwns("vpn")、
 //     default → WorkMsg()、ClaudeProjectsDir／CodexSessionsDir → AiHomeDefault()、StartDownloadWatch → DownloadsDir()、DataDirInit（離屏測試不碰真的家目錄、資料）、ClaudeWatchOnce／CodexWatchOnce → WorkClaudeRoots()／WorkCodexRoots()／WorkWslAlive()、HealthLoop → VpnReachable()、
-//     小屋選單「工作」→ ShowWorkSettings()（設定視窗做好後才掛）。
+//     小屋選單「工作」→ ShowWorkSettings()（DeskPals.WorkSettings.cs）、Snap → WorkSnap()。
 //   DeskPals.Study.cs：PlanTick → WorkLogClass()（上課寫進小本子）、SchoolFetchLoop → WorkMeetUrl()（跟開會同一份行事曆不提醒兩次）。
 //
 // pipe 指令：
@@ -578,6 +578,8 @@ namespace DeskPals
         static string HttpGet(string url, string auth, int timeoutMs, out int status)
         {
             status = 0;
+            // 離屏（測試）：只連本機的假伺服器，真的網址一律不連（測試不能碰網路、也不能拿使用者的 token 去試）
+            if (App.Offscreen) { Uri u; if (!Uri.TryCreate(url, UriKind.Absolute, out u) || (u.Host != "127.0.0.1" && u.Host != "localhost")) { App.Log("work: offscreen, not fetching " + (u != null ? u.Host : "?")); return null; } }
             try
             {
                 System.Net.ServicePointManager.SecurityProtocol |= (System.Net.SecurityProtocolType)3072;   // TLS 1.2
@@ -617,11 +619,11 @@ namespace DeskPals
             int rc = Cli.Run("glab", new string[] { "auth", "status" }, 30000, out o, out e);
             foreach (Match m in GlabLogin.Matches(o + "\n" + e)) if (!hosts.Contains(m.Groups[1].Value)) hosts.Add(m.Groups[1].Value);
             lock (glabHosts) { glabHosts.Clear(); glabHosts.AddRange(hosts); }
-            glabState = rc == -1 && !Cli.Available("glab") ? "missing" : (hosts.Count > 0 ? "ok" : "nologin");
+            glabState = (rc == -1 && !Cli.Available("glab")) || rc == 9009 ? "missing" : (hosts.Count > 0 ? "ok" : "nologin");
             rc = Cli.Run("gh", new string[] { "auth", "status" }, 30000, out o, out e);
             Match g = GhLogin.Match(o + "\n" + e);
             ghUser = g.Success ? g.Groups[2].Value.Trim('(', ')') : "";
-            ghState = rc == -1 && !Cli.Available("gh") ? "missing" : (ghUser != "" ? "ok" : "nologin");
+            ghState = (rc == -1 && !Cli.Available("gh")) || rc == 9009 ? "missing" : (ghUser != "" ? "ok" : "nologin");
             App.Log("work auth: glab=" + glabState + " (" + hosts.Count + " host) gh=" + ghState);
         }
         List<string> GlabHosts() { if (glabState == "") DetectAuth(); lock (glabHosts) return new List<string>(glabHosts); }
@@ -1091,6 +1093,7 @@ namespace DeskPals
         {
             string url = WorkUrl(WC("meet_url"));
             if (url == null) return;
+            if (App.Offscreen && !Regex.IsMatch(url, @"^https?://(127\.0\.0\.1|localhost)[:/]")) return;   // 測試不連真的行事曆
             string err = "";
             string text = Fetch(url, ref err);
             meetErr = err;
@@ -1510,11 +1513,9 @@ namespace DeskPals
         }
 
         // ================= 設定視窗（畫面還在挑版：先留入口，給小屋選單和小本子的「來源」按鈕叫）=================
-        public void ShowWorkSettings()
-        {
-            App.Log("work settings: dialog not built yet");
-            NbSay("工作設定還在做，快好了");   // 畫面還在挑版（v011\work-settings）；做好就換成真的視窗
-        }
+        // 工作設定視窗在 DeskPals.WorkSettings.cs（ShowWorkSettings）；看的方式（格子／清單、上次選的來源）記在 work-ui.txt
+        public static string ReadWorkUi() { return ReadText("work-ui.txt"); }
+        public static void WriteWorkUi(string s) { WriteText("work-ui.txt", s); }
 
         // 小本子（DeskPals.Notebook.cs）用的兩個接點（v011 SPEC 2b）：「來源」按鈕、空白頁的「接上」
         public void OpenWorkSettings() { ShowWorkSettings(); }
@@ -1553,7 +1554,7 @@ namespace DeskPals
                 case "work-token": SetJiraToken(rest); return true;
                 case "work-poll": workPollNow = true; if (workWake != null) workWake.Set(); return true;
                 case "work-dump": Send(c, WorkDump()); return true;
-                case "work-settings": if (p.Length >= 2 && p[1] == "open") ShowWorkSettings(); return true;
+                case "work-settings": return WorkSettingsMsg(c, p, line);   // 設定視窗（DeskPals.WorkSettings.cs）
                 case "work-clock":
                     if (!App.Offscreen) return true;
                     { DateTime want; workShift = p.Length >= 2 && DateTime.TryParse(p[1], CultureInfo.InvariantCulture, DateTimeStyles.None, out want) ? want - DateTime.Now : TimeSpan.Zero; }

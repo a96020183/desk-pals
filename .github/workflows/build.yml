@@ -745,6 +745,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "work sources test failed (public)" }
           node test/desktop-work.js desk-pals-workp "$env:RUNNER_TEMP\dpw-per" "$env:RUNNER_TEMP\dpw-per-shots" -- dist-personal\DeskPals-personal.exe --pipe "{ep}"
           if ($LASTEXITCODE -ne 0) { throw "work sources test failed (personal)" }
+          # 工作設定視窗（D 版）：格子／清單、按開先跳去填、儲存標紅、Esc 一層一層退、記住怎麼看、150%、螢幕太矮會捲
+          New-Item -ItemType Directory -Force exe-shots\work-settings | Out-Null
+          node test/desktop-worksettings.js desk-pals-ws "$env:RUNNER_TEMP\dpws-pub" exe-shots\work-settings -- dist\DeskPals.exe --pipe "{ep}" --pet duoduo --lineup original
+          if ($LASTEXITCODE -ne 0) { throw "work settings test failed (public)" }
+          node test/desktop-worksettings.js desk-pals-wsp "$env:RUNNER_TEMP\dpws-per" "$env:RUNNER_TEMP\dpws-per-shots" -- dist-personal\DeskPals-personal.exe --pipe "{ep}" --pet duoduo --lineup original
+          if ($LASTEXITCODE -ne 0) { throw "work settings test failed (personal)" }
       # exe 旁邊沒有 pals 資料夾：紙箱櫃的圖要從內嵌的資源讀
       - name: Shelf test on public DeskPals.exe (shelf art from embedded resources)
         shell: powershell

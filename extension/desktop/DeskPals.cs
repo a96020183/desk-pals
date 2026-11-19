@@ -4168,7 +4168,7 @@ namespace DeskPals
             defaultPet = DefaultPetFor(pet);
             ShowInTaskbar = false;
             float dpi = 96;
-            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) dpi = g.DpiX;
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) dpi = PixText.TestDpi(g.DpiX);   // 測試：DESKPALS_TEST_DPI（只在離屏）
             S = Math.Max(3, (int)Math.Round(4 * dpi / 96.0));
             k = S / 3.0;
             int seed = Environment.TickCount;
@@ -6428,6 +6428,7 @@ namespace DeskPals
                 StudySnap(g);
                 CuSnap(g);
                 NbSnap(g);   // 小本子（DeskPals.Notebook.cs）
+                WorkSnap(g);   // 工作設定（DeskPals.WorkSettings.cs）
                 if (pmenu != null && pmenu.VVisible) pmenu.PaintTo(g);
                 // 游標位置（只畫一個小十字，方便看）
                 Point c = Cursor.Position;
@@ -8187,6 +8188,7 @@ namespace DeskPals
 
             ToolStripMenuItem work = new ToolStripMenuItem("工作");
             work.DropDownItems.Add("小本子…", null, delegate { ShowNotebook(); });   // 小本子：待辦、今天做了、筆記（DeskPals.Notebook.cs）
+            work.DropDownItems.Add("工作設定…", null, delegate { ShowWorkSettings(); });   // 工作來源：Jira、GitLab、GitHub、CI、開會…（DeskPals.WorkSettings.cs）
             foreach (string[] f in FeatureList) if (Array.IndexOf(WorkFeats, f[0]) >= 0) work.DropDownItems.Add(FeatItem(f[0], f[1]));
             ToolStripMenuItem help = new ToolStripMenuItem("小幫手（專注、安靜、提醒）");
             AddHelpers(help.DropDownItems);

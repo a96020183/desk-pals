@@ -37,10 +37,18 @@ namespace DeskPals
         {
             if (dpi <= 0)
             {
-                try { using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) dpi = g.DpiY; } catch { dpi = 96; }
+                try { using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) dpi = TestDpi(g.DpiY); } catch { dpi = 96; }
                 if (dpi <= 0) dpi = 96;
             }
             return dpi;
+        }
+
+        // 測試（只在離屏）：DESKPALS_TEST_DPI＝144 之類，假裝螢幕是 150%（截 150% 的圖用）
+        public static float TestDpi(float real)
+        {
+            float f;
+            string e = App.Offscreen ? Environment.GetEnvironmentVariable("DESKPALS_TEST_DPI") : null;
+            return !string.IsNullOrEmpty(e) && float.TryParse(e, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out f) && f >= 48 ? f : real;
         }
 
         // 點數字型 → 整數像素字型（快取）

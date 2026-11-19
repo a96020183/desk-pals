@@ -7,7 +7,7 @@ if (process.env.FAKE_CLI_LOG) fs.appendFileSync(process.env.FAKE_CLI_LOG, [tool,
 const out = (v) => { process.stdout.write(typeof v === "string" ? v : JSON.stringify(v)); process.exit(0); };
 const fail = (msg) => { process.stderr.write(msg + "\n"); process.exit(1); };
 const t = state[tool];
-if (!t || t.missing) fail(tool + ": not installed");
+if (!t || t.missing) { process.stderr.write(tool + " is not recognized as an internal or external command\n"); process.exit(9009); }   // 跟 cmd 找不到指令一樣（9009）
 if (args[0] === "auth" && args[1] === "status") {
 	// 跟真的一樣：登入資訊寫在 stderr、token 打星號
 	if (!t.user) { process.stderr.write("You are not logged into any hosts.\n"); process.exit(1); }
