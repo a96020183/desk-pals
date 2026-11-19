@@ -136,7 +136,8 @@
 | 做自己的公仔、分享短片、`.deskpal` 匯出匯入 | ✓ | ✓ | ✓ |
 | 讀書小幫手（學校行事曆、作業、考試、熬夜、搶課） | ✓ | ✓ | ✓ |
 | 提醒我、搶票、專注、安靜、Claude Code／Codex 卡住提醒 | ✓ | ✓ | ✓ |
-| 只有 VS Code 才有：存檔比讚、錯誤數、打字速度、終端機長指令、推 tag 盯 CI、開會提醒（工作行事曆）、Jira／GitLab 待辦、天氣、工作日誌、側邊欄公仔 | | | ✓ |
+| 工作小幫手（開會、Jira、GitLab、GitHub、天氣、工作日誌、小本子；預設關，在「工作設定」用自己帳號打開） | ✓ | ✓ | ✓ |
+| 只有 VS Code 才有：存檔比讚、錯誤數、打字速度、終端機長指令、推 tag 盯 CI、側邊欄公仔 | | | ✓ |
 | 開機自動出現 | ✓（安裝時可取消） | ✓ | ✓ |
 
 檔案從 [Releases](../../releases) 下載（還沒發版之前：[Actions](../../actions) 最新一次成功的建置 → Artifacts 的 `desk-pals-windows`／`desk-pals-mac`）。這些都是公開版（只有續命小隊＋自己做的公仔）；個人版見「[換一櫃](#換一櫃)」。
@@ -177,7 +178,10 @@
 | 路徑 | 內容 |
 |---|---|
 | `extension/extension.js` | VS Code 擴充：側邊欄、狀態列、啟動桌面版 |
-| `extension/practical.js` | 實用功能的資料來源：終端機、CI、行事曆、Jira、GitLab、天氣、工作日誌、提醒 |
+| `extension/practical.js` | VS Code 版的額外提醒（存檔、錯誤數、終端機、推 tag 盯 CI、側邊欄）；桌面版自己在管的工作來源就不重複查 |
+| `extension/desktop/DeskPals.Work.cs` | 桌面版的工作來源：開會、Jira、GitLab、GitHub、天氣、VPN、工作日誌（全預設關） |
+| `extension/desktop/DeskPals.WorkSettings.cs` | 「工作設定」視窗 |
+| `extension/desktop/DeskPals.Notebook.cs`、`DeskPals.NotebookData.cs` | 小本子：待辦、今天做了、筆記 |
 | `extension/media/pet.html` | 側邊欄裡的公仔 |
 | `extension/desktop/DeskPals.cs` | Windows 桌面版：公仔櫃、各櫃公仔、通知（連同下面的 partial 檔由 `build.ps1` 編成 `DeskPals.exe`，附在 Windows 版 vsix 和安裝程式裡；從原始碼跑時由 `desk-pals.ps1` 用 PowerShell 編譯執行） |
 | `extension/desktop/DeskPals.Original.cs` | 續命小隊（躲躲、沒電、刺刺）：讀圖、沒電的電量（液體上色、跟工作時間連動）、角色、動作、串場、舊資料轉移 |
