@@ -53,6 +53,6 @@ cabinet.snow=雪 | snow-cabinet
 costume.lny=新年造型 | lny-costume
 cabinet.lny=新年 | lny-cabinet
 costume.pajama=睡衣 | pajama-costume
-costume.bday=生日造型 | bday-costume | 60 |
+costume.bday=生日造型 | bday-costume | 60 | 15
 cabinet.space=太空 | space-cabinet
 cabinet.camp=露營 | camp-cabinet
