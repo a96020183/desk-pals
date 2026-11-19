@@ -7,6 +7,8 @@
 // 用法：node test/desktop-notebook.js <endpoint 開頭> <工作資料夾> <截圖資料夾> -- <開桌面版的指令…>
 //   指令裡的 {ep} 換成這次的 endpoint。例：
 //   node test/desktop-notebook.js desk-pals-nb %TEMP%\dp-nb shots\notebook -- build\win\DeskPals.exe --pipe {ep} --pet duoduo --lineup original
+//   Mac：endpoint 是 unix socket 的路徑開頭（{ep}＝<開頭>-<情境>-<n>.sock），程式參數是 <socket> <pet> <lineup>：
+//   node test/desktop-notebook.js "$RUNNER_TEMP/dpn" "$RUNNER_TEMP/dp-nb-pub" public-shots/notebook -- build/public/extension/desktop/DeskPals {ep} duoduo original
 //   截圖：1920×1080（主螢幕整張）＋1366×768（從右下角切；櫃子、小本子的位置跟 1366 的螢幕一樣）。NB_SHOTS=0 不截圖。
 const cp = require("child_process");
 const fs = require("fs");

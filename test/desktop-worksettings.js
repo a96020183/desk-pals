@@ -3,6 +3,9 @@
 //   Esc 一層一層退（清單 → 格子 → 關掉）、記住上次怎麼看、取消不存、儲存的設定重開還在、鍵盤（Tab／空白鍵）、
 //   小屋選單「工作 → 工作設定…」、小本子的「來源」都打得開。截圖：100%、150%（DESKPALS_TEST_DPI=144）、1366×768。
 // 用法：node test/desktop-worksettings.js <endpoint 開頭> <工作資料夾> <截圖資料夾> -- <開桌面版的指令…，{ep} 換成 pipe 名稱>
+// Mac：endpoint 是 unix socket 路徑（{ep} 換成 <開頭>-<名字>-<n>.sock），例：
+//   node test/desktop-worksettings.js "$RUNNER_TEMP/dpws" "$RUNNER_TEMP/dpws-pub" public-shots/work-settings -- build/public/extension/desktop/DeskPals {ep} duoduo original
+//   Mac 沒有 DESKPALS_TEST_DPI（一律 100%）；「放不下就捲」改用 DESKPALS_TEST_WA_H 假裝工作區比較矮；沒有 WSL 的「別的資料夾」。
 const cp = require("child_process");
 const fs = require("fs");
 const net = require("net");
@@ -15,6 +18,7 @@ const [epBase, work0, shots0] = argv.slice(0, dash);
 const cmd = argv.slice(dash + 1);
 const work = path.resolve(work0);
 const shots = path.resolve(shots0).replace(/\\/g, "/");
+const win = process.platform === "win32";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const results = [];
 async function check(name, fn) {
@@ -32,14 +36,16 @@ const logDir = path.join(work, "worklog");
 fs.mkdirSync(logDir, { recursive: true });
 
 let n = 0;
-async function launch(name, dpi) {
-	const ep = `${epBase}-${name}-${++n}`;
+async function launch(name, dpi, extraEnv) {
+	const ep = win ? `${epBase}-${name}-${++n}` : `${epBase}-${name}-${++n}.sock`;
+	const target = win ? "\\\\.\\pipe\\" + ep : ep;
 	const env = Object.assign({}, process.env, {
 		DESKPALS_OFFSCREEN: "1", DESKPALS_ISOLATED: "1", DESKPALS_DATA_DIR: data, TEMP: tmp, TMP: tmp,
 		CLAUDE_CONFIG_DIR: path.join(work, "no-claude"), CODEX_HOME: path.join(work, "no-codex"),
 		DESKPALS_FAKE_CLI: path.join(__dirname, "fixtures", "fake-cli.js"), FAKE_CLI_STATE: stateFile,
 	});
 	if (dpi) env.DESKPALS_TEST_DPI = String(dpi); else delete env.DESKPALS_TEST_DPI;
+	Object.assign(env, extraEnv || {});
 	const args = cmd.map((x) => x.replace(/\{ep\}/g, ep));
 	const child = cp.spawn(args[0], args.slice(1), { env, stdio: "ignore", windowsHide: true });
 	let exited = false;
@@ -47,7 +53,7 @@ async function launch(name, dpi) {
 	const sock = await new Promise((resolve, reject) => {
 		const end = Date.now() + 90000;
 		(function attempt() {
-			const s = net.connect("\\\\.\\pipe\\" + ep);
+			const s = net.connect(target);
 			s.setEncoding("utf8");
 			s.once("connect", () => resolve(s));
 			s.once("error", () => { if (Date.now() > end || exited) reject(new Error(`${name}: desktop did not start`)); else setTimeout(attempt, 500); });
@@ -209,6 +215,20 @@ async function snap(app, name) {
 	await snap(app, "grid-work-100");
 	await act(app, "work-settings press tile:jira");
 	await snap(app, "jira-list-100");
+	await act(app, "work-settings press tab:claude");
+	await check(win ? "Claude、Codex：「別的資料夾」打開是 Claude／Codex 資料夾兩格（WSL）" : "Claude、Codex：沒有「別的資料夾」（mac: 沒有 WSL，claude_dir／codex_dir 不擺）", async () => {
+		s = await ws(app);
+		if (win) {
+			assert.ok(s.hits.adv, "別的資料夾");
+			await act(app, "work-settings press adv");
+			s = await ws(app); assert.deepEqual(Object.keys(s.tb).sort(), ["claude_dir", "codex_dir"]);
+			await act(app, "work-settings press adv");
+		} else {
+			assert.ok(!s.hits.adv, "不該有「別的資料夾」"); assert.deepEqual(Object.keys(s.tb), []);
+			await act(app, "work-settings press adv");
+			s = await ws(app); assert.deepEqual(Object.keys(s.tb), [], "按了也不擺");
+		}
+	});
 	await act(app, "work-settings close");
 
 	// ---- 入口：小屋選單、小本子 ----
@@ -235,12 +255,15 @@ async function snap(app, name) {
 	// ---- 重開還在；150% 的樣子 ----
 	app = await launch("b", 144);
 	await act(app, "work-settings open"); await sleep(1200);
-	await check("重開（150%）：存過的還在，Jira 已接上", async () => {
+	await check(win ? "重開（150%）：存過的還在，Jira 已接上" : "重開：存過的還在，Jira 已接上（mac: 沒有假的 150%，一律 600×600）", async () => {
 		s = await ws(app);
-		// 螢幕夠高就是 900x900；CI 的螢幕比較矮時，視窗會照設計變矮、加捲軸（寬度多一條捲軸）
-		const [w150, h150] = s.size.split("x").map(Number);
-		if (h150 === 900) assert.equal(w150, 900, s.size);
-		else { assert.ok(h150 < 900 && h150 >= 240, s.size); assert.equal(s.scroll, "1", s.size); assert.ok(w150 >= 900 && w150 <= 930, s.size); }
+		if (win) {
+			// 螢幕夠高就是 900x900；CI 的螢幕比較矮時，視窗會照設計變矮、加捲軸（寬度多一條捲軸）
+			const [w150, h150] = s.size.split("x").map(Number);
+			if (h150 === 900) assert.equal(w150, 900, s.size);
+			else { assert.ok(h150 < 900 && h150 >= 240, s.size); assert.equal(s.scroll, "1", s.size); assert.ok(w150 >= 900 && w150 <= 930, s.size); }
+		}
+		else if (s.scroll === "0") assert.equal(s.size, "600x600");
 		assert.equal(s.src.jira.on, 1); assert.equal(s.src.meet.on, 1); assert.equal(s.src.gitlab.on, 1); assert.equal(s.src.worklog.on, 1);
 	});
 	await act(app, "work-settings press view:grid");
@@ -253,13 +276,14 @@ async function snap(app, name) {
 	await app.quit();
 
 	// ---- 螢幕太矮（假裝 200%：視窗 1200 高放不進 1040 的工作區）：內容可以捲，儲存按得到 ----
-	app = await launch("c", 192);
+	app = await launch("c", 192, win ? {} : { DESKPALS_TEST_WA_H: "500" });   // mac: 沒有假的 200%：假裝工作區只有 500 高
 	await act(app, "work-settings open"); await sleep(800);
-	await check("螢幕放不下（200%）：視窗變矮、裡面可以捲", async () => {
+	await check(win ? "螢幕放不下（200%）：視窗變矮、裡面可以捲" : "螢幕放不下：視窗變矮、裡面可以捲（mac: DESKPALS_TEST_WA_H=500）", async () => {
 		s = await ws(app);
 		assert.equal(s.scroll, "1", s.raw.split("\n")[0]);
 		const [w, h] = s.size.split("x").map(Number);
-		assert.ok(h < 1200 && h >= 240, s.size);   // 比整個 1200 矮（離屏的工作區是 1080）
+		const full = win ? 1200 : 600;
+		assert.ok(h < full && h >= 240, s.size);   // 比整個 1200 矮（離屏的工作區是 1080）
 		assert.ok(s.hits.save, "儲存還在（捲下去按得到）");
 	});
 	await act(app, "work-settings close");

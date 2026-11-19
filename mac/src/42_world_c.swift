@@ -629,7 +629,7 @@ extension World {
                         var host = ""
                         lock(healthCd) { host = self.companyHost }
                         if host != "" {
-                            let ok = World.TcpOk(host, 443) || World.TcpOk(host, 80)
+                            let ok = World.VpnReachable(host)   // 工作來源：host 或 host:port
                             if !ok { if vpnDownSince == DateTime.MaxValue { vpnDownSince = now } } else { vpnDownSince = DateTime.MaxValue }
                             if vpnDownSince != DateTime.MaxValue && (now - vpnDownSince).TotalSeconds > 30 && HealthReady("vpn") {
                                 let h2 = host; Post { self.OnNotify("vpn", "-", h2 + " 連不到") }
@@ -712,7 +712,7 @@ extension World {
     }
 
     // ================= 3) 下載完成 =================
-    static func DownloadsDir() -> String { return (NSHomeDirectory() as NSString).appendingPathComponent("Downloads") }
+    // 0.11：DownloadsDir() 搬到 62_work.swift（離屏（測試）不看真的下載資料夾）
 
     // mac: 目錄內容快照（名字 → 大小＋修改時間），用來找出新增／改名／變動的檔案
     static func DlSnapshot(_ dir: String) -> [String: String] {
