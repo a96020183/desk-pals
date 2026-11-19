@@ -25,15 +25,22 @@ namespace DeskPals
     using System.Text;
 
     // ================= 兌換碼：離線驗（ECDSA P-256＋SHA-256，App 只有公鑰；發碼工具在 repo 外面）=================
-    // 碼＝6 個位元組（版本 1、項目、日期＝2026-01-01 起第幾天、流水號）＋64 位元組簽章（r‖s）→ Crockford base32 112 個字，4 個字一組用 - 隔開。
-    // 簽的內容＝"WoWoPals-code-v1"＋那 6 個位元組。不綁電腦：同一組碼在自己的另一台電腦也能再輸入一次。
+    // 碼＝9 個位元組（版本 1、項目 bitmask 4 位元組＝最多 32 個付費項目、日期＝2026-01-01 起第幾天、流水號）＋64 位元組簽章（r‖s）
+    //   → Crockford base32 117 個字，4 個字一組用 - 隔開（最後一組 1 個字）。
+    // 簽的內容＝"WoWoPals-code-v1"＋那 9 個位元組。不綁電腦：同一組碼在自己的另一台電腦也能再輸入一次。
+    // 項目順序＝Items 的順序（第 i 個項目＝第 i 個位元，0 起算），要跟發碼工具 issue.py 的 ITEMS 一模一樣。
     static class ShopCodes
     {
         public const string PubX = "7434d12d51eecaaf0615633afdce1a555b4a1d64937d303f6a882392df114b25", PubY = "717de3a0e8a7fd2422df19f314847f1e441b282919fbd0223c90c4316d4df112";
         public const string Alpha = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-        public const int Bytes = 70, Chars = 112;
+        public const int Bytes = 73, Chars = 117;
         static readonly byte[] Domain = Encoding.ASCII.GetBytes("WoWoPals-code-v1");
-        public static readonly string[] Items = { "xmas-costume", "xmas-cabinet", "exam-costume", "exam-cabinet" };   // 第 i 個＝第 i 個位元
+        // 付費項目：先造型後櫃子，照 owner 定的季節順序。要加新項目往後加（最多 32 個）；issue.py 的 ITEMS 要同步。
+        public static readonly string[] Items =
+        {
+            "xmas-costume", "exam-costume", "snow-costume", "lny-costume", "pajama-costume", "bday-costume",
+            "xmas-cabinet", "exam-cabinet", "snow-cabinet", "lny-cabinet", "space-cabinet", "camp-cabinet",
+        };
         static readonly DateTime Epoch = new DateTime(2026, 1, 1);
 
         public class Code { public string Text; public string[] Items; public DateTime Date; public int Id; }
@@ -105,18 +112,19 @@ namespace DeskPals
             string c = Clean(text);
             byte[] raw = Decode(c);
             if (raw == null || raw[0] != 1) return null;
-            byte[] msg = new byte[Domain.Length + 6], sig = new byte[64];
+            byte[] msg = new byte[Domain.Length + 9], sig = new byte[64];
             Domain.CopyTo(msg, 0);
-            Array.Copy(raw, 0, msg, Domain.Length, 6);
-            Array.Copy(raw, 6, sig, 0, 64);
+            Array.Copy(raw, 0, msg, Domain.Length, 9);
+            Array.Copy(raw, 9, sig, 0, 64);
             bool ok = false;
             try { foreach (ECDsaCng k in Keys()) if (k.VerifyData(msg, sig)) { ok = true; break; } }
             catch (Exception ex) { App.Log("shop: verify: " + ex.Message); }
             if (!ok) return null;
+            uint mask = ((uint)raw[1] << 24) | ((uint)raw[2] << 16) | ((uint)raw[3] << 8) | raw[4];
             List<string> it = new List<string>();
-            for (int i = 0; i < Items.Length; i++) if ((raw[1] & (1 << i)) != 0) it.Add(Items[i]);
+            for (int i = 0; i < Items.Length; i++) if ((mask & (1u << i)) != 0) it.Add(Items[i]);
             Code r = new Code();
-            r.Text = c; r.Items = it.ToArray(); r.Date = Epoch.AddDays((raw[2] << 8) | raw[3]); r.Id = (raw[4] << 8) | raw[5];
+            r.Text = c; r.Items = it.ToArray(); r.Date = Epoch.AddDays((raw[5] << 8) | raw[6]); r.Id = (raw[7] << 8) | raw[8];
             return r;
         }
     }
