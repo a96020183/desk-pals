@@ -632,9 +632,19 @@ const STU_SIMPLE = `・上課：資料結構
 		const data = fresh("empty");
 		const app = await launch("empty", data);
 		await clock(app, "2026-11-19T17:10");
-		app.send("nb-open");
-		await sleep(600);
+		// 從小屋選單「工作 → 小本子…」打開
+		const rows = async () => [...(await app.block("menu-info")).matchAll(/^row (\d+) \d+ item \d \d \d (.*)$/gm)].map((m) => ({ i: +m[1], text: m[2] }));
+		app.send("act menu house");
+		await sleep(400);
+		const work = (await rows()).find((r) => r.text === "工作");
+		app.send(`act menuclick ${work.i}`);
+		await sleep(300);
+		const nbRow = (await rows()).find((r) => r.text === "小本子…");
+		await check("小屋選單「工作」裡有「小本子…」", () => assert.ok(nbRow, "沒有小本子"));
+		if (nbRow) app.send(`act menuclick ${nbRow.i}`); else app.send("act menuclose");
+		await sleep(800);
 		let o = await info(app);
+		await check("點「小本子…」就打開，第一次停在今天做了", () => { assert.ok(o.open, o.raw); assert.equal(o.tab, "done"); });
 		await check("今天做了空白：「接上之後，做過的事會自己記下來」、來源清單、補一件的輸入框、複製按鈕不能按", () => {
 			assert.equal(o.tab, "done");
 			assert.ok(o.has("empty done"));
