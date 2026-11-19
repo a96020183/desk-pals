@@ -5,6 +5,12 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      # 測試絕不讀 runner 家目錄的 Claude／Codex 對話：整個 job 都指到空資料夾（桌面版離屏時本來就不看家目錄，這裡再保險一次）
+      - name: Empty Claude / Codex folders for every test
+        run: |
+          mkdir -p "$RUNNER_TEMP/no-claude" "$RUNNER_TEMP/no-codex"
+          echo "CLAUDE_CONFIG_DIR=$RUNNER_TEMP/no-claude" >> "$GITHUB_ENV"
+          echo "CODEX_HOME=$RUNNER_TEMP/no-codex" >> "$GITHUB_ENV"
       - name: DeskPals.swift is up to date with mac/src
         run: |
           python3 mac/assemble.py
@@ -457,6 +463,12 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      # 測試絕不讀 runner 家目錄的 Claude／Codex 對話：整個 job 都指到空資料夾（桌面版離屏時本來就不看家目錄，這裡再保險一次）
+      - name: Empty Claude / Codex folders for every test
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\no-claude", "$env:RUNNER_TEMP\no-codex" | Out-Null
+          [IO.File]::AppendAllText($env:GITHUB_ENV, "CLAUDE_CONFIG_DIR=$env:RUNNER_TEMP\no-claude`nCODEX_HOME=$env:RUNNER_TEMP\no-codex`n")   # 不帶 BOM
       - name: Compile personal DeskPals (same as desk-pals.ps1)
         shell: powershell
         run: |

@@ -51,7 +51,7 @@ let n = 0;
 async function launch(name, data, opts) {
 	const ep = win ? `${epBase}-${name}-${++n}` : `${epBase}-${name}-${++n}.sock`;
 	const target = win ? "\\\\.\\pipe\\" + ep : ep;
-	const env = Object.assign({}, process.env, { DESKPALS_OFFSCREEN: "1", DESKPALS_ISOLATED: "1", DESKPALS_DATA_DIR: data });
+	const env = Object.assign({}, process.env, { DESKPALS_OFFSCREEN: "1", DESKPALS_ISOLATED: "1", DESKPALS_DATA_DIR: data, CLAUDE_CONFIG_DIR: path.join(data, "no-claude"), CODEX_HOME: path.join(data, "no-codex") });   // 不讀你真的 Claude／Codex 對話
 	for (const k of ["DESKPALS_GA4_CONFIG", "DESKPALS_GA4_URL", "DESKPALS_FAKE_PACKAGED", "GA4_MEASUREMENT_ID", "GA4_API_SECRET"]) delete env[k];
 	env.DESKPALS_GA4_CONFIG = opts.config ? cfgFile : path.join(work, "no-such-ga4.txt");   // 沒有 ID：連打包時內嵌的那份都不讀（CI 打包後的 exe 內嵌了真的 ID）
 	env.DESKPALS_GA4_URL = `http://127.0.0.1:${srv.address().port}/mp/collect`;

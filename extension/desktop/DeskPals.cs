@@ -5591,14 +5591,14 @@ namespace DeskPals
         static string ClaudeProjectsDir()
         {
             string cfg = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR");
-            if (string.IsNullOrEmpty(cfg)) cfg = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude");
+            if (string.IsNullOrEmpty(cfg)) cfg = AiHomeDefault(".claude");   // 離屏（測試）時是資料資料夾裡的空資料夾（DeskPals.Work.cs）
             return Path.Combine(cfg, "projects");
         }
 
         static string CodexSessionsDir()
         {
             string home = Environment.GetEnvironmentVariable("CODEX_HOME");
-            if (string.IsNullOrEmpty(home)) home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex");
+            if (string.IsNullOrEmpty(home)) home = AiHomeDefault(".codex");   // 離屏（測試）時是資料資料夾裡的空資料夾（DeskPals.Work.cs）
             return Path.Combine(home, "sessions");
         }
 

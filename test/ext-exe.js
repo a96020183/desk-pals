@@ -81,7 +81,7 @@ function envFor(W, pipe) {
 	const e = Object.assign({}, process.env, {
 		LOCALAPPDATA: path.join(W, "local"), APPDATA: path.join(W, "roaming"), USERPROFILE: path.join(W, "home"), HOME: path.join(W, "home"),
 		TEMP: path.join(W, "tmp"), TMP: path.join(W, "tmp"), CLAUDE_CONFIG_DIR: path.join(W, "home", ".claude"), CODEX_HOME: path.join(W, "home", ".codex"),
-		DESKPALS_OFFSCREEN: "1", DESKPALS_ISOLATED: "1", DESKPALS_DATA_DIR: path.join(W, "local", "DeskPals"), DESKPALS_PIPE: pipe,
+		DESKPALS_OFFSCREEN: "1", DESKPALS_ISOLATED: "1", DESKPALS_DATA_DIR: path.join(W, "local", "DeskPals"), DESKPALS_PIPE: pipe, CLAUDE_CONFIG_DIR: path.join(W, "no-claude"), CODEX_HOME: path.join(W, "no-codex"),
 	});
 	for (const d of ["local", "roaming", "home", "tmp"]) fs.mkdirSync(path.join(W, d), { recursive: true });
 	return e;

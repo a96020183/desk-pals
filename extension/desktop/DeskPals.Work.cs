@@ -14,7 +14,7 @@
 //
 // 掛在別的檔的地方（都只有一兩行，註解寫「工作來源」）：
 //   DeskPals.cs：TickInner → WorkTick()、OnMsg 的 hello → WorkHello()、notify → WorkDropsNotify()、config-host → WorkOwns("vpn")、
-//     default → WorkMsg()、ClaudeWatchOnce／CodexWatchOnce → WorkClaudeRoots()／WorkCodexRoots()／WorkWslAlive()、HealthLoop → VpnReachable()、
+//     default → WorkMsg()、ClaudeProjectsDir／CodexSessionsDir → AiHomeDefault()（離屏測試不讀真的家目錄）、ClaudeWatchOnce／CodexWatchOnce → WorkClaudeRoots()／WorkCodexRoots()／WorkWslAlive()、HealthLoop → VpnReachable()、
 //     小屋選單「工作」→ ShowWorkSettings()（設定視窗做好後才掛）。
 //   DeskPals.Study.cs：PlanTick → WorkLogClass()（上課寫進小本子）、SchoolFetchLoop → WorkMeetUrl()（跟開會同一份行事曆不提醒兩次）。
 //
@@ -1269,6 +1269,16 @@ namespace DeskPals
         }
 
         // ================= Claude Code／Codex：做完的對話寫進小本子 =================
+        // ~/.claude、~/.codex 的預設位置（CLAUDE_CONFIG_DIR／CODEX_HOME 沒設時）。
+        // 離屏（測試，含 DESKPALS_ISOLATED）一律改成資料資料夾裡的空資料夾：測試絕不讀使用者真的對話紀錄
+        static string AiHomeDefault(string name)
+        {
+            if (!App.Offscreen) return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), name);
+            string d = Path.Combine(DataDir, "test-home", name);
+            try { Directory.CreateDirectory(d); } catch { }
+            return d;
+        }
+
         // 進階：別的資料夾（WSL 裡的 Claude／Codex）。給 .claude 或 .claude\projects 都可以
         public List<string> WorkClaudeRoots()
         {
@@ -1526,6 +1536,8 @@ namespace DeskPals
             sb.Append("work-state host=" + (companyHost == "" ? "-" : companyHost) + " jira=" + (jiraStatus == "" ? "-" : jiraStatus.Replace(' ', '_')) + " glab=" + (glabState == "" ? "-" : glabState)
                 + " gh=" + (ghState == "" ? "-" : ghState) + " ghuser=" + (ghUser == "" ? "-" : ghUser) + " dropped=" + workDropped + " polled=" + workPolled + " ai=" + aiWritten
                 + " quiet=" + (quietOn ? QuietLeft() : 0) + " meets=" + meetPlan.Count + (meetErr != "" ? " meeterr=" + meetErr.Replace(' ', '_') : "") + "\n");
+            sb.Append("work-roots claude=" + string.Join("|", WorkClaudeRoots().ToArray()).Replace(' ', '_') + " codex=" + string.Join("|", WorkCodexRoots().ToArray()).Replace(' ', '_')
+                + " home-claude=" + ClaudeProjectsDir().Replace(' ', '_') + " home-codex=" + CodexSessionsDir().Replace(' ', '_') + "\n");
             lock (ciWatches) foreach (CiWatch w in ciWatches) sb.Append("watch " + w.Kind + " " + w.Repo + " " + w.Tag + (w.Announced ? " running" : "") + "\n");
             lock (workNotices) foreach (string n in workNotices) sb.Append("notice " + n + "\n");
             sb.Append("end\n");

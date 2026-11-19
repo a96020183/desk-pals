@@ -12,6 +12,7 @@ const cp = require("child_process");
 const fs = require("fs");
 const http = require("http");
 const net = require("net");
+const os = require("os");
 const path = require("path");
 const assert = require("node:assert/strict");
 
@@ -149,14 +150,15 @@ const server = http.createServer((req, res) => {
 
 // ---------------- 開桌面版 ----------------
 let n = 0, port = 0;
-async function launch(name) {
+async function launch(name, iso) {
 	const ep = `${epBase}-${name}-${++n}`;
 	const env = Object.assign({}, process.env, {
-		DESKPALS_OFFSCREEN: "1", DESKPALS_ISOLATED: "1", DESKPALS_DATA_DIR: data, TEMP: tmp, TMP: tmp,
+		DESKPALS_OFFSCREEN: "1", DESKPALS_ISOLATED: "1", DESKPALS_DATA_DIR: iso || data, TEMP: tmp, TMP: tmp,
 		CLAUDE_CONFIG_DIR: claudeDir, CODEX_HOME: codexDir,
 		DESKPALS_FAKE_CLI: path.join(__dirname, "fixtures", "fake-cli.js"), FAKE_CLI_STATE: stateFile, FAKE_CLI_LOG: cliLog,
 		DESKPALS_FAKE_WEB: `http://127.0.0.1:${port}`,
 	});
+	if (iso) { delete env.CLAUDE_CONFIG_DIR; delete env.CODEX_HOME; }   // 沒設：桌面版自己決定看哪裡（離屏時不能是你的家目錄）
 	const args = cmd.map((x) => x.replace(/\{ep\}/g, ep));
 	const child = cp.spawn(args[0], args.slice(1), { env, stdio: "ignore", windowsHide: true });
 	let exited = false;
@@ -559,6 +561,28 @@ const todayStr = dayOf(fmtLocal(new Date()));
 		app.send("notify jira - 照常");
 		await sleep(400);
 		assert.equal(+stateOf(await app.dump()).dropped, d0);
+	});
+	await app.quit();
+
+	// ================= 13. 離屏（測試）沒設 CLAUDE_CONFIG_DIR／CODEX_HOME：不讀真的家目錄 =================
+	const isoData = path.join(work, "iso-data");
+	fs.mkdirSync(isoData, { recursive: true });
+	app = await launch("iso", isoData);
+	app.send("work-poll");
+	await sleep(3000);
+	await check("離屏測試沒設 CLAUDE_CONFIG_DIR／CODEX_HOME：只看資料資料夾裡的空資料夾，你家目錄的對話一筆都沒讀", async () => {
+		const d = await app.dump();
+		const roots = Object.fromEntries((/^work-roots (.*)$/m.exec(d) || ["", ""])[1].split(" ").filter(Boolean).map((kv) => kv.split("=")));
+		const inIso = (p) => p.toLowerCase().startsWith((path.resolve(isoData) + path.sep).replace(/ /g, "_").toLowerCase());   // dump 把空白換成 _
+		assert.ok(inIso(roots["home-claude"]), d);
+		assert.ok(inIso(roots["home-codex"]), d);
+		for (const r of (roots.claude + "|" + roots.codex).split("|").filter(Boolean)) assert.ok(inIso(r), "看了資料資料夾以外的地方：" + r);
+		const home = os.homedir().toLowerCase();
+		assert.ok(!d.toLowerCase().includes(path.join(home, ".claude")) && !d.toLowerCase().includes(path.join(home, ".codex")), d);
+		const files = [];
+		(function walk(p) { for (const e of fs.readdirSync(p, { withFileTypes: true })) { const f = path.join(p, e.name); if (e.isDirectory()) walk(f); else files.push(f); } })(path.join(isoData, "test-home"));
+		assert.deepEqual(files, [], "test-home 要是空的");
+		assert.ok(!fs.existsSync(path.join(isoData, "notebook")), "沒有對話被寫進小本子");
 	});
 	await app.quit();
 
