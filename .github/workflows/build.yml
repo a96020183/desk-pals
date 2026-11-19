@@ -325,7 +325,22 @@ jobs:
           mkdir -p public-shots/egg
           node test/desktop-egg.js "$RUNNER_TEMP/dpe" "$RUNNER_TEMP/dpe-pub" public-shots/egg -- build/public/extension/desktop/DeskPals {ep} duoduo original
           node test/desktop-egg.js "$RUNNER_TEMP/dpep" "$RUNNER_TEMP/dpe-per" "$RUNNER_TEMP/dpe-per-shots" -- extension/desktop/DeskPals {ep} duoduo original
-      # ---------- standalone Desk Pals.app / DMG ----------
+      # ---------- 0.11 工作來源、工作設定、小本子（跟 Windows 同三支測試；假的 Jira／行事曆／天氣、假的 glab／gh、不連網路；Jira token 在測試專用的鑰匙圈項目）----------
+      - name: Work sources + work settings + notebook tests (public + personal; TZ=Asia/Taipei like the Windows runner)
+        env:
+          TZ: Asia/Taipei
+        run: |
+          mkdir -p public-shots/work public-shots/work-settings public-shots/notebook
+          RC=0
+          node test/desktop-work.js "$RUNNER_TEMP/dpw" "$RUNNER_TEMP/dpw-pub" public-shots/work -- build/public/extension/desktop/DeskPals {ep} "" "" || { echo "::error::work sources test failed (public)"; RC=1; }
+          node test/desktop-work.js "$RUNNER_TEMP/dpwp" "$RUNNER_TEMP/dpw-per" "$RUNNER_TEMP/dpw-per-shots" -- extension/desktop/DeskPals {ep} "" "" || { echo "::error::work sources test failed (personal)"; RC=1; }
+          node test/desktop-worksettings.js "$RUNNER_TEMP/dpws" "$RUNNER_TEMP/dpws-pub" public-shots/work-settings -- build/public/extension/desktop/DeskPals {ep} duoduo original || { echo "::error::work settings test failed (public)"; RC=1; }
+          node test/desktop-worksettings.js "$RUNNER_TEMP/dpwsp" "$RUNNER_TEMP/dpws-per" "$RUNNER_TEMP/dpws-per-shots" -- extension/desktop/DeskPals {ep} duoduo original || { echo "::error::work settings test failed (personal)"; RC=1; }
+          node test/desktop-notebook.js "$RUNNER_TEMP/dpn" "$RUNNER_TEMP/dp-nb-pub" public-shots/notebook -- build/public/extension/desktop/DeskPals {ep} duoduo original || { echo "::error::notebook test failed (public)"; RC=1; }
+          NB_SHOTS=0 node test/desktop-notebook.js "$RUNNER_TEMP/dpnp" "$RUNNER_TEMP/dp-nb-per" "$RUNNER_TEMP/dp-nb-per-shots" -- extension/desktop/DeskPals {ep} duoduo original || { echo "::error::notebook test failed (personal)"; RC=1; }
+          tail -n 80 "$HOME/Library/Logs/desk-pals.log" || true
+          exit $RC
+      # ---------- standalone WoWo Pals.app / DMG ----------
       - name: Developer ID certificate (only if the secrets exist)
         env:
           MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
@@ -344,7 +359,7 @@ jobs:
           [ -n "$ID" ] || { echo "no 'Developer ID Application' identity in the .p12"; exit 1; }
           echo "MAC_SIGN_IDENTITY=$ID" >> "$GITHUB_ENV"
           rm -f "$RUNNER_TEMP/cert.p12"
-      - name: Build Desk Pals.app + DMG
+      - name: Build WoWo Pals.app + DMG
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -367,10 +382,10 @@ jobs:
           ls -la "$MNT"
           python3 -I tools/variant.py guard "$MNT"   # 公開版 DMG：裡面（執行檔、資源、說明）不能有同人字眼
           test -L "$MNT/Applications"
-          codesign --verify --strict --verbose=2 "$MNT/Desk Pals.app"
-          rm -rf "$RUNNER_TEMP/apps" && mkdir -p "$RUNNER_TEMP/apps" && cp -R "$MNT/Desk Pals.app" "$RUNNER_TEMP/apps/"
+          codesign --verify --strict --verbose=2 "$MNT/WoWo Pals.app"
+          rm -rf "$RUNNER_TEMP/apps" && mkdir -p "$RUNNER_TEMP/apps" && cp -R "$MNT/WoWo Pals.app" "$RUNNER_TEMP/apps/"
           hdiutil detach "$MNT"
-          APP="$RUNNER_TEMP/apps/Desk Pals.app"
+          APP="$RUNNER_TEMP/apps/WoWo Pals.app"
           BIN="$APP/Contents/MacOS/DeskPals"
           lipo -archs "$BIN" | grep -q arm64 && lipo -archs "$BIN" | grep -q x86_64
           plutil -p "$APP/Contents/Info.plist"
@@ -388,7 +403,7 @@ jobs:
       - name: Standalone app takes over from the extension (marker, LaunchAgent, single instance)
         run: |
           set -e
-          APP="$RUNNER_TEMP/apps/Desk Pals.app"
+          APP="$RUNNER_TEMP/apps/WoWo Pals.app"
           BIN="$APP/Contents/MacOS/DeskPals"
           HOME_DIR="$HOME/Library/Application Support/DeskPals"
           SOCK="$HOME_DIR/desk-pals.sock"

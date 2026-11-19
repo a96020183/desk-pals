@@ -272,3 +272,29 @@ Swift 沒有 C# 的 `else` 單獨一行的寫法問題，但拿掉 `if` 之後�
 把舊位置的 `claude-hook.js` 換成轉發到 `<DataDir>/claude-hook.js` 的小檔（`~/.claude/settings.json` 的 hooks 可能指著它，settings.json 不動）。
 資料只複製不搬走（`Migrate()` 照舊）。測試用 `DESKPALS_LEGACY_DIR`／`DESKPALS_AUTOSTART_DIR`／`DESKPALS_LEGACY_PIPE`（Windows）指到假的；
 離屏模式沒指定就完全不碰真的。CI：`.github/legacy-upgrade.js`（upgrade／fresh 兩種）。
+## 0.11：工作來源、小本子、工作設定、改名 WoWo Pals（`62_work.swift`…`65_work_settings.swift`）
+
+| C# 檔 | Swift 檔 | 說明 |
+|---|---|---|
+| `DeskPals.Work.cs` | `62_work.swift` | NoteEntry／NoteLog（小本子紀錄）、Secret（Jira token）、Cli（glab／gh）、World 的收集器、`work-*` pipe |
+| `DeskPals.NotebookData.cs` | `63_notebook_data.swift` | Nb：讀 log、合併、白話字、複製的字、todo.json／edits／note（純邏輯，字要跟 C# 一模一樣） |
+| `DeskPals.Notebook.cs` | `64_notebook.swift` | NbNoteBox、NotebookForm、World 的接點、`nb-*` pipe、NbSnap |
+| `DeskPals.WorkSettings.cs` | `65_work_settings.swift` | 工作設定 D 版（格子↔清單）、WorkSnap、`work-settings` pipe |
+| `DeskPals.PixText.cs` | `05_shim_work.swift` 的 `PixText` | 只有同名薄殼，量和畫都交給 TextRenderer（CoreText 沒有 GDI 的糊字問題） |
+
+共用 shim：`05_shim_work.swift`（AutoResetEvent、Convert、Clipboard、PixText）、`06_shim_notebook.swift`（RichTextBox＝NSTextView、NbTextBox、
+FontFamily cell metrics、Cmd+X／C／V／A／Z 給打字框）、`08_shim_worksettings.swift`（WsTextBox＝可以是 NSSecureTextField、選資料夾、編輯快捷鍵）。
+`02_forms.swift`：打字框自己的 `KeyDown`／`OnKeyDown`（C# 的 `box.KeyDown += …`）在 FormPanel 先拿到（`Control._ownsResponder`），Handled 就不往下。
+
+Mac 差異（都標 `// mac:`）：
+- Jira token 存鑰匙圈（Security framework）：service「WoWo Pals」、account「jira」；離屏測試用 account「jira-test:<DataDir>」，絕不碰真的那一項；不寫任何檔。
+- glab／gh：PATH（`:` 分隔）＋`/opt/homebrew/bin`、`/usr/local/bin`、`~/.local/bin`；Foundation.Process、參數陣列、stdin＝/dev/null；token 和設定檔一律不讀。
+  測試用 `DESKPALS_FAKE_CLI`（只在離屏）＝`node test/fixtures/fake-cli.js glab|gh …`。
+- Claude／Codex：`CLAUDE_CONFIG_DIR`／`~/.claude`、`CODEX_HOME`／`~/.codex`；離屏沒設環境變數 → 資料資料夾裡的 test-home（跟 Windows 一樣）。
+  WSL 的「別的資料夾」設定 Mac 不顯示（設定值照存），`WorkWslAlive` 一律 false。
+- 離屏沒設 `DESKPALS_DATA_DIR` → `$TMPDIR/DeskPals-offscreen`；下載／圖片／桌面資料夾 → `World.UserFolder`（離屏是 test-home）。
+- 小本子的字只畫一次（C# 為了 GDI 的粗細再畫一次 `PixText.Heft`，CoreText 不用）；剪貼簿換行保持 `\n`。
+- 工作設定的捲動是自己畫的捲軸（`ScrollBarW = 17`）；離屏測試可用 `DESKPALS_TEST_WA_H` 假裝工作區比較矮。
+- 改名：選單「收工（關掉 WoWo Pals）」、對話框、分享資料夾「圖片/WoWo Pals」、`#WoWoPals`；`WoWo Pals.app`（CFBundleName／DisplayName），
+  **Bundle ID、LaunchAgent Label（local.desk-pals）、資料資料夾 DeskPals、DMG 檔名 DeskPals-<版號>.dmg 都不變**；新 .app 第一次開會把同資料夾裡同 bundle id 的舊 `Desk Pals.app` 丟到垃圾桶（`Standalone.RetireOldApp`）。
+- 測試：`test/desktop-work.js`、`desktop-worksettings.js`、`desktop-notebook.js` 兩個平台同一支（Mac 用 unix socket、鑰匙圈檢查換掉 DPAPI 檢查）；CI mac job 公開版＋個人版都跑，`TZ=Asia/Taipei`。
