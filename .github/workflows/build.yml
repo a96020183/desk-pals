@@ -507,7 +507,7 @@ jobs:
       - name: Mischief tests (public + personal, offscreen, fake side effects) + VS Code settings unit test + line keys
         shell: powershell
         run: |
-          node --test test/mischief.test.js test/lines.test.js
+          node --test test/mischief.test.js test/lines.test.js test/work-own.test.js
           if ($LASTEXITCODE -ne 0) { throw "mischief unit test failed" }
           $runs = @(@{ n = "pub"; ps1 = "build\public\extension\desktop\desk-pals.ps1"; out = "public-ps1-shots\mischief" }, @{ n = "per"; ps1 = "extension\desktop\desk-pals.ps1"; out = "ps1-shots\mischief" })
           foreach ($v in $runs) {
@@ -723,6 +723,16 @@ jobs:
           $log = Get-Content "$env:TEMP\desk-pals.log" -Encoding UTF8
           $log | Select-Object -Last 30
           if (-not ($log | Select-String "exe .* STA")) { throw "exe main thread is not STA (clipboard would fail)" }
+      # 工作來源（DeskPals.Work.cs）：假的 Jira／天氣／行事曆（本機 HTTP）、假的 glab／gh（test/fixtures/fake-cli.js）、假的 Claude／Codex 對話；
+      # 全部預設關、DPAPI、小本子紀錄格式、不重複通知、設定重開還在、改名 WoWo Pals。不連網路；有時間的都用假時鐘
+      - name: Work sources test on DeskPals.exe (public + personal; fake endpoints and CLIs, no network)
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force exe-shots\work | Out-Null
+          node test/desktop-work.js desk-pals-work "$env:RUNNER_TEMP\dpw-pub" exe-shots\work -- dist\DeskPals.exe --pipe "{ep}"
+          if ($LASTEXITCODE -ne 0) { throw "work sources test failed (public)" }
+          node test/desktop-work.js desk-pals-workp "$env:RUNNER_TEMP\dpw-per" "$env:RUNNER_TEMP\dpw-per-shots" -- dist-personal\DeskPals-personal.exe --pipe "{ep}"
+          if ($LASTEXITCODE -ne 0) { throw "work sources test failed (personal)" }
       # exe 旁邊沒有 pals 資料夾：紙箱櫃的圖要從內嵌的資源讀
       - name: Shelf test on public DeskPals.exe (shelf art from embedded resources)
         shell: powershell
