@@ -78,6 +78,40 @@ namespace DeskPals
             catch { return null; }
         }
 
+        // 列出某資料夾底下的子資料夾名字（檔案系統優先、再補 exe 內嵌資源；去重、照字母排）。relParent 用 / 當分隔。
+        //   商店用它發現有哪些造型／櫃子外觀的美術（丟一包美術進去就會出現，不用改程式）。
+        public static List<string> SubDirs(string relParent)
+        {
+            List<string> o = new List<string>();
+            HashSet<string> seen = new HashSet<string>();
+            string rp = (relParent ?? "").Trim('/');
+            try
+            {
+                string root = Root();
+                if (root != "")
+                {
+                    string p = Path.Combine(root, rp.Replace('/', Path.DirectorySeparatorChar));
+                    if (Directory.Exists(p)) foreach (string dd in Directory.GetDirectories(p)) { string nm = Path.GetFileName(dd); if (seen.Add(nm)) o.Add(nm); }
+                }
+            }
+            catch { }
+            try
+            {
+                string pre = "pals/" + rp + "/";
+                foreach (string rn in System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceNames())
+                {
+                    if (!rn.StartsWith(pre)) continue;
+                    int slash = rn.IndexOf('/', pre.Length);
+                    if (slash <= pre.Length) continue;
+                    string nm = rn.Substring(pre.Length, slash - pre.Length);
+                    if (seen.Add(nm)) o.Add(nm);
+                }
+            }
+            catch { }
+            o.Sort(StringComparer.Ordinal);
+            return o;
+        }
+
         public static Bitmap Png(string rel)
         {
             byte[] b = Read(rel);
@@ -1293,7 +1327,7 @@ namespace DeskPals
             if (batForceCharge) { SqBattery.Charging = true; SqBattery.Level = Math.Min(1, SqBattery.Level + dt / 600); }
             else BatTick(dt);
             if (!OrigLineup) return;
-            if (WobanLineup) WbTick(dt);
+            WaterTick(dt);   // 喝水提醒（兩櫃共用，DeskPals.Shop.cs）
             if (LunchState != oLunchSeen)
             {
                 if (LunchState == "eat" && oLunchSeen == "" && OutCount() >= 2) Later(4, delegate { if (scene == null && OrigLineup) OrigScene("lunch"); });

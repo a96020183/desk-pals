@@ -1,0 +1,57 @@
+# 聖誕造型（NT$100）｜cici（tools/costume.py build 產生，別手改；改 tools/defs.py 再重跑）
+# 座標＝2x 圖的像素（1x 全部除以 2），原點＝公仔原圖左上角；x y＝配件圖「中心」要放的位置；角度順時針；倍率 1＝配件圖原尺寸
+# pad 左 上 右 下：配件最多超出公仔原畫布多少，畫的時候畫布要先加大這麼多
+# piece 名稱 寬 高（2x 圖；檔案在這個資料夾的 <1x|2x>/<名稱>.png，白邊 <名稱>.halo.png 同尺寸）
+# <動作> <配件> <back|front> x y 角度 倍率 左右翻轉(0/1)；一個動作可以有好幾行，照順序畫；沒有任何一行的動作＝不戴
+pad 0 58 0 40
+piece x_band 104 74
+piece x_garland 124 90
+piece x_star 64 74
+stand x_garland front 116.7 145.5 -4.2 1 0
+stand x_band front 119.7 185.4 -4.2 0.82 0
+stand x_star front 130.3 2.1 3.8 1 0
+walk1 x_garland front 119.5 144.3 -7 1 0
+walk1 x_band front 124.4 184 -7 0.82 0
+walk1 x_star front 126.2 0.5 1 1 0
+walk2 x_garland front 112.9 143.2 4.1 1 0
+walk2 x_band front 110 183.1 4.1 0.82 0
+walk2 x_star front 146.9 3.3 12.1 1 0
+jump x_garland front 116.3 148.5 -4.3 1 0
+jump x_band front 119.3 188.4 -4.3 0.82 0
+jump x_star front 129.7 5.1 3.7 1 0
+sleep x_garland front 89.1 162.5 16.6 1 0
+sleep x_band front 77.7 200.9 16.6 0.82 0
+sleep x_star front 152.5 33.3 24.6 1 0
+happy x_garland front 118.1 159.6 -9 1 0
+happy x_band front 124.3 199.1 -9 0.82 0
+happy x_star front 119.6 15.6 -1 1 0
+held x_garland front 84 150.7 16.1 1 0
+held x_band front 72.8 189.1 16.1 0.82 0
+held x_star front 146.5 20.9 24.1 1 0
+sit x_garland front 102.9 162.5 6 1 0
+sit x_band front 98.8 202.3 6 0.82 0
+sit x_star front 141.7 23.8 14 1 0
+grab x_garland front 115.9 151 -2.9 1 0
+grab x_band front 117.9 191 -2.9 0.82 0
+grab x_star front 132.8 8 5.1 1 0
+push x_garland front 129.6 140.5 -9.5 1 0
+push x_band front 136.1 180 -9.5 0.82 0
+push x_star front 129.9 -3.5 -1.5 1 0
+cry x_garland front 110.8 150.6 -9.2 1 0
+cry x_band front 117.2 190.1 -9.2 0.82 0
+cry x_star front 111.8 6.6 -1.2 1 0
+blown x_garland front 97.5 127.7 -24.3 1 0
+blown x_band front 114 164.1 -24.3 0.82 0
+blown x_star front 61 -11.6 -16.3 1 0
+sig1 x_garland front 99 144.3 9.9 1 0
+sig1 x_band front 92.1 183.7 9.9 0.82 0
+sig1 x_star front 147.2 8.5 17.9 1 0
+sig2 x_garland front 107 148 0 1 0
+sig2 x_band front 107 188 0 0.82 0
+sig2 x_star front 131 6 8 1 0
+surprised x_garland front 120.5 151.5 -4.9 1 0
+surprised x_band front 123.9 191.3 -4.9 0.82 0
+surprised x_star front 132.2 7.9 3.1 1 0
+pout x_garland front 108.8 145.5 -1.3 1 0
+pout x_band front 109.8 185.5 -1.3 0.82 0
+pout x_star front 129.5 3 6.7 1 0

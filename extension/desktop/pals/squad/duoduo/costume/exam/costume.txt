@@ -1,0 +1,72 @@
+# 期末考週造型（NT$100）｜duoduo（tools/costume.py build 產生，別手改；改 tools/defs.py 再重跑）
+# 座標＝2x 圖的像素（1x 全部除以 2），原點＝公仔原圖左上角；x y＝配件圖「中心」要放的位置；角度順時針；倍率 1＝配件圖原尺寸
+# pad 左 上 右 下：配件最多超出公仔原畫布多少，畫的時候畫布要先加大這麼多
+# piece 名稱 寬 高（2x 圖；檔案在這個資料夾的 <1x|2x>/<名稱>.png，白邊 <名稱>.halo.png 同尺寸）
+# <動作> <配件> <back|front> x y 角度 倍率 左右翻轉(0/1)；一個動作可以有好幾行，照順序畫；沒有任何一行的動作＝不戴
+pad 0 0 2 0
+piece e_band 136 56
+piece e_book 70 68
+piece e_glasses 108 54
+piece e_notes 56 50
+stand e_notes front 80.7 175.5 10 0.9 0
+stand e_band front 130.6 73.3 5.2 0.84 0
+stand e_glasses front 114.8 114 5.2 1 0
+stand e_book front 132.7 143.5 14 0.8 0
+walk1 e_notes front 74.8 167.2 2 0.9 0
+walk1 e_band front 134.4 61.8 11.8 0.84 0
+walk1 e_glasses front 114.1 100.5 11.8 1 0
+walk1 e_book front 121.9 128.3 6 0.8 0
+walk2 e_notes front 117.9 155.5 15 0.9 0
+walk2 e_band front 116.5 53 0 0.84 0
+walk2 e_glasses front 104.5 95 0 1 0
+walk2 e_book front 172.5 128.2 19 0.8 0
+jump e_notes front 81.4 156.5 10 0.9 0
+jump e_band front 127 48.2 5.1 0.84 0
+jump e_glasses front 111.3 89 5.1 1 0
+jump e_book front 133.4 124.5 14 0.8 0
+sleep e_notes front 82 178.2 10 0.9 0
+sleep e_band front 128.1 76.9 9 0.84 0
+sleep e_glasses front 109.7 116.5 9 1 0
+sleep e_book front 134 146.2 14 0.8 0
+happy e_notes front 80.9 176.1 10 0.9 0
+happy e_band front 126.6 52.3 5.2 0.84 0
+happy e_glasses front 110.8 93 5.2 1 0
+happy e_book front 132.9 144.1 14 0.8 0
+held e_notes front 77.3 143.4 22 0.9 0
+held e_band front 131.2 53.1 15.4 0.84 0
+held e_glasses front 108.5 90.4 15.4 1 0
+held e_book front 134.8 122.9 26 0.8 0
+sit e_notes front 79.7 167.1 10 0.9 0
+sit e_band front 116.3 55.4 4 0.84 0
+sit e_glasses front 101.4 96.5 4 1 0
+sit e_book front 131.7 135.1 14 0.8 0
+grab e_notes front 77.9 167.2 10 0.9 0
+grab e_band front 133.5 57 15 0.84 0
+grab e_glasses front 111 94.4 15 1 0
+grab e_book front 129.9 135.2 14 0.8 0
+push e_notes front 68.9 166.6 10 0.9 0
+push e_band front 139.9 48.9 -6.5 0.84 0
+push e_glasses front 132.7 92 -6.5 1 0
+push e_book front 120.9 134.6 14 0.8 0
+cry e_notes front 79.2 167.1 10 0.9 0
+cry e_band front 133.2 34.6 4.6 0.84 0
+cry e_glasses front 117.8 75.5 4.6 1 0
+blown e_notes front 59.7 140.5 35 0.9 0
+blown e_band front 144.5 54.2 22.6 0.84 0
+blown e_glasses front 117.2 88.3 22.6 1 0
+blown e_book front 120.3 133.5 39 0.8 0
+sig1 e_notes front 92.6 177.5 10 0.9 0
+sig1 e_band front 109 92 0 0.84 0
+sig1 e_glasses front 97 134 0 1 0
+sig2 e_notes front 114.3 153.1 22 0.9 0
+sig2 e_band front 164 53.6 16.7 0.84 0
+sig2 e_glasses front 140.4 90.4 16.7 1 0
+sig2 e_book front 171.8 132.6 26 0.8 0
+surprised e_notes front 88 142.5 14 0.9 0
+surprised e_band front 132.6 33.2 6.8 0.84 0
+surprised e_glasses front 115.8 73.5 6.8 1 0
+surprised e_book front 142.1 114.2 18 0.8 0
+pout e_notes front 81.3 176.2 10 0.9 0
+pout e_band front 112.4 73.3 3.4 0.84 0
+pout e_glasses front 97.9 114.5 3.4 1 0
+pout e_book front 133.3 144.2 14 0.8 0

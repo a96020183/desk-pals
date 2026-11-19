@@ -1,0 +1,44 @@
+# 季節商店的價錢和付款方式（DeskPals.Shop.cs 的 ShopConfig 讀這份；跟其他 pals 檔一起內嵌進 exe）。
+# 一行一個 key=值。網址要 https:// 開頭；沒填＝畫面上那顆按鈕先不出現。改完重編 exe。
+# 季節商品：一樣 NT$100／HK$25（兩櫃都套用）
+price_item_twd=100
+price_item_hkd=25
+# 綠界收款連結（後台「收款連結」，一樣一條）
+ecpay_xmas_costume=
+ecpay_xmas_cabinet=
+ecpay_exam_costume=
+ecpay_exam_cabinet=
+# 請他們喝杯咖啡：一杯 NT$60（約 HK$15），1～3 杯，綠界一杯數一條
+coffee_twd=60
+coffee_hkd=15
+ecpay_coffee_1=
+ecpay_coffee_2=
+ecpay_coffee_3=
+# 香港：FPS 識別碼、收款人名字（顯示給使用者看，付款後把截圖寄到 mail）
+fps_id=
+fps_name=
+mail=a96020183@gmail.com
+# 訂做公仔：原價單隻、雙人；早鳥單隻（前 20 單）；預約表單網址
+custom_one_twd=500
+custom_two_twd=1000
+custom_early_twd=300
+custom_early_hkd=70
+custom_early_slots=20
+custom_form=
+# ===== 打卡獎勵階梯（資料驅動）：reward.<天數>=<造型 id> <顯示名>。到那一階自動解鎖；美術還沒到的顯示「即將推出」。
+#        要加新常駐造型：加一行＋把美術放進 pals/<櫃>/<公仔>/costume/<id>/，不用改程式。漏天不歸零（收集制，不是連續）。
+reward.30=scarf 同款小圍巾
+reward.60=grad 畢業帽
+# 之後的常駐造型（美術到了再把註解拿掉；owner 規劃 90／120／150／180…）：
+# reward.90=pajama 睡衣
+# reward.120=animal 動物裝
+# reward.150=flower 小花
+# reward.180=headset 耳機
+# reward.210=cape 披風
+# ===== 季節商店賣的（資料驅動）：costume.<id> 或 cabinet.<id>=<顯示名> | <兌換碼項目> | [NT價] | [HK價]
+#        後三項可省（兌換碼項目省略＝<id>-<kind>、價省略＝用上面的 price_item_*）。要加新季節商品：加一行＋丟美術；
+#        要能用解鎖碼兌換，發碼工具（issue.py／ShopCodes.Items）也要有這個項目（目前共 8 個位元的上限）。
+costume.xmas=聖誕造型 | xmas-costume
+cabinet.xmas=聖誕 | xmas-cabinet
+costume.exam=期末考造型 | exam-costume
+cabinet.exam=期末考 | exam-cabinet

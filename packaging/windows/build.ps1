@@ -193,7 +193,10 @@ using System.Reflection;
         $rel = "pals/" + $f.FullName.Substring($pals.Length + 1).Replace("\", "/")
         $cscArgs += "/resource:$($f.FullName),$rel"
     }
-    & $csc @cscArgs
+    # 資源太多（內建公仔圖＋造型＋櫃子外觀）會讓命令列超過長度上限：改用 csc 回應檔
+    $rsp = Join-Path $Build "csc.rsp"
+    [System.IO.File]::WriteAllLines($rsp, ($cscArgs | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }), (New-Object System.Text.UTF8Encoding($false)))
+    & $csc "@$rsp"
     if ($LASTEXITCODE -ne 0) { throw "csc failed" }
     Guard @($Exe, (Join-Path $Build "DeskPals.all.cs"))
     if ($DoObfuscate) {
