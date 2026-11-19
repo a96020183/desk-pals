@@ -112,7 +112,30 @@ namespace DeskPals
             f.Retried = Tri(o, "retried") == 1;
             f.Gone = Tri(o, "gone") == 1;
             f.Seq = seq;
+            Normalize(f);
             return f;
+        }
+
+        // 收集器寫的字 → 小本子的說法（例：「發 v0.10.4」→「發了 v0.10.4」、學校的「上課：資料結構」→ 一堂課、推 commit 的次數）
+        static void Normalize(NbFact f)
+        {
+            if (f.Src == "ci" && f.Title.StartsWith("發 ")) f.Title = "發了 " + f.Title.Substring(2);
+            if (f.Src == "school" && f.Title.StartsWith("上課：")) { f.Class = true; f.Title = f.Title.Substring(3).Trim(); if (f.Project == "") f.Project = f.Title; }
+            int n;
+            if ((f.Src == "gitlab" || f.Src == "github") && int.TryParse(f.Status, out n)) f.Status = n > 0 ? "推了 " + n + " 個 commit" : "推上去了";
+        }
+
+        // 從 ICS 算的課：log 裡已經有同一堂（收集器上課時寫的，同名、開始時間差 15 分鐘內）就不再加
+        public static void AddClasses(List<NbFact> facts, List<NbFact> classes)
+        {
+            List<NbFact> have = new List<NbFact>();
+            foreach (NbFact f in facts) if (f.Class) have.Add(f);
+            foreach (NbFact c in classes)
+            {
+                bool dup = false;
+                foreach (NbFact h in have) if (h.Title == c.Title && Math.Abs((h.T - c.T).TotalMinutes) <= 15) { dup = true; if (!h.HasEnd && c.HasEnd) { h.End = c.End; h.HasEnd = true; } }
+                if (!dup) facts.Add(c);
+            }
         }
 
         public static string FactJson(NbFact f)
@@ -138,7 +161,14 @@ namespace DeskPals
             List<NbFact> list = new List<NbFact>();
             string path = LogPath(dir, day);
             string[] lines;
-            try { if (!File.Exists(path)) return list; lock (LogLock) lines = File.ReadAllLines(path, Encoding.UTF8); }
+            try
+            {
+                if (!File.Exists(path)) return list;
+                lock (LogLock)
+                    using (FileStream fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    using (StreamReader r = new StreamReader(fs, Encoding.UTF8))
+                        lines = r.ReadToEnd().Split('\n');
+            }
             catch { return list; }
             Dictionary<string, int> at = new Dictionary<string, int>();
             for (int i = 0; i < lines.Length; i++)
@@ -157,7 +187,10 @@ namespace DeskPals
             try
             {
                 Directory.CreateDirectory(dir);
-                lock (LogLock) File.AppendAllText(LogPath(dir, f.T.Date), FactJson(f) + "\n", new UTF8Encoding(false));
+                byte[] b = new UTF8Encoding(false).GetBytes(FactJson(f) + "\n");
+                lock (LogLock)
+                    using (FileStream fs = new FileStream(LogPath(dir, f.T.Date), FileMode.Append, FileAccess.Write, FileShare.ReadWrite))   // 跟收集器（DeskPals.Work.cs 的 NoteLog）同一種開法
+                        fs.Write(b, 0, b.Length);
             }
             catch { }
         }
@@ -236,23 +269,28 @@ namespace DeskPals
             WriteFile(TodoPath(dir), new JavaScriptSerializer().Serialize(o));
         }
 
-        // Jira 指派給我、還沒結的：最近一天有寫 todo 欄位的 log（收集器每次更新就把整份寫進當天的 log）
-        public static List<NbFact> JiraTodos(string dir, DateTime today)
+        // Jira 指派給我、還沒結的：收集器每次查完整份寫進 notebook\jira-open.json（[{"key","title","status","url"}]）
+        public static List<NbFact> JiraTodos(string dir)
         {
-            for (int back = 0; back < 14; back++)
+            List<NbFact> list = new List<NbFact>();
+            string s = ReadFile(Path.Combine(dir, "jira-open.json"));
+            if (s.Trim() == "") return list;
+            try
             {
-                List<NbFact> day = ReadLog(dir, today.AddDays(-back));
-                bool any = false;
-                List<NbFact> open = new List<NbFact>();
-                foreach (NbFact f in day)
+                object[] a = new JavaScriptSerializer().DeserializeObject(s) as object[];
+                if (a == null) return list;
+                foreach (object x in a)
                 {
-                    if (!f.TodoSet) continue;
-                    any = true;
-                    if (f.Todo && !f.Gone) open.Add(f);
+                    Dictionary<string, object> d = x as Dictionary<string, object>;
+                    if (d == null || Str(d, "key") == "") continue;
+                    NbFact f = new NbFact();
+                    f.Id = "jira:" + Str(d, "key") + ":open"; f.Src = "jira"; f.Ref = Str(d, "key"); f.Title = OneLine(Str(d, "title")); f.Status = OneLine(Str(d, "status")); f.Url = Str(d, "url");
+                    f.Todo = true;
+                    list.Add(f);
                 }
-                if (any) return open;
             }
-            return new List<NbFact>();
+            catch { }
+            return list;
         }
 
         // ================= 合併、分組 =================
@@ -269,7 +307,12 @@ namespace DeskPals
         static bool SharedKey(NbFact f, NbFact s)
         {
             List<string> a = Tokens(f.Key + " " + f.Ref.Replace(" ", "")), b = Tokens(s.Key + " " + s.Ref.Replace(" ", ""));
-            foreach (string x in a) if (b.Contains(x)) return true;
+            string pa = f.Project.ToLowerInvariant(), pb = s.Project.ToLowerInvariant();
+            foreach (string x in a)
+            {
+                if (x == pa || x == pb || (pa != "" && x.EndsWith("/" + pa)) || (pb != "" && x.EndsWith("/" + pb))) continue;   // 收集器把 repo 名也放進 key：同一個專案不算同一件事（交給時間判斷）
+                if (b.Contains(x)) return true;
+            }
             if (f.Ref != "" && s.Title.IndexOf(f.Ref, StringComparison.OrdinalIgnoreCase) >= 0) return true;   // 對話標題裡就寫了單號
             return false;
         }

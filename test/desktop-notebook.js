@@ -34,7 +34,7 @@ let n = 0;
 async function launch(name, data) {
 	const ep = win ? `${epBase}-${name}-${++n}` : `${epBase}-${name}-${++n}.sock`;
 	const target = win ? "\\\\.\\pipe\\" + ep : ep;
-	const env = Object.assign({}, process.env, { DESKPALS_OFFSCREEN: "1", DESKPALS_ISOLATED: "1", DESKPALS_DATA_DIR: data });
+	const env = Object.assign({}, process.env, { DESKPALS_OFFSCREEN: "1", DESKPALS_ISOLATED: "1", DESKPALS_DATA_DIR: data, CLAUDE_CONFIG_DIR: path.join(data, "no-claude"), CODEX_HOME: path.join(data, "no-codex") });   // 不讀你真的 Claude／Codex 對話
 	if (win && process.env.NB_PRIVATE_TEMP === "1") { env.TEMP = env.TMP = path.join(work, "tmp"); fs.mkdirSync(env.TEMP, { recursive: true }); }   // 本機跑：紀錄寫到自己的資料夾
 	const args = cmd.map((a) => a.replace(/\{ep\}/g, ep));
 	const child = cp.spawn(args[0], args.slice(1), { env, stdio: "ignore", windowsHide: true });
@@ -124,7 +124,7 @@ const clock = async (app, t) => { app.send("study-clock " + t); await sleep(250)
 // ================= 工程師的一天 =================
 const ENG = [
 	{ id: "calendar:standup@2026-11-19", t: "2026-11-19T09:30", end: "2026-11-19T09:45", src: "calendar", title: "每日站會" },
-	{ id: "claude:a1b2c3", t: "2026-11-19T10:02", end: "2026-11-19T11:18", src: "claude", project: "desk-pals", title: "修好右鍵選單一開就關", key: "fix/menu-focus" },
+	{ id: "claude:a1b2c3", t: "2026-11-19T10:02", end: "2026-11-19T11:18", src: "claude", project: "desk-pals", title: "修好右鍵選單一開就關", key: "desk-pals" },   // 收集器把 repo 名放進 key
 	{ id: "jira:PBG-2231:resolved", t: "2026-11-19T11:05", src: "jira", project: "desk-pals", title: "右鍵選單一開就關", status: "工單解決了", ok: true, ref: "PBG-2231", url: "https://jira.example.com/browse/PBG-2231", key: "PBG-2231" },
 	{ id: "gitlab:desk-pals:!128", t: "2026-11-19T11:20", src: "gitlab", project: "desk-pals", title: "修右鍵選單焦點", ref: "MR !128", url: "https://gitlab.example.com/web/desk-pals/-/merge_requests/128", key: "fix/menu-focus" },
 	{ id: "ci:desk-pals:fix/menu-focus", t: "2026-11-19T11:24", src: "ci", project: "desk-pals", title: "CI", status: "CI 過了", ok: true, key: "fix/menu-focus" },
@@ -132,13 +132,15 @@ const ENG = [
 	{ id: "codex:d4e5f6", t: "2026-11-19T14:25", end: "2026-11-19T15:40", src: "codex", project: "shop-web", title: "結帳頁金額少一位小數" },
 	{ id: "jira:PBG-2240:created", t: "2026-11-19T14:50", src: "jira", project: "shop-web", title: "結帳頁金額少一位小數", status: "新開", ref: "PBG-2240", url: "https://jira.example.com/browse/PBG-2240" },
 	{ id: "github:pixel-icons:#17", t: "2026-11-19T15:52", src: "github", project: "pixel-icons", title: "補 16px 圖示", status: "合併了", ok: true, ref: "PR #17", url: "https://github.com/you/pixel-icons/pull/17" },
-	{ id: "ci:desk-pals:v0.10.4", t: "2026-11-19T16:10", end: "2026-11-19T16:20", src: "ci", project: "desk-pals", title: "發了 v0.10.4", status: "CI 沒過", ok: false, key: "v0.10.4" },
-	{ id: "jira:PBG-2198:testing", t: "2026-11-19T16:30", src: "jira", project: "desk-pals", title: "設定頁字太小", status: "處理中", ref: "PBG-2198", url: "https://jira.example.com/browse/PBG-2198" },
-	{ id: "ci:desk-pals:v0.10.4", t: "2026-11-19T16:10", end: "2026-11-19T16:41", src: "ci", project: "desk-pals", title: "發了 v0.10.4", status: "CI 過了", ok: true, retried: true, key: "v0.10.4" },   // 同一個 id 後寫的蓋前寫的
-	{ id: "jira:PBG-2198:testing2", t: "2026-11-19T16:45", src: "jira", project: "desk-pals", title: "設定頁字太小", status: "測試中", ref: "PBG-2198", url: "https://jira.example.com/browse/PBG-2198" },   // 同一張單改兩次：只留最後
-	{ id: "jira:PBG-2251:assigned", t: "2026-11-19T08:00", src: "jira", title: "設定頁深色模式跑版", status: "待處理", ref: "PBG-2251", todo: true },
-	{ id: "jira:PBG-2263:assigned", t: "2026-11-19T08:00", src: "jira", title: "折扣碼不分大小寫", status: "處理中", ref: "PBG-2263", todo: true },
-	{ id: "jira:PBG-2100:assigned", t: "2026-11-19T08:00", src: "jira", title: "已經結了的單", status: "完成", ref: "PBG-2100", todo: false },
+	{ id: "ci:web/desk-pals:v0.10.4", t: "2026-11-19T16:10", end: "2026-11-19T16:20", src: "ci", project: "desk-pals", title: "發 v0.10.4", status: "CI 沒過", ok: false, ref: "v0.10.4", key: "web/desk-pals" },
+	{ id: "jira:PBG-2198:status", t: "2026-11-19T16:30", src: "jira", project: "desk-pals", title: "設定頁字太小", status: "處理中", ref: "PBG-2198", url: "https://jira.example.com/browse/PBG-2198", key: "PBG-2198" },
+	{ id: "ci:web/desk-pals:v0.10.4", t: "2026-11-19T16:10", end: "2026-11-19T16:41", src: "ci", project: "desk-pals", title: "發 v0.10.4", status: "CI 過了", ok: true, retried: true, ref: "v0.10.4", key: "web/desk-pals" },   // 同一個 id 後寫的蓋前寫的
+	{ id: "jira:PBG-2198:status2", t: "2026-11-19T16:45", src: "jira", project: "desk-pals", title: "設定頁字太小", status: "測試中", ref: "PBG-2198", url: "https://jira.example.com/browse/PBG-2198", key: "PBG-2198" },   // 同一張單改兩次：只留最後
+];
+// Jira 指派給我的未結單：收集器另外寫 notebook\jira-open.json（不是 log）
+const ENG_JIRA_OPEN = [
+	{ key: "PBG-2251", title: "設定頁深色模式跑版", status: "待處理", url: "https://jira.example.com/browse/PBG-2251" },
+	{ key: "PBG-2263", title: "折扣碼不分大小寫", status: "處理中", url: "https://jira.example.com/browse/PBG-2263" },
 ];
 const ENG_YESTERDAY = [{ id: "claude:y1", t: "2026-11-18T15:00", end: "2026-11-18T16:00", src: "claude", project: "desk-pals", title: "整理右鍵選單的測試" }];
 const ENG_TODO = { items: [
@@ -251,6 +253,7 @@ END:VEVENT
 END:VCALENDAR
 `;
 const STU = [
+	{ id: "school:ds-lecture@example.edu@1795047000000-now", t: "2026-11-19T08:10", end: "2026-11-19T10:00", src: "school", project: "資料結構", title: "上課：資料結構" },   // 收集器上課時寫的：跟 ICS 算出來的同一堂，只列一次
 	{ id: "claude:bst", t: "2026-11-19T10:20", end: "2026-11-19T11:45", src: "claude", project: "資料結構", title: "修好 BST 刪除節點的測試", key: "bst-delete" },
 	{ id: "github:ds-hw3:#4", t: "2026-11-19T11:50", src: "github", project: "ds-hw3", title: "BST 刪除節點", status: "合併了，測試過了", ok: true, ref: "PR #4", url: "https://github.com/you/ds-hw3/pull/4", key: "bst-delete" },
 	{ id: "codex:login", t: "2026-11-19T15:30", end: "2026-11-19T16:40", src: "codex", project: "team-app", title: "分組專題登入頁", key: "login-page" },
@@ -299,6 +302,7 @@ const STU_SIMPLE = `・上課：資料結構
 		writeLog(data, "2026-11-19", ENG);
 		writeLog(data, "2026-11-18", ENG_YESTERDAY);
 		fs.writeFileSync(path.join(data, "notebook", "todo.json"), JSON.stringify(ENG_TODO));
+		fs.writeFileSync(path.join(data, "notebook", "jira-open.json"), JSON.stringify(ENG_JIRA_OPEN));
 		const app = await launch("eng", data);
 		await clock(app, "2026-11-19T17:00");
 		app.send("nb-open");
@@ -316,7 +320,7 @@ const STU_SIMPLE = `・上課：資料結構
 			assert.equal(+o.frame + 446 + 16, +m[1]);
 			assert.equal(+o.y + 670, +m[2] + +m[4] - 8);
 		});
-		await check("合併：Jira、MR、CI 掛到同一個對話底下，句尾是白話結果；同一張單只留最後；指派給我的不在今天做了", () => {
+		await check("合併：Jira、MR、CI 掛到同一個對話底下，句尾是白話結果；同一張單只留最後；「發 v0.10.4」說成「發了」", () => {
 			assert.deepEqual(o.things.map((t) => t.text), [
 				"修好右鍵選單一開就關，工單解決了，CI 過了",
 				"發了 v0.10.4，CI 重跑後過了",
@@ -361,7 +365,7 @@ const STU_SIMPLE = `・上課：資料結構
 		// 待辦：勾掉 → 今天做了（17:02）
 		await click(app, "tab", "todo");
 		o = await info(app);
-		await check("待辦：從昨天、今天到期紅字、明天、Jira 指派給我（只顯示狀態，結了的不列）", () => {
+		await check("待辦：從昨天、今天到期紅字、明天、Jira 指派給我（jira-open.json，只顯示狀態）", () => {
 			assert.equal(o.tab, "todo");
 			assert.deepEqual(o.todos.map((t) => [t.id, t.carried, t.text, t.due]), [
 				["t1", true, "回覆 QA 匯出格式的問題", ""], ["t2", false, "寫 v0.10.4 更新說明", "今天 18:00 !"], ["t3", false, "整理 shop-web 測試資料", ""],

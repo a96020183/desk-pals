@@ -245,11 +245,11 @@ namespace DeskPals
         public void Reload()
         {
             List<NbFact> facts = Nb.ReadLog(Dir, Day);
-            facts.AddRange(w.NbClasses(Day));
+            Nb.AddClasses(facts, w.NbClasses(Day));
             edits = Nb.LoadEdits(Dir, Day);
             things = Nb.Build(facts, edits);
             todos = w.NbTodos();
-            jira = Nb.JiraTodos(Dir, w.NbNow().Date);
+            jira = Nb.JiraTodos(Dir);
             logStamp = Stamp();
             if (noteFor != Nb.Ymd(Day)) LoadNote();
             Invalidate();
@@ -701,6 +701,7 @@ namespace DeskPals
             Graphics g = e.Graphics;
             g.SmoothingMode = SmoothingMode.None;
             g.Clear(KEY);
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;   // 字一律反鋸齒（遠端桌面預設關掉字型平滑，mockup 的字是平滑的）
             hits.Clear(); todoRows.Clear(); clipR.Clear(); Drawn.Clear();
             again = false; hitClip = Rectangle.Empty;
             rTodo = Rectangle.Empty; rDone = Rectangle.Empty; rEdit = Rectangle.Empty; rNote = Rectangle.Empty;
@@ -992,7 +993,7 @@ namespace DeskPals
             }
             string back = "要複製";
             int avail = right - Sc(6) - tx - (t.Off ? TW(back, fSmall) + Sc(10) : 0);
-            int lines = Flow(null, runs, tx, y + Sc(3), avail, Sc(22), false);
+            int lines = Flow(g, runs, tx, y + Sc(3), avail, Sc(22), false, false);   // 先量（跟畫用同一個 Graphics，換行才一樣）
             int h = Sc(6) + lines * Sc(22) + (hot ? Sc(16) : 0);
             Rectangle row = new Rectangle(bx, y, right - bx, h);
             if (hot)
@@ -1578,22 +1579,23 @@ namespace DeskPals
         }
 
         // 一串不同字型的字照寬度排，超過就換行（中文一個字一個字斷、英文盡量在空白斷）；回傳幾行。g＝null 只量不畫
-        int Flow(Graphics g, List<Run> runs, int x0, int y0, int w0, int lineH, bool strike)
+        int Flow(Graphics g, List<Run> runs, int x0, int y0, int w0, int lineH, bool strike) { return Flow(g, runs, x0, y0, w0, lineH, strike, true); }
+        int Flow(Graphics g, List<Run> runs, int x0, int y0, int w0, int lineH, bool strike, bool paint)
         {
             int mainAsc = runs.Count > 0 ? Asc(runs[0].F) : 0;
             int baseOff = (lineH + mainAsc - (int)Math.Round(mainAsc * 0.32)) / 2;
-            return FlowCore(g, runs, x0, y0, w0, lineH, strike, 0, baseOff);
+            return FlowCore(g, runs, x0, y0, w0, lineH, strike, 0, baseOff, paint);
         }
         int FlowHang(Graphics g, List<Run> runs, int x0, int y0, int w0, int lineH, int hang)
         {
             int mainAsc = runs.Count > 0 ? Asc(runs[0].F) : 0;
-            return FlowCore(g, runs, x0, y0, w0, lineH, false, hang, (lineH + mainAsc - (int)Math.Round(mainAsc * 0.32)) / 2);
+            return FlowCore(g, runs, x0, y0, w0, lineH, false, hang, (lineH + mainAsc - (int)Math.Round(mainAsc * 0.32)) / 2, true);
         }
         int FlowLines(Graphics g, List<Run> runs, int x0, int y0, int w0, int lineH, int baseline)
         {
-            return FlowCore(g, runs, x0, y0, w0, lineH, false, 0, baseline - y0);
+            return FlowCore(g, runs, x0, y0, w0, lineH, false, 0, baseline - y0, true);
         }
-        int FlowCore(Graphics g, List<Run> runs, int x0, int y0, int w0, int lineH, bool strike, int hang, int baseOff)
+        int FlowCore(Graphics g, List<Run> runs, int x0, int y0, int w0, int lineH, bool strike, int hang, int baseOff, bool paint)
         {
             int x = x0, line = 0;
             for (int ri = 0; ri < runs.Count; ri++)
@@ -1615,7 +1617,7 @@ namespace DeskPals
                     }
                     string part = s.Substring(0, n);
                     int pw = TWg(g, part, r.F);
-                    if (g != null)
+                    if (g != null && paint)
                     {
                         int top = y0 + line * lineH + baseOff - Asc(r.F);
                         DT(g, part, r.F, new Point(x, top), r.C, TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
