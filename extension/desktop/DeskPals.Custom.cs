@@ -250,7 +250,7 @@ namespace DeskPals
                 g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
                 // 格子外面是奶油色紙；格子裡面透明（畫圖軟體不支援透明的話，白底也可以，會自動去背）
                 g.FillRectangle(paper, 0, 0, TW, TH);
-                g.DrawString("Desk Pals 動作表範本", tf, ink, TGap, 10);
+                g.DrawString("WoWo Pals 動作表範本", tf, ink, TGap, 10);
                 g.DrawString("每一格畫一個動作，腳踩在格子底部。空著的格子會自動補動畫（至少畫「站」）。", hf, dim, TGap, 36);
                 for (int i = 0; i < SheetKeys.Length; i++)
                 {

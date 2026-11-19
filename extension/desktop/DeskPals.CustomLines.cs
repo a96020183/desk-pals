@@ -148,7 +148,7 @@ namespace DeskPals
             Say("x_net-down", "網路斷了！"); Say("x_net-up", "網路回來了！👍"); Say("x_vpn", "連不到公司網路（VPN 斷了？）"); Say("x_download", "下載好了！");
             Say("x_ticket0", "🎫 {t} 還有 {h}開賣！先登入、綁好付款"); Say("x_ticket1", "🎫 {t} 再 30 分鐘開賣，網頁先開好！"); Say("x_ticket2", "🎫 {t} 剩 10 分鐘！好緊張～");
             Say("x_ticket3", "🎫 準備！手指放在按鈕上！"); Say("x_ticket4", "🎫 開搶！！衝衝衝！");
-            Say("x_share", "我家的" + me + "住進我電腦了 ✨ #我的桌面公仔 #DeskPals", me + "每天在我桌面上跑來跑去 ✨ #我的桌面公仔 #DeskPals");
+            Say("x_share", "我家的" + me + "住進我電腦了 ✨ #我的桌面公仔 #WoWoPals", me + "每天在我桌面上跑來跑去 ✨ #我的桌面公仔 #WoWoPals");
             Say("x_sig", "看我的招牌跳跳！"); Say("x_sit", "坐一下下～");
             // ---- 小動作 ----
             Say("x_push", "（推推）啊，掉下去了！"); Say("x_ignore", "哼，我在忙！（其實沒有）"); Say("x_comeback", "好啦好啦，我回來陪你了！");
@@ -240,7 +240,7 @@ namespace DeskPals
             Say("x_net-down", "網路斷了。"); Say("x_net-up", "網路回來了。👍"); Say("x_vpn", "連不到公司網路（VPN 斷了？）"); Say("x_download", "下載好了：");
             Say("x_ticket0", "🎫 {t} 還有 {h}開賣。先登入、綁好付款"); Say("x_ticket1", "🎫 {t} 30 分鐘後開賣。網頁先開"); Say("x_ticket2", "🎫 {t} 剩 10 分鐘。專心");
             Say("x_ticket3", "🎫 準備。手指就位"); Say("x_ticket4", "🎫 開搶。上！");
-            Say("x_share", me + "住進我的桌面了。很酷。😎 #我的桌面公仔 #DeskPals", "我的桌面多了一位" + me + "。 #我的桌面公仔 #DeskPals");
+            Say("x_share", me + "住進我的桌面了。很酷。😎 #我的桌面公仔 #WoWoPals", "我的桌面多了一位" + me + "。 #我的桌面公仔 #WoWoPals");
             Say("x_sig", "看好了。"); Say("x_sit", "坐一下。");
             // ---- 小動作 ----
             Say("x_push", "（推）……掉了。"); Say("x_ignore", "（轉頭）現在不想理人。"); Say("x_comeback", "……好吧，陪你。");
@@ -332,7 +332,7 @@ namespace DeskPals
             Say("x_net-down", "網、網路斷了！"); Say("x_net-up", "網路回來了…👍"); Say("x_vpn", "那個…連不到公司網路（VPN 斷了？）"); Say("x_download", "下載好了…：");
             Say("x_ticket0", "🎫 {t} 還有 {h}開賣…先登入、綁好付款喔"); Say("x_ticket1", "🎫 {t} 再 30 分鐘…網頁先開好"); Say("x_ticket2", "🎫 {t} 剩 10 分鐘…好緊張…");
             Say("x_ticket3", "🎫 準、準備…手指放好"); Say("x_ticket4", "🎫 開搶！衝、衝啊！");
-            Say("x_share", "我家的" + me + "害羞地住進我電腦了 🙈 #我的桌面公仔 #DeskPals", me + "每天偷偷在我桌面上陪我 ✨ #我的桌面公仔 #DeskPals");
+            Say("x_share", "我家的" + me + "害羞地住進我電腦了 🙈 #我的桌面公仔 #WoWoPals", me + "每天偷偷在我桌面上陪我 ✨ #我的桌面公仔 #WoWoPals");
             Say("x_sig", "那、那我表演一下…"); Say("x_sit", "坐、坐一下…");
             // ---- 小動作 ----
             Say("x_push", "啊…（不小心推下去了）"); Say("x_ignore", "（害羞到轉過去）"); Say("x_comeback", "那個…我回來了…");
@@ -424,7 +424,7 @@ namespace DeskPals
             Say("x_net-down", "網路斷了！世界末日！"); Say("x_net-up", "網路回來了！人類得救了 👍"); Say("x_vpn", "連不到公司網路（VPN 斷了？）"); Say("x_download", "下載好了！");
             Say("x_ticket0", "🎫 {t} 還有 {h}開賣！先登入、綁好付款"); Say("x_ticket1", "🎫 {t} 再 30 分鐘開賣，網頁先開好"); Say("x_ticket2", "🎫 {t} 剩 10 分鐘！手指熱身！");
             Say("x_ticket3", "🎫 準備！深呼吸，不要手抖"); Say("x_ticket4", "🎫 開搶！！衝啊！");
-            Say("x_share", "我家" + me + "住進我電腦了，還會講冷笑話 ✨ #我的桌面公仔 #DeskPals", me + "在我桌面上班，薪水是摸摸 🤡 #我的桌面公仔 #DeskPals");
+            Say("x_share", "我家" + me + "住進我電腦了，還會講冷笑話 ✨ #我的桌面公仔 #WoWoPals", me + "在我桌面上班，薪水是摸摸 🤡 #我的桌面公仔 #WoWoPals");
             Say("x_sig", "看我的招牌絕技！"); Say("x_sit", "坐下，休息是為了走更長的路");
             // ---- 小動作 ----
             Say("x_push", "（推）喔不，地心引力贏了"); Say("x_ignore", "我在生氣（假的）"); Say("x_comeback", "好啦好啦，氣消了！");
@@ -516,7 +516,7 @@ namespace DeskPals
             Say("x_net-down", "網路斷了。不是我咬的！"); Say("x_net-up", "網路回來了。喵 👍"); Say("x_vpn", "連不到公司網路（VPN 斷了？）"); Say("x_download", "下載好了：");
             Say("x_ticket0", "🎫 {t} 還有 {h}開賣。先登入、綁好付款"); Say("x_ticket1", "🎫 {t} 再 30 分鐘開賣。網頁先開好"); Say("x_ticket2", "🎫 {t} 剩 10 分鐘。（尾巴甩甩）");
             Say("x_ticket3", "🎫 準備。像撲獵物那樣"); Say("x_ticket4", "🎫 開搶！撲！");
-            Say("x_share", "我家" + me + "住進我電腦了 🐾 #我的桌面公仔 #DeskPals", me + "現在連我的桌面都要佔領 🐾 #我的桌面公仔 #DeskPals", "上班有" + me + "盯著，不敢偷懶 🐱 #我的桌面公仔 #DeskPals");
+            Say("x_share", "我家" + me + "住進我電腦了 🐾 #我的桌面公仔 #WoWoPals", me + "現在連我的桌面都要佔領 🐾 #我的桌面公仔 #WoWoPals", "上班有" + me + "盯著，不敢偷懶 🐱 #我的桌面公仔 #WoWoPals");
             Say("x_sig", "（伸懶腰，然後一躍）"); Say("x_sit", "（坐下，尾巴繞好）");
             // ---- 貓的小動作：推東西、不理你又回來、縮成土司 ----
             Say("x_push", "（推）……掉下去了。", "（盯著你，慢慢推）", "這個不需要。（推）"); Say("x_ignore", "（背對你）", "現在不想理你。"); Say("x_comeback", "（蹭蹭）……只是剛好路過。", "（跳回你旁邊）");
@@ -608,7 +608,7 @@ namespace DeskPals
             Say("x_net-down", "網路斷了！汪汪！"); Say("x_net-up", "網路回來了！汪 👍"); Say("x_vpn", "連不到公司網路（VPN 斷了？）"); Say("x_download", "下載好了！汪！");
             Say("x_ticket0", "🎫 {t} 還有 {h}開賣！先登入、綁好付款"); Say("x_ticket1", "🎫 {t} 再 30 分鐘！我陪你等！"); Say("x_ticket2", "🎫 {t} 剩 10 分鐘！汪汪！");
             Say("x_ticket3", "🎫 準備！手指放好！"); Say("x_ticket4", "🎫 開搶！！衝啊！汪！");
-            Say("x_share", "我家" + me + "住進我電腦了 🐾 #我的桌面公仔 #DeskPals", me + "每天在我桌面上搖尾巴 🐶 #我的桌面公仔 #DeskPals", "上班有" + me + "陪，心情好好 🐾 #我的桌面公仔 #DeskPals");
+            Say("x_share", "我家" + me + "住進我電腦了 🐾 #我的桌面公仔 #WoWoPals", me + "每天在我桌面上搖尾巴 🐶 #我的桌面公仔 #WoWoPals", "上班有" + me + "陪，心情好好 🐾 #我的桌面公仔 #WoWoPals");
             Say("x_sig", "汪！看我轉圈圈！"); Say("x_sit", "（乖乖坐好）汪！");
             // ---- 狗的小動作：搖尾巴、撿球回來、你回來就跳 ----
             Say("x_push", "汪？（不小心撞下去了）", "（咬咬…掉下去了）"); Say("x_ignore", "（假裝在聞地板）"); Say("x_comeback", "汪！我回來了！不生氣了！");

@@ -189,7 +189,7 @@ namespace DeskPals
                 sl.SetArguments(args);
                 sl.SetWorkingDirectory(Path.GetDirectoryName(exe));
                 sl.SetIconLocation(exe, 0);
-                sl.SetDescription("公仔櫃 Desk Pals（整個螢幕的像素公仔）");
+                sl.SetDescription("WoWo Pals（整個螢幕的像素公仔）");
                 pf.Save(lnk, true);
                 if (!File.Exists(lnk)) { App.Log("autostart: saved but the shortcut is not there: " + lnk); return false; }
                 return true;

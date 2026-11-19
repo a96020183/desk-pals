@@ -5159,7 +5159,7 @@ namespace DeskPals
             m.Items.Add(Single ? "回" + MiniName + "裡待著" : "回櫃子裡待著", null, delegate { p.StowToShelf(true); });
             m.Items.Add("躲起來（Ctrl+Alt+S）", null, delegate { ToggleHide(); });
             m.Items.Add(new ToolStripSeparator());
-            m.Items.Add("收工（關掉 Desk Pals）", null, delegate { QuitAll(); });
+            m.Items.Add("收工（關掉 WoWo Pals）", null, delegate { QuitAll(); });
         }
 
         // 專注、安靜、提醒、搶票、今天的小結（公仔、櫃子、小屋的選單都有）
@@ -5299,7 +5299,7 @@ namespace DeskPals
             m.Items.Add("公仔小屋（開關、設定）…", null, delegate { HouseMenu(); });
             m.Items.Add("躲起來（Ctrl+Alt+S）", null, delegate { ToggleHide(); });
             m.Items.Add(new ToolStripSeparator());
-            m.Items.Add("收工（關掉 Desk Pals）", null, delegate { QuitAll(); });
+            m.Items.Add("收工（關掉 WoWo Pals）", null, delegate { QuitAll(); });
             ShowMenu(m, p != null ? p.P.Name : "公仔櫃", false);
         }
 
@@ -8198,7 +8198,7 @@ namespace DeskPals
             m.Items.Add(set);
 
             m.Items.Add(new ToolStripSeparator());
-            m.Items.Add("收工（關掉 Desk Pals）", null, delegate { QuitAll(); });
+            m.Items.Add("收工（關掉 WoWo Pals）", null, delegate { QuitAll(); });
             ShowMenu(m, "公仔小屋", true, at);
         }
 

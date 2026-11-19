@@ -291,7 +291,7 @@ s.on("connect", async () => {
 	await check("收工前：推走的視窗還在縮小中", () => assert.equal(field(d, "pushed"), "2"));
 	send("quit");
 	await sleep(2500);
-	if (logFile) await check("收工（關掉 Desk Pals）前會先把推走的視窗全部叫回來", () => assert.equal(restoredCount(), before + 1, logFile));
+	if (logFile) await check("收工（關掉 WoWo Pals）前會先把推走的視窗全部叫回來", () => assert.equal(restoredCount(), before + 1, logFile));
 
 	console.log(results.map((r) => r[0] + "  " + r[1]).join("\n"));
 	const fail = results.filter((r) => r[0] === "FAIL").length;

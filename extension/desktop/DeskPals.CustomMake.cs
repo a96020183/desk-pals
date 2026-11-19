@@ -562,6 +562,8 @@ namespace DeskPals
             Pix.Art(g, CAT, pal, r.X + (r.Width - aw) / 2, r.Y + Sc(22), c);
             TextRenderer.DrawText(g, "把照片拖進來，或點這裡選一張", bigF, new Rectangle(r.X, r.Y + Sc(22) + CAT.Length * c + Sc(10), r.Width, Sc(28)), Pix.TextC, Pix.Mid);
             TextRenderer.DrawText(g, "PNG・JPG・GIF・BMP 都可以", subF, new Rectangle(r.X, r.Y + Sc(22) + CAT.Length * c + Sc(40), r.Width, Sc(20)), Pix.C(0x9A6338), Pix.Mid);
+            // 使用者指定的原字（v011 SPEC §4），不要改字
+            TextRenderer.DrawText(g, CopyrightNote, subF, new Rectangle(r.X, r.Y + Sc(22) + CAT.Length * c + Sc(62), r.Width, Sc(20)), Pix.C(0xB04040), Pix.Mid);
             // 小技巧
             Rectangle tip = new Rectangle(r.X, r.Bottom + Sc(14), r.Width, Sc(78));
             Pix.Round(g, Pix.C(0xE6D3B0), tip.X, tip.Y, tip.Width, tip.Height, U);
@@ -574,6 +576,8 @@ namespace DeskPals
             Btn tb = Find("template");
             if (tb != null) TextRenderer.DrawText(g, "進階：自己畫每個動作（動作表）、或匯入朋友傳來的公仔", smallF, new Rectangle(r.X, tb.R.Y - Sc(22), r.Width, Sc(18)), Pix.C(0x9A6338), Pix.LeftMid);
         }
+
+        public const string CopyrightNote = "千萬不要使用有版權的照片";
 
         static readonly string[] CAT = {
             "..kk..........kk..",
