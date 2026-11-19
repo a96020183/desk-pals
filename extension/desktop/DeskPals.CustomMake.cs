@@ -564,6 +564,7 @@ namespace DeskPals
             PixText.DrawText(g, "PNG・JPG・GIF・BMP 都可以", subF, new Rectangle(r.X, r.Y + Sc(22) + CAT.Length * c + Sc(40), r.Width, Sc(20)), Pix.C(0x9A6338), Pix.Mid);
             // 使用者指定的原字（v011 SPEC §4），不要改字
             PixText.DrawText(g, CopyrightNote, subF, new Rectangle(r.X, r.Y + Sc(22) + CAT.Length * c + Sc(62), r.Width, Sc(20)), Pix.C(0xB04040), Pix.Mid);
+            if (PhotoNoAlpha()) PixText.DrawText(g, PortraitTip, subF, new Rectangle(r.X, r.Y + Sc(22) + CAT.Length * c + Sc(82), r.Width, Sc(20)), Pix.C(0x9A6338), Pix.Mid);   // 選過一張沒透明的照片
             // 小技巧
             Rectangle tip = new Rectangle(r.X, r.Bottom + Sc(14), r.Width, Sc(78));
             Pix.Round(g, Pix.C(0xE6D3B0), tip.X, tip.Y, tip.Width, tip.Height, U);
@@ -578,6 +579,8 @@ namespace DeskPals
         }
 
         public const string CopyrightNote = "千萬不要使用有版權的照片";
+        bool PhotoNoAlpha() { return spr != null && !meta.Sheet && !srcAlpha; }
+        public const string PortraitTip = "人像照先在手機去背，用胸口以上的最可愛";
 
         static readonly string[] CAT = {
             "..kk..........kk..",
@@ -658,6 +661,8 @@ namespace DeskPals
             }
             Section(g, "修一下（在左邊的圖上塗）", r.X, r.Y + Sc(92));
             Section(g, "風格", r.X, r.Y + Sc(204));
+            // 沒有透明的照片（人像照直接去背常常不乾淨，人像測試 v011\humantest）：提醒先在手機去背
+            if (PhotoNoAlpha()) PixText.DrawText(g, PortraitTip, subF, new Rectangle(r.X, r.Y + Sc(346), r.Width, Sc(36)), Pix.C(0x9A6338), TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak);
             // 實際大小預覽（桌面上就是這麼大）：左邊圖的右下角一小格
             if (spr != null)
             {

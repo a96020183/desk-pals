@@ -289,7 +289,8 @@ namespace DeskPals
             return keep;
         }
 
-        // 只留最大的那塊（和夠大的旁支，例如分開的耳朵、尾巴）
+        // 只留主角那塊（和夠大的旁支，例如分開的耳朵、尾巴）。
+        // 主角＝包住畫面中央的那塊（夠大的話）；中央沒有才用最大的那塊。背景很亂的照片，最大的那塊常常是背景（人像測試 v011\humantest）
         public static void KeepMain(int[] px, int w, int h)
         {
             int n = w * h;
@@ -319,6 +320,11 @@ namespace DeskPals
             int big = 0;
             for (int i = 1; i < sizes.Count; i++) big = Math.Max(big, sizes[i]);
             if (big == 0) return;
+            int main = CentreLabel(lab, w, h);
+            if (main > 0 && sizes[main] * 20 >= big) big = sizes[main];   // 中央那塊至少有最大那塊的 5%：當主角
+            else main = 0;
+            bool[] keep = new bool[sizes.Count];
+            for (int i = 1; i < sizes.Count; i++) keep[i] = sizes[i] * 8 >= big && (main == 0 || i == main || sizes[i] <= sizes[main]);   // 比主角還大的（背景）不留
             for (int i = 0; i < n; i++)
             {
                 int a = (px[i] >> 24) & 255;
@@ -335,12 +341,29 @@ namespace DeskPals
                             int xx = x + dx, yy = y + dy;
                             if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
                             int ll = lab[yy * w + xx];
-                            if (ll != 0 && sizes[ll] * 8 >= big) near = true;
+                            if (ll != 0 && keep[ll]) near = true;
                         }
                     if (!near) px[i] = 0;
                 }
-                else if (sizes[l] * 8 < big) px[i] = 0;
+                else if (!keep[l]) px[i] = 0;
             }
+        }
+
+        // 畫面中央（往外一圈一圈找，最多找到短邊的 1/6）碰到的第一塊；0＝沒有
+        static int CentreLabel(int[] lab, int w, int h)
+        {
+            int cx = w / 2, cy = h / 2, max = Math.Max(1, Math.Min(w, h) / 6);
+            for (int r = 0; r <= max; r++)
+                for (int dy = -r; dy <= r; dy++)
+                    for (int dx = -r; dx <= r; dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != r) continue;
+                        int x = cx + dx, y = cy + dy;
+                        if (x < 0 || y < 0 || x >= w || y >= h) continue;
+                        int l = lab[y * w + x];
+                        if (l != 0) return l;
+                    }
+            return 0;
         }
 
         // 筆刷：擦掉／補回（座標都是 0～1；補回＝原圖的顏色）
@@ -610,7 +633,17 @@ namespace DeskPals
             }
             // 脖子
             neck = 0.42; bool neckOk = false;
-            int y0 = (int)(h * 0.22), y1 = (int)(h * 0.6);
+            bool tall = h > 2 * w;   // 全身照這種瘦長的：頭在很上面（人像測試：22–60% 會找到腰）
+            int y0 = (int)(h * (tall ? 0.08 : 0.22)), y1 = (int)(h * (tall ? 0.30 : 0.6));
+            if (tall)
+            {
+                // 頭頂也很窄：從頭最寬的那列以下才開始找脖子
+                int top = 0;
+                while (top < h - 1 && width[top] == 0) top++;
+                int hy = top, hw = -1;
+                for (int y = top; y <= top + (int)(h * 0.09) && y < h; y++) if (width[y] > hw) { hw = width[y]; hy = y; }   // 頭大約佔全身 12%：頂端往下 9% 內最寬的＝臉
+                y0 = Math.Max(y0, hy + 1);
+            }
             int best = -1; double bv = 1e9;
             for (int y = y0; y <= y1 && y < h; y++)
             {
@@ -651,6 +684,13 @@ namespace DeskPals
             {
                 double hp = 1 - (run + 0.5) / h;
                 if (hp > neck + 0.12 && hp < 0.95) { hip = hp; hipOk = true; }
+            }
+            if (!hipOk)
+            {
+                int widest = 0, bottom = 0;
+                for (int y = 0; y < h; y++) widest = Math.Max(widest, width[y]);
+                for (int y = h - 1; y >= 0 && bottom == 0; y--) bottom = width[y];
+                if (widest > 0 && bottom >= widest * 0.85) hip = 0.97;   // 半身照：整塊都是身體，腳只留最下面一點點
             }
             if (hip < neck + 0.15) hip = Math.Min(0.92, neck + 0.3);
             confident = hipOk && neckOk || (hipOk && run >= h * 0.12);
