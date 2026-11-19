@@ -4550,6 +4550,16 @@ class Control {
     func _childAdded(_ c: Control) { }
     func _hostView() -> NSView? { return _nsView }
     func _create() { }   // child controls build their NSView lazily (when added to a form)
+    /// 0.11：這個控制項是不是現在打字的地方（TextBox＝它的 field editor；別的打字框 shim 可以覆寫）
+    func _ownsResponder(_ r: NSResponder) -> Bool { return false }
+    /// 找現在打字的那個控制項（往子控制項一層一層找）
+    static func _keyOwner(_ root: Control, _ r: NSResponder) -> Control? {
+        for c in root.Controls {
+            if c._ownsResponder(r) { return c }
+            if let d = _keyOwner(c, r) { return d }
+        }
+        return nil
+    }
 }
 typealias MouseButtonsT = MouseButtons
 
@@ -4568,6 +4578,12 @@ final class FormPanel: NSPanel {
             if let tv = firstResponder as? NSTextView, tv.hasMarkedText() { composing = true }
             if !composing {
                 let kc = Keys.FromEvent(event)
+                // 0.11：打字框自己的 KeyDown（C# 的 box.KeyDown += …）先拿到；Handled／SuppressKeyPress 就不再往下
+                if let r = firstResponder, let c = Control._keyOwner(f, r) {
+                    let e = KeyEventArgs(kc | Keys.ModsFrom(event.modifierFlags))
+                    c.OnKeyDown(e)
+                    if e.Handled { return }
+                }
                 if f.KeyPreview {
                     let e = KeyEventArgs(kc | Keys.ModsFrom(event.modifierFlags))
                     f.OnKeyDown(e)
@@ -5096,6 +5112,7 @@ class TextBox: Control {
     func SelectAll() { tf?.currentEditor()?.selectAll(nil) }
     func Clear() { Text = "" }
     override var Focused: Bool { guard let t = tf, let ed = t.currentEditor() else { return false }; return t.window?.firstResponder === ed }
+    override func _ownsResponder(_ r: NSResponder) -> Bool { guard let t = tf else { return false }; if r === t { return true }; if let ed = t.currentEditor() { return r === ed }; return false }
 }
 
 final class FlatButtonAppearance {
@@ -5726,6 +5743,483 @@ extension TextBox {
     var PreferredHeight: Int {
         let f = _formsNSFont(Font)
         return Int((f.ascender - f.descender + f.leading).rounded(.up)) + 2
+    }
+}
+
+// ===== 05_shim_work.swift =====
+// ===== 05_shim_work.swift — 0.11（工作來源、小本子、工作設定）共用的 .NET／WinForms shim =====
+// AutoResetEvent、Convert、Clipboard、PixText（Windows 的 GDI+ 字；Mac 照舊用 TextRenderer＝CoreText，只給同名的薄殼）。
+
+// MARK: - AutoResetEvent
+
+/// System.Threading.AutoResetEvent: Set() 放行一個 WaitOne（沒人在等就留著，下一個 WaitOne 馬上回來）。
+final class AutoResetEvent {
+    private let cond = NSCondition()
+    private var signaled: Bool
+    init(_ initialState: Bool) { signaled = initialState }
+    @discardableResult func Set() -> Bool {
+        cond.lock(); signaled = true; cond.signal(); cond.unlock()
+        return true
+    }
+    @discardableResult func Reset() -> Bool { cond.lock(); signaled = false; cond.unlock(); return true }
+    @discardableResult func WaitOne() -> Bool {
+        cond.lock(); defer { cond.unlock() }
+        while !signaled { cond.wait() }
+        signaled = false
+        return true
+    }
+    @discardableResult func WaitOne(_ ms: Int) -> Bool {
+        cond.lock(); defer { cond.unlock() }
+        let until = Date(timeIntervalSinceNow: Double(Swift.max(0, ms)) / 1000.0)
+        while !signaled { if !cond.wait(until: until) { break } }
+        let r = signaled
+        signaled = false
+        return r
+    }
+    func Dispose() {}
+}
+
+// MARK: - Convert
+
+enum Convert {
+    static func ToString(_ v: Any?) -> String { return csToString(v) }
+    static func ToString(_ v: Any?, _ c: CultureInfo) -> String { return csToString(v) }
+    static func ToBase64String(_ b: [UInt8]) -> String { return Data(b).base64EncodedString() }
+    static func FromBase64String(_ s: String) throws -> [UInt8] {
+        guard let d = Data(base64Encoded: s, options: [.ignoreUnknownCharacters]) else { throw FormatException("bad base64") }
+        return [UInt8](d)
+    }
+    static func ToInt32(_ v: Any?) -> Int {
+        if let i = v as? Int { return i }
+        if let d = v as? Double { return Int(d.rounded(.toNearestOrEven)) }
+        if let b = v as? Bool { return b ? 1 : 0 }
+        return Int(csToString(v).Trim()) ?? 0
+    }
+    static func ToBoolean(_ v: Any?) -> Bool {
+        if let b = v as? Bool { return b }
+        if let i = v as? Int { return i != 0 }
+        return csToString(v).lowercased() == "true"
+    }
+}
+
+// MARK: - Clipboard
+
+/// System.Windows.Forms.Clipboard（文字）→ NSPasteboard.general
+enum Clipboard {
+    static func SetText(_ s: String) {
+        let put = {
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            pb.setString(s, forType: .string)
+        }
+        if Foundation.Thread.isMainThread { put() } else { DispatchQueue.main.sync(execute: put) }
+    }
+    static func GetText() -> String {
+        var r = ""
+        let get = { r = NSPasteboard.general.string(forType: .string) ?? "" }
+        if Foundation.Thread.isMainThread { get() } else { DispatchQueue.main.sync(execute: get) }
+        return r
+    }
+    static func ContainsText() -> Bool { return !GetText().isEmpty }
+    static func Clear() { NSPasteboard.general.clearContents() }
+}
+
+// MARK: - PixText
+
+/// DeskPals.PixText.cs 在 Windows 修 GDI 的糊字（整數像素字型、量跟畫同一套、Heft 加粗）；CoreText 沒有這個問題，
+/// mac: 名字照 C#，量和畫都交給 TextRenderer（跟 0.10 一樣的字）。
+enum PixText {
+    static let Heft = 0.5
+    /// 測試用的 DPI（DESKPALS_TEST_DPI）；mac 一律 96（PORTING.md：點＝Windows 100% 的像素）
+    static func TestDpi(_ real: Double) -> Double { return real }
+    static func Px(_ f: Font) -> Font { return f }
+    static func LineH(_ f: Font) -> Int { return TextRenderer.MeasureText("Ag", f, Size(4000, 400), TextFormatFlags.NoPadding).Height }
+    static func LineW(_ s: String?, _ f: Font) -> Int { return TextRenderer.MeasureText(s ?? "", f, Size(4000, 400), [TextFormatFlags.NoPadding, TextFormatFlags.SingleLine, TextFormatFlags.NoPrefix]).Width }
+    static func MeasureText(_ s: String?, _ f: Font) -> Size { return TextRenderer.MeasureText(s, f, Size(4000, 400), TextFormatFlags.NoPadding) }
+    static func MeasureText(_ s: String?, _ f: Font, _ proposed: Size, _ fl: TextFormatFlags) -> Size { return TextRenderer.MeasureText(s, f, proposed, fl) }
+    static func DrawText(_ g: Graphics, _ s: String?, _ f: Font, _ p: Point, _ c: Color, _ fl: TextFormatFlags) { TextRenderer.DrawText(g, s, f, p, c, fl) }
+    static func DrawText(_ g: Graphics, _ s: String?, _ f: Font, _ r: Rectangle, _ c: Color, _ fl: TextFormatFlags) { TextRenderer.DrawText(g, s, f, r, c, fl) }
+}
+
+// ===== 06_shim_notebook.swift =====
+// ===== 06_shim_notebook.swift — 小本子（64_notebook.swift）用到的 WinForms／GDI+ shim =====
+// RichTextBox（NSScrollView＋NSTextView：只打純文字、固定行高、每行底下的線由子類別畫）、
+// NbTextBox（TextBox＋LostFocus）、Cmd+X／C／V／A／Z（沒有「編輯」選單）、FontFamily 的 cell ascent／descent／em、
+// .NET Framework 的 string.GetHashCode（要存進 todo.json 的 id 不能每次開都不一樣）、yyyy-MM-dd 解析。
+import AppKit
+
+// MARK: - RichTextBox
+
+enum RichTextBoxScrollBars { case None, Horizontal, Vertical, Both, ForcedHorizontal, ForcedVertical, ForcedBoth }
+
+/// NSTextView：背景畫完後讓 RichTextBox 畫「字底下」的東西（筆記紙的線）；座標＝文件座標（左上、y 往下）
+final class _RichTextView: NSTextView {
+    weak var box: RichTextBox?
+    override func drawBackground(in rect: NSRect) {
+        super.drawBackground(in: rect)
+        guard let b = box, let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let wd = Int(bounds.width.rounded(.up)), ht = Int(bounds.height.rounded(.up))
+        let g = Graphics.FromCGContext(ctx, wd, ht)
+        let y0 = Int(textContainerInset.height.rounded())
+        let top = Int(rect.minY.rounded(.down)), bottom = Int(rect.maxY.rounded(.up))
+        b._PaintUnder(g, y0, top, bottom, wd)
+    }
+    // 離開打字（WinForms LostFocus）：沒打字就離開也要通知（textDidEndEditing 只有改過字才會送）
+    override func resignFirstResponder() -> Bool {
+        let ok = super.resignFirstResponder()
+        if ok { let b = box; DispatchQueue.main.async { b?.LostFocus?() } }
+        return ok
+    }
+}
+
+/// 使用者打字 → TextChanged（離開 → LostFocus 在 _RichTextView.resignFirstResponder）
+final class _RichTextDelegate: NSObject, NSTextViewDelegate {
+    weak var box: RichTextBox?
+    init(_ b: RichTextBox) { box = b }
+    func textDidChange(_ notification: Notification) { box?._userEdited() }
+}
+
+/// System.Windows.Forms.RichTextBox（只做小本子用到的）：純文字（不帶別的地方的字型、顏色）、直的捲軸、
+/// `_SetLineHeight` 固定行高（NSParagraphStyle 最小＝最大）、子類別覆寫 `_PaintUnder` 在字底下畫東西。
+class RichTextBox: Control {
+    var sv: NSScrollView? = nil
+    var tv: _RichTextView? = nil
+    var _storage: NSTextStorage? = nil
+    var _del: _RichTextDelegate? = nil
+    var _lineH = 0
+    var ScrollBars = RichTextBoxScrollBars.Both
+    var DetectUrls = true
+    var ShortcutsEnabled = true
+    var WordWrap = true
+    var ReadOnly = false { didSet { tv?.isEditable = !ReadOnly } }
+    // C# 的 LostFocus 事件（`x.LostFocus += delegate {…}` → `x.LostFocus = { … }`）
+    var LostFocus: (() -> Void)? = nil
+
+    override init() { super.init(); _w = 100; _h = 96 }
+    override var _nsView: NSView? { return sv }
+
+    override func _create() {
+        if sv != nil { return }
+        let s = NSScrollView(frame: NSRect(x: 0, y: 0, width: CGFloat(Swift.max(1, _w)), height: CGFloat(Swift.max(1, _h))))
+        s.borderType = .noBorder
+        s.hasVerticalScroller = ScrollBars != .None && ScrollBars != .Horizontal && ScrollBars != .ForcedHorizontal
+        s.hasHorizontalScroller = false
+        s.autohidesScrollers = true
+        s.drawsBackground = false
+        // TextKit 1（自己建 storage／layout manager／container）：段落樣式的固定行高兩種版本都吃，這樣比較確定
+        let storage = NSTextStorage()
+        let lm = NSLayoutManager()
+        storage.addLayoutManager(lm)
+        let cs = s.contentSize
+        let tc = NSTextContainer(containerSize: NSSize(width: cs.width, height: CGFloat.greatestFiniteMagnitude))
+        tc.widthTracksTextView = true
+        tc.lineFragmentPadding = 0
+        lm.addTextContainer(tc)
+        let t = _RichTextView(frame: NSRect(x: 0, y: 0, width: cs.width, height: cs.height), textContainer: tc)
+        t.box = self
+        t.minSize = NSSize(width: 0, height: cs.height)
+        t.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        t.isVerticallyResizable = true
+        t.isHorizontallyResizable = false
+        t.autoresizingMask = [.width]
+        t.isRichText = false            // 只貼純文字
+        t.importsGraphics = false
+        t.allowsUndo = true
+        t.usesFindPanel = false
+        t.isEditable = !ReadOnly
+        t.isSelectable = true
+        t.isAutomaticLinkDetectionEnabled = DetectUrls
+        t.isAutomaticQuoteSubstitutionEnabled = false
+        t.isAutomaticDashSubstitutionEnabled = false
+        t.isAutomaticTextReplacementEnabled = false
+        t.isAutomaticSpellingCorrectionEnabled = false
+        t.isContinuousSpellCheckingEnabled = false
+        t.textContainerInset = NSSize(width: 0, height: 0)
+        t.string = _text
+        let dg = _RichTextDelegate(self)
+        t.delegate = dg
+        s.documentView = t
+        sv = s; tv = t; _storage = storage; _del = dg
+        s.isHidden = !_visible
+        _styleChanged()
+    }
+
+    override func _applyBounds() {
+        super._applyBounds()
+        guard let s = sv, let t = tv else { return }
+        let cs = s.contentSize
+        t.minSize = NSSize(width: 0, height: cs.height)
+        t.setFrameSize(NSSize(width: cs.width, height: Swift.max(t.frame.height, cs.height)))
+        t.sizeToFit()
+    }
+
+    override func _styleChanged() {
+        guard let t = tv else { return }
+        t.backgroundColor = BackColor.ns
+        t.drawsBackground = true
+        t.insertionPointColor = ForeColor.ns
+        t.isEditable = Enabled && !ReadOnly
+        _applyAttrs()
+    }
+
+    func _attrs() -> [NSAttributedString.Key: Any] {
+        var a: [NSAttributedString.Key: Any] = [.font: _formsNSFont(Font), .foregroundColor: ForeColor.ns]
+        if _lineH > 0 {
+            let ps = NSMutableParagraphStyle()
+            ps.minimumLineHeight = CGFloat(_lineH)
+            ps.maximumLineHeight = CGFloat(_lineH)
+            a[.paragraphStyle] = ps
+        }
+        return a
+    }
+    /// 整篇套同一個字型、顏色、段落樣式；之後打的字（typingAttributes）也一樣
+    func _applyAttrs() {
+        guard let t = tv else { return }
+        let a = _attrs()
+        if let ps = a[.paragraphStyle] as? NSParagraphStyle { t.defaultParagraphStyle = ps }
+        t.typingAttributes = a
+        if let st = t.textStorage, st.length > 0 {
+            st.beginEditing()
+            st.setAttributes(a, range: NSRange(location: 0, length: st.length))
+            st.endEditing()
+        }
+        t.needsDisplay = true
+    }
+    /// mac：EM_SETPARAFORMAT（PFM_LINESPACING、固定）→ 固定行高（px＝pt）
+    func _SetLineHeight(_ h: Int) { _lineH = h; _applyAttrs() }
+
+    /// 子類別覆寫：在字底下畫（y0＝第一行上緣；top／bottom＝這次要畫的範圍；都是文件座標）
+    func _PaintUnder(_ g: Graphics, _ y0: Int, _ top: Int, _ bottom: Int, _ width: Int) { }
+
+    override var Text: String {
+        get { if let t = tv { _text = t.string }; return _text }
+        set {
+            let old = Text
+            _text = newValue
+            if let t = tv { t.string = newValue; _applyAttrs() }
+            if old != newValue { OnTextChanged(EventArgs.Empty) }
+        }
+    }
+    var TextLength: Int { return Text.utf16.count }
+    func _userEdited() { _text = tv?.string ?? _text; OnTextChanged(EventArgs.Empty) }
+
+    override func Invalidate() { _Coords.onMain { [weak self] in self?.tv?.needsDisplay = true } }
+    @discardableResult override func Focus() -> Bool {
+        guard let t = tv, let w = t.window else { return false }
+        return w.makeFirstResponder(t)
+    }
+    override var Focused: Bool { guard let t = tv else { return false }; return t.window?.firstResponder === t }
+    override func _ownsResponder(_ r: NSResponder) -> Bool { guard let t = tv else { return false }; return r === t }
+
+    // 選取（NSRange 跟 .NET 一樣是 UTF-16 位置）
+    var SelectionStart: Int {
+        get { return tv?.selectedRange().location ?? 0 }
+        set { guard let t = tv else { return }; let n = (t.string as NSString).length; t.setSelectedRange(NSRange(location: Swift.max(0, Swift.min(newValue, n)), length: 0)) }
+    }
+    var SelectionLength: Int {
+        get { return tv?.selectedRange().length ?? 0 }
+        set { guard let t = tv else { return }; let r = t.selectedRange(); let n = (t.string as NSString).length; t.setSelectedRange(NSRange(location: r.location, length: Swift.max(0, Swift.min(newValue, n - r.location)))) }
+    }
+    func SelectAll() { tv?.selectAll(nil) }
+    func Select(_ start: Int, _ length: Int) {
+        guard let t = tv else { return }
+        let n = (t.string as NSString).length
+        let s = Swift.max(0, Swift.min(start, n))
+        t.setSelectedRange(NSRange(location: s, length: Swift.max(0, Swift.min(length, n - s))))
+    }
+    var SelectedText: String {
+        get { guard let t = tv else { return "" }; return (t.string as NSString).substring(with: t.selectedRange()) }
+        set {
+            guard let t = tv else { return }
+            let r = t.selectedRange()
+            if t.shouldChangeText(in: r, replacementString: newValue) { t.replaceCharacters(in: r, with: newValue); t.didChangeText() }
+        }
+    }
+}
+
+// MARK: - TextBox with LostFocus
+
+/// mac：WinForms TextBox 的 LostFocus（NSTextField 的 controlTextDidEndEditing＝離開打字）；打字照樣通知 TextBox
+class NbTextBox: TextBox {
+    var LostFocus: (() -> Void)? = nil
+    var nbDel: _NbBoxDelegate? = nil
+    override func _create() {
+        super._create()
+        guard let t = tf, nbDel == nil else { return }
+        t.isHidden = !_visible   // Controls.Add 之前設的 Visible = false（TextBox._create 沒有套）
+        let dg = _NbBoxDelegate(self)
+        t.delegate = dg
+        nbDel = dg
+    }
+}
+final class _NbBoxDelegate: NSObject, NSTextFieldDelegate {
+    weak var box: NbTextBox?
+    init(_ b: NbTextBox) { box = b }
+    func controlTextDidChange(_ obj: Notification) { box?._userEdited() }
+    func controlTextDidEndEditing(_ obj: Notification) { box?.LostFocus?() }
+}
+
+// MARK: - Cmd+X／C／V／A／Z
+
+/// mac：程式沒有「編輯」選單，Cmd+X／C／V／A／Z 不會自己到打字框 → 小本子在 KeyDown 裡送給 first responder
+enum NbEditKeys {
+    static func Handle() -> Bool {
+        guard let ev = NSApp.currentEvent, ev.type == .keyDown, ev.modifierFlags.contains(.command) else { return false }
+        let ch = (ev.charactersIgnoringModifiers ?? "").lowercased()
+        var sel: Selector? = nil
+        switch ch {
+        case "x": sel = #selector(NSText.cut(_:))
+        case "c": sel = #selector(NSText.copy(_:))
+        case "v": sel = #selector(NSText.paste(_:))
+        case "a": sel = #selector(NSText.selectAll(_:))
+        case "z": sel = ev.modifierFlags.contains(.shift) ? Selector(("redo:")) : Selector(("undo:"))
+        default: break
+        }
+        guard let s = sel else { return false }
+        return NSApp.sendAction(s, to: nil, from: nil)
+    }
+}
+
+// MARK: - FontFamily metrics（GDI+ 的設計單位）
+
+/// mac：em 高＝1000，ascent／descent 從 CoreText 的 ascender／descender 換算（同一個 NSFont，畫跟量才對得上）
+extension FontFamily {
+    static var _nbMetrics: [String: (Int, Int)] = [:]
+    func _nbMetric(_ st: FontStyle) -> (Int, Int) {
+        let k = Name + "|" + String(st.rawValue)
+        if let v = FontFamily._nbMetrics[k] { return v }
+        let f = FontT(Name, 1000, st, GraphicsUnit.Pixel).NSFont
+        let v = (Int(f.ascender.rounded()), Int((-f.descender).rounded()))
+        FontFamily._nbMetrics[k] = v
+        return v
+    }
+    func GetEmHeight(_ st: FontStyle) -> Int { return 1000 }
+    func GetCellAscent(_ st: FontStyle) -> Int { return _nbMetric(st).0 }
+    func GetCellDescent(_ st: FontStyle) -> Int { return _nbMetric(st).1 }
+}
+
+// MARK: - misc
+
+/// mac：.NET Framework（64 位元）的 string.GetHashCode。Swift 的 hashValue 每次開程式都不一樣，
+/// 學校作業進待辦的 id（"s" + hash）會存進 todo.json，要每次都一樣。
+func _NbNetHash(_ s: String) -> Int {
+    var h1: Int32 = 5381
+    var h2: Int32 = 5381
+    let u = Array(s.utf16)
+    var i = 0
+    while i < u.count {
+        h1 = ((h1 &<< 5) &+ h1) ^ Int32(u[i])
+        if i + 1 >= u.count { break }
+        h2 = ((h2 &<< 5) &+ h2) ^ Int32(u[i + 1])
+        i += 2
+    }
+    return Int(h1 &+ (h2 &* 1566083941))
+}
+
+/// mac：DateTime.TryParseExact(s, "yyyy-MM-dd", Inv, DateTimeStyles.None, out d)
+func _NbParseYmd(_ s: String, _ v: inout DateTime) -> Bool {
+    let a = s.Split("-")
+    var y = 0, m = 0, d = 0
+    if s.Length != 10 || a.count != 3 || a[0].Length != 4 || a[1].Length != 2 || a[2].Length != 2 { return false }
+    if !int.TryParse(a[0], &y) || !int.TryParse(a[1], &m) || !int.TryParse(a[2], &d) { return false }
+    if y < 1 || m < 1 || m > 12 || d < 1 || d > DateTime.DaysInMonth(y, m) { return false }
+    v = DateTime(y, m, d)
+    return true
+}
+
+// ===== 08_shim_worksettings.swift =====
+// ===== 08_shim_worksettings.swift — 工作設定視窗（65_work_settings.swift）用到、shim 還沒有的 WinForms 東西 =====
+// - TextBox.GotFocus（點進輸入框＝焦點在那一格）、TextBox.UseSystemPasswordChar（shim 的 TextBox 只記旗標、照樣顯示字）
+//   → WsTextBox：自己建 NSTextField／NSSecureTextField，becomeFirstResponder 時叫 GotFocus。
+//   UseSystemPasswordChar 要在 Controls.Add（建 NSTextField）之前設，跟 C# 一樣。
+// - FolderBrowserDialog → WsDialogs.PickFolder（NSOpenPanel 只選資料夾）。
+// - 沒有「編輯」選單：Cmd+X／C／V／A／Z → WsEditKeys（送給 first responder）。
+import AppKit
+
+/// mac: 一般輸入框：拿到焦點時通知（WinForms 的 GotFocus）
+final class WsField: NSTextField {
+    var onFocus: (() -> Void)? = nil
+    override func becomeFirstResponder() -> Bool {
+        let r = super.becomeFirstResponder()
+        if r { onFocus?() }
+        return r
+    }
+}
+
+/// mac: 密碼框（UseSystemPasswordChar）：打的字顯示成圓點；拿到焦點時一樣通知
+final class WsSecureField: NSSecureTextField {
+    var onFocus: (() -> Void)? = nil
+    override func becomeFirstResponder() -> Bool {
+        let r = super.becomeFirstResponder()
+        if r { onFocus?() }
+        return r
+    }
+}
+
+/// mac: WinForms TextBox ＋ GotFocus 事件 ＋ 真的會遮字的 UseSystemPasswordChar
+final class WsTextBox: TextBox {
+    var GotFocus: (() -> Void)? = nil
+    override func _create() {
+        if tf != nil { return }
+        let t: NSTextField
+        if UseSystemPasswordChar {
+            let s = WsSecureField(string: _text)
+            s.onFocus = { [weak self] in self?.GotFocus?() }
+            t = s
+        } else {
+            let s = WsField(string: _text)
+            s.onFocus = { [weak self] in self?.GotFocus?() }
+            t = s
+        }
+        t.isBezeled = true; t.bezelStyle = .squareBezel; t.isEditable = !ReadOnly; t.isSelectable = true
+        t.usesSingleLineMode = !Multiline
+        t.cell?.isScrollable = true
+        t.cell?.wraps = false
+        t.placeholderString = PlaceholderText.isEmpty ? nil : PlaceholderText
+        let tg = _ControlTarget(self)
+        t.delegate = tg
+        target = tg
+        tf = t
+    }
+}
+
+/// mac: 程式沒有「編輯」選單，Cmd+X／C／V／A／Z 不會自己到打字框（貼 Jira token 要用）→ 工作設定在 KeyDown 裡送給 first responder
+enum WsEditKeys {
+    static var Command: Bool {
+        guard let ev = NSApp.currentEvent, ev.type == .keyDown else { return false }
+        return ev.modifierFlags.contains(.command)
+    }
+    static func Handle() -> Bool {
+        guard let ev = NSApp.currentEvent, ev.type == .keyDown, ev.modifierFlags.contains(.command) else { return false }
+        let ch = (ev.charactersIgnoringModifiers ?? "").lowercased()
+        var sel: Selector? = nil
+        switch ch {
+        case "x": sel = #selector(NSText.cut(_:))
+        case "c": sel = #selector(NSText.copy(_:))
+        case "v": sel = #selector(NSText.paste(_:))
+        case "a": sel = #selector(NSText.selectAll(_:))
+        case "z": sel = ev.modifierFlags.contains(.shift) ? Selector(("redo:")) : Selector(("undo:"))
+        default: break
+        }
+        guard let s = sel else { return false }
+        return NSApp.sendAction(s, to: nil, from: nil)
+    }
+}
+
+/// mac: FolderBrowserDialog → NSOpenPanel（只選資料夾、可以開新資料夾）；取消回 nil
+enum WsDialogs {
+    static func PickFolder(_ title: String, _ dir: String) -> String? {
+        NSApp.activate(ignoringOtherApps: true)
+        let p = NSOpenPanel()
+        p.title = title; p.message = title
+        p.canChooseFiles = false; p.canChooseDirectories = true; p.allowsMultipleSelection = false
+        p.canCreateDirectories = true
+        if !dir.isEmpty { p.directoryURL = URL(fileURLWithPath: dir, isDirectory: true) }
+        p.level = .floating
+        let r = p.runModal()
+        Form._maybeDeactivate()
+        if r != .OK { return nil }
+        return p.url?.path
     }
 }
 
@@ -10232,6 +10726,7 @@ final class World: Form {
     static func DataDirInit() -> String {
         var d = ProcessInfo.processInfo.environment["DESKPALS_DATA_DIR"] ?? ""
         // mac: ~/Library/Application Support/DeskPals（Windows 是 %LOCALAPPDATA%\DeskPals）
+        if d.isEmpty && App.Offscreen { d = Path.Combine(Path.GetTempPath(), "DeskPals-offscreen") }   // 離屏（測試）沒指定：不用你真的資料
         if d.isEmpty { d = NSHomeDirectory() + "/Library/Application Support/DeskPals" }
         return d
     }
@@ -10497,6 +10992,50 @@ final class World: Form {
     var wbWater: Double = 0
     // ---- from 61_stats.swift ----
     let statsState = Dict<String, String>()
+    // ---- from 62_work.swift ----
+    // ================= 設定（work-config.txt：key=value）=================
+    let wcfg = Dict<String, String>()
+    var workLoaded = false, workStarted = false
+    var jiraTokenCache: Bool? = nil
+    // 舊版擴充套件（或 ci-watch.js）送來的通知：桌面版已經在管的就丟掉（不講兩次）
+    var workDropped = 0
+    var lastOwn = "", appliedVpn = ""
+    // ---- 假時鐘（測試）----
+    var workShift = TimeSpan.Zero
+    // ---- 看過了沒（work-seen.txt）----
+    let wseen = Dict<String, String>()
+    var seenDirty = false
+    // ---- 提醒：離屏測試記下來 ----
+    let workNotices = List<String>()
+    // ---- 背景執行緒 ----
+    var workWake: AutoResetEvent! = nil
+    var workPollNow = false   // C#：volatile
+    var workPolled = 0
+    // ---- glab／gh 有沒有登入 ----
+    let glabHosts = List<String>()
+    var ghUser = "", glabState = "", ghState = ""
+    // ---- Jira ----
+    var jiraStatus = "", jiraMe: String? = nil
+    // ---- GitLab ----
+    let glProjects = Dict<String, Any>()   // host#id → projects/:id
+    // ---- 盯 CI ----
+    let ciWatches = List<CiWatch>()
+    // ---- 開會 ----
+    var meetPlan = List<MeetItem>()
+    let meetFired = HashSet<String>()
+    var meetText = "", meetErr = ""
+    // ---- Claude／Codex → 小本子 ----
+    let aiLogged = Dict<String, DateTime>()
+    var aiWritten = 0
+    // ---- from 64_notebook.swift ----
+    var nbForm: NotebookForm! = nil
+    var nbClip = "", nbSaid = ""
+    // ---- 學校行事曆：今天上過的課（從 ICS 算，不寫進 log）----
+    let nbFeeds = Dict<String, SchoolFeed>()
+    // ---- from 65_work_settings.swift ----
+    var workForm: WorkSettingsForm! = nil
+    // 設定視窗的示範：現在帶頭那隻站好的樣子（用預覽用的 World 畫，不動到桌面上的公仔）
+    var workPalPic: Bitmap! = nil
 }
 
 extension World {
@@ -10890,6 +11429,7 @@ extension World {
         ReminderTick()
         TicketTick()
         StudyTick()          // 讀書小幫手（52_study.swift）：學校行事曆、作業死線、考試倒數、熬夜
+        WorkTick()           // 工作來源（62_work.swift）：第一次才開背景執行緒
         MisTick(dt)          // 搗蛋（59_mischief.swift）：搶游標、下班清場、購物警察、打字太兇
         DownloadTick(dt)
         ExpireNotice()
@@ -11397,6 +11937,7 @@ extension World {
         let help = ToolStripMenuItem("小幫手（專注、安靜、提醒）")
         AddHelpers(help.DropDownItems)
         m.Items.Add(help)
+        m.Items.Add("小本子…", nil, { self.ShowNotebook() })   // 小本子（64_notebook.swift）
         m.Items.Add("公仔小屋（開關、設定）…", nil, { self.HouseMenu() })
         m.Items.Add(ToolStripSeparator())
         m.Items.Add(ToolStripLabel(Single ? "我的公仔" : "公仔們"))
@@ -11428,7 +11969,7 @@ extension World {
         m.Items.Add(Single ? "回" + MiniName + "裡待著" : "回櫃子裡待著", nil, { p.StowToShelf(true) })
         m.Items.Add("躲起來（⌃⌥S）", nil, { self.ToggleHide() })
         m.Items.Add(ToolStripSeparator())
-        m.Items.Add("收工（關掉 Desk Pals）", nil, { self.QuitAll() })
+        m.Items.Add("收工（關掉 WoWo Pals）", nil, { self.QuitAll() })
     }
 
     // 專注、安靜、提醒、搶票、今天的小結（公仔、櫃子、小屋的選單都有）
@@ -11548,7 +12089,7 @@ extension World {
         m.Items.Add("公仔小屋（開關、設定）…", nil, { self.HouseMenu() })
         m.Items.Add("躲起來（⌃⌥S）", nil, { self.ToggleHide() })
         m.Items.Add(ToolStripSeparator())
-        m.Items.Add("收工（關掉 Desk Pals）", nil, { self.QuitAll() })
+        m.Items.Add("收工（關掉 WoWo Pals）", nil, { self.QuitAll() })
         ShowMenu(m, p != nil ? p.P.Name : "公仔櫃", false)
     }
 
@@ -11665,7 +12206,7 @@ extension World {
         let l: Pet = Lead()
         let outs = OutPets()
         switch p[0] {
-        case "hello": CuHello(c); if active != nil { World.Send(c, "active " + active.P.Id + "\n") }; World.Send(c, "lineup " + lineup + "\n")   // 櫃子以桌面版為準（第一次設定在桌面做）
+        case "hello": CuHello(c); if active != nil { World.Send(c, "active " + active.P.Id + "\n") }; World.Send(c, "lineup " + lineup + "\n"); WorkHello(c)   // 櫃子以桌面版為準（第一次設定在桌面做）；工作來源：桌面版在管哪些（62_work.swift）
         case "custom": CuMsg(c, line)   // 自己做的公仔（53_custom.swift／56_custom_make.swift）
         case "save":
             Count("saves")
@@ -11726,7 +12267,7 @@ extension World {
             let sv: Bool = setupForm != nil && !setupForm.IsDisposed && (setupForm.VVisible || setupForm.Visible)
             World.Send(c, (sv ? setupForm.Info() : "setup none\n") + "end\n")
         case "notify":
-            if p.count >= 4 {
+            if p.count >= 4 && !WorkDropsNotify(p[1]) {   // 工作來源：桌面版已經在管的不講兩次（62_work.swift）
                 // 文字可以有空白：取第三個空白之後全部
                 let t = Array(line.trimmingCharacters(in: .whitespacesAndNewlines))
                 let i1 = World.IdxSpace(t, 0), i2 = World.IdxSpace(t, i1 + 1), i3 = World.IdxSpace(t, i2 + 1)
@@ -11746,7 +12287,7 @@ extension World {
                 if let ms = Int(p[1]), let lead = Int(p[2]) { AddTicket(ms, lead, p[3], i4 > 0 ? World.AfterIdx(t, i4 + 1) : "") }
             }
         case "lineup": SwitchLineup(p.count >= 2 ? p[1] : "", p.count >= 3 ? p[2] : ""); World.Send(c, "lineup " + lineup + "\n")   // 回報現在是哪一櫃（VS Code 用來判斷桌面版是不是舊版）
-        case "config-host": companyHost = p.count >= 2 ? p[1].trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        case "config-host": if !WorkOwns("vpn") { companyHost = p.count >= 2 ? p[1].trimmingCharacters(in: .whitespacesAndNewlines) : "" }   // 工作來源：桌面版有設公司主機就用桌面版的
         case "snap": if p.count >= 2 { Snap(p[1], World.ParseRect(p, 2)) }; World.Send(c, "snapped\n")
         case "snaps":
             // snaps <資料夾> <張數> <間隔ms> [x y w h]
@@ -11760,7 +12301,7 @@ extension World {
                 }
             }
         case "quit": QuitAll()
-        default: if !MisMsg(c, p, line) && !OrigMsg(c, p, line) && !StatsMsg(c, p, line) { StudyMsg(c, p, line) }   // mischief-…（59_mischief.swift）；stats-…（61_stats.swift）；course／exam／study-…（52_study.swift）
+        default: if !MisMsg(c, p, line) && !OrigMsg(c, p, line) && !StatsMsg(c, p, line) && !WorkMsg(c, p, line) && !NbMsg(c, p, line) { StudyMsg(c, p, line) }   // mischief-…（59_mischief.swift）；stats-…（61_stats.swift）；work-…（工作來源，62_work.swift）；nb-…（小本子，64_notebook.swift）；course／exam／study-…（52_study.swift）
         }
     }
 
@@ -11879,13 +12420,13 @@ extension World {
 
     static func ClaudeProjectsDir() -> String {
         var cfg = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR")
-        if string.IsNullOrEmpty(cfg) { cfg = Path.Combine(NSHomeDirectory(), ".claude") }
+        if string.IsNullOrEmpty(cfg) { cfg = World.AiHomeDefault(".claude") }   // 離屏（測試）時是資料資料夾裡的空資料夾（62_work.swift）
         return Path.Combine(cfg!, "projects")
     }
 
     static func CodexSessionsDir() -> String {
         var home = Environment.GetEnvironmentVariable("CODEX_HOME")
-        if string.IsNullOrEmpty(home) { home = Path.Combine(NSHomeDirectory(), ".codex") }
+        if string.IsNullOrEmpty(home) { home = World.AiHomeDefault(".codex") }   // 離屏（測試）時是資料資料夾裡的空資料夾（62_work.swift）
         return Path.Combine(home!, "sessions")
     }
 
@@ -11928,13 +12469,18 @@ extension World {
         Post { [self] in OnStuck(sr, k2!, t2, ti, min) }
     }
 
+    // 工作來源：預設的 ~/.claude 加上「別的資料夾」都看（62_work.swift 的 WorkClaudeRoots）
     func ClaudeWatchOnce(_ js: JavaScriptSerializer) throws {
-        let root = World.ClaudeProjectsDir()
-        if !Directory.Exists(root) { busyClaude = 0; return }
+        var busy = 0
+        for root in WorkClaudeRoots() { busy += ClaudeWatchRoot(js, root) }
+        busyClaude = busy
+    }
+
+    func ClaudeWatchRoot(_ js: JavaScriptSerializer, _ root: String) -> Int {
         let now = DateTime.UtcNow
         let seen = HashSet<String>()
         // mac: Claude Code 在 mac 上是 claude（原生執行檔）或 node 行程，名字跟 Windows 一樣
-        let anyClaude = Process.GetProcessesByName("claude").Length > 0 || Process.GetProcessesByName("node").Length > 0
+        let anyClaude = Process.GetProcessesByName("claude").Length > 0 || Process.GetProcessesByName("node").Length > 0 || WorkWslAlive("claude_dir")
         var busy = 0
         for pdir in World.WatchDirs(root) {
             for fi in World.WatchFiles(pdir, ".jsonl", nil, false) {
@@ -11955,10 +12501,10 @@ extension World {
                 StuckCheck(key, "Claude", act, kind, tool, title, anyClaude)
             }
         }
-        busyClaude = busy
         let gone = List<String>()
         for kk in stuck.Keys { if !seen.Contains(kk) && kk.lowercased().hasPrefix(root.lowercased()) { gone.Add(kk) } }
         for kk in gone { stuck.Remove(kk) }
+        return busy
     }
 
     // mac: DirectoryInfo／FileInfo 的替代（直接用 FileManager）
@@ -12151,18 +12697,20 @@ extension World {
     }
 
     func CodexWatchOnce(_ relist: Bool) throws {
-        let root = World.CodexSessionsDir()
-        if !Directory.Exists(root) { busyCodex = 0; return }
+        let roots = WorkCodexRoots()   // 工作來源：預設的 ~/.codex 加上「別的資料夾」
+        if roots.Count == 0 { busyCodex = 0; return }
         let now = DateTime.UtcNow
         if relist {
             let files = List<String>()
-            for fi in World.WatchFiles(root, ".jsonl", "rollout-", true) {
-                if (now - World.WatchMtime(fi)).TotalMinutes <= 40 { files.Add(fi) }
+            for root in roots {
+                for fi in World.WatchFiles(root, ".jsonl", "rollout-", true) {
+                    if (now - World.WatchMtime(fi)).TotalMinutes <= 40 { files.Add(fi) }
+                }
             }
             codexFiles = files
         }
         // mac: Codex CLI 是 codex（原生）或 node 行程
-        let anyCodex = Process.GetProcessesByName("codex").Length > 0 || Process.GetProcessesByName("node").Length > 0
+        let anyCodex = Process.GetProcessesByName("codex").Length > 0 || Process.GetProcessesByName("node").Length > 0 || WorkWslAlive("codex_dir")
         var busy = 0
         for f in codexFiles {
             if !FileManager.default.fileExists(atPath: f) { continue }
@@ -12702,6 +13250,8 @@ extension World {
         MisSnapAsk(g)   // 搗蛋第一次打開的說明（公開版）
         StudySnap(g)
         CuSnap(g)
+        NbSnap(g)   // 小本子（64_notebook.swift）
+        WorkSnap(g)   // 工作設定（65_work_settings.swift）
         if pmenu != nil && pmenu.VVisible { pmenu.PaintTo(g) }
         // 游標位置（只畫一個小十字，方便看）
         let c = World.CursorPos()
@@ -13334,7 +13884,7 @@ extension World {
                         var host = ""
                         lock(healthCd) { host = self.companyHost }
                         if host != "" {
-                            let ok = World.TcpOk(host, 443) || World.TcpOk(host, 80)
+                            let ok = World.VpnReachable(host)   // 工作來源：host 或 host:port
                             if !ok { if vpnDownSince == DateTime.MaxValue { vpnDownSince = now } } else { vpnDownSince = DateTime.MaxValue }
                             if vpnDownSince != DateTime.MaxValue && (now - vpnDownSince).TotalSeconds > 30 && HealthReady("vpn") {
                                 let h2 = host; Post { self.OnNotify("vpn", "-", h2 + " 連不到") }
@@ -13417,7 +13967,7 @@ extension World {
     }
 
     // ================= 3) 下載完成 =================
-    static func DownloadsDir() -> String { return (NSHomeDirectory() as NSString).appendingPathComponent("Downloads") }
+    // 0.11：DownloadsDir() 搬到 62_work.swift（離屏（測試）不看真的下載資料夾）
 
     // mac: 目錄內容快照（名字 → 大小＋修改時間），用來找出新增／改名／變動的檔案
     static func DlSnapshot(_ dir: String) -> [String: String] {
@@ -14409,6 +14959,8 @@ extension World {
         let help = ToolStripMenuItem("小幫手（專注、安靜、提醒）")
         AddHelpers(help.DropDownItems)
         work.DropDownItems.Add(help)
+        work.DropDownItems.Add("小本子…", nil, { self.ShowNotebook() })   // 小本子：待辦、今天做了、筆記（64_notebook.swift）
+        work.DropDownItems.Add("工作設定…", nil, { self.ShowWorkSettings() })   // 工作來源：Jira、GitLab、GitHub、CI、開會…（65_work_settings.swift）
         m.Items.Add(work)
 
         let setm = ToolStripMenuItem("設定")
@@ -14420,7 +14972,7 @@ extension World {
         m.Items.Add(setm)
 
         m.Items.Add(ToolStripSeparator())
-        m.Items.Add("收工（關掉 Desk Pals）", nil, { self.QuitAll() })
+        m.Items.Add("收工（關掉 WoWo Pals）", nil, { self.QuitAll() })
         ShowMenu(m, "公仔小屋", true, at)
     }
 
@@ -15252,7 +15804,7 @@ class SetupForm: Form {
             let tc = b.Enabled ? Pix.TextC : Pix.Dim
             if b.Id == "back" { Arrow(g, tx + U, cy, -1, tc); tx += ax }
             TextRenderer.DrawText(g, b.Text, bf, Rectangle(tx, r.Y, tw + 4, r.Height - 2 * U), tc, Pix.LeftMid)
-            if b.Id == "next" && step < 1 { Arrow(g, tx + tw + 2 * U, cy, 1, tc) }
+            if b.Id == "next" && step < 1 { Arrow(g, tx + tw + 3 * U, cy, 1, tc) }
             return
         }
         // 卡片：底下一層影子；選到的是金色粗框、右上角綠色勾勾；「做一隻自己的」是暖黃色的主打卡
@@ -18794,8 +19346,8 @@ extension World {
         while !closing {
             do {
                 let urls: List<String> = lock(schoolUrls) { List<String>(schoolUrls) }
-                let skip = workCal
-                urls.RemoveAll { (u: String) -> Bool in u == skip }   // 跟 VS Code 開會提醒同一份：不要提醒兩次
+                let skip = workCal, skip2 = WorkMeetUrl()
+                urls.RemoveAll { (u: String) -> Bool in u == skip || u == skip2 }   // 跟開會提醒（VS Code 或桌面版的工作設定）同一份：不要提醒兩次
                 let doFetch = fetchNow || DateTime.Now >= nextFetch
                 if urls.Count > 0 && !App.Offscreen && doFetch {
                     fetchNow = false
@@ -18970,7 +19522,7 @@ extension World {
             planFired.Add(it.Key)
             if now - it.At > (it.Kind.EndsWith("-now") ? 5 : 3) * 60000 { continue }   // 電腦睡著錯過太久的就不補
             App.Log("school " + it.Kind + ": " + it.Text)
-            if it.Kind == "class-now" { Count("classes") }
+            if it.Kind == "class-now" { Count("classes"); WorkLogClass(it) }   // 工作來源：上課也寫進小本子（62_work.swift）
             OnNotify(it.Kind, it.Url != "" ? it.Url : "-", it.Text)
             let q = it.QuietMin
             if q > 0 { Later(10) { self.StartQuiet(q) } }   // 等「上課了」那則講完再安靜（不然馬上被「我安靜待著」蓋掉）
@@ -20062,7 +20614,7 @@ final class CuSprite
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit
             // 格子外面是奶油色紙；格子裡面透明（畫圖軟體不支援透明的話，白底也可以，會自動去背）
             g.FillRectangle(paper, 0, 0, TW, TH)
-            g.DrawString("Desk Pals 動作表範本", tf, ink, TGap, 10)
+            g.DrawString("WoWo Pals 動作表範本", tf, ink, TGap, 10)
             g.DrawString("每一格畫一個動作，腳踩在格子底部。空著的格子會自動補動畫（至少畫「站」）。", hf, dim, TGap, 36)
             for i in 0..<SheetKeys.count
             {
@@ -21716,7 +22268,7 @@ extension Pal {
         Say("x_net-down", "網路斷了！"); Say("x_net-up", "網路回來了！👍"); Say("x_vpn", "連不到公司網路（VPN 斷了？）"); Say("x_download", "下載好了！");
         Say("x_ticket0", "🎫 {t} 還有 {h}開賣！先登入、綁好付款"); Say("x_ticket1", "🎫 {t} 再 30 分鐘開賣，網頁先開好！"); Say("x_ticket2", "🎫 {t} 剩 10 分鐘！好緊張～");
         Say("x_ticket3", "🎫 準備！手指放在按鈕上！"); Say("x_ticket4", "🎫 開搶！！衝衝衝！");
-        Say("x_share", "我家的" + me + "住進我電腦了 ✨ #我的桌面公仔 #DeskPals", me + "每天在我桌面上跑來跑去 ✨ #我的桌面公仔 #DeskPals");
+        Say("x_share", "我家的" + me + "住進我電腦了 ✨ #我的桌面公仔 #WoWoPals", me + "每天在我桌面上跑來跑去 ✨ #我的桌面公仔 #WoWoPals");
         Say("x_sig", "看我的招牌跳跳！"); Say("x_sit", "坐一下下～");
         // ---- 小動作 ----
         Say("x_push", "（推推）啊，掉下去了！"); Say("x_ignore", "哼，我在忙！（其實沒有）"); Say("x_comeback", "好啦好啦，我回來陪你了！");
@@ -21808,7 +22360,7 @@ extension Pal {
         Say("x_net-down", "網路斷了。"); Say("x_net-up", "網路回來了。👍"); Say("x_vpn", "連不到公司網路（VPN 斷了？）"); Say("x_download", "下載好了：");
         Say("x_ticket0", "🎫 {t} 還有 {h}開賣。先登入、綁好付款"); Say("x_ticket1", "🎫 {t} 30 分鐘後開賣。網頁先開"); Say("x_ticket2", "🎫 {t} 剩 10 分鐘。專心");
         Say("x_ticket3", "🎫 準備。手指就位"); Say("x_ticket4", "🎫 開搶。上！");
-        Say("x_share", me + "住進我的桌面了。很酷。😎 #我的桌面公仔 #DeskPals", "我的桌面多了一位" + me + "。 #我的桌面公仔 #DeskPals");
+        Say("x_share", me + "住進我的桌面了。很酷。😎 #我的桌面公仔 #WoWoPals", "我的桌面多了一位" + me + "。 #我的桌面公仔 #WoWoPals");
         Say("x_sig", "看好了。"); Say("x_sit", "坐一下。");
         // ---- 小動作 ----
         Say("x_push", "（推）……掉了。"); Say("x_ignore", "（轉頭）現在不想理人。"); Say("x_comeback", "……好吧，陪你。");
@@ -21900,7 +22452,7 @@ extension Pal {
         Say("x_net-down", "網、網路斷了！"); Say("x_net-up", "網路回來了…👍"); Say("x_vpn", "那個…連不到公司網路（VPN 斷了？）"); Say("x_download", "下載好了…：");
         Say("x_ticket0", "🎫 {t} 還有 {h}開賣…先登入、綁好付款喔"); Say("x_ticket1", "🎫 {t} 再 30 分鐘…網頁先開好"); Say("x_ticket2", "🎫 {t} 剩 10 分鐘…好緊張…");
         Say("x_ticket3", "🎫 準、準備…手指放好"); Say("x_ticket4", "🎫 開搶！衝、衝啊！");
-        Say("x_share", "我家的" + me + "害羞地住進我電腦了 🙈 #我的桌面公仔 #DeskPals", me + "每天偷偷在我桌面上陪我 ✨ #我的桌面公仔 #DeskPals");
+        Say("x_share", "我家的" + me + "害羞地住進我電腦了 🙈 #我的桌面公仔 #WoWoPals", me + "每天偷偷在我桌面上陪我 ✨ #我的桌面公仔 #WoWoPals");
         Say("x_sig", "那、那我表演一下…"); Say("x_sit", "坐、坐一下…");
         // ---- 小動作 ----
         Say("x_push", "啊…（不小心推下去了）"); Say("x_ignore", "（害羞到轉過去）"); Say("x_comeback", "那個…我回來了…");
@@ -21992,7 +22544,7 @@ extension Pal {
         Say("x_net-down", "網路斷了！世界末日！"); Say("x_net-up", "網路回來了！人類得救了 👍"); Say("x_vpn", "連不到公司網路（VPN 斷了？）"); Say("x_download", "下載好了！");
         Say("x_ticket0", "🎫 {t} 還有 {h}開賣！先登入、綁好付款"); Say("x_ticket1", "🎫 {t} 再 30 分鐘開賣，網頁先開好"); Say("x_ticket2", "🎫 {t} 剩 10 分鐘！手指熱身！");
         Say("x_ticket3", "🎫 準備！深呼吸，不要手抖"); Say("x_ticket4", "🎫 開搶！！衝啊！");
-        Say("x_share", "我家" + me + "住進我電腦了，還會講冷笑話 ✨ #我的桌面公仔 #DeskPals", me + "在我桌面上班，薪水是摸摸 🤡 #我的桌面公仔 #DeskPals");
+        Say("x_share", "我家" + me + "住進我電腦了，還會講冷笑話 ✨ #我的桌面公仔 #WoWoPals", me + "在我桌面上班，薪水是摸摸 🤡 #我的桌面公仔 #WoWoPals");
         Say("x_sig", "看我的招牌絕技！"); Say("x_sit", "坐下，休息是為了走更長的路");
         // ---- 小動作 ----
         Say("x_push", "（推）喔不，地心引力贏了"); Say("x_ignore", "我在生氣（假的）"); Say("x_comeback", "好啦好啦，氣消了！");
@@ -22084,7 +22636,7 @@ extension Pal {
         Say("x_net-down", "網路斷了。不是我咬的！"); Say("x_net-up", "網路回來了。喵 👍"); Say("x_vpn", "連不到公司網路（VPN 斷了？）"); Say("x_download", "下載好了：");
         Say("x_ticket0", "🎫 {t} 還有 {h}開賣。先登入、綁好付款"); Say("x_ticket1", "🎫 {t} 再 30 分鐘開賣。網頁先開好"); Say("x_ticket2", "🎫 {t} 剩 10 分鐘。（尾巴甩甩）");
         Say("x_ticket3", "🎫 準備。像撲獵物那樣"); Say("x_ticket4", "🎫 開搶！撲！");
-        Say("x_share", "我家" + me + "住進我電腦了 🐾 #我的桌面公仔 #DeskPals", me + "現在連我的桌面都要佔領 🐾 #我的桌面公仔 #DeskPals", "上班有" + me + "盯著，不敢偷懶 🐱 #我的桌面公仔 #DeskPals");
+        Say("x_share", "我家" + me + "住進我電腦了 🐾 #我的桌面公仔 #WoWoPals", me + "現在連我的桌面都要佔領 🐾 #我的桌面公仔 #WoWoPals", "上班有" + me + "盯著，不敢偷懶 🐱 #我的桌面公仔 #WoWoPals");
         Say("x_sig", "（伸懶腰，然後一躍）"); Say("x_sit", "（坐下，尾巴繞好）");
         // ---- 貓的小動作：推東西、不理你又回來、縮成土司 ----
         Say("x_push", "（推）……掉下去了。", "（盯著你，慢慢推）", "這個不需要。（推）"); Say("x_ignore", "（背對你）", "現在不想理你。"); Say("x_comeback", "（蹭蹭）……只是剛好路過。", "（跳回你旁邊）");
@@ -22176,7 +22728,7 @@ extension Pal {
         Say("x_net-down", "網路斷了！汪汪！"); Say("x_net-up", "網路回來了！汪 👍"); Say("x_vpn", "連不到公司網路（VPN 斷了？）"); Say("x_download", "下載好了！汪！");
         Say("x_ticket0", "🎫 {t} 還有 {h}開賣！先登入、綁好付款"); Say("x_ticket1", "🎫 {t} 再 30 分鐘！我陪你等！"); Say("x_ticket2", "🎫 {t} 剩 10 分鐘！汪汪！");
         Say("x_ticket3", "🎫 準備！手指放好！"); Say("x_ticket4", "🎫 開搶！！衝啊！汪！");
-        Say("x_share", "我家" + me + "住進我電腦了 🐾 #我的桌面公仔 #DeskPals", me + "每天在我桌面上搖尾巴 🐶 #我的桌面公仔 #DeskPals", "上班有" + me + "陪，心情好好 🐾 #我的桌面公仔 #DeskPals");
+        Say("x_share", "我家" + me + "住進我電腦了 🐾 #我的桌面公仔 #WoWoPals", me + "每天在我桌面上搖尾巴 🐶 #我的桌面公仔 #WoWoPals", "上班有" + me + "陪，心情好好 🐾 #我的桌面公仔 #WoWoPals");
         Say("x_sig", "汪！看我轉圈圈！"); Say("x_sit", "（乖乖坐好）汪！");
         // ---- 狗的小動作：搖尾巴、撿球回來、你回來就跳 ----
         Say("x_push", "汪？（不小心撞下去了）", "（咬咬…掉下去了）"); Say("x_ignore", "（假裝在聞地板）"); Say("x_comeback", "汪！我回來了！不生氣了！");
@@ -22539,7 +23091,8 @@ enum CuImg {
         return keep
     }
 
-    // 只留最大的那塊（和夠大的旁支，例如分開的耳朵、尾巴）
+    // 只留主角那塊（和夠大的旁支，例如分開的耳朵、尾巴）。
+    // 主角＝包住畫面中央的那塊（夠大的話）；中央沒有才用最大的那塊。背景很亂的照片，最大的那塊常常是背景（人像測試 v011\humantest）
     static func KeepMain(_ px: inout [Int], _ w: Int, _ h: Int) {
         let n = w * h
         var lab = [Int](repeating: 0, count: n)
@@ -22568,6 +23121,15 @@ enum CuImg {
         var big = 0
         for i in 1..<sizes.count { big = Math.Max(big, sizes[i]) }
         if big == 0 { return }
+        var main = CuImg.CentreLabel(lab, w, h)
+        if main > 0 && sizes[main] * 20 >= big { big = sizes[main] }   // 中央那塊至少有最大那塊的 5%：當主角
+        else { main = 0 }
+        var keep = [Bool](repeating: false, count: sizes.count)
+        for i in 1..<sizes.count {
+            let enough: Bool = sizes[i] * 8 >= big
+            let notBigger: Bool = main == 0 || i == main || sizes[i] <= sizes[main]
+            keep[i] = enough && notBigger   // 比主角還大的（背景）不留
+        }
         for i in 0..<n {
             let a = (px[i] >> 24) & 255
             if a == 0 { continue }
@@ -22583,7 +23145,7 @@ enum CuImg {
                         let xx = x + dx, yy = y + dy
                         if !(xx < 0 || yy < 0 || xx >= w || yy >= h) {
                             let ll = lab[yy * w + xx]
-                            if ll != 0 && sizes[ll] * 8 >= big { near = true }
+                            if ll != 0 && keep[ll] { near = true }
                         }
                         dx += 1
                     }
@@ -22591,8 +23153,25 @@ enum CuImg {
                 }
                 if !near { px[i] = 0 }
             }
-            else if sizes[l] * 8 < big { px[i] = 0 }
+            else if !keep[l] { px[i] = 0 }
         }
+    }
+
+    // 畫面中央（往外一圈一圈找，最多找到短邊的 1/6）碰到的第一塊；0＝沒有
+    static func CentreLabel(_ lab: [Int], _ w: Int, _ h: Int) -> Int {
+        let cx = w / 2, cy = h / 2, max = Math.Max(1, Math.Min(w, h) / 6)
+        for r in 0...max {
+            for dy in -r...r {
+                for dx in -r...r {
+                    if Math.Max(Math.Abs(dx), Math.Abs(dy)) != r { continue }
+                    let x = cx + dx, y = cy + dy
+                    if x < 0 || y < 0 || x >= w || y >= h { continue }
+                    let l = lab[y * w + x]
+                    if l != 0 { return l }
+                }
+            }
+        }
+        return 0
     }
 
     // 筆刷：擦掉／補回（座標都是 0～1；補回＝原圖的顏色）
@@ -22855,7 +23434,19 @@ enum CuImg {
         }
         // 脖子
         neck = 0.42; var neckOk = false
-        let y0 = CInt(Double(h) * 0.22), y1 = CInt(Double(h) * 0.6)
+        let tall = h > 2 * w   // 全身照這種瘦長的：頭在很上面（人像測試：22–60% 會找到腰）
+        var y0 = CInt(Double(h) * (tall ? 0.08 : 0.22))
+        let y1 = CInt(Double(h) * (tall ? 0.30 : 0.6))
+        if tall {
+            // 頭頂也很窄：從頭最寬的那列以下才開始找脖子
+            var top = 0
+            while top < h - 1 && width[top] == 0 { top += 1 }
+            var hy = top, hw = -1
+            let headEnd = top + CInt(Double(h) * 0.09)
+            var yh = top
+            while yh <= headEnd && yh < h { if width[yh] > hw { hw = width[yh]; hy = yh }; yh += 1 }   // 頭大約佔全身 12%：頂端往下 9% 內最寬的＝臉
+            y0 = Math.Max(y0, hy + 1)
+        }
         var best = -1; var bv = 1e9
         var y = y0
         while y <= y1 && y < h {
@@ -22896,6 +23487,13 @@ enum CuImg {
         if Double(run) >= Math.Max(2.0, Double(h) * 0.07) {
             let hp = 1 - (Double(run) + 0.5) / Double(h)
             if hp > neck + 0.12 && hp < 0.95 { hip = hp; hipOk = true }
+        }
+        if !hipOk {
+            var widest = 0, bottom = 0
+            for y2 in 0..<h { widest = Math.Max(widest, width[y2]) }
+            var yb = h - 1
+            while yb >= 0 && bottom == 0 { bottom = width[yb]; yb -= 1 }
+            if widest > 0 && Double(bottom) >= Double(widest) * 0.85 { hip = 0.97 }   // 半身照：整塊都是身體，腳只留最下面一點點
         }
         if hip < neck + 0.15 { hip = Math.Min(0.92, neck + 0.3) }
         confident = hipOk && neckOk || (hipOk && Double(run) >= Double(h) * 0.12)
@@ -23274,7 +23872,7 @@ class CuMaker: Form {
     func PickImage(_ sheet: Bool) {
         if App.Offscreen { App.Log("custom: file dialog skipped (offscreen)"); return }
         // mac: OpenFileDialog（圖片（PNG、JPG、GIF、BMP））→ NSOpenPanel
-        let file = CuDialogs.Open(sheet ? "選畫好的動作表" : "選一張照片或圖片", ["png", "jpg", "jpeg", "gif", "bmp"], Environment.GetFolderPath(Environment.SpecialFolder.MyPictures))
+        let file = CuDialogs.Open(sheet ? "選畫好的動作表" : "選一張照片或圖片", ["png", "jpg", "jpeg", "gif", "bmp"], World.UserFolder(Environment.SpecialFolder.MyPictures, "", "Pictures"))
         if file != nil { LoadImage(file!, sheet) }
     }
 
@@ -23475,6 +24073,10 @@ class CuMaker: Form {
         Pix.Art(g, CuMaker.CAT, pal, r.X + (r.Width - aw) / 2, r.Y + Sc(22), c)
         TextRenderer.DrawText(g, "把照片拖進來，或點這裡選一張", bigF, Rectangle(r.X, r.Y + Sc(22) + CuMaker.CAT.count * c + Sc(10), r.Width, Sc(28)), Pix.TextC, Pix.Mid)
         TextRenderer.DrawText(g, "PNG・JPG・GIF・BMP 都可以", subF, Rectangle(r.X, r.Y + Sc(22) + CuMaker.CAT.count * c + Sc(40), r.Width, Sc(20)), Pix.C(0x9A6338), Pix.Mid)
+        // 使用者指定的原字（v011 SPEC §4），不要改字
+        let artH: Int = CuMaker.CAT.count * c
+        TextRenderer.DrawText(g, CuMaker.CopyrightNote, subF, Rectangle(r.X, r.Y + Sc(22) + artH + Sc(62), r.Width, Sc(20)), Pix.C(0xB04040), Pix.Mid)
+        if PhotoNoAlpha() { TextRenderer.DrawText(g, CuMaker.PortraitTip, subF, Rectangle(r.X, r.Y + Sc(22) + artH + Sc(82), r.Width, Sc(20)), Pix.C(0x9A6338), Pix.Mid) }   // 選過一張沒透明的照片
         // 小技巧
         let tip = Rectangle(r.X, r.Bottom + Sc(14), r.Width, Sc(78))
         Pix.Round(g, Pix.C(0xE6D3B0), tip.X, tip.Y, tip.Width, tip.Height, U)
@@ -23487,6 +24089,10 @@ class CuMaker: Form {
         let tb: Btn! = Find("template")
         if tb != nil { TextRenderer.DrawText(g, "進階：自己畫每個動作（動作表）、或匯入朋友傳來的公仔", smallF, Rectangle(r.X, tb.R.Y - Sc(22), r.Width, Sc(18)), Pix.C(0x9A6338), Pix.LeftMid) }
     }
+
+    static let CopyrightNote = "千萬不要使用有版權的照片"
+    func PhotoNoAlpha() -> Bool { return spr != nil && !meta.Sheet && !srcAlpha }
+    static let PortraitTip = "人像照先在手機去背，用胸口以上的最可愛"
 
     static let CAT: [String] = [
         "..kk..........kk..",
@@ -23566,6 +24172,8 @@ class CuMaker: Form {
         }
         Section(g, "修一下（在左邊的圖上塗）", r.X, r.Y + Sc(92))
         Section(g, "風格", r.X, r.Y + Sc(204))
+        // 沒有透明的照片（人像照直接去背常常不乾淨，人像測試 v011\humantest）：提醒先在手機去背
+        if PhotoNoAlpha() { TextRenderer.DrawText(g, CuMaker.PortraitTip, subF, Rectangle(r.X, r.Y + Sc(346), r.Width, Sc(36)), Pix.C(0x9A6338), [TextFormatFlags.Left, TextFormatFlags.Top, TextFormatFlags.WordBreak]) }
         // 實際大小預覽（桌面上就是這麼大）：左邊圖的右下角一小格
         if spr != nil {
             let mw = Sc(120), mh = Sc(104)
@@ -23792,7 +24400,7 @@ extension World {
     func CuSaveTemplateDialog() {
         if App.Offscreen { App.Log("custom: template dialog skipped (offscreen)"); return }
         // mac: SaveFileDialog（PNG 圖片）→ NSSavePanel
-        guard let file = CuDialogs.Save("存動作表範本", "DeskPals動作表範本.png", ["png"], Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)) else { return }
+        guard let file = CuDialogs.Save("存動作表範本", "DeskPals動作表範本.png", ["png"], World.UserFolder(Environment.SpecialFolder.DesktopDirectory, "", "Desktop")) else { return }
         World.CuSaveTemplate(file)
         Lead().Say("範本存好了：每一格畫一個動作，畫好再按「上傳畫好的動作表」🎨", 4)
     }
@@ -24011,7 +24619,7 @@ extension World {
     // 選單：做分享短片（存到 圖片\Desk Pals、說明文字放進剪貼簿、打開資料夾）
     func ShareClip(_ who: Pet!) {
         if sharing2 { return }
-        let dir = App.Offscreen ? Path.Combine(World.DataDir, "share") : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Desk Pals")
+        let dir = App.Offscreen ? Path.Combine(World.DataDir, "share") : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "WoWo Pals")
         ShareClipTo(dir, who)
     }
 
@@ -24068,7 +24676,7 @@ extension World {
             // mac: explorer /select → Finder 選取
             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
         }
-        l.Say("短片做好了！存在「圖片/Desk Pals」，說明文字也複製好了，直接貼上就能分享 🎬", 5)   // mac: 路徑分隔用 /
+        l.Say("短片做好了！存在「圖片/WoWo Pals」，說明文字也複製好了，直接貼上就能分享 🎬", 5)   // mac: 路徑分隔用 /
     }
 
     // 畫每一格：可愛的小桌面背景＋公仔照劇本動
@@ -24081,7 +24689,7 @@ extension World {
         let heroPet: Pet = pets[0]
         caption = nil
         for p in pets { if p.P.Cu { caption = p.ShareLine("x_share"); break } }
-        if string.IsNullOrEmpty(caption) { caption = "我的桌面公仔在螢幕上陪我上班 ✨ #我的桌面公仔 #DeskPals" }
+        if string.IsNullOrEmpty(caption) { caption = "我的桌面公仔在螢幕上陪我上班 ✨ #我的桌面公仔 #WoWoPals" }
         let hi = World.NoEmoji(heroPet.ShareLine("hi"))
         let ps = cast.Count == 1 ? 13 : (cast.Count == 2 ? 11 : (cast.Count == 3 ? 9 : 7))
         let frames = List<[Int]>()
@@ -24217,7 +24825,7 @@ extension World {
         // 浮水印
         do {
             let f = FontT("Microsoft JhengHei UI", 16, FontStyle.Bold, GraphicsUnit.Pixel)
-            let s = "Desk Pals"
+            let s = "WoWo Pals"
             let ts = TextRenderer.MeasureText(s, f, SizeT(4000, 400), TextFormatFlags.NoPadding)
             let tx = W0 - ts.Width - 18, ty = H0 - ts.Height - 14
             TextRenderer.DrawText(g, s, f, Point(tx + 1, ty + 1), Pix.C(0x7A4A28), TextFormatFlags.NoPadding)
@@ -24239,7 +24847,7 @@ extension World {
         if m == nil { return }
         if App.Offscreen { App.Log("custom: export dialog skipped (offscreen)"); return }
         // mac: SaveFileDialog → NSSavePanel
-        guard let file = CuDialogs.Save("匯出「" + m.Name + "」", CuMeta.CleanName(m.Name) + ".deskpal", ["deskpal"], Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)) else { return }
+        guard let file = CuDialogs.Save("匯出「" + m.Name + "」", CuMeta.CleanName(m.Name) + ".deskpal", ["deskpal"], World.UserFolder(Environment.SpecialFolder.DesktopDirectory, "", "Desktop")) else { return }
         if CuExport(id, file) { Lead().Say("匯出好了！把「" + Path.GetFileName(file) + "」傳給朋友，他在小屋按「匯入朋友的公仔」就能養 🧸", 5) }
     }
 
@@ -24252,7 +24860,7 @@ extension World {
             guard let meta = try JavaScriptSerializer().DeserializeObject(m.ToJson()) as? Dict<String, Any> else { return false }
             meta.Remove("id"); meta.Remove("created")
             let d = Dict<String, Any>()
-            d["deskpal"] = 1; d["app"] = "Desk Pals"; d["meta"] = meta; d["source"] = Data(src).base64EncodedString()   // Convert.ToBase64String
+            d["deskpal"] = 1; d["app"] = "WoWo Pals"; d["meta"] = meta; d["source"] = Data(src).base64EncodedString()   // Convert.ToBase64String
             let js = JavaScriptSerializer(); js.MaxJsonLength = int.MaxValue
             try File.WriteAllText(path, js.Serialize(d), UTF8Encoding(false))
             App.Log("custom exported " + id + " -> " + path)
@@ -24264,7 +24872,7 @@ extension World {
     func CuImportDialog(_ first: Bool) {
         if App.Offscreen { App.Log("custom: import dialog skipped (offscreen)"); if first { ShowSetup(true) }; return }
         // mac: OpenFileDialog → NSOpenPanel（只列 .deskpal）
-        guard let file = CuDialogs.Open("匯入朋友的公仔", ["deskpal"], Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)) else { if first { ShowSetup(true) }; return }
+        guard let file = CuDialogs.Open("匯入朋友的公仔", ["deskpal"], World.UserFolder(Environment.SpecialFolder.DesktopDirectory, "", "Desktop")) else { if first { ShowSetup(true) }; return }
         CuImportFile(file, first)
     }
 
@@ -24292,7 +24900,7 @@ extension World {
                 var ver: Any? = nil, mo: Any? = nil, so: Any? = nil
                 var isPal = false   // C#：d == null || !TryGetValue || Convert.ToInt32(ver) != 1（短路：前面不成立才轉）
                 if d != nil && d!.TryGetValue("deskpal", &ver) { isPal = try World.CuToInt32(ver) == 1 }
-                if !isPal { err = "這不是 Desk Pals 的公仔檔" }
+                if !isPal { err = "這不是 WoWo Pals 的公仔檔" }
                 else if !d!.TryGetValue("meta", &mo) || !(mo is Dict<String, Any>) || !d!.TryGetValue("source", &so) || !(so is String) { err = "公仔檔缺東西（可能壞掉了）" }
                 else {
                     let m: CuMeta = CuMeta.FromDict(mo as! Dict<String, Any>)
@@ -27348,7 +27956,7 @@ extension World {
         case "mis_clear":
             return [
                 ["會做什麼", "平日 18:00 以後（一天一次），公仔把你最前面的幾個 App（最多 3 個）隱藏起來，演一段「推出螢幕」。"],
-                ["怎麼叫回來", "點公仔或泡泡，或小屋選單「把推走的視窗叫回來」，一鍵全部回來；關掉 Desk Pals 前也會先全部叫回來。"],
+                ["怎麼叫回來", "點公仔或泡泡，或小屋選單「把推走的視窗叫回來」，一鍵全部回來；關掉 WoWo Pals 前也會先全部叫回來。"],
                 ["不會做的事", "不會關閉任何視窗或 App，也不擷取畫面（動畫裡的視窗是畫出來的）。"]]
         case "mis_shop":
             return [
@@ -28482,8 +29090,5259 @@ extension World {
     }
 }
 
+// ===== 62_work.swift =====
+// 62_work.swift — port of extension/desktop/DeskPals.Work.cs
+// WoWo Pals：工作來源。Jira、GitLab（glab）、GitHub（gh）、盯 CI、開會（ICS）、下雨、公司網路（VPN）、工作日誌資料夾，
+// 再加上把 Claude Code／Codex 做完的對話寫進「小本子」的紀錄。以前在 VS Code 擴充套件（practical.js、ci-watch.js）做，現在桌面版自己做，不用 VS Code。
+//
+// 規則：
+//   * 全部預設關，每個來源自己打開（Claude／Codex 的紀錄例外：只讀本機檔案、只寫本機檔案，預設開）。
+//   * 收集器只寫「事實」：%DataDir%\notebook\log-YYYY-MM-DD.jsonl，一行一筆（格式見 v011 SPEC 2b；同一個 id 後寫的蓋前寫的）。
+//     合併、白話句子、複製在小本子做（notebook 分支）。Jira 指派給我的未結單另外寫 notebook\jira-open.json 給待辦用。
+//   * 要提醒的照舊走 OnNotify（公仔泡泡），用字跟 VS Code 版一樣。
+//   * glab／gh 的 token 不碰、不讀：只叫它們自己的指令（glab api、gh api、auth status），輸出也不寫進紀錄。
+//   * Jira API token 用 Windows DPAPI（目前使用者）加密存在 jira-token.dat。
+//     mac: 存在 macOS 鑰匙圈（generic password，service「WoWo Pals」、account「jira」；離屏測試「jira-test:<資料資料夾>」），不寫檔。
+//
+// 跟 VS Code 擴充套件：連上時（hello）送「work-own <來源,…>」，設定改了再送一次；新版擴充套件看到就不再自己查、不再自己通知。
+//   舊版擴充套件（還不認得 work-own）送來的 notify，桌面版已經在管的那幾種直接丟掉（WorkDropsNotify），不會講兩次。
+//
+// 掛在別的檔的地方（都只有一兩行，註解寫「工作來源」）：
+//   DeskPals.cs：TickInner → WorkTick()、OnMsg 的 hello → WorkHello()、notify → WorkDropsNotify()、config-host → WorkOwns("vpn")、
+//     default → WorkMsg()、ClaudeProjectsDir／CodexSessionsDir → AiHomeDefault()、StartDownloadWatch → DownloadsDir()、DataDirInit（離屏測試不碰真的家目錄、資料）、ClaudeWatchOnce／CodexWatchOnce → WorkClaudeRoots()／WorkCodexRoots()／WorkWslAlive()、HealthLoop → VpnReachable()、
+//     小屋選單「工作」→ ShowWorkSettings()（DeskPals.WorkSettings.cs）、Snap → WorkSnap()。
+//   DeskPals.Study.cs：PlanTick → WorkLogClass()（上課寫進小本子）、SchoolFetchLoop → WorkMeetUrl()（跟開會同一份行事曆不提醒兩次）。
+//
+// pipe 指令：
+//   work-set <key> <值…|->      改設定（key 見 WorkDefaults；值「-」＝清空）。存 work-config.txt，馬上套用
+//   work-token <token|->         Jira API token（DPAPI 加密存檔；「-」＝刪掉）（mac: 鑰匙圈）
+//   work-poll                    每個打開的來源馬上查一次
+//   work-dump                    狀態（測試用）：設定、誰管哪些來源、最近的提醒、丟掉幾則重複通知、CI 在盯哪些
+//   work-settings open           打開工作設定視窗（之後小本子的「來源」按鈕也叫這個）
+//   測試用（只在離屏模式）：work-clock <yyyy-MM-ddTHH:mm|off>、work-vpncheck、work-forget（忘掉「已經看過」的紀錄）
+// 送回擴充套件：work-own <jira,gitlab,github,ci,meet,rain,vpn,worklog|->
+//
+// 連到哪裡（隱私權政策用）：你填的 Jira 網站（REST API，HTTPS）、你填的行事曆網址（ICS）、wttr.in／api.met.no（下雨：只送地點）、
+//   你填的公司主機（只試開 TCP 連線）；GitLab／GitHub 由 glab／gh 自己連（用它們自己的登入）。
+// 寫哪些本機檔案（都在 %DataDir%）：work-config.txt、work-seen.txt、jira-token.dat、notebook\log-*.jsonl、notebook\jira-open.json。
+//   mac: 沒有 jira-token.dat（token 在鑰匙圈）。
+//
+// mac 差異（都標了 // mac:）：
+// - Jira token：DPAPI → 鑰匙圈（Security framework：SecItemAdd／SecItemUpdate／SecItemCopyMatching／SecItemDelete）。
+//   HasJiraToken 只問「有沒有這一項」（不要內容，不會跳授權視窗）。紀錄只寫狀態碼，不寫 token。
+// - glab／gh：PATH（用 : 分）＋/opt/homebrew/bin、/usr/local/bin、~/.local/bin 找（沒有 .exe）；Foundation.Process、參數直接給陣列
+//   （不用 Windows 的引號規則，Quote 拿掉）；stdout／stderr 各用一個背景佇列讀到底（不會因為 pipe 滿了卡住）；PATH 補上 Homebrew 的位置。
+// - HTTP：HttpWebRequest → URLSession（背景執行緒等 semaphore；借 52_study 的 StudyFetchTask：最多 4 次轉址、讀到 8 MB 就停）。
+//   4xx／5xx 不會丟例外，看 HTTPURLResponse.statusCode：≥ 400 跟 C# 的 WebException 一樣回 null、status＝狀態碼。
+// - DateTimeOffset.TryParse → 00_compat 的 DateTime.TryParse(…, AssumeUniversal)（Z、+08:00、+0800、有沒有小數秒都吃），再不行用 ISO8601DateFormatter。
+// - Path.GetFileName（Windows 版把 \ / : 都當分隔）→ WorkFileName：對話的 cwd 可能是 Windows 路徑，照 Windows 的結果取最後一段。
+// - WSL：Mac 沒有。claude_dir／codex_dir 留在設定裡（設定檔兩邊通用）；「別的資料夾」是本機存在的資料夾才看，WorkWslAlive 一律 false。
+// - Regex.Unescape、DateTime.TryParseExact 在 00_compat 沒有：NoteLog.Unescape、World.WorkParseYmd。
+// 刻意寫成 C# 5（不用 $"" / ?. / => 成員 / nameof）。
+import Foundation
+import Security
+
+// ================= 小本子的紀錄：一行一筆 JSON =================
+final class NoteEntry {
+    var Id: String! = nil, Src: String! = nil, Project: String! = nil, Title: String! = nil, Status: String! = nil, Ref: String! = nil, Url: String! = nil, Key: String! = nil
+    var T = DateTime.MinValue, End = DateTime.MinValue
+    var Ok = -1   // -1＝null、0＝false、1＝true
+    var Retried = false  // src=ci：第一次沒過、重跑才過（SPEC 2b 小本子的約定），只有 true 才寫
+    init() {}
+}
+
+enum NoteLog {
+    static let gate = NSObject()
+    static let days = Dict<String, Dict<String, String>>()   // 日期 → id → 最後寫的那一行
+    static let IdRx = Regex("^\\{\"id\":\"((?:[^\"\\\\]|\\\\.)*)\"")
+
+    static func Dir() -> String { return Path.Combine(World.DataDir, "notebook") }
+    static func FileFor(_ d: DateTime) -> String { return Path.Combine(Dir(), "log-" + d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ".jsonl") }
+    static func Iso(_ t: DateTime) -> String { return t.ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture) }
+
+    static func Line(_ e: NoteEntry) -> String {
+        let sb = StringBuilder("{\"id\":")
+        Q(sb, e.Id)
+        sb.Append(",\"t\":"); Q(sb, Iso(e.T))
+        if e.End != DateTime.MinValue { sb.Append(",\"end\":"); Q(sb, Iso(e.End)) }
+        Field(sb, "src", e.Src); Field(sb, "project", e.Project); Field(sb, "title", e.Title); Field(sb, "status", e.Status)
+        let ok: String = e.Ok < 0 ? "null" : (e.Ok > 0 ? "true" : "false")
+        sb.Append(",\"ok\":").Append(ok)
+        Field(sb, "ref", e.Ref); Field(sb, "url", e.Url); Field(sb, "key", e.Key)
+        if e.Retried { sb.Append(",\"retried\":true") }
+        return sb.Append("}").ToString()
+    }
+    static func Field(_ sb: StringBuilder, _ k: String, _ v: String?) { if string.IsNullOrEmpty(v) { return }; sb.Append(",\"").Append(k).Append("\":"); Q(sb, v) }
+    static func Q(_ sb: StringBuilder, _ s: String?) {
+        sb.Append("\"")
+        // mac: C# 一個一個 UTF-16 字元看；這裡看 Unicode scalar（BMP 以外的字原樣寫，UTF-8 結果一樣）
+        for ch in (s ?? "").unicodeScalars {
+            switch ch {
+            case "\"": sb.Append("\\\"")
+            case "\\": sb.Append("\\\\")
+            case "\n": sb.Append("\\n")
+            case "\r": sb.Append("\\r")
+            case "\t": sb.Append("\\t")
+            default:
+                if ch.value < 0x20 || ch.value == 0x2028 || ch.value == 0x2029 { sb.Append("\\u" + String(format: "%04x", ch.value)) }
+                else { sb.Append(String(ch)) }
+            }
+        }
+        sb.Append("\"")
+    }
+
+    // 寫進「結束那天」（沒有結束時間＝開始那天）的檔；跟上次寫的一模一樣就不寫
+    @discardableResult static func Write(_ e0: NoteEntry?) -> Bool {
+        guard let e = e0 else { return false }
+        if string.IsNullOrEmpty(e.Id) || string.IsNullOrEmpty(e.Title) { return false }
+        e.Title = OneLine(e.Title)
+        let d = (e.End != DateTime.MinValue ? e.End : e.T).Date
+        return Append(d, e.Id, Line(e))
+    }
+
+    // 小本子（同一個程式）要寫手動加的、做完的待辦也可以用這個：同一把鎖，不會跟收集器的寫入交錯
+    @discardableResult static func Append(_ day: DateTime, _ id: String, _ line: String) -> Bool {
+        return lock(gate) { () -> Bool in
+            let f = FileFor(day), k = day.ToString("yyyyMMdd")
+            let m: Dict<String, String>
+            if let had = days.Get(k) { m = had }
+            else {
+                m = Dict<String, String>()
+                do {
+                    if File.Exists(f) {
+                        for l in try File.ReadAllLines(f) {
+                            let mm = IdRx.Match(l)
+                            if mm.Success { m[Unescape(mm.Groups[1].Value)] = l }
+                        }
+                    }
+                } catch { App.Log("notebook log read: " + error.Message) }
+                if days.Count > 8 { days.Clear() }
+                days[k] = m
+            }
+            var was = ""
+            if m.TryGetValue(id, &was) && was == line { return false }
+            do {
+                try Directory.CreateDirectory(Dir())
+                let fs = try FileStream(f, FileMode.Append, FileAccess.Write, FileShare.ReadWrite)
+                let b: [UInt8] = UTF8Encoding(false).GetBytes(line + "\n")
+                try fs.Write(b, 0, b.count)
+                fs.Close()
+                m[id] = line
+                return true
+            } catch { App.Log("notebook log write: " + error.Message); return false }
+        }
+    }
+
+    static func OneLine(_ s: String?) -> String { return Regex.Replace(s ?? "", "[\\s\\x0B\\x85]+", " ").Trim() }   // mac: .NET 的 \s 還有 \v、\x85（ICU 沒有）
+    static func Cut(_ s0: String?, _ n: Int) -> String { let s = OneLine(s0); return s.Length > n ? s.Substring(0, n) + "…" : s }
+
+    // mac: Regex.Unescape（00_compat 沒有）。Q 只會寫 \" \\ \n \r \t \uXXXX；其他「\x」＝x（跟 Regex.Unescape 一樣）
+    static func Unescape(_ s: String) -> String {
+        if !s.Contains("\\") { return s }
+        let u = Array(s.utf16)
+        var out: [UInt16] = []
+        out.reserveCapacity(u.count)
+        var i = 0
+        while i < u.count {
+            let c = u[i]
+            if c != 92 || i + 1 >= u.count { out.append(c); i += 1; continue }
+            let n = u[i + 1]
+            switch n {
+            case 110: out.append(10); i += 2   // \n
+            case 114: out.append(13); i += 2   // \r
+            case 116: out.append(9); i += 2    // \t
+            case 117:                          // \uXXXX
+                if i + 5 < u.count, let v = UInt16(String(decoding: u[(i + 2)...(i + 5)], as: UTF16.self), radix: 16) { out.append(v); i += 6 }
+                else { out.append(n); i += 2 }
+            default: out.append(n); i += 2
+            }
+        }
+        return String(decoding: out, as: UTF16.self)
+    }
+}
+
+// ================= Windows DPAPI（目前使用者）：Jira token 加密存檔 =================
+// mac: DPAPI → macOS 鑰匙圈（generic password）。只放在鑰匙圈，不寫檔；離屏（測試）用另一個 account，絕不碰你真的那一項。
+enum Secret {
+    static let Service = "WoWo Pals"
+    static let JiraLabel = "WoWo Pals Jira API token"
+    static func JiraAccount() -> String { return App.Offscreen ? "jira-test:" + World.DataDir : "jira" }
+
+    static func Query(_ account: String) -> [String: Any] {
+        return [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: Service, kSecAttrAccount as String: account]
+    }
+    // 只問有沒有（要屬性、不要內容：不會跳「要使用鑰匙圈裡的機密資訊」的視窗）
+    static func Exists(_ account: String) -> Bool {
+        var q = Query(account)
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
+        q[kSecReturnAttributes as String] = true
+        var out: CFTypeRef? = nil
+        let st = SecItemCopyMatching(q as CFDictionary, &out)
+        if st != errSecSuccess && st != errSecItemNotFound { App.Log("keychain exists: " + String(st)) }
+        return st == errSecSuccess
+    }
+    @discardableResult static func Set(_ account: String, _ value: String, _ label: String) -> Bool {
+        let data = Data(value.utf8)
+        let q = Query(account)
+        let upd: [String: Any] = [kSecValueData as String: data, kSecAttrLabel as String: label]
+        var st = SecItemUpdate(q as CFDictionary, upd as CFDictionary)
+        if st == errSecItemNotFound {
+            var add = q
+            add[kSecValueData as String] = data
+            add[kSecAttrLabel as String] = label
+            st = SecItemAdd(add as CFDictionary, nil)
+        }
+        if st != errSecSuccess { App.Log("keychain set: " + String(st)) }
+        return st == errSecSuccess
+    }
+    static func Get(_ account: String) -> String? {
+        var q = Query(account)
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
+        q[kSecReturnData as String] = true
+        var out: CFTypeRef? = nil
+        let st = SecItemCopyMatching(q as CFDictionary, &out)
+        if st != errSecSuccess { if st != errSecItemNotFound { App.Log("keychain get: " + String(st)) }; return nil }
+        guard let d = out as? Data else { return nil }
+        return String(data: d, encoding: .utf8)
+    }
+    @discardableResult static func Delete(_ account: String) -> Bool {
+        let st = SecItemDelete(Query(account) as CFDictionary)
+        if st != errSecSuccess && st != errSecItemNotFound { App.Log("keychain delete: " + String(st)) }
+        return st == errSecSuccess || st == errSecItemNotFound
+    }
+}
+
+// ================= 叫 glab／gh（token 交給它們自己）=================
+enum Cli {
+    // PATH 裡找，再看常見的安裝位置（開機自動啟動時 PATH 可能是舊的）
+    // mac: PATH 用 : 分、沒有 .exe；Finder／登入項目開的 App 的 PATH 只有 /usr/bin:/bin…，所以再看 Homebrew、~/.local/bin
+    static func Find(_ name: String) -> String? {
+        let fm = FileManager.default
+        for d in (Environment.GetEnvironmentVariable("PATH") ?? "").components(separatedBy: ":") {
+            let t = d.Trim().Trim("\"")
+            if t == "" { continue }
+            let p = Path.Combine(t, name)
+            if File.Exists(p) && fm.isExecutableFile(atPath: p) { return p }
+        }
+        let extra: [String] = ["/opt/homebrew/bin", "/usr/local/bin", Path.Combine(NSHomeDirectory(), ".local/bin")]
+        for dir in extra {
+            let p = Path.Combine(dir, name)
+            if File.Exists(p) && fm.isExecutableFile(atPath: p) { return p }
+        }
+        return nil
+    }
+
+    // 測試（只在離屏模式）：DESKPALS_FAKE_CLI＝一支 node 小程式，「node <它> glab|gh <參數…>」假裝是 glab／gh
+    static func Fake() -> String? { return App.Offscreen ? Environment.GetEnvironmentVariable("DESKPALS_FAKE_CLI") : nil }
+
+    static func Available(_ tool: String) -> Bool { return !string.IsNullOrEmpty(Fake()) || (!App.Offscreen && Find(tool) != nil) }
+
+    final class Buf { var data = Data() }
+
+    // 回傳結束碼（-1＝沒裝、跑不起來或超時）；stdout／stderr 只給呼叫的人解析，不寫進紀錄
+    static func Run(_ tool: String, _ args: [String], _ timeoutMs: Int, _ stdout: inout String, _ stderr: inout String) -> Int {
+        stdout = ""; stderr = ""
+        var exe: String? = nil
+        var a: [String] = []
+        let fake = Fake()
+        if !string.IsNullOrEmpty(fake) { exe = Find("node") ?? "node"; a.append(fake!); a.append(tool) }
+        else if App.Offscreen { return -1 }   // 離屏（測試）沒給假的：絕不叫你真的 glab／gh（它們會用你的登入）
+        else { exe = Find(tool) }
+        guard let exe0 = exe else { return -1 }
+        a.append(contentsOf: args)
+        // mac: 參數直接給陣列（不用 Windows 命令列的引號規則，C# 的 Quote 拿掉）；只有名字（PATH 裡找不到 node）交給 /usr/bin/env 找
+        var path = exe0
+        if !exe0.Contains("/") { a.insert(exe0, at: 0); path = "/usr/bin/env" }
+        let p = Foundation.Process()
+        p.executableURL = URL(fileURLWithPath: path)
+        p.arguments = a
+        var env = ProcessInfo.processInfo.environment
+        env["NO_COLOR"] = "1"
+        env["GH_PROMPT_DISABLED"] = "1"
+        env["GH_NO_UPDATE_NOTIFIER"] = "1"
+        env["GLAB_CHECK_UPDATE"] = "false"
+        env["GLAB_NO_PROMPT"] = "1"
+        let path0: String = env["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        env["PATH"] = path0 + ":/opt/homebrew/bin:/usr/local/bin"   // mac: glab／gh 自己可能還要叫 git
+        p.environment = env
+        p.standardInput = FileHandle.nullDevice
+        let po = Pipe(), pe = Pipe()
+        p.standardOutput = po
+        p.standardError = pe
+        let exited = DispatchSemaphore(value: 0)
+        p.terminationHandler = { _ in exited.signal() }
+        do { try p.run() } catch { App.Log("cli " + tool + ": " + error.Message); return -1 }
+        // mac: stdout／stderr 各一個背景佇列讀到底（C# 的 ReadToEndAsync），不然輸出多的時候 pipe 滿了兩邊互等
+        let ob = Buf(), eb = Buf()
+        let g = DispatchGroup()
+        g.enter()
+        DispatchQueue.global(qos: .utility).async { ob.data = po.fileHandleForReading.readDataToEndOfFile(); g.leave() }
+        g.enter()
+        DispatchQueue.global(qos: .utility).async { eb.data = pe.fileHandleForReading.readDataToEndOfFile(); g.leave() }
+        let until: DispatchTime = DispatchTime.now() + DispatchTimeInterval.milliseconds(Swift.max(0, timeoutMs))
+        if exited.wait(timeout: until) == .timedOut {
+            p.terminate()
+            return -1
+        }
+        let until2: DispatchTime = DispatchTime.now() + DispatchTimeInterval.seconds(3)
+        if g.wait(timeout: until2) == .success {
+            stdout = String(decoding: ob.data, as: UTF8.self)
+            stderr = String(decoding: eb.data, as: UTF8.self)
+        }
+        return Int(p.terminationStatus)
+    }
+    // mac: Quote（Windows 命令列的引號規則，CommandLineToArgvW）不需要：Foundation.Process 直接收參數陣列
+}
+
+
+extension World {
+    // ================= 設定（work-config.txt：key=value）=================
+    static let WorkDefaults: [[String]] = [
+        ["ai", "1"],            // Claude Code／Codex 做完的對話寫進小本子（只讀寫本機檔案）
+        ["claude_dir", ""],     // 進階：別的 Claude 資料夾（WSL：\\wsl$\Ubuntu\home\me\.claude）（mac: 沒有 WSL；本機存在的資料夾才看）
+        ["codex_dir", ""],      // 進階：別的 Codex 資料夾
+        ["jira", "0"], ["jira_site", ""], ["jira_email", ""],
+        ["gitlab", "0"], ["github", "0"], ["ci", "0"],
+        ["meet", "0"], ["meet_url", ""], ["meet_before", "5"], ["meet_quiet", "1"],
+        ["rain", "0"], ["rain_place", ""],
+        ["vpn", "0"], ["vpn_host", ""],
+        ["worklog", "0"], ["worklog_dir", ""]]
+    static let WorkSources: [String] = ["jira", "gitlab", "github", "ci", "meet", "rain", "vpn", "worklog"]
+
+    func WorkLoad() {
+        lock(wcfg) {
+            if workLoaded { return }
+            workLoaded = true
+            for d in World.WorkDefaults { wcfg[d[0]] = d[1] }
+            for line in World.ReadText("work-config.txt").Split("\n") {
+                let i = line.IndexOf("=")
+                if i <= 0 { continue }
+                let k = line.Substring(0, i).Trim(), v = line.Substring(i + 1).Trim()
+                if wcfg.ContainsKey(k) { wcfg[k] = v }
+            }
+            for line in World.ReadText("work-seen.txt").Split("\n") {
+                let i = line.IndexOf("\t")
+                if i > 0 { wseen[line.Substring(0, i)] = line.Substring(i + 1).TrimEnd("\r") }
+            }
+        }
+    }
+
+    func WorkSave() {
+        let sb = StringBuilder()
+        lock(wcfg) { for d in World.WorkDefaults { sb.Append(d[0] + "=" + (wcfg.Get(d[0]) ?? "") + "\n") } }
+        World.WriteText("work-config.txt", sb.ToString())
+    }
+
+    func WC(_ k: String) -> String { WorkLoad(); return lock(wcfg) { () -> String in wcfg.Get(k) ?? "" } }
+    func WOn(_ k: String) -> Bool { return WC(k) == "1" }
+
+    // 設定視窗、pipe 共用：改一項（回傳 false＝沒有這一項或值不對）
+    @discardableResult func WorkSet(_ k: String, _ v0: String?) -> Bool {
+        WorkLoad()
+        var v = NoteLog.OneLine(v0 ?? "")
+        if v == "-" { v = "" }
+        let has: Bool = lock(wcfg) { () -> Bool in wcfg.ContainsKey(k) }
+        if !has { return false }
+        switch k {
+        case "ai", "jira", "gitlab", "github", "ci", "meet", "meet_quiet", "rain", "vpn", "worklog":
+            v = v == "1" || v == "on" || v == "true" ? "1" : "0"
+        case "meet_before":
+            var n = 0
+            if !int.TryParse(v, &n) || n < 1 || n > 120 { return false }
+            v = n.ToString()
+        case "meet_url": if v != "" && World.WorkUrl(v) == nil { return false }
+        case "vpn_host": if v != "" && !Regex.IsMatch(v, "^[\\w.-]+(:\\d{1,5})?$") { return false }
+        default: break
+        }
+        let v1 = v
+        lock(wcfg) { wcfg[k] = v1 }
+        WorkSave()
+        WorkApply()
+        let hidden = k.EndsWith("_url") || k == "jira_email"
+        let state: String = v == "" ? "empty" : "set"
+        let shown: String = hidden ? " (" + state + ")" : "=" + v
+        App.Log("work set " + k + shown)
+        return true
+    }
+
+    // ---- Jira token：DPAPI ----（mac: 鑰匙圈）
+    func HasJiraToken() -> Bool {
+        if jiraTokenCache == nil { jiraTokenCache = Secret.Exists(Secret.JiraAccount()) }
+        return jiraTokenCache!
+    }
+    @discardableResult func SetJiraToken(_ token0: String?) -> Bool {
+        let token = (token0 ?? "").Trim()
+        if token == "" || token == "-" { Secret.Delete(Secret.JiraAccount()); jiraTokenCache = false; WorkApply(); return true }
+        // mac: 不用建資料夾、不寫檔：直接放進鑰匙圈
+        if !Secret.Set(Secret.JiraAccount(), token, Secret.JiraLabel) { App.Log("jira token: keychain failed"); return false }
+        jiraTokenCache = true
+        WorkApply()
+        return true
+    }
+    func JiraToken() -> String? {
+        return Secret.Get(Secret.JiraAccount())
+    }
+
+    // ---- 誰管哪個來源 ----
+    func WorkOwns(_ src: String) -> Bool {
+        switch src {
+        case "jira": return WOn("jira") && WC("jira_site") != "" && WC("jira_email") != "" && HasJiraToken()
+        case "gitlab", "github", "ci": return WOn(src)
+        case "meet": return WOn("meet") && WC("meet_url") != ""
+        case "rain": return WOn("rain") && WC("rain_place") != ""
+        case "vpn": return WOn("vpn") && WC("vpn_host") != ""
+        case "worklog": return WOn("worklog") && WC("worklog_dir") != ""
+        default: break
+        }
+        return false
+    }
+    func WorkOwnLine() -> String {
+        let l = List<String>()
+        for s in World.WorkSources { if WorkOwns(s) { l.Add(s) } }
+        let list: String = l.Count == 0 ? "-" : string.Join(",", l.ToArray())
+        return "work-own " + list + "\n"
+    }
+    func WorkHello(_ c: Client) { World.Send(c, WorkOwnLine()) }
+
+    // 舊版擴充套件（或 ci-watch.js）送來的通知：桌面版已經在管的就丟掉（不講兩次）
+    func WorkDropsNotify(_ kind: String) -> Bool {
+        var src: String? = nil
+        switch kind {
+        case "jira": src = "jira"
+        case "gitlab": src = "gitlab"
+        case "ci-run", "ci-ok", "ci-fail": src = "ci"
+        case "meeting", "meeting-now": src = "meet"
+        case "rain": src = "rain"
+        case "worklog": src = "worklog"
+        default: break
+        }
+        guard let s = src else { return false }
+        if !WorkOwns(s) { return false }
+        workDropped += 1
+        App.Log("work: dropped a " + kind + " notice from VS Code (the desktop handles " + s + ")")
+        return true
+    }
+
+    func WorkApply() {
+        let own = WorkOwnLine()
+        if own != lastOwn { lastOwn = own; lock(clients) { for c in clients { World.Send(c, own) } } }
+        // 公司網路：桌面版有設就用桌面版的（VS Code 的 deskPals.companyHost 不再蓋過來）
+        let vh = WorkOwns("vpn") ? WC("vpn_host") : ""
+        if vh != appliedVpn { if vh != "" || companyHost == appliedVpn { companyHost = vh }; appliedVpn = vh }
+        workPollNow = true
+        if workWake != nil { workWake.Set() }
+    }
+
+    // ---- 公司網路：host 或 host:port ----
+    static func VpnReachable(_ host: String) -> Bool {
+        let c = host.LastIndexOf(":")
+        var port = 0
+        if c > 0 && int.TryParse(host.Substring(c + 1), &port) { return World.TcpOk(host.Substring(0, c), port) }
+        return World.TcpOk(host, 443) || World.TcpOk(host, 80)
+    }
+
+    // ---- 網址：只收 https（webcal 當 https）；測試時（離屏）才收本機的 http ----
+    static func WorkUrl(_ s0: String?) -> String? {
+        var s = (s0 ?? "").Trim()
+        if s.StartsWith("webcal://", StringComparison.OrdinalIgnoreCase) { s = "https://" + s.Substring(9) }
+        else if s.StartsWith("webcals://", StringComparison.OrdinalIgnoreCase) { s = "https://" + s.Substring(10) }
+        var u: Uri? = nil
+        if !Uri.TryCreate(s, UriKind.Absolute, &u) || u == nil { return nil }
+        if u!.Scheme == Uri.UriSchemeHttps { return s }
+        if App.Offscreen && u!.Scheme == Uri.UriSchemeHttp && (u!.Host == "127.0.0.1" || u!.Host == "localhost") { return s }
+        return nil
+    }
+
+    // ---- 假時鐘（測試）----
+    func WNow() -> DateTime { return DateTime.Now + workShift }
+    static let Epoch0 = DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)
+    func WNowMs() -> Int { return CInt((WNow().ToUniversalTime() - World.Epoch0).TotalMilliseconds) }
+    static func LocalOfMs(_ ms: Int) -> DateTime { return World.Epoch0.AddMilliseconds(ms).ToLocalTime() }
+
+    // ---- 看過了沒（work-seen.txt：key\tvalue；重開也不會再講一次）----
+    func Seen(_ k: String) -> String? { return lock(wcfg) { () -> String? in wseen.Get(k) } }
+    func SetSeen(_ k: String, _ v: String) { lock(wcfg) { wseen[k] = v; seenDirty = true } }
+    func SaveSeen() {
+        let sb = StringBuilder()
+        let go: Bool = lock(wcfg) { () -> Bool in
+            if !seenDirty { return false }
+            seenDirty = false
+            // 一天一次的旗子只留最近幾天
+            let keep = WNow().AddDays(-3).ToString("yyyyMMdd")
+            let drop = List<String>()
+            for kv in wseen {
+                let m = Regex.Match(kv.Key, ":(\\d{8})(:|$)")
+                if m.Success && string.CompareOrdinal(m.Groups[1].Value, keep) < 0 { drop.Add(kv.Key) }
+            }
+            for k in drop { wseen.Remove(k) }
+            for kv in wseen { sb.Append(kv.Key + "\t" + kv.Value + "\n") }
+            return true
+        }
+        if !go { return }
+        World.WriteText("work-seen.txt", sb.ToString())
+    }
+    static func SeenList(_ v: String?) -> List<String> { let l = List<String>(); if v != nil { for x in v!.Split(",") { if x != "" { l.Add(x) } } }; return l }
+    static func SeenJoin(_ l0: List<String>) -> String { var l = l0; if l.Count > 500 { l = l.GetRange(l.Count - 500, 500) }; return string.Join(",", l.ToArray()) }
+
+    // ---- 提醒：照舊走 OnNotify（公仔泡泡）；離屏測試記下來 ----
+    func WNotify(_ kind: String, _ url: String?, _ text0: String?) {
+        let text = NoteLog.OneLine(text0)
+        let rec: String = kind + " " + (url ?? "-") + " " + text
+        lock(workNotices) { workNotices.Add(rec); if workNotices.Count > 60 { workNotices.RemoveAt(0) } }
+        App.Log("work notify " + kind)
+        let k = kind, u: String = string.IsNullOrEmpty(url) ? "-" : url!, t = text
+        Post { self.OnNotify(k, u, t) }
+    }
+
+    // ================= 開始（TickInner 每一輪叫；第一次才開背景執行緒）=================
+    func WorkTick() {
+        if workStarted { return }
+        workStarted = true
+        WorkLoad()
+        let vh = WorkOwns("vpn") ? WC("vpn_host") : ""
+        if vh != "" { companyHost = vh; appliedVpn = vh }
+        lastOwn = WorkOwnLine()
+        workWake = AutoResetEvent(false)
+        let th = Thread { self.WorkLoop() }; th.IsBackground = true; th.Start()
+    }
+
+    func WorkLoop() {
+        Thread.Sleep(App.Offscreen ? 300 : 6000)
+        let off = App.Offscreen
+        let s20: Int = off ? 0 : 20, s25: Int = off ? 0 : 25, s30: Int = off ? 0 : 30
+        var nAi = DateTime.MinValue, nAuth = DateTime.MinValue, nJira = DateTime.Now.AddSeconds(s20), nGl = DateTime.Now.AddSeconds(s25)
+        var nGh = DateTime.Now.AddSeconds(s30), nMeet = DateTime.MinValue, nRain = DateTime.Now.AddSeconds(s30), nWl = DateTime.MinValue, nSave = DateTime.MinValue
+        let js = JavaScriptSerializer()
+        js.MaxJsonLength = int.MaxValue
+        while !closing {
+            let force = workPollNow
+            if force {
+                workPollNow = false
+                nAi = DateTime.MinValue; nAuth = nAi; nJira = nAi; nGl = nAi; nGh = nAi; nMeet = nAi; nRain = nAi; nWl = nAi
+            }
+            let now = DateTime.Now
+            if WOn("ai") && now >= nAi { nAi = now.AddSeconds(30); Try("ai") { self.AiScan(js) } }
+            if (WOn("gitlab") || WOn("github") || WOn("ci")) && now >= nAuth { nAuth = now.AddMinutes(10); Try("auth") { self.DetectAuth() } }
+            if WorkOwns("jira") && now >= nJira { nJira = now.AddMinutes(3); Try("jira") { try self.JiraCheck(js) } }
+            if (WOn("gitlab") || WOn("ci")) && now >= nGl { let s: Int = WOn("ci") ? 60 : 180; nGl = now.AddSeconds(s); Try("gitlab") { self.GitLabCheck(js) } }
+            if (WOn("github") || WOn("ci")) && now >= nGh { let s: Int = WOn("ci") ? 60 : 180; nGh = now.AddSeconds(s); Try("github") { self.GitHubCheck(js) } }
+            if WOn("ci") { Try("ci") { self.CiStep(js, force) } }
+            if WorkOwns("meet") {
+                if now >= nMeet { nMeet = now.AddMinutes(10); Try("meet") { self.MeetFetch() } }
+                Try("meet") { self.MeetTick() }
+            }
+            if WorkOwns("rain") && now >= nRain { nRain = now.AddMinutes(10); Try("rain") { self.RainCheck(js) } }
+            if WorkOwns("worklog") && now >= nWl { nWl = now.AddSeconds(60); Try("worklog") { self.WorklogCheck() } }
+            if now >= nSave || force { nSave = now.AddSeconds(20); SaveSeen() }
+            if force { workPolled += 1 }
+            workWake.WaitOne(1000)
+        }
+    }
+    // mac: C# 的 catch (Exception) 只接得到 throw 的；Swift 會當掉的地方（nil、索引）都先擋掉了
+    func Try(_ what: String, _ a: () throws -> Void) { do { try a() } catch { App.Log("work " + what + ": " + error.Message) } }
+
+    // ================= JSON 小工具 =================
+    // mac: JavaScriptSerializer（00_compat）：物件＝Dict<String, Any>、陣列＝[Any]、null＝NSNull（這裡當成 null）
+    static func J(_ o: Any?, _ path: String...) -> Any? { return JPath(o, path) }
+    static func JPath(_ o0: Any?, _ path: [String]) -> Any? {
+        var o: Any? = o0
+        for k in path {
+            guard let d = o as? Dict<String, Any> else { return nil }
+            guard let v = d.Get(k) else { return nil }
+            o = v
+        }
+        if o is NSNull { return nil }
+        return o
+    }
+    static func JS(_ o: Any?, _ path: String...) -> String? { return JSPath(o, path) }
+    static func JSPath(_ o: Any?, _ path: [String]) -> String? { guard let v = JPath(o, path) else { return nil }; return Convert.ToString(v, CultureInfo.InvariantCulture) }
+    static func JA(_ o: Any?, _ path: String...) -> [Any] { if let a = JPath(o, path) as? [Any] { return a }; return [] }
+    static func JI(_ o: Any?, _ path: String...) -> Int { var n = 0; return int.TryParse(JSPath(o, path) ?? "", &n) ? n : 0 }
+    // C# JA(new Dictionary<string, object> { { "a", list } }, "a")：glab／gh 回的是整個陣列
+    static func JArr(_ o: Any?) -> [Any] { let d = Dict<String, Any>(); if let v = o { d["a"] = v }; return JA(d, "a") }
+    static func JT(_ s: String?) -> DateTime {
+        // mac: DateTimeOffset.TryParse(…, AssumeUniversal) → 00_compat 的 DateTime.TryParse(…, AssumeUniversal)：
+        //      Z、+08:00、Jira 的 +0800（時區沒有冒號）、有沒有小數秒都吃；有時區＝換成本地時間，沒有＝當 UTC。再不行用 ISO8601DateFormatter 試一次。
+        if s == nil { return DateTime.MinValue }
+        var t = DateTime.MinValue
+        if DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, &t) { return t.Kind == DateTimeKind.Local ? t : t.ToLocalTime() }
+        if let d = World.WorkIsoDate(s!) { return DateTime(d) }
+        return DateTime.MinValue
+    }
+    static let WorkIsoF1: ISO8601DateFormatter = { let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]; return f }()
+    static let WorkIsoF2: ISO8601DateFormatter = { let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]; return f }()
+    static func WorkIsoDate(_ s: String) -> Foundation.Date? {
+        if let d = WorkIsoF1.date(from: s) { return d }
+        return WorkIsoF2.date(from: s)
+    }
+    // mac: DateTime.TryParseExact(s, "yyyy-MM-dd", …)（00_compat 沒有）：先看格式，再交給 TryParse
+    static func WorkParseYmd(_ s: String, _ d: inout DateTime) -> Bool {
+        if !Regex.IsMatch(s, "^[0-9]{4}-[0-9]{2}-[0-9]{2}$") { d = DateTime.MinValue; return false }
+        return DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, &d)
+    }
+    func ParseJson(_ js: JavaScriptSerializer, _ s: String?) -> Any? { if string.IsNullOrEmpty(s) { return nil }; return try? js.DeserializeObject(s) }
+
+    // ================= HTTP（Jira、天氣、行事曆）=================
+    // 回傳內容；status＝HTTP 狀態（0＝連不上）
+    // mac: URLSession（StudyFetchTask：最多 4 次轉址、8 MB 就停；gzip 自己解）。4xx／5xx 不丟例外：看狀態碼，≥ 400 回 null（C# 的 WebException）
+    static func HttpGet(_ url: String, _ auth: String?, _ timeoutMs: Int, _ status: inout Int) -> String? {
+        status = 0
+        // 離屏（測試）：只連本機的假伺服器，真的網址一律不連（測試不能碰網路、也不能拿使用者的 token 去試）
+        if App.Offscreen {
+            var u: Uri? = nil
+            if !Uri.TryCreate(url, UriKind.Absolute, &u) || u == nil || (u!.Host != "127.0.0.1" && u!.Host != "localhost") {
+                let h: String = u != nil ? u!.Host : "?"
+                App.Log("work: offscreen, not fetching " + h)
+                return nil
+            }
+        }
+        guard let nu = URL(string: url) else { return nil }
+        let secs = Double(Swift.max(1000, timeoutMs)) / 1000.0
+        var req = URLRequest(url: nu, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: secs)
+        req.setValue("WoWoPals", forHTTPHeaderField: "User-Agent")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let a = auth { req.setValue(a, forHTTPHeaderField: "Authorization") }
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.timeoutIntervalForRequest = secs
+        cfg.timeoutIntervalForResource = secs * 6
+        let ft = StudyFetchTask()
+        let session = URLSession(configuration: cfg, delegate: ft, delegateQueue: nil)
+        defer { session.finishTasksAndInvalidate() }
+        session.dataTask(with: req).resume()
+        let deadline: DispatchTime = DispatchTime.now() + (secs * 6.0 + 5.0)
+        if ft.done.wait(timeout: deadline) == .timedOut { session.invalidateAndCancel(); return nil }
+        status = ft.status
+        if ft.failed != nil { return nil }
+        if status >= 400 { return nil }
+        var s = String(decoding: ft.data, as: UTF8.self)
+        if s.hasPrefix("\u{FEFF}") { s.removeFirst() }   // StreamReader 會吃掉 BOM
+        return s
+    }
+
+    // ================= glab／gh 有沒有登入（只看「Logged in to <host> as <user>」那幾行）=================
+    static let GlabLogin = Regex("Logged in to (\\S+) as (\\S+)")
+    static let GhLogin = Regex("Logged in to (\\S+) (?:account|as) (\\S+)")
+    func DetectAuth() {
+        var o = "", e = ""
+        let hosts = List<String>()
+        var rc = Cli.Run("glab", ["auth", "status"], 30000, &o, &e)
+        for m in World.GlabLogin.Matches(o + "\n" + e) { if !hosts.Contains(m.Groups[1].Value) { hosts.Add(m.Groups[1].Value) } }
+        lock(glabHosts) { glabHosts.Clear(); glabHosts.AddRange(hosts) }
+        let glabMissing = (rc == -1 && !Cli.Available("glab")) || rc == 9009
+        glabState = glabMissing ? "missing" : (hosts.Count > 0 ? "ok" : "nologin")
+        rc = Cli.Run("gh", ["auth", "status"], 30000, &o, &e)
+        let g = World.GhLogin.Match(o + "\n" + e)
+        ghUser = g.Success ? g.Groups[2].Value.Trim("(", ")") : ""
+        let ghMissing = (rc == -1 && !Cli.Available("gh")) || rc == 9009
+        ghState = ghMissing ? "missing" : (ghUser != "" ? "ok" : "nologin")
+        App.Log("work auth: glab=" + glabState + " (" + String(hosts.Count) + " host) gh=" + ghState)
+    }
+    func GlabHosts() -> List<String> { if glabState == "" { DetectAuth() }; return lock(glabHosts) { () -> List<String> in List<String>(glabHosts) } }
+
+    func Glab(_ js: JavaScriptSerializer, _ host: String, _ path: String) -> Any? {
+        var o = "", e = ""
+        let rc = Cli.Run("glab", ["api", "--hostname", host, path], 30000, &o, &e)
+        return rc == 0 ? ParseJson(js, o) : nil
+    }
+    func Gh(_ js: JavaScriptSerializer, _ path: String) -> Any? {
+        var o = "", e = ""
+        let rc = Cli.Run("gh", ["api", path], 30000, &o, &e)
+        return rc == 0 ? ParseJson(js, o) : nil
+    }
+
+    // ================= Jira =================
+    func JiraBase() -> String? {
+        var s = WC("jira_site").Trim().TrimEnd("/")
+        if s == "" { return nil }
+        if s.StartsWith("http://", StringComparison.OrdinalIgnoreCase) { return World.WorkUrl(s) != nil ? s : nil }   // 只有測試（離屏、本機）
+        if s.StartsWith("https://", StringComparison.OrdinalIgnoreCase) { s = s.Substring(8) }
+        let sl = s.IndexOf("/")
+        if sl >= 0 { s = s.Substring(0, sl) }
+        return "https://" + s
+    }
+    func JiraGet(_ js: JavaScriptSerializer, _ path: String) throws -> Any? {
+        let b = JiraBase(), tok = JiraToken()
+        if b == nil || tok == nil { return nil }
+        let auth = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes(WC("jira_email") + ":" + tok!))
+        var st = 0
+        let body = World.HttpGet(b! + path, auth, 20000, &st)
+        let other: String = st == 0 ? "down" : "http " + String(st)
+        jiraStatus = st == 200 ? "ok" : (st == 401 || st == 403 ? "auth" : other)
+        if body == nil { throw Exception("jira " + jiraStatus) }
+        return ParseJson(js, body)
+    }
+    func JiraSearch(_ js: JavaScriptSerializer, _ jql: String, _ fields: String, _ max: Int) throws -> [Any] {
+        let path: String = "/rest/api/3/search/jql?jql=" + Uri.EscapeDataString(jql) + "&fields=" + fields + "&maxResults=" + String(max)
+        let r = try JiraGet(js, path)
+        return World.JA(r, "issues")
+    }
+    static func AdfText(_ n: Any?) -> String {
+        if n == nil { return "" }
+        let type = JS(n, "type")
+        if type == "text" { return JS(n, "text") ?? "" }
+        if type == "mention" { return JS(n, "attrs", "text") ?? "@" }
+        let sb = StringBuilder()
+        for c in JA(n, "content") { sb.Append(AdfText(c)); if type == "paragraph" { sb.Append(" ") } }
+        return sb.ToString()
+    }
+
+    func JiraCheck(_ js: JavaScriptSerializer) throws {
+        guard let b = JiraBase() else { throw Exception("jira: no site") }   // mac: C# 這裡是 new Uri(null) 丟例外
+        let host = Uri(b).Authority
+        // 1) 新單指派給你（第一次只記下來）＋給小本子待辦的未結單
+        let jql = "assignee = currentUser() AND statusCategory != Done ORDER BY created DESC"
+        let open_ = try JiraSearch(js, jql, "summary,status", 100)   // mac: open 是 Swift 的存取修飾字（也是 Darwin 的 open()），改叫 open_
+        let oj = StringBuilder("[")
+        let keys = List<String>()
+        for i in open_ {
+            guard let k = World.JS(i, "key") else { continue }
+            keys.Add(k)
+            if oj.Length > 1 { oj.Append(",") }
+            oj.Append("{\"key\":"); NoteLog.Q(oj, k)
+            oj.Append(",\"title\":"); NoteLog.Q(oj, NoteLog.OneLine(World.JS(i, "fields", "summary")))
+            oj.Append(",\"status\":"); NoteLog.Q(oj, World.JS(i, "fields", "status", "name") ?? "")
+            oj.Append(",\"url\":"); NoteLog.Q(oj, b + "/browse/" + k)
+            oj.Append("}")
+        }
+        oj.Append("]\n")
+        do { try Directory.CreateDirectory(NoteLog.Dir()); try File.WriteAllText(Path.Combine(NoteLog.Dir(), "jira-open.json"), oj.ToString()) } catch {}
+        let sk = "jira-seen:" + host
+        let seen0 = Seen(sk)
+        let seen = World.SeenList(seen0)
+        if seen0 == nil { SetSeen(sk, World.SeenJoin(keys)) }
+        else {
+            let fresh = List<Any>()
+            for i in open_ { let k = World.JS(i, "key"); if k == nil || !seen.Contains(k!) { fresh.Add(i) } }
+            var n = 0
+            while n < fresh.Count && n < 3 {
+                let fk = World.JS(fresh[n], "key") ?? ""
+                let msg: String = fk + " 指派給你了：" + NoteLog.Cut(World.JS(fresh[n], "fields", "summary"), 40)
+                WNotify("jira", b + "/browse/" + fk, msg)
+                n += 1
+            }
+            if fresh.Count > 3 { WNotify("jira", b + "/issues/?jql=" + Uri.EscapeDataString(jql), "還有 " + String(fresh.Count - 3) + " 張新單指派給你") }
+            for k in keys { if !seen.Contains(k) { seen.Add(k) } }
+            SetSeen(sk, World.SeenJoin(seen))
+        }
+
+        // 2) 到期：平日 09:30、16:30 各看一次
+        let d = WNow()
+        let hm = d.Hour * 60 + d.Minute
+        let slot: String? = hm >= 16 * 60 + 30 ? "pm" : (hm >= 9 * 60 + 30 ? "am" : nil)
+        let dk: String = "jira-due:" + host + ":" + d.ToString("yyyyMMdd") + ":" + (slot ?? "")
+        let weekday = d.DayOfWeek != DayOfWeek.Saturday && d.DayOfWeek != DayOfWeek.Sunday
+        if slot != nil && weekday && Seen(dk) == nil {
+            SetSeen(dk, "1")
+            let djql = "assignee = currentUser() AND statusCategory != Done AND duedate >= -14d AND duedate <= endOfDay(1) ORDER BY duedate ASC"
+            let due = try JiraSearch(js, djql, "summary,duedate", 50)
+            let over = List<String>(), today = List<String>(), tmr = List<String>()
+            for i in due {
+                var dd = DateTime.MinValue
+                if !World.WorkParseYmd(World.JS(i, "fields", "duedate") ?? "", &dd) { continue }
+                let diff = CInt(Math.Round((dd - d.Date).TotalDays))
+                let bucket: List<String> = diff < 0 ? over : (diff == 0 ? today : tmr)
+                bucket.Add(World.JS(i, "key") ?? "")
+            }
+            let parts = List<String>()
+            if today.Count > 0 {
+                let more: String = today.Count > 3 ? " 等 " + String(today.Count) + " 張" : ""
+                let ks: String = string.Join("、", today.GetRange(0, Math.Min(3, today.Count)).ToArray())
+                parts.Add("今天到期：" + ks + more)
+            }
+            if tmr.Count > 0 {
+                let more: String = tmr.Count > 3 ? " 等 " + String(tmr.Count) + " 張" : ""
+                let ks: String = string.Join("、", tmr.GetRange(0, Math.Min(3, tmr.Count)).ToArray())
+                parts.Add("明天到期：" + ks + more)
+            }
+            if over.Count > 0 { parts.Add("已經逾期 " + String(over.Count) + " 張") }
+            if parts.Count > 0 {
+                let one: String = b + "/browse/" + (due.count > 0 ? (World.JS(due[0], "key") ?? "") : "")
+                let url: String = due.count == 1 ? one : b + "/issues/?jql=" + Uri.EscapeDataString(djql)
+                WNotify("jira", url, string.Join("；", parts.ToArray()))
+            }
+        }
+
+        // 3) 有人在留言 @你
+        if jiraMe == nil { let me0 = try JiraGet(js, "/rest/api/3/myself"); jiraMe = World.JS(me0, "accountId") }
+        if let me = jiraMe {
+            let mk = "jira-mention:" + host
+            var since = 0
+            let nowMs = WNowMs()
+            if !long.TryParse(Seen(mk) ?? "", &since) { SetSeen(mk, String(nowMs)) }
+            else {
+                var newest = since
+                let recent = try JiraSearch(js, "updated >= -20m AND (watcher = currentUser() OR assignee = currentUser() OR reporter = currentUser()) ORDER BY updated DESC", "summary", 20)
+                for i in recent {
+                    let k = World.JS(i, "key") ?? ""
+                    let cr = try JiraGet(js, "/rest/api/3/issue/" + k + "/comment?orderBy=-created&maxResults=5")
+                    for x in World.JA(cr, "comments") {
+                        let ct = World.JT(World.JS(x, "created"))
+                        let t: Int = ct == DateTime.MinValue ? 0 : CInt((ct.ToUniversalTime() - World.Epoch0).TotalMilliseconds)
+                        if t <= since || World.JS(x, "author", "accountId") == me { continue }
+                        let body: Any = World.J(x, "body") ?? ""
+                        if JavaScriptSerializer().Serialize(body).IndexOf("\"id\":\"" + me + "\"", StringComparison.Ordinal) < 0 { continue }
+                        newest = Math.Max(newest, t)
+                        let who: String = World.JS(x, "author", "displayName") ?? "有人"
+                        let url: String = b + "/browse/" + k + "?focusedCommentId=" + (World.JS(x, "id") ?? "")
+                        let msg: String = who + " 在 " + k + " @你：" + NoteLog.Cut(World.AdfText(World.J(x, "body")), 40)
+                        WNotify("jira", url, msg)
+                    }
+                }
+                SetSeen(mk, String(Math.Max(newest, nowMs - 60000)))
+            }
+        }
+
+        // 4) 小本子：今天你動過狀態的單、今天解決的單
+        let mine = try JiraSearch(js, "(status changed BY currentUser() AFTER startOfDay()) OR (assignee = currentUser() AND resolved >= startOfDay()) ORDER BY updated DESC", "summary,status,project,updated", 50)
+        for i in mine {
+            guard let k = World.JS(i, "key") else { continue }
+            let done = World.JS(i, "fields", "status", "statusCategory", "key") == "done"
+            let e = NoteEntry()
+            e.Id = "jira:" + k + (done ? ":resolved" : ":status")
+            e.T = World.JT(World.JS(i, "fields", "updated")); if e.T == DateTime.MinValue { e.T = WNow() }
+            e.Src = "jira"; e.Project = World.JS(i, "fields", "project", "name"); e.Title = World.JS(i, "fields", "summary")
+            e.Status = done ? "工單解決了" : World.JS(i, "fields", "status", "name")
+            e.Ok = done ? 1 : -1; e.Ref = k; e.Url = b + "/browse/" + k; e.Key = k
+            NoteLog.Write(e)
+        }
+    }
+
+    // ================= GitLab（glab）：待辦提醒＋今天做的事＋推了 tag（盯 CI 用）=================
+    static let TodoText: Dict<String, String> = {
+        let d = Dict<String, String>()
+        let rows: [(String, String)] = [
+            ("review_requested", "請你 review"), ("assigned", "指派給你"), ("mentioned", "@你"), ("directly_addressed", "@你"),
+            ("build_failed", "pipeline 失敗"), ("approval_required", "需要你核准"), ("unmergeable", "沒辦法合併了"), ("marked", "加了待辦")]
+        for r in rows { d[r.0] = r.1 }
+        return d
+    }()
+
+    func GitLabCheck(_ js: JavaScriptSerializer) {
+        for host in GlabHosts() {
+            if WOn("gitlab") {
+                let list = Glab(js, host, "todos?state=pending&per_page=20")
+                if list != nil {
+                    let todos = World.JArr(list)
+                    let sk = "gl-todo:" + host
+                    let seen0 = Seen(sk)
+                    let seen = World.SeenList(seen0), ids = List<String>()
+                    for t in todos { ids.Add(World.JS(t, "id") ?? "") }
+                    if seen0 != nil {
+                        let fresh = List<Any>()
+                        for t in todos { if !seen.Contains(World.JS(t, "id") ?? "") { fresh.Add(t) } }
+                        var n = 0
+                        while n < fresh.Count && n < 3 {
+                            let t = fresh[n]
+                            let act = World.JS(t, "action_name") ?? ""
+                            var what = ""
+                            if !World.TodoText.TryGetValue(act, &what) { what = act }
+                            let tt = World.JS(t, "target_type")
+                            let rf: String = tt == "MergeRequest" ? "MR" : (tt == "Issue" ? "Issue" : "")
+                            let kind: String = act == "build_failed" ? "ci-fail" : "gitlab"
+                            let who: String = World.JS(t, "author", "name") ?? "有人"
+                            let msg: String = who + " " + what + "：" + rf + " " + NoteLog.Cut(World.JS(t, "target", "title"), 36)
+                            WNotify(kind, World.JS(t, "target_url"), msg)
+                            n += 1
+                        }
+                        if fresh.Count > 3 { WNotify("gitlab", "https://" + host + "/dashboard/todos", "GitLab 還有 " + String(fresh.Count - 3) + " 件新待辦") }
+                    }
+                    for id in ids { if !seen.Contains(id) { seen.Add(id) } }
+                    SetSeen(sk, World.SeenJoin(seen))
+                }
+            }
+            // 你自己的動態（推 commit、開／合併 MR、推 tag）
+            let ev = Glab(js, host, "events?after=" + WNow().AddDays(-2).ToString("yyyy-MM-dd") + "&per_page=100&sort=desc")
+            if ev == nil { continue }
+            let today = WNow().Date
+            let pushes = Dict<String, NoteEntry>()
+            for x in World.JArr(ev) {
+                let at = World.JT(World.JS(x, "created_at"))
+                if at == DateTime.MinValue { continue }
+                let act = World.JS(x, "action_name") ?? "", pid = World.JS(x, "project_id")
+                let proj = GlProject(js, host, pid)
+                guard let path = World.JS(proj, "path_with_namespace") else { continue }
+                let web = World.JS(proj, "web_url"), name = World.JS(proj, "name") ?? World.JS(proj, "path")
+                let pd = World.J(x, "push_data")
+                // 推了 tag → 盯 CI
+                if pd != nil && World.JS(pd, "ref_type") == "tag" && act == "pushed new" {
+                    if WOn("ci") { CiCandidate("gitlab", host, pid, path, name, World.JS(pd, "ref"), at) }
+                    continue
+                }
+                if WOn("gitlab") == false || at.Date != today { continue }
+                if pd != nil && World.JS(pd, "ref_type") == "branch" && (act == "pushed to" || act == "pushed new") {
+                    let br = World.JS(pd, "ref") ?? ""
+                    let id = "gitlab:" + path + ":push:" + br
+                    let e: NoteEntry
+                    if let had = pushes.Get(id) { e = had }
+                    else {
+                        e = NoteEntry(); e.Id = id; e.Src = "gitlab"; e.Project = name; e.Key = br; e.End = at; e.T = at; e.Ref = br
+                        e.Title = World.JS(pd, "commit_title") ?? ("推到 " + br); e.Url = (web ?? "") + "/-/commits/" + br; e.Ok = -1; e.Status = "0"
+                        pushes[id] = e
+                    }
+                    if at < e.T { e.T = at }
+                    if at > e.End { e.End = at; e.Title = World.JS(pd, "commit_title") ?? e.Title }
+                    e.Status = String(int.Parse(e.Status) + Math.Max(1, World.JI(pd, "commit_count")))
+                    continue
+                }
+                if World.JS(x, "target_type") == "MergeRequest" && (act == "opened" || act == "accepted" || act == "approved") {
+                    let iid = World.JS(x, "target_iid") ?? ""
+                    let e = NoteEntry()
+                    let what: String = act == "opened" ? "opened" : (act == "accepted" ? "merged" : "approved")
+                    e.Id = "gitlab:" + path + "!" + iid + ":" + what; e.T = at; e.Src = "gitlab"; e.Project = name
+                    e.Title = World.JS(x, "target_title"); e.Status = act == "opened" ? "開了 MR" : (act == "accepted" ? "合併了" : "核准了")
+                    e.Ok = act == "accepted" ? 1 : -1; e.Ref = "MR !" + iid; e.Url = (web ?? "") + "/-/merge_requests/" + iid; e.Key = path
+                    NoteLog.Write(e)
+                }
+            }
+            for e in pushes.Values {
+                let n = int.Parse(e.Status)
+                e.Status = "推了 " + String(n) + " 個 commit"
+                if e.End == e.T { e.End = DateTime.MinValue }
+                NoteLog.Write(e)
+            }
+        }
+    }
+    func GlProject(_ js: JavaScriptSerializer, _ host: String, _ id0: String?) -> Any? {
+        guard let id = id0 else { return nil }
+        let k = host + "#" + id
+        let had: Any? = lock(glProjects) { () -> Any? in glProjects.Get(k) }
+        if had != nil { return had }
+        let p = Glab(js, host, "projects/" + id)
+        if let pv = p { lock(glProjects) { glProjects[k] = pv } }
+        return p
+    }
+
+    // ================= GitHub（gh）：通知提醒＋今天做的事＋推了 tag =================
+    static let GhReason: Dict<String, String> = {
+        let d = Dict<String, String>()
+        let rows: [(String, String)] = [
+            ("review_requested", "請你 review"), ("mention", "@你"), ("team_mention", "@你的團隊"), ("assign", "指派給你"),
+            ("ci_activity", "CI 沒過"), ("author", "有新回覆"), ("comment", "有新留言"), ("approval_requested", "需要你核准")]
+        for r in rows { d[r.0] = r.1 }
+        return d
+    }()
+
+    static func GhWeb(_ api: String?) -> String? {
+        // https://api.github.com/repos/o/r/pulls/17 → https://github.com/o/r/pull/17
+        if string.IsNullOrEmpty(api) { return nil }
+        let m = Regex.Match(api, "^https://api\\.github\\.com/repos/([^/]+/[^/]+)/(pulls|issues|commits)/(\\w+)")
+        if !m.Success { return nil }
+        let kind = m.Groups[2].Value
+        let seg: String = kind == "pulls" ? "pull" : (kind.TrimEnd("s") == "commit" ? "commit" : "issues")
+        return "https://github.com/" + m.Groups[1].Value + "/" + seg + "/" + m.Groups[3].Value
+    }
+
+    func GitHubCheck(_ js: JavaScriptSerializer) {
+        if ghState == "" { DetectAuth() }
+        if ghUser == "" { return }
+        if WOn("github") {
+            let list = Gh(js, "notifications?per_page=30")
+            if list != nil {
+                let ns = World.JArr(list)
+                let sk = "gh-note"
+                let seen0 = Seen(sk)
+                let seen = World.SeenList(seen0)
+                let fresh = List<Any>()
+                for n in ns {
+                    let key: String = (World.JS(n, "id") ?? "") + "@" + (World.JS(n, "updated_at") ?? "")
+                    if seen0 != nil && !seen.Contains(key) && World.GhReason.ContainsKey(World.JS(n, "reason") ?? "") { fresh.Add(n) }
+                    if !seen.Contains(key) { seen.Add(key) }
+                }
+                SetSeen(sk, World.SeenJoin(seen))
+                var i = 0
+                while i < fresh.Count && i < 3 {
+                    let n = fresh[i]
+                    let reason = World.JS(n, "reason") ?? "", type = World.JS(n, "subject", "type")
+                    let rf: String = type == "PullRequest" ? "PR" : (type == "Issue" ? "Issue" : "")
+                    let url: String = World.GhWeb(World.JS(n, "subject", "url")) ?? ("https://github.com/" + (World.JS(n, "repository", "full_name") ?? ""))
+                    var why = ""
+                    World.GhReason.TryGetValue(reason, &why)
+                    let kind: String = reason == "ci_activity" ? "ci-fail" : "github"
+                    let msg: String = (World.JS(n, "repository", "name") ?? "") + " " + why + "：" + rf + " " + NoteLog.Cut(World.JS(n, "subject", "title"), 36)
+                    WNotify(kind, url, msg)
+                    i += 1
+                }
+                if fresh.Count > 3 { WNotify("github", "https://github.com/notifications", "GitHub 還有 " + String(fresh.Count - 3) + " 則新通知") }
+            }
+        }
+        let ev = Gh(js, "users/" + ghUser + "/events?per_page=100")
+        if ev == nil { return }
+        let today = WNow().Date
+        let pushes = Dict<String, NoteEntry>()
+        for x in World.JArr(ev) {
+            let at = World.JT(World.JS(x, "created_at"))
+            if at == DateTime.MinValue { continue }
+            let type = World.JS(x, "type")
+            guard let repo = World.JS(x, "repo", "name") else { continue }
+            let name = repo.Substring(repo.IndexOf("/") + 1)
+            let pl = World.J(x, "payload")
+            if type == "CreateEvent" && World.JS(pl, "ref_type") == "tag" {
+                if WOn("ci") { CiCandidate("github", "github.com", nil, repo, name, World.JS(pl, "ref"), at) }
+                continue
+            }
+            if !WOn("github") || at.Date != today { continue }
+            if type == "PushEvent" {
+                let ref0 = World.JS(pl, "ref") ?? ""
+                let br = ref0.Replace("refs/heads/", "")
+                if br == "" || ref0.StartsWith("refs/tags/") { continue }
+                let commits = World.JA(pl, "commits")
+                let n: Int = commits.count > 0 ? commits.count : Math.Max(World.JI(pl, "size"), World.JI(pl, "distinct_size"))
+                let msg: String? = commits.count > 0 ? (World.JS(commits[commits.count - 1], "message") ?? "").Split("\n")[0] : nil
+                let id = "github:" + repo + ":push:" + br
+                let e: NoteEntry
+                if let had = pushes.Get(id) { e = had }
+                else {
+                    e = NoteEntry(); e.Id = id; e.Src = "github"; e.Project = name; e.Key = br; e.Ref = br; e.T = at; e.End = at
+                    e.Title = string.IsNullOrEmpty(msg) ? "推到 " + br : msg!; e.Url = "https://github.com/" + repo + "/commits/" + br; e.Status = "0"
+                    pushes[id] = e
+                }
+                if at < e.T { e.T = at }
+                if at > e.End { e.End = at; if !string.IsNullOrEmpty(msg) { e.Title = msg! } }
+                e.Status = String(int.Parse(e.Status) + Math.Max(0, n))
+            }
+            else if type == "PullRequestEvent" {
+                let act = World.JS(pl, "action")
+                let merged = act == "closed" && World.JS(pl, "pull_request", "merged") == "True"
+                if act != "opened" && !merged { continue }
+                let num = World.JS(pl, "pull_request", "number") ?? World.JS(pl, "number") ?? ""
+                let e = NoteEntry()
+                e.Id = "github:" + repo + "#" + num + ":" + (merged ? "merged" : "opened"); e.T = at; e.Src = "github"; e.Project = name
+                e.Title = World.JS(pl, "pull_request", "title") ?? ("PR #" + num); e.Status = merged ? "合併了" : "開了 PR"; e.Ok = merged ? 1 : -1
+                e.Ref = "PR #" + num; e.Url = World.JS(pl, "pull_request", "html_url") ?? ("https://github.com/" + repo + "/pull/" + num)
+                e.Key = World.JS(pl, "pull_request", "head", "ref") ?? repo
+                NoteLog.Write(e)
+            }
+        }
+        for e in pushes.Values {
+            let n = int.Parse(e.Status)
+            e.Status = n > 0 ? "推了 " + String(n) + " 個 commit" : "推上去了"
+            if e.End == e.T { e.End = DateTime.MinValue }
+            NoteLog.Write(e)
+        }
+    }
+
+    // ================= 盯 CI：從 glab／gh 看到你推了 tag（哪個終端機、哪台電腦推的都算）→ 查 pipeline／workflow 直到跑完 =================
+    // 為什麼用「你自己的動態」找：不用設定資料夾、不用在 VS Code 推，只看你真的推過的 repo；GitHub 的動態偶爾會晚一兩分鐘。
+    final class CiWatch {
+        var Kind = "", Host = "", Repo = "", Name = "", Tag = "", Last = ""
+        var Pid: String? = nil, Url: String? = nil
+        var Pushed = DateTime.MinValue, NextAt = DateTime.MinValue, Until = DateTime.MinValue
+        var Misses = 0
+        var Announced = false, Failed = false
+        init() {}
+    }
+
+    func CiCandidate(_ kind: String, _ host: String, _ pid: String?, _ repo: String, _ name: String?, _ tag: String?, _ pushed: DateTime) {
+        if string.IsNullOrEmpty(tag) || (WNow() - pushed).TotalMinutes > 30 { return }
+        let key = kind + ":" + repo + ":" + tag!
+        let seen = World.SeenList(Seen("ci-seen"))
+        if seen.Contains(key) { return }
+        seen.Add(key); SetSeen("ci-seen", World.SeenJoin(seen))
+        let w = CiWatch()
+        w.Kind = kind; w.Host = host; w.Pid = pid; w.Repo = repo; w.Name = name ?? ""; w.Tag = tag!; w.Pushed = pushed
+        let s0: Int = App.Offscreen ? 0 : 15
+        w.NextAt = DateTime.Now.AddSeconds(s0); w.Until = DateTime.Now.AddMinutes(90)
+        lock(ciWatches) { ciWatches.Add(w) }
+        App.Log("work ci: watching " + kind + " " + tag!)
+    }
+
+    func CiStep(_ js: JavaScriptSerializer, _ force: Bool) {
+        let l: List<CiWatch> = lock(ciWatches) { () -> List<CiWatch> in List<CiWatch>(ciWatches) }
+        for w in l {
+            if DateTime.Now < w.NextAt && !force { continue }
+            w.NextAt = DateTime.Now.AddSeconds(20)
+            var status: String? = nil, url: String? = nil
+            var tool = true
+            if w.Kind == "gitlab" {
+                let r = Glab(js, w.Host, "projects/" + (w.Pid ?? "") + "/pipelines?ref=" + Uri.EscapeDataString(w.Tag) + "&per_page=1")
+                if r == nil { tool = false }
+                else { let a = World.JArr(r); if a.count > 0 { status = World.JS(a[0], "status"); url = World.JS(a[0], "web_url") } }
+            }
+            else {
+                let r = Gh(js, "repos/" + w.Repo + "/actions/runs?per_page=20")
+                if r == nil { tool = false }
+                else {
+                    for run in World.JA(r, "workflow_runs") {
+                        if World.JS(run, "head_branch") != w.Tag { continue }
+                        status = World.JS(run, "status") != "completed" ? "running" : (World.JS(run, "conclusion") == "success" ? "success" : "failed")
+                        url = World.JS(run, "html_url")
+                        break
+                    }
+                }
+            }
+            var end = false
+            if !tool || DateTime.Now > w.Until { end = true }
+            else if status == nil { w.Misses += 1; if w.Misses > 12 { end = true } }   // 4 分鐘都沒有 pipeline：這個 tag 不跑 CI
+            else {
+                let st = status!
+                w.Url = url
+                // mac: where 是 Swift 的關鍵字，改叫 whereS
+                let whereS: String = Regex.IsMatch(w.Tag, "Production", RegexOptions.IgnoreCase) ? "正式機" : (Regex.IsMatch(w.Tag, "Development", RegexOptions.IgnoreCase) ? "測試機" : "")
+                let failed = st == "failed" || st == "canceled" || st == "cancelled"
+                let now: String = st == "success" ? "success" : (failed ? "failed" : "running")
+                let head: String = w.Name + " " + w.Tag + " " + whereS
+                if now != w.Last {
+                    w.Last = now
+                    if now == "success" {
+                        WNotify("ci-ok", url, head + "部署成功！"); CiLog(w, "CI 過了", 1, true, w.Failed); end = true
+                    }
+                    else if failed {
+                        // 沒過：先講，再多看 3 小時（重跑 pipeline／re-run workflow 之後過了，小本子要寫「第一次沒過，重跑過了」）
+                        WNotify("ci-fail", url, head + "部署失敗（" + st + "），點我看 pipeline"); CiLog(w, "CI 沒過", 0, true, false)
+                        w.Failed = true; w.Until = DateTime.Now.AddHours(3)
+                    }
+                    else if !w.Announced && !w.Failed {   // 重跑中不另外講，過了或又沒過才講
+                        w.Announced = true; WNotify("ci-run", url, head + "CI 開始跑了，好了叫你"); CiLog(w, "CI 跑起來了", -1, false, false)
+                    }
+                }
+                if w.Failed && !end { w.NextAt = DateTime.Now.AddSeconds(60) }   // 等重跑：慢慢看就好
+            }
+            if end { lock(ciWatches) { ciWatches.Remove(w) } }
+        }
+    }
+    func CiLog(_ w: CiWatch, _ status: String, _ ok: Int, _ done: Bool, _ retried: Bool) {
+        let e = NoteEntry()
+        e.Retried = retried
+        e.Id = "ci:" + w.Repo + ":" + w.Tag; e.T = w.Pushed; if done { e.End = WNow() }
+        e.Src = "ci"; e.Project = w.Name; e.Title = "發 " + w.Tag; e.Status = status; e.Ok = ok; e.Ref = w.Tag; e.Url = w.Url; e.Key = w.Repo
+        NoteLog.Write(e)
+    }
+
+    // ================= 開會（ICS）：開會前 N 分鐘、開始時提醒；開會中自動安靜 =================
+    final class MeetItem {
+        var At = 0, End = 0
+        var Kind = "", Text = "", Url = "", Key = "", Uid = "", Summary = ""
+        var Start = 0
+        init() {}
+    }
+    func WorkMeetUrl() -> String { return WorkOwns("meet") ? (World.WorkUrl(WC("meet_url")) ?? "") : "" }
+
+    func MeetFetch() {
+        guard let url = World.WorkUrl(WC("meet_url")) else { return }
+        if App.Offscreen && !Regex.IsMatch(url, "^https?://(127\\.0\\.0\\.1|localhost)[:/]") { return }   // 測試不連真的行事曆
+        var err = ""
+        let text: String? = World.Fetch(url, &err)
+        meetErr = err
+        if text == nil { return }
+        meetText = text!
+        MeetPlan()
+    }
+
+    func MeetPlan() {
+        let url = WC("meet_url")
+        let om = Regex.Match(url, "/ical/([^/]+)/")
+        let owner: String = om.Success ? Uri.UnescapeDataString(om.Groups[1].Value) : ""
+        var cal = ""
+        var before = 0
+        if !int.TryParse(WC("meet_before"), &before) || before < 1 { before = 5 }
+        let now = WNowMs()
+        let occ = Ics.Occurrences(Ics.Parse(meetText, owner, &cal), now - 60000, now + 26 * 3600000)
+        // 同一時間好幾場 → 合成一則
+        let groups = Dict<Int, List<IcsOcc>>()
+        let order = List<Int>()
+        for o in occ {
+            var g: List<IcsOcc>! = groups.Get(o.Start)
+            if g == nil { g = List<IcsOcc>(); groups[o.Start] = g; order.Add(o.Start) }
+            g.Add(o)
+        }
+        let plan = List<MeetItem>()
+        for start in order {
+            guard let g = groups.Get(start), g.Count > 0 else { continue }
+            var uid = "", link = ""
+            var end = start
+            for o in g { uid += (uid == "" ? "" : "+") + (o.Uid ?? ""); if link == "" { link = o.Link ?? "" }; end = Math.Max(end, o.End) }
+            let s0: String = g[0].Summary ?? ""
+            var summary: String = s0
+            if g.Count > 1 {
+                let more: String = g.Count > 2 ? " 等 " + String(g.Count) + " 場" : ""
+                summary = s0 + "、" + (g[1].Summary ?? "") + more
+            }
+            let hhmm = World.LocalOfMs(start).ToString("HH:mm")
+            let key = uid + "@" + String(start)
+            let pre = MeetItem(); pre.At = start - before * 60000; pre.Kind = "meeting"; pre.Url = link; pre.Key = key + "-pre"; pre.Start = start; pre.End = end; pre.Uid = uid; pre.Summary = summary
+            pre.Text = hhmm + " 有會：" + summary + "（" + String(before) + " 分鐘後）"
+            let go = MeetItem(); go.At = start; go.Kind = "meeting-now"; go.Url = link; go.Key = key + "-now"; go.Start = start; go.End = end; go.Uid = uid; go.Summary = summary
+            go.Text = summary + " 開始了！" + (link != "" ? "點我進會議" : "")
+            if pre.At > now - 60000 { plan.Add(pre) }
+            plan.Add(go)
+        }
+        lock(meetFired) { meetPlan = plan }
+    }
+
+    func MeetTick() {
+        let now = WNowMs()
+        let fire = List<MeetItem>()
+        lock(meetFired) {
+            for it in meetPlan {
+                if it.At > now || meetFired.Contains(it.Key) { continue }
+                meetFired.Add(it.Key)
+                if now - it.At > 3 * 60000 { continue }   // 電腦睡著錯過太久的就不補
+                fire.Add(it)
+            }
+        }
+        for it in fire {
+            WNotify(it.Kind, it.Url, it.Text)
+            if it.Kind != "meeting-now" { continue }
+            let e = NoteEntry()
+            e.Id = "calendar:" + it.Uid + "@" + String(it.Start); e.T = World.LocalOfMs(it.Start); e.End = World.LocalOfMs(it.End)
+            e.Src = "calendar"; e.Title = it.Summary; e.Url = it.Url != "" ? it.Url : nil
+            NoteLog.Write(e)
+            if WOn("meet_quiet") {
+                let mins = CInt(Math.Round(Double(it.End - now) / 60000.0))
+                if mins > 0 { let q = Math.Min(mins, 240); Post { self.Later(1.5) { self.StartQuiet(q) } } }
+            }
+        }
+    }
+
+    // ================= 下雨：平日 17:30 看一次（等一下下班、下一個上班日）=================
+    static let RainCity: Dict<String, [Double]> = {
+        let d = Dict<String, [Double]>()
+        let rows: [(String, Double, Double)] = [
+            ("台北", 25.05, 121.53), ("臺北", 25.05, 121.53), ("新北", 25.01, 121.47), ("桃園", 24.99, 121.31),
+            ("新竹", 24.80, 120.97), ("台中", 24.15, 120.67), ("臺中", 24.15, 120.67), ("台南", 22.99, 120.21),
+            ("臺南", 22.99, 120.21), ("高雄", 22.63, 120.30), ("基隆", 25.13, 121.74), ("宜蘭", 24.76, 121.75),
+            ("花蓮", 23.99, 121.60), ("台東", 22.76, 121.14), ("臺東", 22.76, 121.14), ("嘉義", 23.48, 120.45),
+            ("彰化", 24.08, 120.54), ("苗栗", 24.56, 120.82), ("屏東", 22.67, 120.49), ("南投", 23.91, 120.68),
+            ("雲林", 23.71, 120.54), ("香港", 22.32, 114.17), ("九龍", 22.32, 114.18), ("澳門", 22.20, 113.55)]
+        for r in rows { d[r.0] = [r.1, r.2] }
+        return d
+    }()
+    static let RainCityEn: Dict<String, String> = {
+        let d = Dict<String, String>()
+        let rows: [(String, String)] = [
+            ("台北", "Taipei"), ("臺北", "Taipei"), ("新北", "New Taipei"), ("桃園", "Taoyuan"), ("新竹", "Hsinchu"), ("台中", "Taichung"), ("臺中", "Taichung"),
+            ("台南", "Tainan"), ("臺南", "Tainan"), ("高雄", "Kaohsiung"), ("基隆", "Keelung"), ("宜蘭", "Yilan"), ("花蓮", "Hualien"), ("台東", "Taitung"),
+            ("臺東", "Taitung"), ("嘉義", "Chiayi"), ("彰化", "Changhua"), ("苗栗", "Miaoli"), ("屏東", "Pingtung"), ("南投", "Nantou"), ("雲林", "Yunlin"),
+            ("香港", "Hong Kong"), ("九龍", "Kowloon"), ("澳門", "Macau")]
+        for r in rows { d[r.0] = r.1 }
+        return d
+    }()
+
+    // 測試（只在離屏模式）：DESKPALS_FAKE_WEB＝本機假伺服器，代替 wttr.in／api.met.no
+    static func WeatherBase(_ real: String, _ fakePath: String) -> String {
+        let f: String? = App.Offscreen ? Environment.GetEnvironmentVariable("DESKPALS_FAKE_WEB") : nil
+        return string.IsNullOrEmpty(f) ? real : f!.TrimEnd("/") + fakePath
+    }
+    static func NextWorkday(_ d: DateTime) -> DateTime {
+        var n = d.Date
+        repeat { n = n.AddDays(1) } while n.DayOfWeek == DayOfWeek.Saturday || n.DayOfWeek == DayOfWeek.Sunday
+        return n
+    }
+
+    func RainCheck(_ js: JavaScriptSerializer) {
+        let d = WNow()
+        let hm = d.Hour * 60 + d.Minute
+        if d.DayOfWeek == DayOfWeek.Saturday || d.DayOfWeek == DayOfWeek.Sunday || hm < 17 * 60 + 30 || hm > 19 * 60 { return }
+        let k = "rain:" + d.ToString("yyyyMMdd")
+        if Seen(k) != nil { return }
+        let loc = WC("rain_place").Trim()
+        var lat = Double.nan, lon = Double.nan
+        var q = loc
+        let m = Regex.Match(loc, "^(-?\\d+(?:\\.\\d+)?)\\s*,\\s*(-?\\d+(?:\\.\\d+)?)$")
+        if m.Success { lat = double.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture); lon = double.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture); q = m.Groups[1].Value + "," + m.Groups[2].Value }
+        else {
+            let c = Regex.Replace(loc, "[市縣]$", "")
+            if let ll = World.RainCity.Get(c), ll.count >= 2 { lat = ll[0]; lon = ll[1] }
+            if let en = World.RainCityEn.Get(c) { q = en }
+        }
+        var st = 0
+        var unit = "%"
+        var tonight = -1, next = -1
+        var tonightMm: Double = -1, nextMm: Double = -1
+        var body = World.HttpGet(World.WeatherBase("https://wttr.in", "/wttr") + "/" + Uri.EscapeDataString(q) + "?format=j1&lang=zh-tw", nil, 20000, &st)
+        var j = ParseJson(js, body)
+        if j != nil && World.JA(j, "weather").count > 0 {
+            tonight = World.WttrMax(j, d, 18, 21)
+            next = World.WttrMax(j, World.NextWorkday(d), 6, 21)
+        }
+        else if !lat.isNaN {
+            unit = "mm"
+            let la: String = lat.ToString("0.00", CultureInfo.InvariantCulture), lo: String = lon.ToString("0.00", CultureInfo.InvariantCulture)
+            body = World.HttpGet(World.WeatherBase("https://api.met.no", "/metno") + "/weatherapi/locationforecast/2.0/compact?lat=" + la + "&lon=" + lo, nil, 20000, &st)
+            j = ParseJson(js, body)
+            if j == nil { return }
+            let nx = World.NextWorkday(d)
+            tonightMm = World.MetSum(j, d.Date.AddHours(18), d.Date.AddHours(22))
+            nextMm = World.MetSum(j, nx.AddHours(6), nx.AddHours(22))
+        }
+        else { return }
+        SetSeen(k, "1")
+        let label: String = d.DayOfWeek == DayOfWeek.Friday ? "下週一" : "明天"
+        let parts = List<String>()
+        if unit == "%" {
+            if tonight >= 50 { parts.Add("等一下下班可能會下雨（降雨機率 " + String(tonight) + "%）") }
+            if next >= 50 { parts.Add(label + "降雨機率 " + String(next) + "%") }
+        }
+        else {
+            if tonightMm >= 1 { parts.Add("等一下下班可能會下雨（預估雨量 " + tonightMm.ToString("0.#", CultureInfo.InvariantCulture) + " mm）") }
+            if nextMm >= 1 { parts.Add(label + "可能下雨，預估雨量 " + nextMm.ToString("0.#", CultureInfo.InvariantCulture) + " mm") }
+        }
+        if parts.Count > 0 { WNotify("rain", "-", string.Join("，", parts.ToArray()) + "，記得帶傘 ☔") }
+    }
+    static func WttrMax(_ j: Any?, _ day: DateTime, _ from: Int, _ to: Int) -> Int {
+        let ymd = day.ToString("yyyy-MM-dd")
+        var mx = -1
+        for w in JA(j, "weather") {
+            if JS(w, "date") != ymd { continue }
+            for h in JA(w, "hourly") {
+                let hr = JI(h, "time") / 100
+                if hr >= from && hr <= to { mx = Math.Max(mx, Math.Max(0, JI(h, "chanceofrain"))) }
+            }
+        }
+        return mx
+    }
+    static func MetSum(_ j: Any?, _ from: DateTime, _ to: DateTime) -> Double {
+        var mm = 0.0
+        var anyMm = false   // mac: any 是 Swift 的關鍵字，改叫 anyMm
+        for t in JA(j, "properties", "timeseries") {
+            let at = JT(JS(t, "time"))
+            if at < from || at >= to { continue }
+            let v = JS(t, "data", "next_1_hours", "details", "precipitation_amount")
+            var x = 0.0
+            if v != nil && double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, &x) { mm += x; anyMm = true }
+        }
+        return anyMm ? Math.Round(mm * 10) / 10 : -1
+    }
+
+    // ================= 工作日誌資料夾：今天出現新檔就說 =================
+    func WorklogCheck() {
+        let dir = WC("worklog_dir")
+        if !Directory.Exists(dir) { return }
+        var newest: FileInfo? = nil
+        for f in DirectoryInfo(dir).EnumerateFiles() {
+            if Regex.IsMatch(f.Name, "\\.(md|txt|docx?|xlsx?)$", RegexOptions.IgnoreCase) && (newest == nil || f.LastWriteTimeUtc > newest!.LastWriteTimeUtc) { newest = f }
+        }
+        guard let nf = newest else { return }
+        let k = "worklog:" + dir, t = String(nf.LastWriteTimeUtc.Ticks)
+        let last = Seen(k)
+        SetSeen(k, t)
+        if last == nil || string.CompareOrdinal(t.PadLeft(20, "0"), last!.PadLeft(20, "0")) <= 0 { return }
+        if nf.LastWriteTime.Date == DateTime.Now.Date { WNotify("worklog", Uri(nf.FullName).AbsoluteUri, "今天的工作日誌好了：" + nf.Name) }
+    }
+
+    // ================= Claude Code／Codex：做完的對話寫進小本子 =================
+    // ~/.claude、~/.codex 的預設位置（CLAUDE_CONFIG_DIR／CODEX_HOME 沒設時）。
+    // 離屏（測試，含 DESKPALS_ISOLATED）一律改成資料資料夾裡的空資料夾：測試絕不讀使用者真的對話紀錄
+    static func AiHomeDefault(_ name: String) -> String { return UserFolder(Environment.SpecialFolder.UserProfile, name, name) }
+
+    // 使用者的資料夾（家目錄、下載、圖片、桌面）。離屏（測試）一律換成資料資料夾裡的 test-home 底下的空資料夾，絕不碰真的
+    // mac: GetFolderPath → ~、~/Pictures、~/Desktop（00_compat）
+    static func UserFolder(_ f: Environment.SpecialFolder, _ sub: String?, _ testName: String) -> String {
+        if !App.Offscreen {
+            let real = Environment.GetFolderPath(f)
+            return string.IsNullOrEmpty(sub) ? real : Path.Combine(real, sub!)
+        }
+        let d = Path.Combine(World.DataDir, "test-home", testName)
+        do { try Directory.CreateDirectory(d) } catch {}
+        return d
+    }
+
+    // 「下載好了」看的資料夾：DESKPALS_DOWNLOADS_DIR 有設就用它，不然是家目錄的 Downloads（離屏：test-home 的 Downloads）
+    static func DownloadsDir() -> String {
+        let e = Environment.GetEnvironmentVariable("DESKPALS_DOWNLOADS_DIR")
+        return !string.IsNullOrEmpty(e) ? e! : UserFolder(Environment.SpecialFolder.UserProfile, "Downloads", "Downloads")
+    }
+
+    // 進階：別的資料夾（WSL 裡的 Claude／Codex）。給 .claude 或 .claude\projects 都可以
+    // mac: 沒有 WSL；有填、而且是本機存在的資料夾才多看這一個（設定視窗不顯示這一欄）
+    func WorkClaudeRoots() -> List<String> {
+        let l = List<String>()
+        l.Add(World.ClaudeProjectsDir())
+        let c = WC("claude_dir")
+        if c != "" && Directory.Exists(c) {
+            let p = Directory.Exists(Path.Combine(c, "projects")) ? Path.Combine(c, "projects") : c
+            if !l.Exists({ (x: String) -> Bool in string.Equals(x.TrimEnd("\\", "/"), p.TrimEnd("\\", "/"), StringComparison.OrdinalIgnoreCase) }) { l.Add(p) }
+        }
+        return l.FindAll { (x: String) -> Bool in Directory.Exists(x) }
+    }
+    func WorkCodexRoots() -> List<String> {
+        let l = List<String>()
+        l.Add(World.CodexSessionsDir())
+        let c = WC("codex_dir")
+        if c != "" && Directory.Exists(c) {
+            let p = Directory.Exists(Path.Combine(c, "sessions")) ? Path.Combine(c, "sessions") : c
+            if !l.Exists({ (x: String) -> Bool in string.Equals(x.TrimEnd("\\", "/"), p.TrimEnd("\\", "/"), StringComparison.OrdinalIgnoreCase) }) { l.Add(p) }
+        }
+        return l.FindAll { (x: String) -> Bool in Directory.Exists(x) }
+    }
+    // WSL 裡跑的 claude／codex 在 Windows 這邊看不到行程：有設別的資料夾、WSL 開著就當作有在跑
+    // mac: 沒有 WSL，一律 false
+    func WorkWslAlive(_ key: String) -> Bool {
+        _ = key
+        return false
+    }
+
+    func AiScan(_ js: JavaScriptSerializer) {
+        let now = DateTime.Now
+        for root in WorkClaudeRoots() {
+            for pdir in Directory.GetDirectories(root) {
+                for fi in DirectoryInfo(pdir).EnumerateFiles("*.jsonl") {
+                    if fi.Name.StartsWith("agent-") { continue }
+                    let mt = fi.LastWriteTime
+                    if mt.Date != now.Date || (now - mt).TotalSeconds < 60 { continue }   // 還在寫的先不記
+                    var was = DateTime.MinValue
+                    if aiLogged.TryGetValue(fi.FullName, &was) && was == mt { continue }
+                    var tool: String? = nil, title: String? = nil
+                    let kind = World.ClaudeState(js, fi.FullName, &tool, &title)
+                    if kind != "idle" && (now - mt).TotalMinutes < 10 { continue }      // 還沒講完（等工具、在想）：晚點再看
+                    aiLogged[fi.FullName] = mt
+                    if NoteLog.Write(ClaudeEntry(js, fi)) { aiWritten += 1 }
+                }
+            }
+        }
+        for root in WorkCodexRoots() {
+            for back in 0..<7 {
+                let dd = now.Date.AddDays(-back)
+                let dir = Path.Combine(root, dd.ToString("yyyy"), dd.ToString("MM"), dd.ToString("dd"))
+                if !Directory.Exists(dir) { continue }
+                for fi in DirectoryInfo(dir).EnumerateFiles("rollout-*.jsonl") {
+                    let mt = fi.LastWriteTime
+                    if mt.Date != now.Date || (now - mt).TotalSeconds < 60 { continue }
+                    var was = DateTime.MinValue
+                    if aiLogged.TryGetValue(fi.FullName, &was) && was == mt { continue }
+                    let st = World.ParseCodex(fi.FullName)
+                    if st.Busy || st.LastComplete == DateTime.MinValue { if (now - mt).TotalMinutes < 10 { continue } }
+                    aiLogged[fi.FullName] = mt
+                    if NoteLog.Write(CodexEntry(js, fi, st)) { aiWritten += 1 }
+                }
+            }
+        }
+        if aiLogged.Count > 2000 { aiLogged.Clear() }
+    }
+
+    static let TsRx = Regex("\"timestamp\":\"([^\"]+)\"")
+    static let AiTitleRx = Regex("^\\{\"type\":\"ai-title\"")
+
+    // 對話的第一句需求（去掉指令、系統訊息、IDE 附帶的標籤），太長就剪
+    static func FirstAsk(_ s0: String?) -> String? {
+        guard var s = s0 else { return nil }
+        s = Regex.Replace(s, "<(ide_[a-z_]+|system-reminder|environment_context|user_instructions|command-[a-z]+)>[\\s\\S]*?</\\1>", " ")
+        s = NoteLog.OneLine(s)
+        if s == "" || s.StartsWith("<") || s.StartsWith("[Request interrupted") || s.StartsWith("Caveat:") { return nil }
+        return NoteLog.Cut(s, 40)
+    }
+    static func UserText(_ content: Any?) -> String? {
+        if let s = content as? String { return FirstAsk(s) }
+        guard let arr = content as? [Any] else { return nil }
+        for o in arr {
+            if JS(o, "type") != "text" { continue }
+            if let t = FirstAsk(JS(o, "text")) { return t }
+        }
+        return nil
+    }
+    static func UtcLocal(_ iso: String?) -> DateTime {
+        var t = DateTime.MinValue
+        if iso != nil && DateTime.TryParse(iso, CultureInfo.InvariantCulture, [DateTimeStyles.AdjustToUniversal, DateTimeStyles.AssumeUniversal], &t) { return t.ToLocalTime() }
+        return DateTime.MinValue
+    }
+    // mac: C# 的 Path.GetFileName（Windows）把 \ / : 都當分隔字元；對話的 cwd 可能是 Windows 路徑，照 Windows 的結果取最後一段
+    static func WorkFileName(_ p: String) -> String {
+        if let i = p.lastIndex(where: { $0 == "/" || $0 == "\\" || $0 == ":" }) { return String(p[p.index(after: i)...]) }
+        return p
+    }
+
+    func ClaudeEntry(_ js: JavaScriptSerializer, _ fi: FileInfo) -> NoteEntry? {
+        let big = 3 * 1024 * 1024, mb = 1024 * 1024
+        let text: String = fi.Length <= big ? World.Tail(fi.FullName, big) : World.Head(fi.FullName, mb) + "\n" + World.Tail(fi.FullName, mb)
+        let lines = text.Split("\n")
+        var cwd: String? = nil, ask: String? = nil, aiTitle: String? = nil
+        var t0 = DateTime.MinValue, t1 = DateTime.MinValue
+        let firstOn = Dict<DateTime, DateTime>()   // 每一天的第一筆（同一個對話開好幾天：那天的紀錄從那天開始算）
+        for raw in lines {
+            let l = raw.Trim()
+            if l.Length < 2 { continue }
+            if World.AiTitleRx.IsMatch(l) { let at = World.JS(ParseJson(js, l), "aiTitle"); if !string.IsNullOrEmpty(at) { aiTitle = at }; continue }
+            let probe: String = l.Length > 4000 ? l.Substring(0, 4000) + l.Substring(Math.Max(4000, l.Length - 4000)) : l
+            let tm = World.TsRx.Match(probe)
+            if tm.Success {
+                let t = World.UtcLocal(tm.Groups[1].Value)
+                if t != DateTime.MinValue { if t0 == DateTime.MinValue { t0 = t }; if !firstOn.ContainsKey(t.Date) { firstOn[t.Date] = t }; t1 = t }
+            }
+            if ask != nil && cwd != nil { continue }
+            if l.IndexOf("\"type\":\"user\"", StringComparison.Ordinal) < 0 || l.IndexOf("\"isSidechain\":true", StringComparison.Ordinal) >= 0 { continue }
+            let d = ParseJson(js, l.Length > 400000 ? nil : l)
+            if d == nil || World.JS(d, "type") != "user" || World.JS(d, "isMeta") == "True" { continue }
+            if cwd == nil { cwd = World.JS(d, "cwd") }
+            if ask == nil { ask = World.UserText(World.J(d, "message", "content")) }
+        }
+        let title: String? = !string.IsNullOrEmpty(aiTitle) ? NoteLog.Cut(aiTitle, 60) : ask
+        if title == nil || t0 == DateTime.MinValue { return nil }
+        var td = DateTime.MinValue
+        if t1.Date != t0.Date && firstOn.TryGetValue(t1.Date, &td) { t0 = td }
+        let e = NoteEntry()
+        e.Id = "claude:" + Path.GetFileNameWithoutExtension(fi.Name); e.T = t0; e.End = t1 > t0 ? t1 : DateTime.MinValue
+        e.Src = "claude"; e.Title = title
+        e.Project = cwd != nil ? World.WorkFileName(cwd!.TrimEnd("\\", "/")) : World.ProjectFromFolder(fi.Directory.Name)
+        e.Key = e.Project
+        return e
+    }
+    // Claude 的資料夾名字是把路徑的 \ / : 換成 -（c--tmp-dp-wt-work）：取最後一段（不完美，只在讀不到 cwd 時用）
+    static func ProjectFromFolder(_ n: String) -> String { let i = n.LastIndexOf("-"); return i >= 0 && i < n.Length - 1 ? n.Substring(i + 1) : n }
+
+    func CodexEntry(_ js: JavaScriptSerializer, _ fi: FileInfo, _ st: CodexState) -> NoteEntry? {
+        let head = World.Head(fi.FullName, 2 * 1024 * 1024)
+        var id: String? = nil, cwd: String? = nil, ask: String? = nil
+        var t0 = DateTime.MinValue
+        for raw in head.Split("\n") {
+            let l = raw.Trim()
+            if l.Length < 2 { continue }
+            if id == nil && l.IndexOf("\"type\":\"session_meta\"", StringComparison.Ordinal) >= 0 {
+                let d = ParseJson(js, l)
+                id = World.JS(d, "payload", "id"); cwd = World.JS(d, "payload", "cwd")
+                t0 = World.UtcLocal(World.JS(d, "payload", "timestamp") ?? World.JS(d, "timestamp"))
+                continue
+            }
+            if ask == nil && l.IndexOf("\"user_message\"", StringComparison.Ordinal) >= 0 && l.Length < 400000 {
+                let d = ParseJson(js, l)
+                if World.JS(d, "payload", "type") == "user_message" { ask = World.FirstAsk(World.JS(d, "payload", "message")) }
+            }
+            if id != nil && ask != nil { break }
+        }
+        if ask == nil { return nil }
+        if t0 == DateTime.MinValue { let tm = World.TsRx.Match(head); if tm.Success { t0 = World.UtcLocal(tm.Groups[1].Value) } }
+        if t0 == DateTime.MinValue { return nil }
+        if id == nil { let m = Regex.Match(fi.Name, "([0-9a-f]{8}-[0-9a-f-]{27,})\\.jsonl$"); id = m.Success ? m.Groups[1].Value : Path.GetFileNameWithoutExtension(fi.Name) }
+        let e = NoteEntry()
+        e.Id = "codex:" + id!; e.T = t0
+        e.End = st.LastComplete != DateTime.MinValue ? st.LastComplete.ToLocalTime() : fi.LastWriteTime
+        if e.End != DateTime.MinValue && e.End.Date != e.T.Date {
+            // 同一個對話開好幾天：那天的紀錄從那天的第一筆開始算
+            for raw in World.Tail(fi.FullName, 1024 * 1024).Split("\n") {
+                // mac: CodexRx 在 41_world_b 是 NSRegularExpression，用 RxMatch（[1]＝時間）
+                let probe: String = raw.Length > 400 ? raw.Substring(0, 400) : raw
+                guard let tm = World.RxMatch(World.CodexRx, probe) else { continue }
+                let t = World.UtcLocal(tm[1])
+                if t.Date == e.End.Date { e.T = t; break }
+            }
+        }
+        if e.End <= e.T { e.End = DateTime.MinValue }
+        e.Src = "codex"; e.Title = ask
+        e.Project = cwd != nil ? World.WorkFileName(cwd!.TrimEnd("\\", "/")) : nil; e.Key = e.Project
+        return e
+    }
+
+    // ================= 學校行事曆的上課也進小本子（DeskPals.Study.cs 的 PlanTick 叫）=================
+    func WorkLogClass(_ it: SchoolPlanItem) {
+        let e = NoteEntry()
+        let name = Regex.Replace(it.Text ?? "", "（點我打開）$", "")
+        e.Id = "school:" + (it.Key ?? ""); e.T = World.LocalOfMs(it.At); if it.QuietMin > 0 { e.End = World.LocalOfMs(it.At + it.QuietMin * 60000) }
+        e.Src = "school"; e.Project = name; e.Title = "上課：" + name; e.Url = it.Url != "" ? it.Url : nil
+        NoteLog.Write(e)
+    }
+
+    // ================= 設定視窗（畫面還在挑版：先留入口，給小屋選單和小本子的「來源」按鈕叫）=================
+    // 工作設定視窗在 DeskPals.WorkSettings.cs（ShowWorkSettings）；看的方式（格子／清單、上次選的來源）記在 work-ui.txt
+    static func ReadWorkUi() -> String { return World.ReadText("work-ui.txt") }
+    static func WriteWorkUi(_ s: String) { World.WriteText("work-ui.txt", s) }
+
+    // 小本子（DeskPals.Notebook.cs）用的兩個接點（v011 SPEC 2b）：「來源」按鈕、空白頁的「接上」
+    func OpenWorkSettings() { ShowWorkSettings() }
+    // 空白頁的「接上」：直接打開那個來源（calendar＝開會；school 在讀書小幫手設定）
+    func OpenWorkSettings(_ key: String?) {
+        if key == "school" { ShowStudySettings(); return }
+        let src: String? = key == "calendar" ? "meet" : key
+        ShowWorkSettings(src)
+    }
+
+    // 空白頁那張清單：這個來源接上了沒（claude｜school｜calendar｜github｜gitlab｜jira）
+    func WorkSourceOn(_ key: String) -> Bool {
+        switch key {
+        case "claude": return WOn("ai")
+        case "school": if !studyLoaded { LoadStudy() }; return haveSchool
+        case "calendar": return WorkOwns("meet")
+        case "github", "gitlab", "jira": return WorkOwns(key)
+        default: break
+        }
+        return false
+    }
+
+    // ================= pipe =================
+    func WorkMsg(_ c: Client, _ p: [String], _ line: String) -> Bool {
+        if p.count == 0 || !p[0].StartsWith("work-") { return false }
+        WorkLoad()
+        let t = line.Trim()
+        let sp = t.IndexOf(" ")
+        let rest: String = sp > 0 ? t.Substring(sp + 1) : ""
+        switch p[0] {
+        case "work-set":
+            if p.count >= 2 {
+                let s2 = rest.IndexOf(" ")
+                let v: String = s2 > 0 ? rest.Substring(s2 + 1) : ""
+                if !WorkSet(p[1], v) { World.Send(c, "work-set bad " + p[1] + "\n") }
+            }
+            return true
+        case "work-token": SetJiraToken(rest); return true
+        case "work-poll": workPollNow = true; if workWake != nil { workWake.Set() }; return true
+        case "work-dump": World.Send(c, WorkDump()); return true
+        case "work-settings": return WorkSettingsMsg(c, p, line)   // 設定視窗（DeskPals.WorkSettings.cs）
+        case "work-clock":
+            if !App.Offscreen { return true }
+            do {
+                var want = DateTime.MinValue
+                var ok = false
+                if p.count >= 2 { ok = DateTime.TryParse(p[1], CultureInfo.InvariantCulture, DateTimeStyles.None, &want) }
+                workShift = ok ? want - DateTime.Now : TimeSpan.Zero
+            }
+            if meetText != "" { MeetPlan() }
+            return true
+        case "work-vpncheck":
+            if !App.Offscreen { return true }
+            do {
+                let h = companyHost
+                let r: String = h == "" ? "none" : (World.VpnReachable(h) ? "ok" : "down")
+                World.Send(c, "work-vpn " + r + " " + h + "\n")
+            }
+            return true
+        case "work-forget":
+            if !App.Offscreen { return true }
+            lock(wcfg) { wseen.Clear(); seenDirty = true }
+            lock(meetFired) { meetFired.Clear() }
+            aiLogged.Clear()
+            return true
+        default: break
+        }
+        return true
+    }
+
+    func WorkDump() -> String {
+        let sb = StringBuilder("work")
+        lock(wcfg) {
+            for d in World.WorkDefaults {
+                let v = wcfg.Get(d[0]) ?? ""
+                let shown: String = v == "" ? "-" : v.Replace(" ", "_")
+                sb.Append(" " + d[0] + "=" + shown)
+            }
+        }
+        let tok: String = HasJiraToken() ? "1" : "0"
+        let nowS: String = WNow().ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture)
+        let tl: String = " token=" + tok + " now=" + nowS + "\n"
+        sb.Append(tl)
+        sb.Append(WorkOwnLine())
+        let hostS: String = companyHost == "" ? "-" : companyHost
+        let jiraS: String = jiraStatus == "" ? "-" : jiraStatus.Replace(" ", "_")
+        let glabS: String = glabState == "" ? "-" : glabState
+        let ghS: String = ghState == "" ? "-" : ghState
+        let ghU: String = ghUser == "" ? "-" : ghUser
+        let quietS: Int = quietOn ? QuietLeft() : 0
+        let meetE: String = meetErr != "" ? " meeterr=" + meetErr.Replace(" ", "_") : ""
+        var st: String = "work-state host=" + hostS + " jira=" + jiraS + " glab=" + glabS
+        st += " gh=" + ghS + " ghuser=" + ghU + " dropped=" + String(workDropped)
+        st += " polled=" + String(workPolled) + " ai=" + String(aiWritten)
+        st += " quiet=" + String(quietS) + " meets=" + String(meetPlan.Count) + meetE + "\n"
+        sb.Append(st)
+        let cr: String = string.Join("|", WorkClaudeRoots().ToArray()).Replace(" ", "_")
+        let xr: String = string.Join("|", WorkCodexRoots().ToArray()).Replace(" ", "_")
+        let hc: String = World.ClaudeProjectsDir().Replace(" ", "_")
+        let hx: String = World.CodexSessionsDir().Replace(" ", "_")
+        let dl: String = World.DownloadsDir().Replace(" ", "_")
+        let pic: String = World.UserFolder(Environment.SpecialFolder.MyPictures, "", "Pictures").Replace(" ", "_")
+        let desk: String = World.UserFolder(Environment.SpecialFolder.DesktopDirectory, "", "Desktop").Replace(" ", "_")
+        let dat: String = World.DataDir.Replace(" ", "_")
+        var rt: String = "work-roots claude=" + cr + " codex=" + xr
+        rt += " home-claude=" + hc + " home-codex=" + hx
+        rt += " downloads=" + dl + " pictures=" + pic + " desktop=" + desk + " data=" + dat + "\n"
+        sb.Append(rt)
+        lock(ciWatches) {
+            for w in ciWatches {
+                let run: String = w.Announced ? " running" : ""
+                let wl: String = "watch " + w.Kind + " " + w.Repo + " " + w.Tag + run + "\n"
+                sb.Append(wl)
+            }
+        }
+        lock(workNotices) { for n in workNotices { sb.Append("notice " + n + "\n") } }
+        sb.Append("end\n")
+        return sb.ToString()
+    }
+}
+
+// ===== 63_notebook_data.swift =====
+// ===== 63_notebook_data.swift — DeskPals.NotebookData.cs（小本子的資料：NbFact／NbWord／NbThing／NbEdits／NbTodo／Nb）=====
+// Desk Pals：小本子的資料（跟畫面分開；Mac 版照這支逐段移植）。
+// 收集器（work-sources 分支）把做過的事寫成一行一筆 JSON：<DataDir>/notebook/log-YYYY-MM-DD.jsonl（格式見 v011 SPEC 2b）。
+// 小本子只讀 log＋自己的檔（todo.json、note-*.txt、edits-*.json），合併、分組、白話狀態、複製的字都在這裡算。
+// 這個檔沒有任何視窗或畫圖的東西：輸入是一串事實（NbFact），輸出是要畫的列（NbThing）和要貼出去的字。
+// mac 的差別（都標了 // mac:）：
+// - DateTime.TryParseExact（期限 yyyy-MM-dd／yyyy-MM-ddTHH:mm）shim 沒有：Nb.ExactDue 照 .NET 的規則自己對（位數固定、不收空白）。
+// - Guid.NewGuid().ToString("N") → UUID（一樣 32 個小寫十六進位）。
+// - 讀 log：FileStream＋StreamReader → File.ReadAllText（一樣去掉 BOM）；FileShare 在 mac 沒有意義。
+// - Regex.Split／Replace 的樣式先編好放 static（C# 的 Regex 靜態方法有快取）；\s 補上 .NET 有、ICU 沒有的 \x0B、\x85。
+// - JSON 的 null：shim 給 NSNull，當成 C# 的 null。
+
+import Foundation
+
+// 一筆事實（log 的一行）
+final class NbFact: Hashable {
+    var Id = "", Src = "", Project = "", Title = "", Status = "", Ref = "", Url = "", Key = ""
+    var T = DateTime.MinValue, End = DateTime.MinValue
+    var HasEnd = false
+    var Ok = -1            // -1 不知道、0 沒過、1 過了
+    var Todo = false, TodoSet = false     // Jira 指派給我、還沒結：todo=true（只放待辦，不放今天做了）；todo=false＝不再是了
+    var Retried = false           // CI：之前沒過、重跑才過（retried=true）
+    var Gone = false              // gone=true：這筆收回（例如待辦勾錯了又取消）
+    var Class = false             // 學校行事曆的課（小本子自己從 ICS 算的，不寫進 log）
+    var Seq = 0                   // 在檔案裡的順序（同一刻的照寫入順序）
+    init() { }
+    // mac: C# 的 Dictionary<NbFact, …> 用參考相等
+    static func == (a: NbFact, b: NbFact) -> Bool { return a === b }
+    func hash(into h: inout Hasher) { h.combine(ObjectIdentifier(self)) }
+}
+
+// 一句話的結果字：0 一般（棕）、1 好（綠）、2 壞（紅）
+final class NbWord { var Text: String; var Kind: Int; init(_ t: String, _ k: Int) { Text = t; Kind = k } }
+
+// 今天做了的一件事：主要那筆＋掛在底下的（Jira、MR／PR、CI）
+final class NbThing {
+    var F: NbFact! = nil
+    let Kids = List<NbFact>()
+    let Fold = Dict<NbFact, NbFact>()   // MR／PR → 同一個分支的 CI（接在同一句）
+    var Group = "", Title = ""
+    var Off = false
+    init() { }
+}
+
+// 使用者在今天做了改過的：不複製、改過的標題、刪掉的（手寫的）
+final class NbEdits {
+    let Off = HashSet<String>()
+    let Titles = Dict<String, String>()
+    let Gone = HashSet<String>()
+    init() { }
+}
+
+// 一件待辦（自己寫的、學校的作業）
+final class NbTodo {
+    var Id = "", Text = "", Due = "", Created = "", Src = "", Course = "", Ref = ""   // Due：yyyy-MM-dd 或 yyyy-MM-ddTHH:mm；Src：""＝自己寫的、school＝學校作業（Ref＝作業 id）
+    init() { }
+}
+
+enum Nb {
+    static let Inv = CultureInfo.InvariantCulture
+    static let WeekDay: [String] = ["日", "一", "二", "三", "四", "五", "六"]
+    static let Meet = "會議", Other = "其他"
+
+    // ================= 檔案 =================
+    static func Dir(_ dataDir: String) -> String { return Path.Combine(dataDir, "notebook") }
+    static func Ymd(_ d: DateTime) -> String { return d.ToString("yyyy-MM-dd", Inv) }
+    static func LogPath(_ dir: String, _ day: DateTime) -> String { return Path.Combine(dir, "log-" + Ymd(day) + ".jsonl") }
+    static func NotePath(_ dir: String, _ day: DateTime) -> String { return Path.Combine(dir, "note-" + Ymd(day) + ".txt") }
+    static func EditsPath(_ dir: String, _ day: DateTime) -> String { return Path.Combine(dir, "edits-" + Ymd(day) + ".json") }
+    static func TodoPath(_ dir: String) -> String { return Path.Combine(dir, "todo.json") }
+
+    // 收集器和小本子都可能寫同一個 log：一次寫一整行，同一個程式裡用這把鎖
+    static let LogLock = NSObject()
+
+    // mac: C# Convert.ToString(null) 是 ""；shim 的 JSON null 是 NSNull
+    private static func Cs(_ v: Any?) -> String {
+        guard let v = v, !(v is NSNull) else { return "" }
+        return Convert.ToString(v, Inv)
+    }
+
+    static func Str(_ o: Dict<String, Any>, _ k: String) -> String {
+        guard let v = o.Get(k), !(v is NSNull) else { return "" }
+        return Convert.ToString(v, Inv).Trim()
+    }
+    static func Tri(_ o: Dict<String, Any>, _ k: String) -> Int {
+        guard let v = o.Get(k), !(v is NSNull) else { return -1 }
+        if let b = v as? Bool { return b ? 1 : 0 }
+        let s = Convert.ToString(v, Inv).Trim().ToLowerInvariant()
+        return s == "true" || s == "1" ? 1 : (s == "false" || s == "0" ? 0 : -1)
+    }
+
+    // ISO 時間（本地時間；有時區的換成本地）
+    @discardableResult static func ParseTime(_ s: String?, _ t: inout DateTime) -> Bool {
+        t = DateTime.MinValue
+        if string.IsNullOrEmpty(s) { return false }
+        return DateTime.TryParse(s, Inv, DateTimeStyles.AssumeLocal, &t)
+    }
+
+    static func ParseFact(_ line0: String?, _ seq: Int) -> NbFact! {
+        let line = (line0 ?? "").Trim()
+        if line == "" || line[0] != "{" { return nil }
+        var o0: Dict<String, Any>? = nil
+        do { o0 = try JavaScriptSerializer().DeserializeObject(line) as? Dict<String, Any> }
+        catch { return nil }
+        guard let o = o0 else { return nil }
+        let f = NbFact()
+        f.Id = Str(o, "id"); f.Src = Str(o, "src").ToLowerInvariant(); f.Project = Str(o, "project"); f.Title = OneLine(Str(o, "title"))
+        f.Status = OneLine(Str(o, "status")); f.Ref = Str(o, "ref"); f.Url = Str(o, "url"); f.Key = Str(o, "key")
+        if f.Id == "" || !ParseTime(Str(o, "t"), &f.T) { return nil }
+        var end = DateTime.MinValue
+        let hasEnd = ParseTime(Str(o, "end"), &end)
+        f.End = end
+        f.HasEnd = hasEnd && f.End >= f.T
+        f.Ok = Tri(o, "ok")
+        f.TodoSet = o.ContainsKey("todo"); f.Todo = Tri(o, "todo") == 1
+        f.Retried = Tri(o, "retried") == 1
+        f.Gone = Tri(o, "gone") == 1
+        f.Seq = seq
+        Normalize(f)
+        return f
+    }
+
+    // 收集器寫的字 → 小本子的說法（例：「發 v0.10.4」→「發了 v0.10.4」、學校的「上課：資料結構」→ 一堂課、推 commit 的次數）
+    static func Normalize(_ f: NbFact) {
+        if f.Src == "ci" && f.Title.StartsWith("發 ") { f.Title = "發了 " + f.Title.Substring(2) }
+        if f.Src == "school" && f.Title.StartsWith("上課：") { f.Class = true; f.Title = f.Title.Substring(3).Trim(); if f.Project == "" { f.Project = f.Title } }
+        var n = 0
+        if (f.Src == "gitlab" || f.Src == "github") && int.TryParse(f.Status, &n) { f.Status = n > 0 ? "推了 " + String(n) + " 個 commit" : "推上去了" }
+    }
+
+    // 從 ICS 算的課：log 裡已經有同一堂（收集器上課時寫的，同名、開始時間差 15 分鐘內）就不再加
+    static func AddClasses(_ facts: List<NbFact>, _ classes: List<NbFact>) {
+        let have = List<NbFact>()
+        for f in facts { if f.Class { have.Add(f) } }
+        for c in classes {
+            var dup = false
+            for h in have { if h.Title == c.Title && Math.Abs((h.T - c.T).TotalMinutes) <= 15 { dup = true; if !h.HasEnd && c.HasEnd { h.End = c.End; h.HasEnd = true } } }
+            if !dup { facts.Add(c) }
+        }
+    }
+
+    static func FactJson(_ f: NbFact) -> String {
+        let o = Dict<String, Any>()
+        o["id"] = f.Id; o["t"] = f.T.ToString("yyyy-MM-ddTHH:mm:ss", Inv)
+        if f.HasEnd { o["end"] = f.End.ToString("yyyy-MM-ddTHH:mm:ss", Inv) }
+        o["src"] = f.Src
+        if f.Project != "" { o["project"] = f.Project }
+        o["title"] = f.Title
+        if f.Status != "" { o["status"] = f.Status }
+        if f.Ok >= 0 { o["ok"] = f.Ok == 1 }
+        if f.Ref != "" { o["ref"] = f.Ref }
+        if f.Url != "" { o["url"] = f.Url }
+        if f.Key != "" { o["key"] = f.Key }
+        if f.Gone { o["gone"] = true }
+        return JavaScriptSerializer().Serialize(o)
+    }
+
+    // 一天的 log：同一個 id 後寫的蓋前寫的（位置照第一次出現）
+    static func ReadLog(_ dir: String, _ day: DateTime) -> List<NbFact> {
+        let list = List<NbFact>()
+        let path = LogPath(dir, day)
+        var lines: [String] = []
+        do {
+            if !File.Exists(path) { return list }
+            // mac: FileStream（FileShare.ReadWrite | Delete）＋StreamReader → File.ReadAllText（一樣去掉 BOM）
+            try lock(LogLock) { () throws -> Void in
+                lines = try File.ReadAllText(path, Encoding.UTF8).Split("\n")
+            }
+        }
+        catch { return list }
+        let at = Dict<String, Int>()
+        var i = 0
+        while i < lines.count {
+            let f: NbFact! = ParseFact(lines[i], i)
+            if f != nil {
+                if let j = at.Get(f.Id) { f.Seq = list[j].Seq; list[j] = f }
+                else { at[f.Id] = list.Count; list.Add(f) }
+            }
+            i += 1
+        }
+        return list
+    }
+
+    static func AppendLog(_ dir: String, _ f: NbFact) {
+        do {
+            try Directory.CreateDirectory(dir)
+            let b: [UInt8] = UTF8Encoding(false).GetBytes(FactJson(f) + "\n")
+            try lock(LogLock) { () throws -> Void in
+                let fs = try FileStream(LogPath(dir, f.T.Date), FileMode.Append, FileAccess.Write, FileShare.ReadWrite)   // 跟收集器（DeskPals.Work.cs 的 NoteLog）同一種開法
+                try fs.Write(b, 0, b.count)
+                fs.Close()
+            }
+        }
+        catch { }
+    }
+
+    static func ReadFile(_ path: String) -> String {
+        do {
+            if !File.Exists(path) { return "" }
+            return try File.ReadAllText(path, Encoding.UTF8)
+        }
+        catch { return "" }
+    }
+    static func WriteFile(_ path: String, _ s: String) {
+        do { try Directory.CreateDirectory(Path.GetDirectoryName(path)); try File.WriteAllText(path, s, UTF8Encoding(false)) } catch { }
+    }
+
+    static func LoadEdits(_ dir: String, _ day: DateTime) -> NbEdits {
+        let e = NbEdits()
+        let s = ReadFile(EditsPath(dir, day))
+        if s.Trim() == "" { return e }
+        do {
+            guard let o = try JavaScriptSerializer().DeserializeObject(s) as? Dict<String, Any> else { return e }
+            if let v = o.Get("off") as? [Any] { for x in v { e.Off.Add(Cs(x)) } }
+            if let v = o.Get("gone") as? [Any] { for x in v { e.Gone.Add(Cs(x)) } }
+            if let v = o.Get("titles") as? Dict<String, Any> {
+                for kv in v { e.Titles[kv.Key] = OneLine(Cs(kv.Value)) }
+            }
+        }
+        catch { }
+        return e
+    }
+
+    static func SaveEdits(_ dir: String, _ day: DateTime, _ e: NbEdits) {
+        let o = Dict<String, Any>()
+        o["off"] = e.Off.ToArray()
+        o["titles"] = e.Titles
+        o["gone"] = e.Gone.ToArray()
+        WriteFile(EditsPath(dir, day), JavaScriptSerializer().Serialize(o))
+    }
+
+    static func LoadTodos(_ dir: String) -> List<NbTodo> {
+        let list = List<NbTodo>()
+        let s = ReadFile(TodoPath(dir))
+        if s.Trim() == "" { return list }
+        do {
+            guard let o = try JavaScriptSerializer().DeserializeObject(s) as? Dict<String, Any>, let v = o.Get("items") as? [Any] else { return list }
+            for x in v {
+                guard let d = x as? Dict<String, Any> else { continue }
+                let t = NbTodo()
+                t.Id = Str(d, "id"); t.Text = OneLine(Str(d, "text")); t.Due = Str(d, "due"); t.Created = Str(d, "created")
+                t.Src = Str(d, "src"); t.Course = Str(d, "course"); t.Ref = Str(d, "ref")
+                if t.Id != "" && t.Text != "" { list.Add(t) }
+            }
+        }
+        catch { }
+        return list
+    }
+
+    static func SaveTodos(_ dir: String, _ list: List<NbTodo>) {
+        var items: [Any] = []
+        for t in list {
+            let d = Dict<String, Any>()
+            d["id"] = t.Id; d["text"] = t.Text; d["created"] = t.Created
+            if t.Due != "" { d["due"] = t.Due }
+            if t.Src != "" { d["src"] = t.Src; d["course"] = t.Course; d["ref"] = t.Ref }
+            items.append(d)
+        }
+        let o = Dict<String, Any>()
+        o["items"] = items
+        WriteFile(TodoPath(dir), JavaScriptSerializer().Serialize(o))
+    }
+
+    // Jira 指派給我、還沒結的：收集器每次查完整份寫進 notebook/jira-open.json（[{"key","title","status","url"}]）
+    static func JiraTodos(_ dir: String) -> List<NbFact> {
+        let list = List<NbFact>()
+        let s = ReadFile(Path.Combine(dir, "jira-open.json"))
+        if s.Trim() == "" { return list }
+        do {
+            guard let a = try JavaScriptSerializer().DeserializeObject(s) as? [Any] else { return list }
+            for x in a {
+                guard let d = x as? Dict<String, Any>, Str(d, "key") != "" else { continue }
+                let f = NbFact()
+                f.Id = "jira:" + Str(d, "key") + ":open"; f.Src = "jira"; f.Ref = Str(d, "key"); f.Title = OneLine(Str(d, "title")); f.Status = OneLine(Str(d, "status")); f.Url = Str(d, "url")
+                f.Todo = true
+                list.Add(f)
+            }
+        }
+        catch { }
+        return list
+    }
+
+    // ================= 合併、分組 =================
+    static func IsSession(_ f: NbFact) -> Bool { return f.Src == "claude" || f.Src == "codex" }
+    static func Attachable(_ f: NbFact) -> Bool { return f.Src == "jira" || f.Src == "gitlab" || f.Src == "github" || f.Src == "ci" }
+    static func IsCode(_ f: NbFact) -> Bool { return f.Src == "gitlab" || f.Src == "github" }
+
+    // mac: .NET 的 \s 還多 \x0B、\x85（ICU 的 \s 沒有）
+    private static let TokSplit = Regex("[\\s\\x0B\\x85,;|，、]+")
+    static func Tokens(_ s: String?) -> List<String> {
+        let l = List<String>()
+        for x in TokSplit.Split(s ?? "") { if x.Trim() != "" { l.Add(x.Trim().ToLowerInvariant()) } }
+        return l
+    }
+    static func SharedKey(_ f: NbFact, _ s: NbFact) -> Bool {
+        let a = Tokens(f.Key + " " + f.Ref.Replace(" ", "")), b = Tokens(s.Key + " " + s.Ref.Replace(" ", ""))
+        let pa = f.Project.ToLowerInvariant(), pb = s.Project.ToLowerInvariant()
+        for x in a {
+            let skipA: Bool = x == pa || (pa != "" && x.EndsWith("/" + pa))
+            let skipB: Bool = x == pb || (pb != "" && x.EndsWith("/" + pb))
+            if skipA || skipB { continue }   // 收集器把 repo 名也放進 key：同一個專案不算同一件事（交給時間判斷）
+            if b.Contains(x) { return true }
+        }
+        if f.Ref != "" && s.Title.IndexOf(f.Ref, StringComparison.OrdinalIgnoreCase) >= 0 { return true }   // 對話標題裡就寫了單號
+        return false
+    }
+    static func SameProject(_ a: NbFact, _ b: NbFact) -> Bool { return a.Project != "" && string.Equals(a.Project, b.Project, StringComparison.OrdinalIgnoreCase) }
+
+    // 一件事要掛在哪個對話底下：同一個單號／分支（key），或同一個專案、在對話期間（到結束後 15 分鐘）發生的
+    static func FindParent(_ f: NbFact, _ sessions: List<NbFact>) -> NbFact! {
+        var best: NbFact! = nil
+        var bestScore = double.MaxValue
+        for s in sessions {
+            let end: DateTime = s.HasEnd ? s.End : s.T
+            let key = SharedKey(f, s)
+            let near: Bool = SameProject(f, s) && f.T >= s.T.AddMinutes(-5) && f.T <= end.AddMinutes(15)
+            if !key && !near { continue }
+            let score: Double = Math.Abs((f.T - s.T).TotalMinutes) + (key ? 0.0 : 100000.0)
+            if score < bestScore { bestScore = score; best = s }
+        }
+        return best
+    }
+
+    static func GroupOf(_ f: NbFact) -> String {
+        if f.Src == "calendar" { return f.Project != "" ? f.Project : Meet }
+        return f.Project != "" ? f.Project : Other
+    }
+
+    static func Build(_ facts: List<NbFact>, _ ed: NbEdits!) -> List<NbThing> {
+        let list = List<NbFact>()
+        for f in facts {
+            if f.Gone || f.Todo || (f.TodoSet && f.Src == "jira") { continue }   // 指派給我的單只放待辦
+            if ed != nil && ed.Gone.Contains(f.Id) { continue }
+            list.Add(f)
+        }
+        list.Sort { (a: NbFact, b: NbFact) -> Int in let c = a.T.CompareTo(b.T); return c != 0 ? c : a.Seq.CompareTo(b.Seq) }
+        let sessions = List<NbFact>()
+        for f in list { if IsSession(f) { sessions.Add(f) } }
+        let things = List<NbThing>()
+        let of = Dict<NbFact, NbThing>()
+        for f in list {
+            let parent: NbFact! = Attachable(f) ? FindParent(f, sessions) : nil
+            if parent != nil, let pt = of.Get(parent) { pt.Kids.Add(f); continue }
+            let t = NbThing()
+            t.F = f
+            things.Add(t)
+            of[f] = t
+        }
+        // 同一張單、一天裡改了好幾次狀態：只留最後那次
+        let lastJira = Dict<String, NbThing>()
+        for i in stride(from: things.Count - 1, through: 0, by: -1) {
+            let t = things[i]
+            if t.F.Src != "jira" || t.F.Ref == "" { continue }
+            let k = t.F.Ref.ToLowerInvariant()
+            if lastJira.ContainsKey(k) { things.RemoveAt(i) } else { lastJira[k] = t }
+        }
+        for t in things {
+            let lastKid = Dict<String, NbFact>()
+            for i in stride(from: t.Kids.Count - 1, through: 0, by: -1) {
+                let k = t.Kids[i]
+                if k.Src != "jira" || k.Ref == "" { continue }
+                let key = k.Ref.ToLowerInvariant()
+                if lastKid.ContainsKey(key) { t.Kids.RemoveAt(i) } else { lastKid[key] = k }
+            }
+            // CI 跟同一個分支的 MR／PR 接成一句（「MR !128，CI 過了」）
+            for i in stride(from: t.Kids.Count - 1, through: 0, by: -1) {
+                let c = t.Kids[i]
+                if c.Src != "ci" { continue }
+                for m in t.Kids {
+                    if IsCode(m) && m.Ref != "" && !t.Fold.ContainsKey(m) && SharedKey(c, m) && !HasCiWord(m.Status) { t.Fold[m] = c; t.Kids.RemoveAt(i); break }
+                }
+            }
+            if IsCode(t.F) && t.F.Ref != "" {
+                var i = 0
+                while i < t.Kids.Count {
+                    if t.Kids[i].Src == "ci" && SharedKey(t.Kids[i], t.F) && !HasCiWord(t.F.Status) { t.Fold[t.F] = t.Kids[i]; t.Kids.RemoveAt(i); break }
+                    i += 1
+                }
+            }
+            t.Group = GroupOf(t.F)
+            var nt: String? = nil
+            var has = false
+            if ed != nil { has = ed.Titles.TryGetValue(t.F.Id, &nt) }
+            t.Title = has && nt != nil && nt! != "" ? nt! : t.F.Title
+            t.Off = ed != nil && ed.Off.Contains(t.F.Id)
+        }
+        // 分組：照第一件的時間；會議、其他放最後
+        let order = Groups(things)
+        let sorted = List<NbThing>()
+        for g in order { for t in things { if t.Group == g { sorted.Add(t) } } }
+        return sorted
+    }
+
+    static func Groups(_ things: List<NbThing>) -> List<String> {
+        let order = List<String>()
+        for t in things { if !order.Contains(t.Group) { order.Add(t.Group) } }
+        let head = List<String>(), tail = List<String>()
+        for g in order { if g != Meet && g != Other { head.Add(g) } }
+        if order.Contains(Meet) { tail.Add(Meet) }
+        if order.Contains(Other) { tail.Add(Other) }
+        head.AddRange(tail)
+        return head
+    }
+
+    // ================= 白話的字 =================
+    private static let OneLineRx = Regex("[\\r\\n\\t]+")
+    static func OneLine(_ s: String?) -> String { return OneLineRx.Replace(s ?? "", " ").Trim() }
+    static func Hm(_ t: DateTime) -> String { return t.ToString("HH':'mm", Inv) }
+    static func Span(_ f: NbFact) -> String { return f.HasEnd && f.End > f.T && f.Src != "ci" ? Hm(f.T) + "–" + Hm(f.End) : Hm(f.T) }
+    static func DayLabel(_ d: DateTime) -> String { return String(d.Month) + "/" + String(d.Day) + "（" + WeekDay[d.DayOfWeek.rawValue] + "）" }
+    static func WeekName(_ d: DateTime) -> String { return "週" + WeekDay[d.DayOfWeek.rawValue] }
+
+    static func HasCiWord(_ s: String) -> Bool { return s.StartsWith("CI") || s.IndexOf("測試") >= 0 }
+    // Jira 的狀態：拿掉「工單」兩個字
+    static func JiraCore(_ s0: String?) -> String {
+        var s = (s0 ?? "").Trim()
+        if s.StartsWith("工單") { s = s.Substring(2).Trim() }
+        return s
+    }
+    static func IsNew(_ core: String) -> Bool { return core == "新開" || core == "開了單" || core == "開單" || core == "建立" || core == "新建" }
+
+    static let Bad = Regex("沒過|失敗|不過|錯誤|退回|掛了|壞了")
+    static let Good = Regex("過了|合併了|解決了|通過|完成|上線了|發了")
+    static func KindOf(_ w: String, _ ok: Int) -> Int {
+        if Bad.IsMatch(w) { return 2 }
+        if Good.IsMatch(w) { return 1 }
+        return 0
+    }
+
+    private static let ListSplit = Regex("[，,]")
+    static func Split(_ s: String?) -> List<String> {
+        let l = List<String>()
+        for x in ListSplit.Split(s ?? "") { if x.Trim() != "" { l.Add(x.Trim()) } }
+        return l
+    }
+
+    static func CiWord(_ f: NbFact) -> String {
+        if f.Retried && f.Ok == 1 { return "CI 重跑後過了" }
+        if f.Status != "" { return f.Status }
+        return f.Ok == 1 ? "CI 過了" : (f.Ok == 0 ? "CI 沒過" : "")
+    }
+    static func CiDetail(_ f: NbFact) -> String {
+        if f.Retried && f.Ok == 1 { return "CI 第一次沒過，" + Hm(f.HasEnd ? f.End : f.T) + " 重跑過了" }
+        return CiWord(f)
+    }
+
+    static func AddWords(_ l: List<NbWord>, _ f: NbFact, _ top: Bool, _ t: NbThing!) {
+        if f.Src == "jira" {
+            let core = JiraCore(f.Status)
+            if IsNew(core) { l.Add(NbWord("開了單", 0)) }
+            else if core != "" { l.Add(NbWord(top ? core : "工單" + core, KindOf(core, f.Ok))) }
+            return
+        }
+        if f.Src == "ci" { let w = CiWord(f); if w != "" { l.Add(NbWord(w, KindOf(w, f.Ok))) }; return }
+        for w in Split(f.Status) { l.Add(NbWord(w, KindOf(w, f.Ok))) }
+        if t != nil, let c = t.Fold.Get(f) { let w = CiWord(c); if w != "" { l.Add(NbWord(w, KindOf(w, c.Ok))) } }
+    }
+
+    // 頁面上那一句：做了什麼
+    static func PageText(_ t: NbThing) -> String {
+        let f: NbFact = t.F
+        if f.Src == "calendar" { return t.Group == Meet ? t.Title : "開會：" + t.Title }
+        if f.Class { return t.Group == t.Title ? "上課" : "上課：" + t.Title }
+        return t.Title
+    }
+
+    // 頁面上句尾的結果字（自己的＋底下的）
+    static func Words(_ t: NbThing) -> List<NbWord> {
+        let l = List<NbWord>()
+        AddWords(l, t.F, true, t)
+        for k in t.Kids { AddWords(l, k, false, t) }
+        return l
+    }
+
+    // 滑過才出現的：單號、MR、時間
+    static func Ids(_ t: NbThing) -> String {
+        let l = List<String>()
+        if t.F.Ref != "" { l.Add(t.F.Ref) }
+        for k in t.Kids { if k.Ref != "" && !l.Contains(k.Ref) { l.Add(k.Ref) } }
+        l.Add(Span(t.F))
+        return string.Join("　", l.ToArray())
+    }
+
+    // 最上面一行：今天 N 件＋整體結果
+    private static let CiHead = Regex("^CI\\s*")
+    static func SumWord(_ things: List<NbThing>) -> NbWord! {
+        let badGroups = List<String>()
+        var badWord = ""
+        var ci = false, test = false
+        for t in things {
+            if t.Off { continue }
+            for w in Words(t) {
+                if w.Text.StartsWith("CI") { ci = true }
+                if w.Text.IndexOf("測試") >= 0 { test = true }
+                if w.Kind != 2 { continue }
+                if !badGroups.Contains(t.Group) { badGroups.Add(t.Group) }
+                if badWord == "" { badWord = CiHead.Replace(w.Text, "CI ") }
+            }
+        }
+        if badGroups.Count > 0 { return NbWord(string.Join("、", badGroups.ToArray()) + " " + badWord, 2) }
+        if ci { return NbWord("CI 都過了", 1) }
+        if test { return NbWord("測試都過了", 1) }
+        return nil
+    }
+
+    static func OnCount(_ things: List<NbThing>) -> Int { var n = 0; for t in things { if !t.Off { n += 1 } }; return n }
+
+    // ================= 貼出去的字 =================
+    static func JoinStatus(_ s: String) -> String {
+        if s == "" { return "" }
+        let c: Character = s[0]
+        let ascii: Bool = c.Code < 128 && char.IsLetterOrDigit(c)
+        return s.StartsWith("CI") || s.StartsWith("測試") || ascii ? "，" + s : " " + s
+    }
+
+    static func FoldText(_ t: NbThing, _ f: NbFact) -> String {
+        if let c = t.Fold.Get(f) { return CiWord(c) }
+        return ""
+    }
+
+    // 詳細的主行（不含時間）
+    static func DetailTop(_ t: NbThing) -> String {
+        let f: NbFact = t.F
+        let title = t.Title
+        if f.Src == "calendar" { return t.Group == Meet ? title : "開會：" + title }
+        if f.Class { return "上課：" + title }
+        if f.Src == "jira" {
+            let core = JiraCore(f.Status)
+            if IsNew(core) { return ("新開 " + f.Ref + " " + title).Replace("  ", " ").Trim() }
+            let head: String = f.Ref != "" ? f.Ref + " " : ""
+            let tailS: String = core != "" ? "，" + core : ""
+            return (head + title + tailS).Trim()
+        }
+        if IsCode(f) {
+            var st = f.Status
+            let fold = FoldText(t, f)
+            if fold != "" { st = st == "" ? fold : st + "，" + fold }
+            let head: String = f.Ref != "" ? f.Ref + " " : ""
+            let tailS: String = st != "" ? "，" + st : ""
+            return head + title + tailS
+        }
+        return title
+    }
+
+    static func KidLine(_ t: NbThing, _ k: NbFact) -> String {
+        if k.Src == "jira" {
+            let core = JiraCore(k.Status)
+            if IsNew(core) { return "新開 " + k.Ref }
+            return (k.Ref + " " + core).Trim()
+        }
+        if k.Src == "ci" { return CiDetail(k) }
+        var st = k.Status
+        let fold = FoldText(t, k)
+        if fold != "" { st = st == "" ? fold : st + "，" + fold }
+        if st == "" { return (k.Ref + " " + k.Title).Trim() }
+        return k.Ref != "" ? k.Ref + JoinStatus(st) : st
+    }
+
+    static func Link(_ links: Bool, _ url: String) -> String { return links && url != "" ? " " + url : "" }
+
+    static func Simple(_ things: List<NbThing>) -> String {
+        let sb = StringBuilder()
+        for t in things {
+            if t.Off { continue }
+            var s: String
+            if t.F.Src == "calendar" { s = "開會：" + t.Title }
+            else if t.F.Class { s = "上課：" + t.Title }
+            else {
+                let grp: String = t.Group != Meet && t.Group != Other ? "（" + t.Group + "）" : ""
+                s = DetailTop(t) + grp
+            }
+            if sb.Length > 0 { sb.Append("\n") }
+            sb.Append("・" + s)
+        }
+        return sb.ToString()
+    }
+
+    static func Detail(_ things: List<NbThing>, _ day: DateTime, _ links: Bool) -> String {
+        let sb = StringBuilder(DayLabel(day) + "進度\n")
+        var group: String? = nil
+        for t in things {
+            if t.Off { continue }
+            if group == nil || t.Group != group! { group = t.Group; sb.Append("\n【" + t.Group + "】\n") }
+            let top: String = "・" + Span(t.F) + " " + DetailTop(t)
+            sb.Append(top + Link(links, t.F.Url) + "\n")
+            if t.F.Src == "ci" { let cd = CiDetail(t.F); if cd != "" { sb.Append("　- " + cd + "\n") } }
+            for k in t.Kids { sb.Append("　- " + KidLine(t, k) + Link(links, k.Url) + "\n") }
+        }
+        return sb.ToString().TrimEnd(Character("\n"))
+    }
+
+    // ================= 待辦的期限 =================
+    @discardableResult static func ParseDue(_ s: String?, _ due: inout DateTime, _ hasTime: inout Bool) -> Bool {
+        hasTime = s != nil && s!.IndexOf(Character("T")) > 0
+        due = DateTime.MinValue
+        if string.IsNullOrEmpty(s) { return false }
+        return ExactDue(s!, hasTime, &due)
+    }
+    // mac: DateTime.TryParseExact(s, hasTime ? "yyyy-MM-ddTHH:mm" : "yyyy-MM-dd", Inv, DateTimeStyles.None, out due)：
+    // shim 沒有 ParseExact，照 .NET 的規則對：yyyy 四位、MM／dd／HH／mm 兩位、只收 ASCII 數字、前後不能有空白、日期要存在
+    private static func ExactDue(_ s: String, _ hasTime: Bool, _ due: inout DateTime) -> Bool {
+        let u: [UInt16] = Array(s.utf16)
+        let n = hasTime ? 16 : 10
+        if u.count != n { return false }
+        func dig(_ i: Int, _ len: Int) -> Int {
+            var v = 0
+            var k = i
+            while k < i + len { let c = Int(u[k]); if c < 48 || c > 57 { return -1 }; v = v * 10 + c - 48; k += 1 }
+            return v
+        }
+        if u[4] != 45 || u[7] != 45 { return false }   // '-'
+        let y = dig(0, 4), mo = dig(5, 2), d = dig(8, 2)
+        var h = 0, mi = 0
+        if hasTime {
+            if u[10] != 84 || u[13] != 58 { return false }   // 'T'、':'
+            h = dig(11, 2); mi = dig(14, 2)
+        }
+        if y < 1 || mo < 1 || mo > 12 || d < 1 || h < 0 || h > 23 || mi < 0 || mi > 59 { return false }
+        if d > DateTime.DaysInMonth(y, mo) { return false }
+        due = DateTime(y, mo, d, h, mi, 0)
+        return true
+    }
+    static func DueValue(_ day: DateTime, _ minute: Int) -> String { return minute < 0 ? Ymd(day) : Ymd(day) + "T" + (minute / 60).ToString("00", Inv) + ":" + (minute % 60).ToString("00", Inv) }
+
+    // 「今天 18:00」「明天」「週五 23:59」「11/30」；今天以前（含今天）要紅字
+    static func DueText(_ due: String?, _ now: DateTime, _ urgent: inout Bool) -> String {
+        urgent = false
+        var d = DateTime.MinValue
+        var hasTime = false
+        if !ParseDue(due, &d, &hasTime) { return "" }
+        let days = (d.Date - now.Date).Days
+        urgent = days <= 0
+        var day: String
+        if days == 0 { day = "今天" }
+        else if days == 1 { day = "明天" }
+        else if days == -1 { day = "昨天" }
+        else if days > 1 && days < 7 { day = WeekName(d) }
+        else { day = String(d.Month) + "/" + String(d.Day) }
+        return hasTime ? day + " " + Hm(d) : day
+    }
+
+    // mac: Guid.NewGuid().ToString("N") → UUID（一樣 32 個小寫十六進位）
+    static func NewId(_ prefix: String) -> String { return prefix + UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased().Substring(0, 10) }
+}
+
+// ===== 64_notebook.swift =====
+// 64_notebook.swift — port of extension/desktop/DeskPals.Notebook.cs
+// Desk Pals：小本子（待辦／今天做了／筆記）。446 寬、停在公仔櫃左邊；上緣三個索引頁籤，「攤開」變成左右兩頁（待辦＋筆記｜今天做了）。
+// 資料、合併、要貼出去的字都在 DeskPals.NotebookData.cs；這支只管畫、點、打字、跟 World 接（學校行事曆、泡泡、剪貼簿、pipe）。
+// 畫法跟像素選單、設定視窗同一套（Pix.*、木框、奶油色面板、銅牌、像素按鈕），字型 Microsoft JhengHei UI。
+// 打字用真的 TextBox／RichTextBox（中文輸入法才打得了），其他全部自己畫；離屏測試（DESKPALS_OFFSCREEN=1）時字也自己畫，snap 才看得到。
+//
+// 掛在 DeskPals.cs 的地方（都只有一行，標 // 小本子）：HouseMenu「工作」→「小本子…」、公仔右鍵 →「小本子…」、OnMsg 的 default → NbMsg()、Snap → NbSnap()。
+// pipe 指令（測試用的只在離屏模式）：
+//   nb-open [todo|done|note]、nb-close、nb-info（現在畫了什麼）、nb-clip（剛剛「複製」了什麼字，不碰真的剪貼簿）
+//   nb-text simple|detail|links（現在會貼出去的字）、nb-act <動作> [參數]（跟滑鼠點一樣，見 Do()）、nb-click <x> <y>、nb-hover <x> <y>
+//   nb-type todo|done|edit|note <字…>（打字）、nb-key todo|done|edit enter|esc、nb-key alt-up|alt-down
+//   時間用 study-clock（跟讀書小幫手同一個假時鐘）
+//
+// mac 差異（都標了 // mac:）：
+// - RichTextBox → 06_shim_notebook.swift（NSScrollView＋NSTextView，純文字、固定行高、線畫在字底下）；PARAFORMAT2／SendMessage 不用。
+// - TextBox 的 LostFocus → NbTextBox（06_shim_notebook.swift）；外框 BorderStyle.None → CuMaker.Borderless；提示字 EM_SETCUEBANNER → placeholder。
+// - ProcessCmdKey（Esc、Alt+↑↓ 先給表單）→ 打字框自己的 KeyDown 一開始、表單的 OnKeyDown（KeyPreview）都先問 ProcessCmdKey(keyData)。
+// - 沒有「編輯」選單：Cmd+X／C／V／A／Z 在表單的 OnKeyDown 送給 first responder（NbEditKeys）。
+// - 字：Windows 用 GDI+ 畫兩次（第二次右移 PixText.Heft 加粗）；mac 用 CoreText 畫一次。
+// - 無框視窗要能打字：_overlayKeyable；不是最上層（C# 沒設 TopMost）：_overlayLevel = .normal。
+// - 拖上面的木框搬家：ReleaseCapture＋WM_NCLBUTTONDOWN → NSWindow.performDrag。
+// - 滾輪：mac 的 delta 很小（觸控板），用 Double 算，不用 C# 的整數 /120。
+// - 減少動態：SystemInformation.UIEffectsEnabled → NSWorkspace.accessibilityDisplayShouldReduceMotion。
+// - 剪貼簿：Clipboard.SetText（NSPasteboard），換行照 mac 用 \n。
+import Foundation
+import AppKit
+
+// 筆記用的紙：固定 28px 一行（RichEdit 的固定行高），每行底下一條線
+final class NbNoteBox: RichTextBox {
+    // mac: PARAFORMAT2／SendMessage(EM_SETPARAFORMAT) 不用：固定行高＝NSParagraphStyle（06_shim_notebook.swift 的 _SetLineHeight）
+    var LineH = 28
+    var LineC = Pix.C(0xEFE0C4)
+    override init() {
+        super.init()
+        // mac: BorderStyle = BorderStyle.None → NSScrollView 本來就沒有外框
+        ScrollBars = RichTextBoxScrollBars.Vertical
+        DetectUrls = false
+        ShortcutsEnabled = true
+    }
+    // mac: OnHandleCreated → NSTextView 建好的時候（Controls.Add）
+    override func _create() { super._create(); Spacing() }
+    // 整篇固定行高（新打的字照前一段的格式，貼上的也是）
+    func Spacing() {
+        if !IsHandleCreated { return }
+        _SetLineHeight(LineH)   // mac: PFM_LINESPACING（固定）→ 段落最小＝最大行高＝LineH，打字、貼上的字都照 typingAttributes
+    }
+    // mac: WndProc(WM_PAINT) 字畫完再畫線 → NSTextView 畫背景時（字底下）畫；座標是文件座標，捲動時線跟著字走（OnVScroll 不用）
+    override func _PaintUnder(_ g: Graphics, _ y0: Int, _ top: Int, _ bottom: Int, _ width: Int) { Lines2(g, y0, top, bottom, width) }
+    func Lines2(_ g: Graphics, _ y0: Int, _ top: Int, _ bottom: Int, _ width: Int) {
+        let b = SolidBrush(LineC)
+        var y = y0 + LineH - 2
+        while y < bottom { if y >= top - 1 { g.FillRectangle(b, 0, y, width, 1) }; y += LineH }
+    }
+    override func OnTextChanged(_ e: EventArgs) { super.OnTextChanged(e); Invalidate() }
+    // mac: ProcessCmdKey(Ctrl+V／Shift+Insert)「只貼純文字」→ NSTextView.isRichText = false 本來就只貼純文字（Cmd+V 見 NbEditKeys）
+}
+
+final class NotebookForm: Form {
+    // ---- 顏色（mockup：C:\tmp\dp\worklog-ui\v5-tabs-b）----
+    static let CText = Pix.C(0x4A3010), CSub = Pix.C(0x6B5238), CTime = Pix.C(0x8F6B44), COk = Pix.C(0x2F7A22), COkHot = Pix.C(0x24661A)
+    static let CBad = Pix.C(0xB8433F), CPh = Pix.C(0x8A6A4C), COff = Pix.C(0x8C7B62), CGh = Pix.C(0x7A4A22), CGhLine = Pix.C(0xE2CFAE), CBar = Pix.C(0xF7EBD2)
+    static let CBarEdge = Pix.C(0xD8BF94), CPaper = Pix.C(0xFFFDF7), CNote = Pix.C(0x3A2A18), CTabText = Pix.C(0x5A3E22), CField = Pix.C(0xC9B08A), CBtn = Pix.C(0xFFFBF0)
+    static let TabC: [Color] = [Pix.C(0xF6C453), Pix.C(0xA9D394), Pix.C(0xF3B3BE)], TabBg: [Color] = [Pix.C(0xF9E2A4), Pix.C(0xD5EAC8), Pix.C(0xF8D5DB)]
+    static let TabKey: [String] = ["todo", "done", "note"], TabName: [String] = ["待辦", "今天做了", "筆記"]
+    static let KEY = Color.FromArgb(255, 0, 255)
+
+    // ---- 像素小圖（8×8 以內；k＝深色描邊）----
+    static let ICLAUDE: [String] = ["kkkkkkkk", "kddddddk", "kdgddddk", "kddgdddk", "kdgdggdk", "kddddddk", "kkkkkkkk"]
+    static let IJIRA: [String] = ["kkkkkkkk", "kbbbbbbk", "kbwwwwbk", ".kbbbbk.", "kbwwwbbk", "kbbbbbbk", "kkkkkkkk"]
+    static let IMR: [String] = [".k...k.", "kpk.kpk", ".k...k.", ".k..k..", ".k.k...", ".kk....", "kpk....", ".k....."]
+    static let IMEET: [String] = [".k...k..", "kkkkkkkk", "krrrrrrk", "kwwwwwwk", "kwkwkwwk", "kwwwwwwk", "kwkwwwwk", "kkkkkkkk"]
+    static let ICLASS: [String] = ["kkkkkkk.", "kggggggk", "kgwwwwgk", "kggggggk", "kggggggk", "kggggggk", "kwwwwwwk", "kkkkkkkk"]
+    static let IHW: [String] = ["kkkkk...", "kwwwwk..", "kwkkwwk.", "kwwwwwwk", "kwkkkkwk", "kwwwwwwk", "kwkkkwwk", "kkkkkkkk"]
+    static let ICAL: [String] = [".k...k.", "kkkkkkk", "kwwwwwk", "kwkwkwk", "kwwwwwk", "kkkkkkk"]
+    static let IGEAR: [String] = [".k.k.", "kkkkk", "kk.kk", "kkkkk", ".k.k."]
+    static let IPLUS: [String] = ["..k..", "..k..", "kkkkk", "..k..", "..k.."]
+    static let ILEFT: [String] = ["..k", ".kk", "kkk", ".kk", "..k"], IRIGHT: [String] = ["k..", "kk.", "kkk", "kk.", "k.."], IDOWN: [String] = ["kkkkk", ".kkk.", "..k.."]
+    static let IX: [String] = ["k...k", ".k.k.", "..k..", ".k.k.", "k...k"]
+    static let IGRIP: [String] = ["k.k", "...", "k.k", "...", "k.k"]
+
+    let w: World
+    let d: Double
+    let U: Int
+    let fPlate: FontT, fBody: FontT, fWord: FontT, fSmall: FontT, fBar: FontT, fBtn: FontT, fBtnS: FontT, fNote: FontT, fPv: FontT, fPvB: FontT, fField: FontT
+    var VVisible = false
+
+    // ---- 狀態 ----
+    var Tab = "done", LastTab = "done"
+    var Spread = false, Preview = false, Links = false
+    var PvKind = "detail"
+    var Day = DateTime.MinValue
+    var copied = ""; var copiedUntil = 0.0
+    var things = List<NbThing>()
+    var todos = List<NbTodo>()
+    var jira = List<NbFact>()
+    var edits = NbEdits()
+    var savedAt = ""
+    var noteDirty = false; var noteSaveAt = 0.0
+    var logStamp = ""
+    var nextRefresh = 0.0
+    // 剛勾掉的待辦：先留在原地畫刪除線＋「▶ 今天做了」，一下子再消失（這段時間再點一次＝取消）
+    final class Just { var T: NbTodo! = nil; var Index = 0; var LogId = ""; var Until = 0.0; init() {} }
+    let justDone = List<Just>()
+    // 滑鼠、編輯、拖曳
+    var hoverThing = "", hoverTodo = "", hoverAct = "", editThing = "", editTodo = "", lastTodo = ""
+    var dragTodo = ""; var dragY = 0, dragStartY = 0; var dragging = false
+    let scroll = Dict<String, Int>()
+    let contentH = Dict<String, Int>()
+    let clipR = Dict<String, RectangleT>()
+    // 待辦的期限（新增那一行右邊的小日曆）
+    var duePick = false; var dueDay = DateTime.MinValue; var dueMin = -1
+    final class Hit { var Act = "", Arg = ""; var R = RectangleT.Empty; var Hover: String? = nil; init() {} }
+    let hits = List<Hit>()
+    let todoRows = Dict<String, RectangleT>()
+    let Drawn = List<String>()   // 測試用（nb-info）：這次畫了哪些東西
+
+    // 打字的地方
+    var tbTodo: NbTextBox! = nil, tbDone: NbTextBox! = nil, tbEdit: NbTextBox! = nil   // mac: NbTextBox＝TextBox＋LostFocus
+    let note: NbNoteBox
+    var rTodo = RectangleT.Empty, rDone = RectangleT.Empty, rEdit = RectangleT.Empty, rNote = RectangleT.Empty   // 這次畫出來的位置（看不到＝Empty）
+    var noteFor = ""                    // 筆記框現在是哪一天的
+    let timer = Timer()
+
+    init(_ w: World) {
+        self.w = w
+        let dd = Double(w.S) / 4.0
+        d = dd
+        U = Math.Max(2, CInt(Math.Round(2 * dd)))
+        let jh = "Microsoft JhengHei UI"
+        // 自己畫的字：像素大小（跟 mockup 一樣 14.7／13.3／11.3／12px），用 GDI+ 反鋸齒畫（見 DT）
+        fPlate = NotebookForm.Px(jh, 14.667 * dd, FontStyle.Bold)
+        fBody = NotebookForm.Px(jh, 14.667 * dd, FontStyle.Bold)
+        fWord = NotebookForm.Px(jh, 13.333 * dd, FontStyle.Bold)
+        fSmall = NotebookForm.Px(jh, 11.333 * dd, FontStyle.Bold)
+        fBar = NotebookForm.Px(jh, 12 * dd, FontStyle.Bold)
+        fBtn = NotebookForm.Px(jh, 13.333 * dd, FontStyle.Bold)
+        fBtnS = NotebookForm.Px(jh, 11.333 * dd, FontStyle.Bold)
+        fNote = NotebookForm.Px(jh, 14.667 * dd, FontStyle.Regular)
+        fPv = NotebookForm.Px(jh, 13.333 * dd, FontStyle.Regular)
+        fPvB = NotebookForm.Px(jh, 13.333 * dd, FontStyle.Bold)
+        fField = NotebookForm.Px(jh, 13.333 * dd, FontStyle.Bold)
+        note = NbNoteBox()
+        super.init()
+        Text = "小本子"
+        FormBorderStyle = FormBorderStyleT.None
+        ShowInTaskbar = true
+        StartPosition = FormStartPosition.Manual
+        BackColor = NotebookForm.KEY; TransparencyKey = NotebookForm.KEY      // 左邊的線圈凸出木框外面
+        KeyPreview = true
+        SetStyle([ControlStyles.OptimizedDoubleBuffer, ControlStyles.AllPaintingInWmPaint, ControlStyles.UserPaint, ControlStyles.ResizeRedraw], true)
+        // 真的打字框（TextBox／RichTextBox）用 pt 字型，跟系統縮放走
+        tbTodo = MakeBox(FontT(jh, 10, FontStyle.Bold), "寫一件要做的事，按 Enter")
+        tbDone = MakeBox(FontT(jh, 10, FontStyle.Bold), "補一件做過的事，按 Enter")
+        tbEdit = MakeBox(FontT(jh, 11, FontStyle.Bold), "")
+        note.Font = FontT(jh, 11, FontStyle.Regular); note.BackColor = NotebookForm.CPaper; note.ForeColor = NotebookForm.CNote; note.LineH = Sc(28); note.Visible = false
+        note.TextChanged = { [weak self] in guard let s = self else { return }; if s.note.Tag == nil { s.noteDirty = true; s.noteSaveAt = s.w.Now + 0.7 } }
+        note.LostFocus = { [weak self] in self?.Invalidate() }
+        Controls.Add(note)
+        tbTodo.KeyDown = { [weak self] (e: KeyEventArgs) in
+            guard let s = self else { return }
+            if s.ProcessCmdKey(e.KeyData) { e.Handled = true; return }   // mac: C# 的表單 ProcessCmdKey 比 TextBox 的 KeyDown 先拿到 Esc、Alt+↑↓
+            if e.KeyCode == Keys.Enter { e.SuppressKeyPress = true; s.Key("todo", "enter") } else if e.KeyCode == Keys.Escape { e.SuppressKeyPress = true; s.Key("todo", "esc") }
+        }
+        tbDone.KeyDown = { [weak self] (e: KeyEventArgs) in
+            guard let s = self else { return }
+            if s.ProcessCmdKey(e.KeyData) { e.Handled = true; return }   // mac: 同上
+            if e.KeyCode == Keys.Enter { e.SuppressKeyPress = true; s.Key("done", "enter") } else if e.KeyCode == Keys.Escape { e.SuppressKeyPress = true; s.Key("done", "esc") }
+        }
+        tbEdit.KeyDown = { [weak self] (e: KeyEventArgs) in
+            guard let s = self else { return }
+            if s.ProcessCmdKey(e.KeyData) { e.Handled = true; return }   // mac: 同上
+            if e.KeyCode == Keys.Enter { e.SuppressKeyPress = true; s.Key("edit", "enter") } else if e.KeyCode == Keys.Escape { e.SuppressKeyPress = true; s.Key("edit", "esc") }
+        }
+        tbEdit.LostFocus = { [weak self] in guard let s = self else { return }; if s.editThing != "" || s.editTodo != "" { s.Key("edit", "enter") } }
+        tbTodo.TextChanged = { [weak self] in self?.Invalidate() }
+        tbDone.TextChanged = { [weak self] in self?.Invalidate() }
+        timer.Interval = 250
+        timer.Tick = { [weak self] in self?.Tick() }
+        timer.Start()
+        Day = w.NbNow().Date
+        FormClosed = { [weak self] in guard let s = self else { return }; s.timer.Stop(); s.SaveNote(); s.w.NbClosed(s) }
+    }
+
+    // mac: 無框視窗（C#：沒有 WS_EX_NOACTIVATE 的一般視窗）要能拿鍵盤焦點才打得了字；C# 沒設 TopMost → 一般視窗那一層
+    override var _overlayKeyable: Bool { return true }
+    override var _overlayLevel: NSWindow.Level { return .normal }
+
+    func MakeBox(_ f: FontT, _ cue: String) -> NbTextBox {
+        let t = NbTextBox()
+        t.Font = f; t.BackColor = NotebookForm.CPaper; t.ForeColor = NotebookForm.CText; t.Visible = false
+        t.Tag = cue
+        Controls.Add(t)
+        CuMaker.Borderless(t, NotebookForm.CPaper)   // mac: BorderStyle = BorderStyle.None
+        // mac: EM_SETCUEBANNER（打字時也留著提示）→ NSTextField 的 placeholder（空的時候一直都在，打字才消失）
+        if cue != "" {
+            t.PlaceholderText = cue
+            t.tf?.placeholderAttributedString = NSAttributedString(string: cue, attributes: [.foregroundColor: NotebookForm.CPh.ns, .font: _formsNSFont(f)])
+        }
+        return t
+    }
+
+    func Sc(_ v: Int) -> Int { return CInt(Math.Round(Double(v) * d)) }
+    var OV: Int { return Sc(10) }                  // 左邊凸出去的線圈
+    var FrameW: Int { return Sc(Spread ? 760 : 446) }
+    var FrameH: Int { return Sc(Spread ? 636 : 670) }
+    var Want: SizeT { return SizeT(FrameW + OV, FrameH) }
+
+    // ---- 離屏測試模式：不真的顯示，snap 時畫到虛擬螢幕上 ----
+    override func SetVisibleCore(_ value: Bool) {
+        if App.Offscreen { VVisible = value; super.SetVisibleCore(false); return }
+        super.SetVisibleCore(value)
+    }
+    func PaintTo(_ g: Graphics) {
+        let cs = ClientSize
+        if cs.Width <= 0 || cs.Height <= 0 { return }
+        let b = Bitmap(cs.Width, cs.Height, PixelFormat.Format24bppRgb)
+        do { let gg = Graphics.FromImage(b); OnPaint(PaintEventArgs(gg, RectangleT(0, 0, cs.Width, cs.Height))) }
+        // mac: KEY 色畫上去就是透明，不用 MakeTransparent
+        g.DrawImageUnscaled(b, Left, Top)
+    }
+
+    // ================= 資料 =================
+    var Dir: String { return Nb.Dir(World.DataDir) }
+    var IsToday: Bool { return Day == w.NbNow().Date }
+
+    func Reload() {
+        let facts = Nb.ReadLog(Dir, Day)
+        Nb.AddClasses(facts, w.NbClasses(Day))
+        edits = Nb.LoadEdits(Dir, Day)
+        things = Nb.Build(facts, edits)
+        todos = w.NbTodos()
+        jira = Nb.JiraTodos(Dir)
+        logStamp = Stamp()
+        if noteFor != Nb.Ymd(Day) { LoadNote() }
+        Invalidate()
+    }
+    func Stamp() -> String {
+        let a = FileInfo(Nb.LogPath(Dir, Day)), b = FileInfo(Nb.TodoPath(Dir))
+        let sa: String = a.Exists ? String(a.LastWriteTimeUtc.Ticks) + ":" + String(a.Length) : "-"
+        let sb: String = b.Exists ? String(b.LastWriteTimeUtc.Ticks) + ":" + String(b.Length) : "-"
+        return sa + "|" + sb + "|" + w.NbSchoolStamp()
+    }
+
+    func LoadNote() {
+        SaveNote()
+        noteFor = Nb.Ymd(Day)
+        note.Tag = "loading"
+        note.Text = Nb.ReadFile(Nb.NotePath(Dir, Day)).Replace("\r\n", "\n")
+        note.Tag = nil
+        note.Spacing()
+        noteDirty = false
+        savedAt = ""
+        let fi = FileInfo(Nb.NotePath(Dir, Day))
+        if fi.Exists && note.Text != "" { savedAt = Nb.Hm(fi.LastWriteTime) }
+    }
+    func SaveNote() {
+        if !noteDirty || noteFor == "" { return }
+        noteDirty = false
+        var day = DateTime.MinValue
+        if !_NbParseYmd(noteFor, &day) { return }   // mac: DateTime.TryParseExact(noteFor, "yyyy-MM-dd", …)
+        let path = Nb.NotePath(Dir, day), text = note.Text.Replace("\r\n", "\n")
+        if text.Trim() == "" { if File.Exists(path) { try? File.Delete(path) }; savedAt = "" }
+        else { Nb.WriteFile(path, text); savedAt = Nb.Hm(w.NbNow()) }
+        Invalidate()
+    }
+
+    func Tick() {
+        let now = w.Now
+        if noteDirty && now >= noteSaveAt { SaveNote() }
+        if copied != "" && now >= copiedUntil { copied = ""; Invalidate() }
+        var drop = false
+        var i = justDone.Count - 1
+        while i >= 0 { if now >= justDone[i].Until { justDone.RemoveAt(i); drop = true }; i -= 1 }
+        if drop { Invalidate() }
+        if now >= nextRefresh {
+            nextRefresh = now + 3
+            if Stamp() != logStamp && editThing == "" && editTodo == "" && !dragging { Reload() }
+        }
+    }
+
+    // ================= 動作（滑鼠、鍵盤、測試都走這裡）=================
+    func Do(_ act: String, _ arg: String) {
+        switch act {
+        case "close": Close(); return
+        case "tab": if NotebookForm.TabKey.IndexOf(arg) >= 0 { Tab = arg; LastTab = arg; Preview = false; duePick = false; EndEdit(true); w.NbSaveUi(self); FocusFor() }
+        case "spread":
+            EndEdit(true)
+            if !Spread { LastTab = Tab; Spread = true } else { Spread = false; Tab = LastTab }
+            duePick = false
+            w.NbPlace(self)
+            w.NbSaveUi(self)
+        case "prev": GoDay(Day.AddDays(-1)); return
+        case "next": if !IsToday { GoDay(Day.AddDays(1)) }; return
+        case "today": GoDay(w.NbNow().Date); return
+        case "sources": w.OpenWorkSettings(); return
+        case "connect": w.OpenWorkSettings(arg); return   // 直接打開那個來源（學校行事曆＝讀書小幫手設定）
+        case "pv": Preview = !Preview; if !Spread { Tab = "done" }
+        case "kind": PvKind = arg == "simple" ? "simple" : "detail"; Preview = true
+        case "links": Links = !Links
+        case "copy": Copy(arg)
+        case "off": SetOff(arg, true)
+        case "on": SetOff(arg, false)
+        case "edit": StartEdit(arg, "")
+        case "tedit": StartEdit("", arg)
+        case "tick": Tick(arg)
+        case "untick": Untick(arg)
+        case "due": duePick = !duePick
+        case "dueday": do { var n = 0; if int.TryParse(arg, &n) { dueDay = w.NbNow().Date.AddDays(n); if dueMin < 0 { dueMin = -1 } } }
+        case "duetime": do { var m = 0; if int.TryParse(arg, &m) { if dueDay == DateTime.MinValue { dueDay = w.NbNow().Date }; dueMin = m; duePick = false } }
+        case "duenotime": if dueDay == DateTime.MinValue { dueDay = w.NbNow().Date }; dueMin = -1; duePick = false
+        case "dueclear": dueDay = DateTime.MinValue; dueMin = -1; duePick = false
+        case "move": MoveTodo(lastTodo, arg == "up" ? -1 : 1)
+        case "notefocus": ShowNote(true)
+        case "focus": FocusFor()
+        default: return
+        }
+        Invalidate()
+    }
+
+    func GoDay(_ day: DateTime) {
+        EndEdit(true)
+        SaveNote()
+        let today = w.NbNow().Date
+        Day = day > today ? today : day
+        justDone.Clear()
+        scroll.Clear()
+        Reload()
+    }
+
+    // 打字的地方：Enter／Esc
+    func Key(_ box: String, _ k: String) {
+        if box == "todo" {
+            if k == "esc" { tbTodo.Text = ""; duePick = false; dueDay = DateTime.MinValue; dueMin = -1; Invalidate(); return }
+            let s = tbTodo.Text.Trim()
+            if s == "" { return }
+            let t = NbTodo()
+            t.Id = Nb.NewId("t"); t.Text = s; t.Created = Nb.Ymd(w.NbNow())
+            if dueDay != DateTime.MinValue { t.Due = Nb.DueValue(dueDay, dueMin) }
+            todos.Add(t)
+            scroll["todo"] = 1 << 20
+            w.NbSaveTodos(todos)
+            lastTodo = t.Id
+            tbTodo.Text = ""; dueDay = DateTime.MinValue; dueMin = -1; duePick = false
+            logStamp = Stamp()
+            Invalidate()
+            return
+        }
+        if box == "done" {
+            if k == "esc" { tbDone.Text = ""; return }
+            let s = tbDone.Text.Trim()
+            if s == "" { return }
+            let f = NbFact()
+            f.Id = Nb.NewId("manual:"); f.Src = "manual"; f.Title = s
+            f.T = IsToday ? w.NbNow() : Day.Date + w.NbNow().TimeOfDay
+            Nb.AppendLog(Dir, f)
+            tbDone.Text = ""
+            scroll["done"] = 1 << 20   // 捲到最下面：看得到剛加的那件
+            Reload()
+            return
+        }
+        if box == "edit" { EndEdit(k == "enter"); return }
+    }
+
+    func StartEdit(_ thingId: String, _ todoId: String) {
+        EndEdit(true)
+        if thingId != "" { guard let t = FindThing(thingId) else { return }; editThing = thingId; tbEdit.Text = t.Title }
+        else { guard let t = FindTodo(todoId), t.Src != "jira" else { return }; editTodo = todoId; lastTodo = todoId; tbEdit.Text = t.Text }
+        tbEdit.Tag = ""
+        Invalidate()
+        if !App.Offscreen {
+            BeginInvoke { [weak self] in
+                guard let s = self else { return }
+                if !s.tbEdit.Visible { s.Update() }   // mac: 先畫一次（PlaceBoxes 才會把打字框放上去）
+                if s.tbEdit.Visible { s.tbEdit.Focus(); s.tbEdit.SelectAll() }
+            }
+        }
+    }
+
+    func EndEdit(_ save: Bool) {
+        if editThing == "" && editTodo == "" { return }
+        let th = editThing, td = editTodo, s = tbEdit.Text.Trim()
+        editThing = ""; editTodo = ""
+        tbEdit.Visible = false
+        MacDropFocus(tbEdit)   // mac: 藏起來的打字框不能還留著鍵盤焦點
+        if !save { Invalidate(); return }
+        if th != "" {
+            if let t = FindThing(th) {
+                let mine = t.F.Src == "manual" || t.F.Src == "todo"
+                if s == "" { edits.Titles.Remove(th); if mine { edits.Gone.Add(th) } }
+                else if s == t.F.Title { edits.Titles.Remove(th) }
+                else { edits.Titles[th] = s }
+                Nb.SaveEdits(Dir, Day, edits)
+                Reload()
+            }
+        } else {
+            if let t = FindTodo(td) {
+                if s == "" { todos.Remove(t) } else { t.Text = s }
+                if s == "" && t.Src == "school" { w.NbForgetSchool(t.Ref) }   // 學校的作業刪掉＝不想看到（當成交了，但不記進今天做了）
+                w.NbSaveTodos(todos)
+                logStamp = Stamp()
+            }
+        }
+        Invalidate()
+    }
+
+    func FindThing(_ id: String) -> NbThing? { for t in things { if t.F.Id == id { return t } }; return nil }
+    func FindTodo(_ id: String) -> NbTodo? { for t in todos { if t.Id == id { return t } }; return nil }
+
+    func SetOff(_ id: String, _ off: Bool) {
+        guard let t = FindThing(id) else { return }
+        t.Off = off
+        if off { edits.Off.Add(id) } else { edits.Off.Remove(id) }
+        Nb.SaveEdits(Dir, Day, edits)
+    }
+
+    // 勾掉＝做完：移到今天做了（學校作業＝交了）
+    func Tick(_ id: String) {
+        guard let t = FindTodo(id) else { return }
+        let idx = todos.IndexOf(t)
+        let now = w.NbNow()
+        let f = NbFact()
+        f.T = now
+        if t.Src == "school" { f.Id = "school:" + t.Ref + ":done"; f.Src = "school"; f.Project = t.Course; f.Title = "交了 " + t.Text; w.NbSchoolDone(t.Ref, true) }
+        else { f.Id = "todo:" + t.Id; f.Src = "todo"; f.Title = t.Text }
+        Nb.AppendLog(Dir, f)
+        todos.Remove(t)
+        w.NbSaveTodos(todos)
+        let j = Just(); j.T = t; j.Index = idx; j.LogId = f.Id; j.Until = w.Now + (w.NbReduced() ? 1.2 : 1.6)
+        justDone.Add(j)
+        lastTodo = ""
+        Reload()
+    }
+
+    func Untick(_ id: String) {
+        var j: Just? = nil
+        for x in justDone { if x.T.Id == id { j = x } }
+        guard let jj = j else { return }
+        justDone.Remove(jj)
+        let g = NbFact(); g.Id = jj.LogId; g.T = w.NbNow(); g.Gone = true; g.Src = jj.T.Src == "school" ? "school" : "todo"; g.Title = jj.T.Text
+        Nb.AppendLog(Dir, g)
+        if jj.T.Src == "school" { w.NbSchoolDone(jj.T.Ref, false) }
+        todos.Insert(Math.Min(jj.Index, todos.Count), jj.T)
+        w.NbSaveTodos(todos)
+        Reload()
+    }
+
+    func MoveTodo(_ id: String, _ dir: Int) {
+        guard let t = FindTodo(id) else { return }
+        let i = todos.IndexOf(t), j = i + dir
+        if j < 0 || j >= todos.Count { return }
+        todos.RemoveAt(i); todos.Insert(j, t)
+        w.NbSaveTodos(todos)
+        logStamp = Stamp()
+        Invalidate()
+    }
+    func DragTo(_ id: String, _ index: Int) {
+        guard let t = FindTodo(id) else { return }
+        todos.Remove(t)
+        todos.Insert(Math.Max(0, Math.Min(index, todos.Count)), t)
+        lastTodo = id
+        w.NbSaveTodos(todos)
+        logStamp = Stamp()
+        Invalidate()
+    }
+
+    func CopyText(_ kind: String) -> String {
+        if kind == "simple" { return Nb.Simple(things) }
+        if kind == "note" { return note.Text.Replace("\r\n", "\n").TrimEnd() }
+        return Nb.Detail(things, Day, kind == "links" || Links)
+    }
+
+    func Copy(_ kind: String) {
+        let s = CopyText(kind)
+        if s.Trim() == "" { return }
+        w.NbClipboard(s)
+        copied = kind; copiedUntil = w.Now + 3
+        w.NbSay("好了，去貼上吧")
+    }
+
+    func FocusFor() {
+        if App.Offscreen { return }
+        BeginInvoke { [weak self] in
+            guard let s = self else { return }
+            if s.IsDisposed { return }
+            if (s.Spread || s.Tab == "todo") && !s.tbTodo.Visible { s.Update() }   // mac: 先畫一次（PlaceBoxes 才會把打字框放上去）
+            if (s.Spread || s.Tab == "todo") && s.tbTodo.Visible { s.tbTodo.Focus() }
+            else if !s.Spread && s.Tab == "note" { s.ShowNote(true) }
+        }
+    }
+
+    func ShowNote(_ focus: Bool) {
+        if rNote.IsEmpty { return }
+        note.Visible = true
+        if focus && !App.Offscreen { note.Focus() }
+        Invalidate()
+    }
+
+    // mac: C# 的 ProcessCmdKey(ref Message, Keys)（表單比打字框先拿到）→ 打字框的 KeyDown、表單的 OnKeyDown 一開始都先問這裡
+    func ProcessCmdKey(_ keyData: Keys) -> Bool {
+        if keyData == (Keys.Alt | Keys.Up) || keyData == (Keys.Alt | Keys.Down) {
+            let id = editTodo != "" ? editTodo : (hoverTodo != "" ? hoverTodo : lastTodo)
+            if id != "" { lastTodo = id; MoveTodo(id, keyData == (Keys.Alt | Keys.Up) ? -1 : 1) }
+            return true
+        }
+        if keyData == Keys.Escape {
+            if editThing != "" || editTodo != "" { Key("edit", "esc") }
+            else if duePick { duePick = false; Invalidate() }
+            else if Preview { Preview = false; Invalidate() }
+            else { Close() }
+            return true
+        }
+        return false
+    }
+    // mac: KeyPreview：打字框沒處理的鍵（筆記框、或焦點在表單上）
+    override func OnKeyDown(_ e: KeyEventArgs) {
+        super.OnKeyDown(e)
+        if e.Handled { return }
+        if NbEditKeys.Handle() { e.Handled = true; return }   // mac: Cmd+X／C／V／A／Z（沒有「編輯」選單）
+        if ProcessCmdKey(e.KeyData) { e.Handled = true }
+    }
+
+    // ================= 滑鼠 =================
+    func HitAt(_ p: Point) -> Hit? {
+        var i = hits.Count - 1
+        while i >= 0 { if hits[i].R.Contains(p) { return hits[i] }; i -= 1 }
+        return nil
+    }
+    func SimHover(_ p: Point) {
+        if App.Offscreen { Render() }
+        let h = HitAt(p)
+        var th = "", td = "", act = ""
+        if let h = h {
+            act = h.Act + ":" + h.Arg
+            if let hv = h.Hover, hv.StartsWith("thing:") { th = hv.Substring(6) }
+            if let hv = h.Hover, hv.StartsWith("todo:") { td = hv.Substring(5) }
+        }
+        if th != hoverThing || td != hoverTodo || act != hoverAct { hoverThing = th; hoverTodo = td; hoverAct = act; Invalidate() }
+    }
+    func SimClick(_ p: Point) {
+        if App.Offscreen { Render() }
+        guard let h = HitAt(p) else { return }
+        DoHit(h)
+    }
+    // 點整列（不在按鈕上）＝改字
+    func DoHit(_ h: Hit) {
+        if h.Act == "row" {
+            if let hv = h.Hover, hv.StartsWith("thing:") { Do("edit", h.Arg) } else if let hv = h.Hover, hv.StartsWith("todo:") { Do("tedit", h.Arg) }
+            return
+        }
+        Do(h.Act, h.Arg)
+    }
+    func HoverThing(_ id: String) { hoverThing = id; hoverTodo = ""; Invalidate() }
+    func HoverTodo(_ id: String) { hoverTodo = id; hoverThing = ""; if id != "" { lastTodo = id }; Invalidate() }
+
+    override func OnMouseMove(_ e: MouseEventArgs) {
+        super.OnMouseMove(e)
+        if dragTodo != "" && (e.Button & MouseButtonsT.Left).raw != 0 {
+            if !dragging && Math.Abs(e.Y - dragStartY) > Sc(4) { dragging = true }
+            if dragging { dragY = e.Y; Invalidate() }
+            return
+        }
+        SimHover(e.Location)
+        let h = HitAt(e.Location)
+        Cursor = h != nil && h!.Act != "row" ? Cursors.Hand : Cursors.Default
+    }
+    override func OnMouseLeave(_ e: EventArgs) {
+        super.OnMouseLeave(e)
+        if !dragging && (hoverThing != "" || hoverTodo != "" || hoverAct != "") { hoverThing = ""; hoverTodo = ""; hoverAct = ""; Invalidate() }
+    }
+    var downAt = PointT(0, 0)
+    override func OnMouseDown(_ e: MouseEventArgs) {
+        super.OnMouseDown(e)
+        downAt = e.Location
+        let h = HitAt(e.Location)
+        if e.Button == MouseButtonsT.Left, let hh = h, hh.Act == "grip" || hh.Act == "tedit" { dragTodo = hh.Arg; dragStartY = e.Y; dragY = e.Y; dragging = false; lastTodo = hh.Arg }
+        if e.Button == MouseButtonsT.Left && h == nil && e.Y < Sc(46) { DragWindow() }
+    }
+    override func OnMouseUp(_ e: MouseEventArgs) {
+        super.OnMouseUp(e)
+        if dragTodo != "" {
+            let id = dragTodo, was = dragging
+            dragTodo = ""; dragging = false
+            if was { DragTo(id, DropIndex(id)); return }
+        }
+        if e.Button != MouseButtonsT.Left { return }
+        guard let h = HitAt(e.Location) else { return }
+        if h.Act == "grip" { return }
+        DoHit(h)
+        FocusAfterClick(h.Act)
+    }
+    func FocusAfterClick(_ act: String) {
+        if App.Offscreen { return }
+        if act == "addtodo" && tbTodo.Visible { tbTodo.Focus() }
+        if act == "adddone" && tbDone.Visible { tbDone.Focus() }
+    }
+    override func OnMouseWheel(_ e: MouseEventArgs) {
+        super.OnMouseWheel(e)
+        for kv in clipR {
+            // mac: 觸控板的 delta 很小，C# 的整數 -Delta / 120 會變 0 → 用 Double 算
+            if kv.Value.Contains(e.Location) { ScrollBy(kv.Key, -CInt(Double(e.Delta) / 120.0 * Double(Sc(28)) * 2)); return }
+        }
+    }
+    func ScrollBy(_ key: String, _ dy: Int) {
+        var s = 0, h = 0
+        var c = RectangleT.Empty
+        scroll.TryGetValue(key, &s)
+        contentH.TryGetValue(key, &h)
+        clipR.TryGetValue(key, &c)
+        s = Math.Max(0, Math.Min(Math.Max(0, h - c.Height), s + dy))
+        scroll[key] = s
+        Invalidate()
+    }
+    func DropIndex(_ id: String) -> Int {
+        var idx = 0
+        for t in todos {
+            if t.Id == id { continue }
+            var r = RectangleT.Empty
+            if todoRows.TryGetValue(t.Id, &r) && dragY > r.Y + r.Height / 2 { idx += 1 }
+        }
+        return idx
+    }
+
+    // 拖上面的木框搬家
+    // mac: ReleaseCapture＋SendMessage(WM_NCLBUTTONDOWN, HTCAPTION) → NSWindow.performDrag（放開滑鼠才回來，跟 Windows 一樣吃掉 mouse up）
+    func DragWindow() { if App.Offscreen { return }; if let p = panel, let ev = NSApp.currentEvent { p.performDrag(with: ev) } }
+    // mac: 藏起來的打字框如果還拿著鍵盤焦點（NSTextField 的 field editor），還給視窗（C#：藏起來的控制項自己會交出焦點）
+    func MacDropFocus(_ c: Control) {
+        BeginInvoke { [weak self] in
+            guard let s = self else { return }
+            if !c.Visible && c.Focused { _ = s.panel?.makeFirstResponder(nil) }
+        }
+    }
+
+    // ================= 畫 =================
+    func AddHit(_ act: String, _ arg: String, _ r: Rectangle) { AddHit(act, arg, r, nil) }
+    var hitClip = RectangleT.Empty   // 捲動的紙：紙外面（看不到的）不能點
+    var again = false, inAgain = false
+    // 捲到哪：不超過內容（內容變短時往回拉，下一輪重畫一次）
+    func ScrollOf(_ key: String, _ clip: Rectangle) -> Int {
+        var s = 0
+        scroll.TryGetValue(key, &s)
+        s = Math.Max(0, s)   // 太大的（剛加一件、要捲到底）由 ScrollDone 拉回來再畫一次
+        scroll[key] = s
+        return s
+    }
+    func ScrollDone(_ key: String, _ h: Int, _ clip: Rectangle) {
+        var s = 0; scroll.TryGetValue(key, &s)
+        contentH[key] = h
+        let max = Math.Max(0, h - clip.Height)
+        if s > max { scroll[key] = max; again = true }
+    }
+    func AddHit(_ act: String, _ arg: String, _ r: Rectangle, _ hover: String?) { AddHit(act, arg, r, hover, false) }
+    func AddHit(_ act: String, _ arg: String, _ r0: Rectangle, _ hover: String?, _ low: Bool) {
+        var r = r0
+        if !hitClip.IsEmpty { r = RectangleT.Intersect(r, hitClip); if r.Width <= 0 || r.Height <= 0 { return } }
+        let h = Hit(); h.Act = act; h.Arg = arg; h.R = r; h.Hover = hover
+        if low { hits.Insert(0, h) } else { hits.Add(h) }
+    }
+    func Hot(_ act: String, _ arg: String) -> Bool { return hoverAct == act + ":" + arg }
+
+    override func OnPaint(_ e: PaintEventArgs) {
+        let g = e.Graphics
+        g.SmoothingMode = SmoothingMode.None
+        g.Clear(NotebookForm.KEY)
+        g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit   // 字見 DT()
+        hits.Clear(); todoRows.Clear(); clipR.Clear(); Drawn.Clear()
+        again = false; hitClip = RectangleT.Empty
+        rTodo = RectangleT.Empty; rDone = RectangleT.Empty; rEdit = RectangleT.Empty; rNote = RectangleT.Empty
+        let night = w.Night
+        let X = OV, W0 = FrameW, H0 = FrameH
+        Pix.Wood(g, X, 0, W0, H0, U, night, 31)
+        Pix.Panel(g, X + Sc(8), Sc(46), W0 - Sc(16), H0 - Sc(46) - Sc(8), U, night)
+        Crown(g, X, W0)
+        DayBar(g, X + Sc(18), Sc(54), W0 - Sc(36))
+        if Spread {
+            let top = Sc(92), colW = (W0 - Sc(36) - Sc(22)) / 2, areaH = Sc(526)
+            let left = RectangleT(X + Sc(18), top, colW, areaH), right = RectangleT(X + Sc(18) + colW + Sc(22), top, colW, areaH)
+            LeftSpread(g, left)
+            DoneArea(g, right, Sc(22), false)
+        } else {
+            let top = Sc(126), areaH = Sc(526)
+            Tabs(g, X, Sc(92))
+            let area = RectangleT(X + Sc(18), top, W0 - Sc(36), areaH)
+            let ti = NotebookForm.TabKey.IndexOf(Tab)
+            if Tab == "todo" { TodoArea(g, area) }
+            else if Tab == "note" { NoteArea(g, area) }
+            else { DoneArea(g, area, Sc(44), true) }
+            Drawn.Add("tab " + Tab + " " + String(ti))
+        }
+        PlaceBoxes()
+        if again && !inAgain { inAgain = true; OnPaint(e); inAgain = false }   // 捲動往回拉了：照新的位置再畫一次
+    }
+
+    // 頂上：銅牌＋兩邊小愛心＋右上角的叉叉
+    func Crown(_ g: Graphics, _ X: Int, _ W0: Int) {
+        let t = "小本子"
+        let tw = TW(t, fPlate), plw = tw + Sc(44), plh = Sc(25)
+        let pr = RectangleT(X + (W0 - plw) / 2, Sc(10), plw, plh)
+        Pix.Plate(g, "", fPlate, pr, U)
+        NotebookForm.DT(g, t, fPlate, RectangleT(pr.X, pr.Y, pr.Width, pr.Height - U / 2), NotebookForm.CText, Pix.Mid)
+        Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.X - Sc(8) - 5 * U, pr.Y + plh / 2 - 2 * U, U)
+        Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.Right + Sc(8), pr.Y + plh / 2 - 2 * U, U)
+        let xr = RectangleT(X + W0 - Sc(10) - Sc(20), Sc(12), Sc(20), Sc(20))
+        let hot = Hot("close", "")
+        Pix.Round(g, Pix.Ink, xr.X, xr.Y, xr.Width, xr.Height, U)
+        Pix.Box(g, hot ? Pix.C(0xFFF3D6) : NotebookForm.CBtn, xr.X + U, xr.Y + U, xr.Width - 2 * U, xr.Height - 2 * U)
+        Pix.Box(g, Pix.C(0xDCC6A2), xr.X + U, xr.Bottom - U - Sc(3) + 1, xr.Width - 2 * U, Sc(3) - 1)
+        Pix.Mono(g, NotebookForm.Mono(NotebookForm.IX), Pix.Ink, xr.X + (xr.Width - 5 * U) / 2, xr.Y + (xr.Height - 5 * U) / 2 - 1, U)
+        AddHit("close", "", xr)
+    }
+    static func Mono(_ a: [String]) -> [String] { var r: [String] = []; for s in a { r.append(s.Replace("k", "#")) }; return r }
+
+    // ◀ 11/19（四）［今天］ ▶ ……［攤開］［⚙ 來源］
+    func DayBar(_ g: Graphics, _ x: Int, _ y: Int, _ w0: Int) {
+        let bh = Sc(24), by = y + (Sc(30) - bh) / 2
+        let l = RectangleT(x, by, bh, bh)
+        SmallBtn(g, l, "", false, Hot("prev", ""))
+        Pix.Mono(g, NotebookForm.Mono(NotebookForm.ILEFT), Pix.Ink, l.X + (bh - 3 * U) / 2, l.Y + (bh - Sc(3) - 5 * U) / 2 + 1, U)
+        AddHit("prev", "", l)
+        let ds = Nb.DayLabel(Day)
+        let dx = l.Right + Sc(8) + Sc(4), dw = TW(ds, fBody)
+        NotebookForm.DT(g, ds, fBody, RectangleT(dx, y, dw + 4, Sc(30)), NotebookForm.CText, Pix.LeftMid)
+        let px = dx + dw + Sc(2) + Sc(8)
+        var pr: Rectangle
+        if IsToday {
+            let pw = TW("今天", fSmall) + Sc(12), ph = Sc(18)
+            pr = RectangleT(px, y + (Sc(30) - ph) / 2, pw, ph)
+            Pix.Round(g, Pix.C(0x8A5A2A), pr.X, pr.Y, pr.Width, pr.Height, U)
+            Pix.Box(g, Pix.C(0xF6C453), pr.X + U, pr.Y + U, pr.Width - 2 * U, pr.Height - 2 * U)
+            NotebookForm.DT(g, "今天", fSmall, RectangleT(pr.X, pr.Y, pr.Width, pr.Height - 1), NotebookForm.CText, Pix.Mid)
+        } else {
+            pr = RectangleT(px, by, TW("回今天", fBtnS) + Sc(18), bh)
+            SmallBtn(g, pr, "回今天", false, Hot("today", ""))
+            AddHit("today", "", pr)
+        }
+        let r = RectangleT(pr.Right + Sc(8), by, bh, bh)
+        SmallBtn(g, r, "", IsToday, Hot("next", ""))
+        Pix.Mono(g, NotebookForm.Mono(NotebookForm.IRIGHT), IsToday ? Pix.C(0xBBA98C) : Pix.Ink, r.X + (bh - 3 * U) / 2 + 1, r.Y + (bh - Sc(3) - 5 * U) / 2 + 1, U)
+        if !IsToday { AddHit("next", "", r) }
+        // 右邊：來源、攤開／收起
+        let src = "來源"
+        let sw = TW(src, fBtnS) + Sc(18) + 5 * U + Sc(5)
+        let sr = RectangleT(x + w0 - sw, by, sw, bh)
+        SmallBtn(g, sr, "", false, Hot("sources", ""))
+        Pix.Mono(g, NotebookForm.Mono(NotebookForm.IGEAR), Pix.Ink, sr.X + Sc(9), sr.Y + (bh - Sc(3) - 5 * U) / 2 + 1, U)
+        NotebookForm.DT(g, src, fBtnS, RectangleT(sr.X + Sc(9) + 5 * U + Sc(5), sr.Y, sw, bh - Sc(3)), NotebookForm.CText, Pix.LeftMid)
+        AddHit("sources", "", sr)
+        let sp = Spread ? "收起" : "攤開"
+        let spw = TW(sp, fBtnS) + Sc(18)
+        let spr = RectangleT(sr.X - Sc(8) - spw, by, spw, bh)
+        SmallBtn(g, spr, sp, false, Hot("spread", ""))
+        AddHit("spread", "", spr)
+        Drawn.Add("day " + Nb.Ymd(Day) + " " + (IsToday ? "today" : "past"))
+    }
+
+    // 上緣的三個索引頁籤：選中的比較高、接進紙張、紙色底、上緣一條頁籤色
+    func Tabs(_ g: Graphics, _ X: Int, _ y: Int) {
+        var x = X + Sc(48)
+        let n0 = todos.Count + jira.Count, n1 = things.Count
+        for i in 0..<3 {
+            let on = Tab == NotebookForm.TabKey[i]
+            let cnt: String = i == 0 ? n0.ToString() : (i == 1 ? n1.ToString() : "")
+            let nameW = TW(NotebookForm.TabName[i], fBody)
+            let tw: Int = nameW + (cnt != "" ? Sc(8) + TW(cnt, fWord) : 0)
+            let wd = Math.Max(Sc(on ? 104 : 96), tw + Sc(28))
+            var ht = on ? Sc(36) : Sc(32)
+            let ty: Int = y + Sc(34) - Sc(32) - (on ? Sc(2) : 0)
+            if on { ht = Sc(36) }
+            _ = ht
+            let rh: Int = on ? Sc(34) + Sc(2) - (ty - y) + Sc(0) : Sc(32)
+            var r = RectangleT(x, ty, wd, rh)
+            if on { r.Height = y + Sc(34) + Sc(2) - ty }
+            Pix.Box(g, Pix.Ink, r.X + U, r.Y, r.Width - 2 * U, U)
+            Pix.Box(g, Pix.Ink, r.X, r.Y + U, U, r.Height - U)
+            Pix.Box(g, Pix.Ink, r.Right - U, r.Y + U, U, r.Height - U)
+            Pix.Box(g, on ? NotebookForm.CPaper : NotebookForm.TabBg[i], r.X + U, r.Y + U, r.Width - 2 * U, r.Height - U)
+            if on { Pix.Box(g, NotebookForm.TabC[i], r.X + U, r.Y + U, r.Width - 2 * U, Sc(6)) }
+            else { Pix.Box(g, Pix.C(0xC9A777), r.X + U, r.Bottom - U, r.Width - 2 * U, U) }
+            let hot = Hot("tab", NotebookForm.TabKey[i]) && !on
+            if hot { Pix.Box(g, Pix.Mix(NotebookForm.TabBg[i], Color.White, 0.5), r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U) }
+            let cy = on ? r.Y + Sc(6) : r.Y, ch = on ? r.Height - Sc(6) - Sc(2) : r.Height
+            let tx = r.X + (r.Width - tw) / 2
+            NotebookForm.DT(g, NotebookForm.TabName[i], fBody, RectangleT(tx, cy, tw + 4, ch), on ? NotebookForm.CText : NotebookForm.CTabText, Pix.LeftMid)
+            if cnt != "" { NotebookForm.DT(g, cnt, fWord, RectangleT(tx + nameW + Sc(8), cy, TW(cnt, fWord) + 4, ch), on ? NotebookForm.CText : NotebookForm.CSub, Pix.LeftMid) }
+            AddHit("tab", NotebookForm.TabKey[i], r)
+            let geo = String(r.X) + " " + String(r.Y) + " " + String(r.Width) + " " + String(r.Height)
+            Drawn.Add("tabbtn " + NotebookForm.TabKey[i] + " " + (on ? "1" : "0") + " " + cnt + " " + geo)
+            x += wd + Sc(4)
+        }
+    }
+
+    // 紙：深色外框（2px，畫在外面）、紙色、右緣頁籤色、左邊線圈
+    @discardableResult func Paper(_ g: Graphics, _ r: Rectangle, _ bg: Color, _ stripe: Int, _ rings: Bool) -> Rectangle {
+        Pix.Box(g, Pix.Ink, r.X - U, r.Y - U, r.Width + 2 * U, r.Height + 2 * U)
+        Pix.Box(g, bg, r.X, r.Y, r.Width, r.Height)
+        if stripe >= 0 { Pix.Box(g, NotebookForm.TabC[stripe], r.Right - Sc(6), r.Y, Sc(6), r.Height) }
+        return r
+    }
+    func Rings(_ g: Graphics, _ paper: Rectangle) {
+        for i in 0..<6 {
+            let y = paper.Y + Sc(30) + i * Sc(80)
+            if y > paper.Bottom - Sc(16) { break }
+            let x = paper.X - Sc(28)
+            Pix.Round(g, Pix.Ink, x, y, Sc(34), Sc(8), U)
+            Pix.Box(g, Pix.C(0xCFC8BC), x + U, y + U, Sc(34) - 2 * U, Sc(8) - 2 * U)
+            Pix.Box(g, Pix.C(0xF1EDE6), x + U, y + U, Sc(34) - 2 * U, U)
+            let hx = paper.X + Sc(2), hy = y + Sc(1)
+            Pix.Box(g, Pix.C(0xA88A64), hx, hy, Sc(6), Sc(6))
+            Pix.Box(g, Pix.C(0xD9C6A4), hx + U, hy + U, Sc(6) - U, Sc(6) - U)
+        }
+    }
+    func Scrollbar(_ g: Graphics, _ key: String, _ paper: Rectangle, _ clip: Rectangle) {
+        var h = 0, s = 0
+        contentH.TryGetValue(key, &h)
+        scroll.TryGetValue(key, &s)
+        if h <= clip.Height + Sc(4) { return }
+        let tr = RectangleT(paper.Right - Sc(8), paper.Y + Sc(6), Sc(6), paper.Height - Sc(12))
+        Pix.Box(g, Pix.C(0xEFE3CB), tr.X, tr.Y, tr.Width, tr.Height)
+        let th = Math.Max(Sc(20), tr.Height * clip.Height / h)
+        let ty = tr.Y + (tr.Height - th) * s / Math.Max(1, h - clip.Height)
+        Pix.Box(g, Pix.C(0xC9A777), tr.X, ty, tr.Width, th)
+    }
+
+    // ---- 今天做了（一頁，或攤開的右頁）----
+    func DoneArea(_ g: Graphics, _ area: Rectangle, _ padL: Int, _ single: Bool) {
+        let foot = Sc(32), bar = Sc(28)
+        let paper = RectangleT(area.X, area.Y, area.Width, area.Height - bar - Sc(8) - foot - Sc(10))
+        Paper(g, paper, Preview ? Color.White : NotebookForm.CPaper, single ? 1 : -1, true)
+        let clip = RectangleT(paper.X + padL - Sc(8), paper.Y + Sc(6), paper.Width - padL + Sc(8) - Sc(14) + Sc(12), paper.Height - Sc(12))
+        clipR[Preview ? "preview" : "done"] = clip
+        let tx = paper.X + padL, right = paper.Right - Sc(14)
+        // 「補一件做過的事」：清單放得下就接在後面；放不下就釘在紙的最下面（捲動時不會被切一半）
+        let fieldH = Sc(28) + Sc(4)
+        var prev = 0
+        contentH.TryGetValue("donelist", &prev)
+        let pin = !Preview && prev + fieldH > clip.Height
+        let lclip = pin ? RectangleT(clip.X, clip.Y, clip.Width, clip.Height - fieldH - Sc(4)) : clip
+        clipR[Preview ? "preview" : "done"] = lclip
+        let st = g.Save()
+        g.SetClip(RectangleT(paper.X, paper.Y, paper.Width - (single ? Sc(6) : 0), pin ? lclip.Bottom - paper.Y : paper.Height))
+        let s = ScrollOf(Preview ? "preview" : "done", lclip)
+        hitClip = RectangleT(paper.X - Sc(12), paper.Y, paper.Width + Sc(12), pin ? lclip.Bottom - paper.Y : paper.Height)
+        let y0 = paper.Y + Sc(6) - s
+        var h = Preview ? PreviewPage(g, tx, y0, right) : DonePage(g, tx, y0, right, lclip)
+        if !Preview {
+            contentH["donelist"] = h
+            if (h + fieldH > clip.Height) != pin { again = true }
+            let fr = pin ? RectangleT(tx - Sc(8), lclip.Bottom + Sc(4), right - tx + Sc(8), Sc(28)) : RectangleT(tx - Sc(8), y0 + h, right - tx + Sc(8), Sc(28))
+            if pin { g.ResetClip(); hitClip = RectangleT.Empty }
+            Field(g, fr, tbDone, "補一件做過的事，按 Enter", false, clip)
+            rDone = NotebookForm.Inside(fr, clip) ? fr : RectangleT.Empty
+            AddHit("adddone", "", fr)
+            if !pin { h += fieldH }
+        }
+        hitClip = RectangleT.Empty
+        ScrollDone(Preview ? "preview" : "done", h, lclip)
+        g.Restore(st)
+        Rings(g, paper)
+        Scrollbar(g, Preview ? "preview" : "done", paper, lclip)
+        // 貼出去會長這樣
+        var br = RectangleT(area.X, paper.Bottom + U + Sc(8) - U, area.Width, bar)
+        br.Y = paper.Bottom + Sc(8)
+        PvBar(g, br)
+        // 會複製 N 件、複製簡單、複製詳細
+        let fy = br.Bottom + Sc(10)
+        let empty = things.Count == 0 || Nb.OnCount(things) == 0
+        if things.Count > 0 { NotebookForm.DT(g, "會複製 " + String(Nb.OnCount(things)) + " 件", fSmall, RectangleT(area.X, fy, Sc(160), foot), NotebookForm.CSub, Pix.LeftMid) }
+        let cD = copied == "detail" || copied == "links", cS = copied == "simple"
+        let dt = cD ? "已複製詳細" : "複製詳細", stx = cS ? "已複製簡單" : "複製簡單"
+        let dw: Int = TW(dt, fBtn) + Sc(28) + (cD ? 5 * U + Sc(6) : 0)
+        let sw: Int = TW(stx, fBtn) + Sc(28) + (cS ? 5 * U + Sc(6) : 0)
+        let dr = RectangleT(area.Right - dw, fy, dw, foot)
+        let sr = RectangleT(dr.X - Sc(8) - sw, fy, sw, foot)
+        BigBtn(g, sr, stx, empty ? 3 : (cS ? 2 : 0), Hot("copy", "simple"))
+        BigBtn(g, dr, dt, empty ? 3 : (cD ? 2 : 1), Hot("copy", "detail"))
+        if !empty { AddHit("copy", "simple", sr); AddHit("copy", "detail", dr) }
+        let fn = things.Count > 0 ? Nb.OnCount(things) : -1
+        let cpS: String = copied == "" ? "-" : copied, onS: String = empty ? "off" : "on"
+        Drawn.Add("foot " + String(fn) + " copied=" + cpS + " " + onS)
+    }
+
+    // 貼出去會長這樣：▶／▼、附上連結、簡單｜詳細
+    func PvBar(_ g: Graphics, _ r: Rectangle) {
+        Pix.Round(g, NotebookForm.CBarEdge, r.X, r.Y, r.Width, r.Height, U)
+        Pix.Box(g, NotebookForm.CBar, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U)
+        let x = r.X + Sc(8), cy = r.Y + r.Height / 2
+        let ac = Pix.C(0x8A5A2A)
+        if Preview { Pix.Mono(g, NotebookForm.Mono(NotebookForm.IDOWN), ac, x, cy - U - U / 2, U) }
+        else { Pix.Mono(g, NotebookForm.Mono(NotebookForm.IRIGHT), ac, x + U, cy - 5 * U / 2, U) }
+        let t = "貼出去會長這樣"
+        NotebookForm.DT(g, t, fBar, RectangleT(x + 5 * U + Sc(8), r.Y, TW(t, fBar) + 4, r.Height), NotebookForm.CGh, Pix.LeftMid)
+        AddHit("pv", "", RectangleT(r.X, r.Y, x + 5 * U + Sc(8) + TW(t, fBar) + Sc(8) - r.X, r.Height))
+        if !Preview { Drawn.Add("pvbar closed"); return }
+        // 簡單｜詳細
+        let sw = Sc(40), sh = Sc(20), segW = 2 * sw + 3 * U
+        let seg = RectangleT(r.Right - Sc(6) - segW, cy - sh / 2, segW, sh)
+        Pix.Round(g, Pix.Ink, seg.X, seg.Y, seg.Width, seg.Height, U)
+        for i in 0..<2 {
+            let on = (i == 0) == (PvKind == "simple")
+            let c = RectangleT(seg.X + U + i * (sw + U), seg.Y + U, sw, sh - 2 * U)
+            Pix.Box(g, on ? Pix.C(0xF6C453) : NotebookForm.CBtn, c.X, c.Y, c.Width, c.Height)
+            if on { Pix.Box(g, Pix.C(0xFBE7BA), c.X, c.Y, c.Width, U); Pix.Box(g, Pix.C(0xC8902C), c.X, c.Bottom - U, c.Width, U) }
+            NotebookForm.DT(g, i == 0 ? "簡單" : "詳細", fSmall, c, on ? NotebookForm.CText : NotebookForm.CPh, Pix.Mid)
+            AddHit("kind", i == 0 ? "simple" : "detail", c)
+        }
+        // 附上連結（只有詳細用得到）
+        let lk = "附上連結"
+        let lw = TW(lk, fSmall), cs = Sc(14)
+        let lx = seg.X - Sc(8) - lw - Sc(5) - cs
+        Chk(g, lx, cy - cs / 2, Links, Hot("links", ""))
+        NotebookForm.DT(g, lk, fSmall, RectangleT(lx + cs + Sc(5), r.Y, lw + 4, r.Height), NotebookForm.CSub, Pix.LeftMid)
+        AddHit("links", "", RectangleT(lx - Sc(2), r.Y, cs + Sc(5) + lw + Sc(4), r.Height))
+        Drawn.Add("pvbar open " + PvKind + " links=" + (Links ? "1" : "0"))
+    }
+
+    func DonePage(_ g: Graphics, _ tx: Int, _ y0: Int, _ right: Int, _ clip: Rectangle) -> Int {
+        var y = y0
+        let bx = tx - Sc(8), bw = right - bx
+        if things.Count == 0 { return EmptyDone(g, tx, y, right, clip) - y0 }
+        // 今天 N 件　CI 都過了
+        let sr = RectangleT(bx, y, bw, Sc(32))
+        Pix.Round(g, NotebookForm.CBarEdge, sr.X, sr.Y, sr.Width, sr.Height, U)
+        Pix.Box(g, NotebookForm.CBar, sr.X + U, sr.Y + U, sr.Width - 2 * U, sr.Height - 2 * U)
+        let today = w.NbNow().Date
+        let which = Day == today ? "今天 " : (Day == today.AddDays(-1) ? "昨天 " : "這天 ")
+        let head = which + String(things.Count) + " 件"
+        NotebookForm.DT(g, head, fBody, RectangleT(sr.X + Sc(10), sr.Y, sr.Width, sr.Height), NotebookForm.CText, Pix.LeftMid)
+        let sum: NbWord? = Nb.SumWord(things)
+        if let sm = sum { let ww = TW(sm.Text, fWord); NotebookForm.DT(g, sm.Text, fWord, RectangleT(sr.Right - Sc(10) - ww - 2, sr.Y, ww + 4, sr.Height), WordC(sm.Kind, false), Pix.LeftMid) }
+        let sumS: String = sum != nil ? " | " + sum!.Text : ""
+        Drawn.Add("sum " + head + sumS)
+        y += Sc(32) + Sc(4)
+        var group: String? = nil
+        for t in things {
+            if group == nil || t.Group != group! {
+                group = t.Group
+                let gr = RectangleT(tx, y, right - tx, Sc(28))
+                NotebookForm.DT(g, t.Group, fBody, RectangleT(gr.X, gr.Y, gr.Width, gr.Height - Sc(4)), NotebookForm.CGh, [TextFormatFlags.Left, TextFormatFlags.Bottom, TextFormatFlags.SingleLine, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix])
+                Pix.Box(g, NotebookForm.CGhLine, gr.X, gr.Bottom - Sc(2), gr.Width, Sc(2))
+                Drawn.Add("group " + t.Group)
+                y += Sc(28) + Sc(4)
+            }
+            y += ThingRow(g, t, bx, y, right, clip)
+        }
+        y += Sc(4)   // 「補一件做過的事」由 DoneArea 畫
+        return y - y0
+    }
+
+    func WordC(_ kind: Int, _ hot: Bool) -> Color { return kind == 2 ? NotebookForm.CBad : (kind == 1 ? (hot ? NotebookForm.COkHot : NotebookForm.COk) : NotebookForm.CSub) }
+
+    func ThingRow(_ g: Graphics, _ t: NbThing, _ bx: Int, _ y: Int, _ right: Int, _ clip: Rectangle) -> Int {
+        let hot = t.F.Id == hoverThing && !t.Off && editThing != t.F.Id, editing = editThing == t.F.Id
+        let tx = bx + Sc(8)
+        let words = Nb.Words(t)
+        let runs = List<Run>()
+        let main = t.Off ? NotebookForm.COff : NotebookForm.CText
+        runs.Add(Run(Nb.PageText(t), fBody, main))
+        for wd in words {
+            let cm = Run("，", fWord, t.Off ? NotebookForm.COff : NotebookForm.CSub); cm.KeepNext = true; runs.Add(cm)
+            let wr = Run(wd.Text, fWord, t.Off ? NotebookForm.COff : WordC(wd.Kind, hot)); wr.Keep = true; runs.Add(wr)
+        }
+        let back = "要複製"
+        let avail: Int = right - Sc(6) - tx - (t.Off ? TW(back, fSmall) + Sc(10) : 0)
+        let lines = Flow(g, runs, tx, y + Sc(3), avail, Sc(22), false, false)   // 先量（跟畫用同一個 Graphics，換行才一樣）
+        let h: Int = Sc(6) + lines * Sc(22) + (hot ? Sc(16) : 0)
+        let row = RectangleT(bx, y, right - bx, h)
+        if hot {
+            Pix.Round(g, Pix.C(0xD9A944), row.X, row.Y, row.Width, row.Height, U)
+            Pix.Box(g, Pix.C(0xFFE29A), row.X + U, row.Y + U, row.Width - 2 * U, row.Height - 2 * U)
+            Pix.Box(g, Pix.C(0xFFF1C9), row.X + U, row.Y + U, row.Width - 2 * U, Sc(3) - U)
+        }
+        if editing {
+            rEdit = RectangleT(tx, y + Sc(3), avail, Sc(22))
+            Pix.Round(g, Pix.Ink, rEdit.X - Sc(4), rEdit.Y - Sc(2), rEdit.Width + Sc(8), rEdit.Height + Sc(4), U)
+            Pix.Box(g, NotebookForm.CPaper, rEdit.X - Sc(4) + U, rEdit.Y - Sc(2) + U, rEdit.Width + Sc(8) - 2 * U, rEdit.Height + Sc(4) - 2 * U)
+            if App.Offscreen { NotebookForm.DT(g, tbEdit.Text, fBody, rEdit, NotebookForm.CText, Pix.LeftMid) }
+            if !NotebookForm.Inside(rEdit, clip) { rEdit = RectangleT.Empty }
+        } else { Flow(g, runs, tx, y + Sc(3), avail, Sc(22), t.Off) }
+        AddHit("edit", t.F.Id, RectangleT(tx, y, Math.Max(Sc(20), Math.Min(avail, FlowW(runs))), Sc(6) + lines * Sc(22)), "thing:" + t.F.Id)
+        if hot {
+            NotebookForm.DT(g, Nb.Ids(t), fSmall, RectangleT(tx, y + Sc(3) + lines * Sc(22), right - tx, Sc(16)), NotebookForm.CSub, [TextFormatFlags.Left, TextFormatFlags.Top, TextFormatFlags.SingleLine, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix])
+            let nc = "不複製"
+            let bw = TW(nc, fBtnS) + Sc(18)
+            let br = RectangleT(row.Right - Sc(6) - bw, row.Bottom - Sc(3) - Sc(20), bw, Sc(20))
+            SmallBtn(g, br, nc, false, Hot("off", t.F.Id))
+            AddHit("off", t.F.Id, br, "thing:" + t.F.Id)
+        }
+        if t.Off {
+            let bw = TW(back, fSmall)
+            let br = RectangleT(row.Right - Sc(6) - bw, y + Sc(6), bw, Sc(16))
+            NotebookForm.DT(g, back, fSmall, RectangleT(br.X, br.Y, br.Width + 4, br.Height), Hot("on", t.F.Id) ? NotebookForm.CText : NotebookForm.CSub, [TextFormatFlags.Left, TextFormatFlags.Top, TextFormatFlags.SingleLine, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix])
+            AddHit("on", t.F.Id, RectangleT(br.X - Sc(4), y, br.Width + Sc(8), h), "thing:" + t.F.Id)
+        }
+        AddHit("row", t.F.Id, row, "thing:" + t.F.Id, true)   // 整列只管 hover，放最下面
+        let onS: String = t.Off ? "off" : "on", hotS: String = hot ? " hot" : ""
+        let idsS: String = hot ? " | " + Nb.Ids(t) : ""
+        Drawn.Add("thing " + t.F.Id + " " + onS + hotS + " | " + NotebookForm.RunsText(runs) + idsS)
+        return h
+    }
+
+    // 空白：接上之後，做過的事會自己記下來
+    func EmptyDone(_ g: Graphics, _ tx: Int, _ y0: Int, _ right: Int, _ clip: Rectangle) -> Int {
+        var y = y0
+        NotebookForm.DT(g, "接上之後，做過的事會自己記下來", fWord, RectangleT(tx, y, right - tx, Sc(32)), NotebookForm.CSub, Pix.LeftMid)
+        Drawn.Add("empty done")
+        y += Sc(32)
+        let rows: [[String]] = [
+            ["claude", "Claude Code／Codex", "本機紀錄"], ["school", "學校行事曆", "上課、作業"], ["calendar", "行事曆", "會議"],
+            ["github", "GitHub", "PR、CI"], ["gitlab", "GitLab", "MR、CI"], ["jira", "Jira", "工單"] ]
+        let bx = tx - Sc(8)
+        _ = bx
+        for r in rows {
+            DrawIcon(g, r[0], tx, y + Sc(16) - 4 * U)
+            NotebookForm.DT(g, r[1], fWord, RectangleT(tx + 8 * U + Sc(8), y, Sc(150), Sc(32)), NotebookForm.CText, Pix.LeftMid)
+            NotebookForm.DT(g, r[2], fSmall, RectangleT(tx + 8 * U + Sc(8) + Sc(150) + Sc(8), y, Sc(120), Sc(32)), NotebookForm.CSub, Pix.LeftMid)
+            if w.WorkSourceOn(r[0]) {
+                let ok = "已接上"
+                let ow = TW(ok, fSmall)
+                NotebookForm.DT(g, ok, fSmall, RectangleT(right - ow - 2, y, ow + 4, Sc(32)), NotebookForm.COk, Pix.LeftMid)
+                Pix.Mono(g, Pix.CHECK, NotebookForm.COk, right - ow - Sc(4) - 5 * U, y + Sc(16) - 5 * U / 2, U)
+            } else {
+                let c = "接上"
+                let cw = TW(c, fBtnS) + Sc(18)
+                let br = RectangleT(right - cw, y + Sc(4), cw, Sc(24))
+                SmallBtn(g, br, c, false, Hot("connect", r[0]))
+                AddHit("connect", r[0], br)
+            }
+            y += Sc(32)
+        }
+        return y + Sc(14)   // 「補一件做過的事」由 DoneArea 畫
+    }
+
+    // 預覽：白紙上就是要貼出去的字（簡單／詳細、附不附連結）
+    func PreviewPage(_ g: Graphics, _ tx: Int, _ y0: Int, _ right: Int) -> Int {
+        let text = PvKind == "simple" ? Nb.Simple(things) : Nb.Detail(things, Day, Links)
+        var y = y0
+        let lh = Sc(19), ind = Sc(14)
+        for raw in text.Split("\n") {
+            let head = raw.StartsWith("【") || raw.EndsWith("進度")
+            let kid = raw.StartsWith("　")
+            let s = kid ? raw.Substring(1) : raw
+            let x = tx + (kid ? ind : 0), hang = s.StartsWith("・") || s.StartsWith("- ") ? ind : 0
+            if s == "" { y += lh; continue }
+            let runs = List<Run>()
+            runs.Add(Run(s, head ? fPvB : fPv, NotebookForm.CNote))
+            let n = FlowHang(g, runs, x, y, right - x, lh, hang)
+            y += n * lh
+        }
+        Drawn.Add("preview " + PvKind + " links=" + (Links ? "1" : "0"))
+        return y - y0 + Sc(8)
+    }
+
+    // ---- 待辦（一頁）----
+    func TodoArea(_ g: Graphics, _ area: Rectangle) {
+        let paper = Paper(g, area, NotebookForm.CPaper, 0, true)
+        let clip = RectangleT(paper.X + Sc(36), paper.Y + Sc(6), paper.Width - Sc(36) - Sc(2), paper.Height - Sc(12))
+        clipR["todo"] = clip
+        var pin = false
+        let lclip = TodoClip(clip, &pin)
+        clipR["todo"] = lclip
+        let st = g.Save()
+        g.SetClip(RectangleT(paper.X, paper.Y, paper.Width - Sc(6), lclip.Bottom - paper.Y + (pin ? 0 : Sc(6))))
+        let s = ScrollOf("todo", lclip)
+        hitClip = RectangleT(paper.X - Sc(12), paper.Y, paper.Width + Sc(12), lclip.Bottom - paper.Y + (pin ? 0 : Sc(6)))
+        todoPin = pin
+        let h = TodoPage(g, paper.X + Sc(44), paper.Y + Sc(6) - s, paper.Right - Sc(14), lclip)
+        todoPin = false
+        hitClip = RectangleT.Empty
+        TodoMeasured(h, pin, clip)
+        ScrollDone("todo", h, lclip)
+        g.Restore(st)
+        if pin { TodoField(g, RectangleT(paper.X + Sc(36), lclip.Bottom + Sc(4), paper.Right - Sc(14) - paper.X - Sc(36), Sc(28)), clip) }
+        Rings(g, paper)
+        Scrollbar(g, "todo", paper, lclip)
+        DuePopup(g, clip)
+    }
+
+    func TodoPage(_ g: Graphics, _ tx: Int, _ y0: Int, _ right: Int, _ clip: Rectangle) -> Int {
+        var y = y0
+        let bx = tx - Sc(8)
+        let now = w.NbNow()
+        if todos.Count == 0 && jira.Count == 0 && justDone.Count == 0 {
+            NotebookForm.DT(g, "還沒有待辦", fWord, RectangleT(tx, y, right - tx, Sc(32)), NotebookForm.CSub, Pix.LeftMid)
+            Drawn.Add("empty todo")
+            y += Sc(32)
+        } else {
+            let shown = List<NbTodo>()
+            for t in todos { if !(dragging && t.Id == dragTodo) { shown.Add(t) } }
+            let drop = dragging ? DropIndex(dragTodo) : -1
+            var dragAt = -1
+            var i = 0
+            while i <= shown.Count {
+                if i == drop {
+                    Pix.Box(g, Pix.C(0xFFF6D8), bx, y + Sc(1), right - bx + Sc(4), Sc(28) - Sc(2))
+                    var dx = bx
+                    while dx < right + Sc(4) { Pix.Box(g, Pix.C(0xD9A944), dx, y + Sc(1), Sc(4), Sc(2)); Pix.Box(g, Pix.C(0xD9A944), dx, y + Sc(25), Sc(4), Sc(2)); dx += Sc(8) }
+                    dragAt = y
+                    y += Sc(28)
+                }
+                if i == shown.Count { break }
+                y += TodoRow(g, shown[i], bx, y, right, now, false)
+                i += 1
+            }
+            _ = dragAt
+            for j in justDone {
+                let r = RectangleT(bx, y, right - bx, Sc(28))
+                Chk(g, r.X + Sc(8), y + (Sc(28) - Sc(14)) / 2, true, false)
+                let mv = "今天做了"
+                let mw = TW(mv, fWord)
+                let tx2 = r.X + Sc(8) + Sc(14) + Sc(8)
+                let avail = right - Sc(6) - tx2 - mw - 3 * U - Sc(12)
+                let txt = Ellipsis(j.T.Text, fBody, avail)
+                NotebookForm.DT(g, txt, fBody, RectangleT(tx2, y, avail + 4, Sc(28)), NotebookForm.COff, Pix.LeftMid)
+                Pix.Box(g, NotebookForm.COff, tx2, y + Sc(14), TW(txt, fBody), Sc(2))
+                let ax = right - Sc(6) - mw
+                Pix.Mono(g, NotebookForm.Mono(NotebookForm.IRIGHT), NotebookForm.COk, ax - 3 * U - Sc(4), y + Sc(14) - 5 * U / 2, U)
+                NotebookForm.DT(g, mv, fWord, RectangleT(ax, y, mw + 4, Sc(28)), NotebookForm.COk, Pix.LeftMid)
+                AddHit("untick", j.T.Id, RectangleT(r.X, y, Sc(8) + Sc(14) + Sc(8), Sc(28)))
+                Drawn.Add("justdone " + j.T.Text)
+                y += Sc(28)
+            }
+            if dragging {
+                if let dt = FindTodo(dragTodo) {
+                    let ly = Math.Max(clip.Y - Sc(10), Math.Min(clip.Bottom - Sc(20), dragY - Sc(14)))
+                    TodoRow(g, dt, bx + Sc(8), ly - Sc(3), right + Sc(4), now, true)
+                }
+            }
+        }
+        // 新增一行（右邊小日曆：期限）；放不下時由呼叫的地方釘在最下面
+        if !todoPin {
+            y += Sc(4)
+            TodoField(g, RectangleT(bx, y, right - bx, Sc(28)), clip)
+            y += Sc(28) + Sc(4)
+        }
+        if jira.Count > 0 {
+            let gr = RectangleT(tx, y, right - tx, Sc(40))
+            NotebookForm.DT(g, "Jira 指派給我", fBody, RectangleT(gr.X, gr.Y, gr.Width, gr.Height - Sc(4)), NotebookForm.CGh, [TextFormatFlags.Left, TextFormatFlags.Bottom, TextFormatFlags.SingleLine, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix])
+            Pix.Box(g, NotebookForm.CGhLine, gr.X, gr.Bottom - Sc(2), gr.Width, Sc(2))
+            y += Sc(40) + Sc(4)
+            for j in jira {
+                DrawIcon(g, "jira", tx, y + Sc(14) - 7 * U / 2)
+                let st = j.Status != "" ? j.Status : "待處理"
+                let sw = TW(st, fWord), x2 = tx + 8 * U + Sc(8)
+                let avail = right - Sc(6) - sw - Sc(8) - x2
+                NotebookForm.DT(g, Ellipsis((j.Ref + " " + j.Title).Trim(), fBody, avail), fBody, RectangleT(x2, y, avail + 4, Sc(28)), NotebookForm.CText, Pix.LeftMid)
+                NotebookForm.DT(g, st, fWord, RectangleT(right - Sc(6) - sw - 2, y, sw + 4, Sc(28)), NotebookForm.CTime, Pix.LeftMid)
+                Drawn.Add("jira " + j.Ref + " " + j.Title + " | " + st)
+                y += Sc(28)
+            }
+        }
+        return y - y0
+    }
+    var dueAnchor = RectangleT.Empty
+    var todoPin = false
+    func TodoField(_ g: Graphics, _ fr: Rectangle, _ clip: Rectangle) {
+        let chip = dueDay != DateTime.MinValue ? DueChip() : ""
+        Field(g, fr, tbTodo, "寫一件要做的事，按 Enter", true, clip, chip)
+        let cw0: Int = chip != "" ? TW(chip, fWord) + Sc(8) : 7 * U + Sc(4)
+        rTodo = NotebookForm.Inside(fr, clip) ? RectangleT(fr.X, fr.Y, fr.Width - Sc(8) - cw0, fr.Height) : RectangleT.Empty
+        AddHit("addtodo", "", fr)
+        let cw1: Int = chip != "" ? TW(chip, fWord) : 7 * U
+        let cal = RectangleT(fr.Right - Sc(8) - cw1 - Sc(4), fr.Y, cw1 + Sc(12), fr.Height)
+        AddHit("due", "", cal)
+        dueAnchor = fr
+    }
+    // 待辦清單（不含新增那一行）有多高：上一輪量的；放得下＝新增那一行接在清單裡
+    func TodoClip(_ clip: Rectangle, _ pin: inout Bool) -> Rectangle {
+        let fieldH = Sc(28) + Sc(8)
+        var prev = 0
+        contentH.TryGetValue("todolist", &prev)
+        pin = prev + fieldH > clip.Height
+        return pin ? RectangleT(clip.X, clip.Y, clip.Width, clip.Height - fieldH - Sc(4)) : clip
+    }
+    func TodoMeasured(_ h: Int, _ pin: Bool, _ clip: Rectangle) {
+        let listH = pin ? h : h - Sc(28) - Sc(8)
+        contentH["todolist"] = listH
+        if (listH + Sc(28) + Sc(8) > clip.Height) != pin { again = true }
+    }
+
+    func DueChip() -> String {
+        let today = w.NbNow().Date
+        let days = (dueDay - today).Days
+        let day = days == 0 ? "今天" : (days == 1 ? "明天" : Nb.WeekName(dueDay))
+        return dueMin >= 0 ? day + " " + (dueMin / 60).ToString("00") + ":" + (dueMin % 60).ToString("00") : day
+    }
+
+    @discardableResult func TodoRow(_ g: Graphics, _ t: NbTodo, _ bx: Int, _ y: Int, _ right: Int, _ now: DateTime, _ lifted: Bool) -> Int {
+        let hot = t.Id == hoverTodo && !lifted && !dragging, editing = editTodo == t.Id
+        let row = RectangleT(bx, y, right - bx, Sc(28))
+        if lifted {
+            Pix.Box(g, Color.FromArgb(46, 74, 44, 23), row.X + Sc(4), row.Bottom, row.Width, Sc(4))
+            Pix.Round(g, Pix.Ink, row.X, row.Y, row.Width, row.Height, U)
+            Pix.Box(g, Color.White, row.X + U, row.Y + U, row.Width - 2 * U, row.Height - 2 * U)
+        } else if hot {
+            Pix.Round(g, Pix.C(0xD9A944), row.X, row.Y, row.Width, row.Height, U)
+            Pix.Box(g, Pix.C(0xFFE29A), row.X + U, row.Y + U, row.Width - 2 * U, row.Height - 2 * U)
+            Pix.Box(g, Pix.C(0xFFF1C9), row.X + U, row.Y + U, row.Width - 2 * U, Sc(3) - U)
+        }
+        if hot || lifted {
+            let gp = Dict<Character, Color>(); gp["k"] = Pix.C(0xB08A5A)
+            Pix.Art(g, NotebookForm.IGRIP, gp, bx - Sc(6), y + Sc(9), U)
+        }
+        if !lifted { AddHit("grip", t.Id, RectangleT(bx - Sc(10), y, Sc(16), Sc(28)), "todo:" + t.Id) }
+        var x = bx + Sc(8)
+        Chk(g, x, y + (Sc(28) - Sc(14)) / 2, false, Hot("tick", t.Id))
+        if !lifted { AddHit("tick", t.Id, RectangleT(x - Sc(4), y, Sc(14) + Sc(8), Sc(28)), "todo:" + t.Id) }
+        x += Sc(14) + Sc(8)
+        if t.Src == "school" { DrawIcon(g, "hw", x, y + Sc(14) - 4 * U); x += 8 * U + Sc(8) }
+        var urgent = false
+        let due = Nb.DueText(t.Due, now, &urgent)
+        let dw = due != "" ? TW(due, fWord) : 0
+        let carried = t.Src != "school" && t.Created != "" && string.CompareOrdinal(t.Created, Nb.Ymd(now)) < 0
+        let pw = carried ? TW("從昨天", fSmall) + Sc(12) : 0
+        let end: Int = right - Sc(6) - dw - (dw > 0 ? Sc(8) : 0) - (carried ? pw + Sc(8) : 0)
+        let cw = t.Src == "school" && t.Course != "" ? TW(t.Course, fSmall) + Sc(6) : 0
+        let txt = Ellipsis(t.Text, fBody, end - x - cw)
+        let tw = TW(txt, fBody)
+        if editing {
+            rEdit = RectangleT(x, y + Sc(3), end - x, Sc(22))
+            Pix.Round(g, Pix.Ink, rEdit.X - Sc(4), rEdit.Y - Sc(2), rEdit.Width + Sc(8), rEdit.Height + Sc(4), U)
+            Pix.Box(g, NotebookForm.CPaper, rEdit.X - Sc(4) + U, rEdit.Y - Sc(2) + U, rEdit.Width + Sc(8) - 2 * U, rEdit.Height + Sc(4) - 2 * U)
+            if App.Offscreen { NotebookForm.DT(g, tbEdit.Text, fBody, rEdit, NotebookForm.CText, Pix.LeftMid) }
+        } else {
+            NotebookForm.DT(g, txt, fBody, RectangleT(x, y, tw + 4, Sc(28)), NotebookForm.CText, Pix.LeftMid)
+            if cw > 0 { NotebookForm.DT(g, t.Course, fSmall, RectangleT(x + tw + Sc(6), y + Sc(1), cw + 4, Sc(28)), NotebookForm.CSub, Pix.LeftMid) }
+        }
+        if !lifted { AddHit("tedit", t.Id, RectangleT(x, y, Math.Max(Sc(20), end - x), Sc(28)), "todo:" + t.Id) }
+        var rx = right - Sc(6)
+        if dw > 0 { NotebookForm.DT(g, due, fWord, RectangleT(rx - dw - 2, y, dw + 4, Sc(28)), urgent ? NotebookForm.CBad : NotebookForm.CTime, Pix.LeftMid); rx -= dw + Sc(8) }
+        if carried {
+            let pr = RectangleT(rx - pw, y + (Sc(28) - Sc(18)) / 2, pw, Sc(18))
+            Pix.Round(g, Pix.C(0xC9B08A), pr.X, pr.Y, pr.Width, pr.Height, U)
+            Pix.Box(g, Pix.C(0xF3EADB), pr.X + U, pr.Y + U, pr.Width - 2 * U, pr.Height - 2 * U)
+            NotebookForm.DT(g, "從昨天", fSmall, RectangleT(pr.X, pr.Y, pr.Width, pr.Height - 1), NotebookForm.CSub, Pix.Mid)
+        }
+        if !lifted { todoRows[t.Id] = row; AddHit("row", t.Id, row, "todo:" + t.Id, true) }
+        if !lifted {
+            let srcS: String = t.Src == "school" ? "school" : "mine"
+            let carS: String = carried ? " carried" : "", hotS: String = hot ? " hot" : ""
+            let courseS: String = t.Course != "" ? " | " + t.Course : ""
+            let bang: String = urgent && due != "" ? " !" : ""
+            Drawn.Add("todo " + t.Id + " " + srcS + carS + hotS + " | " + t.Text + courseS + " | " + due + bang)
+        }
+        else { Drawn.Add("lifted " + t.Id) }
+        return Sc(28)
+    }
+
+    // 期限：今天、明天、週X…；不設時間、12:00、18:00、22:00、23:59；不設期限
+    func DuePopup(_ g: Graphics, _ clip: Rectangle) {
+        if !duePick || dueAnchor.IsEmpty { return }
+        let today = w.NbNow().Date
+        var dayChips: [[String]] = []
+        for i in 0..<7 { dayChips.append([i == 0 ? "今天" : (i == 1 ? "明天" : Nb.WeekName(today.AddDays(i))), String(i)]) }
+        let times: [[String]] = [["不設時間", "-1"], ["12:00", "720"], ["18:00", "1080"], ["22:00", "1320"], ["23:59", "1439"]]
+        let pad = Sc(8), ch = Sc(24), gap = Sc(6), wdt = Sc(250)
+        let rowsH: Int = pad + ch * 4 + gap * 3 + pad
+        var box = RectangleT(dueAnchor.Right - wdt, dueAnchor.Bottom + Sc(4), wdt, rowsH)
+        if box.Bottom > clip.Bottom { box.Y = dueAnchor.Y - Sc(4) - rowsH }
+        Pix.Round(g, Pix.Ink, box.X, box.Y, box.Width, box.Height, U)
+        Pix.Box(g, Pix.Cream, box.X + U, box.Y + U, box.Width - 2 * U, box.Height - 2 * U)
+        var x = box.X + pad, y = box.Y + pad
+        for i in 0..<dayChips.count {
+            if i == 4 { x = box.X + pad; y += ch + gap }
+            let t = dayChips[i][0]
+            let cw = TW(t, fBtnS) + Sc(18)
+            let r = RectangleT(x, y, cw, ch)
+            let on = dueDay != DateTime.MinValue && (dueDay - today).Days.ToString() == dayChips[i][1]
+            SmallBtn(g, r, t, false, on || Hot("dueday", dayChips[i][1]))
+            AddHit("dueday", dayChips[i][1], r)
+            x += cw + gap
+        }
+        x = box.X + pad; y += ch + gap
+        for i in 0..<times.count {
+            if i == 3 { x = box.X + pad; y += ch + gap }
+            let cw = TW(times[i][0], fBtnS) + Sc(18)
+            let r = RectangleT(x, y, cw, ch)
+            let none = times[i][1] == "-1"
+            SmallBtn(g, r, times[i][0], false, Hot(none ? "duenotime" : "duetime", none ? "" : times[i][1]))
+            if none { AddHit("duenotime", "", r) } else { AddHit("duetime", times[i][1], r) }
+            x += cw + gap
+        }
+        let cl = "不設期限"
+        let clw = TW(cl, fBtnS) + Sc(18)
+        let cr = RectangleT(box.Right - pad - clw, y, clw, ch)
+        SmallBtn(g, cr, cl, false, Hot("dueclear", ""))
+        AddHit("dueclear", "", cr)
+        Drawn.Add("duepick")
+    }
+
+    // ---- 筆記（一頁）----
+    func NoteArea(_ g: Graphics, _ area: Rectangle) {
+        let foot = Sc(34)
+        let paper = Paper(g, RectangleT(area.X, area.Y, area.Width, area.Height - Sc(8) - foot), NotebookForm.CPaper, 2, true)
+        let box = RectangleT(paper.X + Sc(44), paper.Y + Sc(6), paper.Width - Sc(44) - Sc(14), paper.Height - Sc(12))
+        NoteLines(g, paper, box)
+        NoteText(g, box)
+        Rings(g, paper)
+        AddHit("notefocus", "", box)
+        rNote = box
+        let fy = paper.Bottom + U + Sc(8) - U
+        let empty = note.Text.Trim() == ""
+        if !empty && savedAt != "" {
+            Pix.Mono(g, Pix.CHECK, NotebookForm.COk, area.X, fy + foot / 2 - 5 * U / 2, U)
+            NotebookForm.DT(g, "已存 " + savedAt, fSmall, RectangleT(area.X + 5 * U + Sc(6), fy, Sc(160), foot), NotebookForm.CSub, Pix.LeftMid)
+        }
+        let ct = copied == "note" ? "已複製筆記" : "複製筆記"
+        let cw: Int = TW(ct, fBtn) + Sc(28) + (copied == "note" ? 5 * U + Sc(6) : 0)
+        let cr = RectangleT(area.Right - cw, fy + (foot - Sc(32)) / 2, cw, Sc(32))
+        BigBtn(g, cr, ct, empty ? 3 : (copied == "note" ? 2 : 0), Hot("copy", "note"))
+        if !empty { AddHit("copy", "note", cr) }
+        let svS: String = savedAt == "" ? "-" : savedAt, emS: String = empty ? "empty" : "text"
+        Drawn.Add("note saved=" + svS + " " + emS)
+    }
+
+    // 28px 一行、每行底下一條線（跟 RichEdit 的固定行高對齊）
+    func NoteLines(_ g: Graphics, _ paper: Rectangle, _ box: Rectangle) {
+        var y = box.Y + Sc(28) - Sc(2)
+        while y < paper.Bottom - Sc(2) { Pix.Box(g, Pix.C(0xEFE0C4), paper.X, y, paper.Width - Sc(6), 1); y += Sc(28) }
+    }
+    func NoteText(_ g: Graphics, _ box: Rectangle) {
+        let text = note.Text.Replace("\r\n", "\n")
+        if text.Trim() == "" && !(note.Visible && note.Focused) {
+            NotebookForm.DT(g, "隨手寫，會自己存", fNote, RectangleT(box.X, box.Y, box.Width, Sc(28) - Sc(2)), NotebookForm.CPh, [TextFormatFlags.Left, TextFormatFlags.Bottom, TextFormatFlags.SingleLine, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix])
+            return
+        }
+        if !App.Offscreen && note.Visible { return }
+        // 離屏（或還沒點進去）：自己照 28px 一行畫，換行跟 RichEdit 一樣一個字一個字斷
+        var y = box.Y
+        for para in text.Split("\n") {
+            let runs = List<Run>()
+            runs.Add(Run(para == "" ? " " : para, fNote, NotebookForm.CNote))
+            let n = FlowLines(g, runs, box.X, y, box.Width, Sc(28), y + Sc(28) - Sc(4))
+            y += Math.Max(1, n) * Sc(28)
+            if y > box.Bottom { break }
+        }
+    }
+
+    // ---- 攤開的左頁：待辦＋筆記 ----
+    func LeftSpread(_ g: Graphics, _ area: Rectangle) {
+        let paper = Paper(g, area, NotebookForm.CPaper, -1, false)
+        let tx = paper.X + Sc(14), right = paper.Right - Sc(14)
+        let noteMin = Sc(40) + Sc(28) * 4 + Sc(6)
+        var clip = RectangleT(paper.X + Sc(6), paper.Y + Sc(6), paper.Width - Sc(8), paper.Height - Sc(12) - noteMin)
+        var pin = false
+        let lclip = TodoClip(clip, &pin)
+        let s = ScrollOf("todo", lclip)
+        let st = g.Save()
+        g.SetClip(lclip)
+        hitClip = RectangleT(paper.X - Sc(12), lclip.Y, paper.Width + Sc(12), lclip.Height)
+        todoPin = pin
+        let h = TodoPage(g, tx, paper.Y + Sc(6) - s, right, lclip)
+        todoPin = false
+        hitClip = RectangleT.Empty
+        g.Restore(st)
+        TodoMeasured(h, pin, clip)
+        ScrollDone("todo", h, lclip)
+        if pin { TodoField(g, RectangleT(tx - Sc(8), lclip.Bottom + Sc(4), right - tx + Sc(8), Sc(28)), clip) }
+        let used = pin ? clip.Height : Math.Min(h, clip.Height)
+        clip.Height = used
+        clipR["todo"] = pin ? lclip : clip
+        Scrollbar(g, "todo", RectangleT(paper.X, clip.Y - Sc(6), paper.Width, clip.Height + Sc(12)), clip)
+        // 筆記：標題列（已存、複製）＋下面的紙
+        let ny = clip.Bottom
+        let gr = RectangleT(tx, ny, right - tx, Sc(40))
+        NotebookForm.DT(g, "筆記", fBody, RectangleT(gr.X, gr.Y, gr.Width, gr.Height - Sc(4)), NotebookForm.CGh, [TextFormatFlags.Left, TextFormatFlags.Bottom, TextFormatFlags.SingleLine, TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix])
+        Pix.Box(g, NotebookForm.CGhLine, gr.X, gr.Bottom - Sc(2), gr.Width, Sc(2))
+        let empty = note.Text.Trim() == ""
+        let ct = copied == "note" ? "已複製" : "複製"
+        let cw = TW(ct, fBtnS) + Sc(18)
+        let cr = RectangleT(right - cw, gr.Bottom - Sc(4) - Sc(24) - Sc(2), cw, Sc(24))
+        if empty { SmallBtnOff(g, cr, ct) } else { SmallBtn(g, cr, ct, false, Hot("copy", "note")) }
+        if !empty { AddHit("copy", "note", cr) }
+        if !empty && savedAt != "" {
+            let sv = "已存 " + savedAt
+            let sw = TW(sv, fSmall)
+            NotebookForm.DT(g, sv, fSmall, RectangleT(cr.X - Sc(8) - sw - 2, cr.Y, sw + 4, cr.Height), NotebookForm.CSub, Pix.LeftMid)
+            Pix.Mono(g, Pix.CHECK, NotebookForm.COk, cr.X - Sc(8) - sw - Sc(6) - 5 * U, cr.Y + cr.Height / 2 - 5 * U / 2, U)
+        }
+        let box = RectangleT(tx, gr.Bottom + Sc(4), right - tx, paper.Bottom - Sc(6) - gr.Bottom - Sc(4))
+        NoteText(g, box)
+        AddHit("notefocus", "", box)
+        rNote = box
+        let svS: String = savedAt == "" ? "-" : savedAt, emS: String = empty ? "empty" : "text"
+        Drawn.Add("note saved=" + svS + " " + emS)
+        DuePopup(g, RectangleT(paper.X, paper.Y, paper.Width, paper.Height))
+    }
+
+    // ================= 打字框放到畫出來的位置 =================
+    func PlaceBoxes() {
+        let pad = Sc(8) + 5 * U + Sc(8)
+        Place(tbTodo, rTodo.IsEmpty ? RectangleT.Empty : RectangleT(rTodo.X + pad, rTodo.Y + (rTodo.Height - tbTodo.PreferredHeight) / 2, rTodo.Width - pad, tbTodo.PreferredHeight))
+        Place(tbDone, rDone.IsEmpty ? RectangleT.Empty : RectangleT(rDone.X + pad, rDone.Y + (rDone.Height - tbDone.PreferredHeight) / 2, rDone.Width - pad - Sc(8), tbDone.PreferredHeight))
+        Place(tbEdit, rEdit.IsEmpty ? RectangleT.Empty : RectangleT(rEdit.X, rEdit.Y + (rEdit.Height - tbEdit.PreferredHeight) / 2, rEdit.Width, tbEdit.PreferredHeight))
+        let noteOn = !rNote.IsEmpty && (note.Text != "" || note.Focused || note.Visible)
+        if rNote.IsEmpty { if note.Visible { note.Visible = false; MacDropFocus(note) } }   // mac: MacDropFocus
+        else {
+            let nr = RectangleT(rNote.X, rNote.Y, rNote.Width + Sc(10), rNote.Height)
+            if note.Bounds != nr { note.Bounds = nr }
+            if noteOn != note.Visible { note.Visible = noteOn }
+        }
+    }
+    func Place(_ c: Control, _ r: Rectangle) {
+        if r.IsEmpty { if c.Visible { c.Visible = false; MacDropFocus(c) }; return }   // mac: MacDropFocus
+        if c.Bounds != r { c.Bounds = r }
+        if !c.Visible { c.Visible = true }
+    }
+    static func Inside(_ r: Rectangle, _ clip: Rectangle) -> Bool { return r.Y >= clip.Y - 2 && r.Bottom <= clip.Bottom + 2 }
+
+    // ================= 小零件 =================
+    // 輸入框：奶油白、淺棕邊（打字中＝深色邊）；左邊 ＋、右邊小日曆或期限
+    func Field(_ g: Graphics, _ r: Rectangle, _ tb: TextBox, _ ph: String, _ cal: Bool, _ clip: Rectangle) { Field(g, r, tb, ph, cal, clip, "") }
+    func Field(_ g: Graphics, _ r: Rectangle, _ tb: TextBox, _ ph: String, _ cal: Bool, _ clip: Rectangle, _ chip: String) {
+        let focus = tb.Focused || (App.Offscreen && tb.Text != "")
+        Pix.Round(g, focus ? Pix.Ink : NotebookForm.CField, r.X, r.Y, r.Width, r.Height, U)
+        Pix.Box(g, NotebookForm.CPaper, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U)
+        Pix.Box(g, Pix.C(0xF1E6D0), r.X + U, r.Y + U, r.Width - 2 * U, U)
+        let x = r.X + Sc(8)
+        if !focus || tb.Text == "" { Pix.Mono(g, NotebookForm.Mono(NotebookForm.IPLUS), NotebookForm.CTime, x, r.Y + (r.Height - 5 * U) / 2, U) }
+        let tx = x + 5 * U + Sc(8)
+        if App.Offscreen || !tb.Visible {
+            if tb.Text == "" { NotebookForm.DT(g, ph, fField, RectangleT(tx, r.Y, r.Width - (tx - r.X), r.Height), NotebookForm.CPh, Pix.LeftMid) }
+            else {
+                let tw = TW(tb.Text, fField)
+                NotebookForm.DT(g, tb.Text, fField, RectangleT(tx, r.Y, tw + 4, r.Height), NotebookForm.CText, Pix.LeftMid)
+                if App.Offscreen { Pix.Box(g, NotebookForm.CText, tx + tw + 1, r.Y + Sc(7), 1, r.Height - Sc(14)) }   // 游標
+            }
+        }
+        if chip != "" {
+            let cw = TW(chip, fWord)
+            NotebookForm.DT(g, chip, fWord, RectangleT(r.Right - Sc(8) - cw - 2, r.Y, cw + 4, r.Height), Pix.C(0x35577F), Pix.LeftMid)
+        } else if cal {
+            let p = Dict<Character, Color>(); p["k"] = Pix.C(0x9A6338); p["w"] = NotebookForm.CPaper
+            Pix.Art(g, NotebookForm.ICAL, p, r.Right - Sc(8) - 7 * U, r.Y + (r.Height - 6 * U) / 2, U)
+        }
+        let which: String = tb === tbTodo ? "todo" : "done"
+        let typed: String = tb.Text == "" ? "-" : tb.Text
+        let chipS: String = chip != "" ? " | " + chip : ""
+        Drawn.Add("field " + which + " " + typed + chipS)
+    }
+
+    func Chk(_ g: Graphics, _ x: Int, _ y: Int, _ on: Bool, _ hot: Bool) {
+        let s = Sc(14)
+        Pix.Round(g, Pix.C(0x9A6338), x, y, s, s, U)
+        Pix.Box(g, on ? Pix.C(0xDDF2C8) : (hot ? Pix.C(0xFFF3D6) : NotebookForm.CPaper), x + U, y + U, s - 2 * U, s - 2 * U)
+        if on { Pix.Mono(g, Pix.CHECK, Pix.C(0x3F8A30), x + U, y + U, U) }
+    }
+
+    // 小按鈕（24 高）：奶油色、深色邊、下緣一條陰影
+    func SmallBtn(_ g: Graphics, _ r: Rectangle, _ t: String, _ off: Bool, _ hot: Bool) {
+        if off { SmallBtnOff(g, r, t); return }
+        Pix.Round(g, Pix.Ink, r.X, r.Y, r.Width, r.Height, U)
+        let face = hot ? Pix.C(0xFFF3D6) : NotebookForm.CBtn
+        Pix.Box(g, face, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U)
+        let sh = r.Height >= Sc(24) ? Sc(4) - U : Sc(3) - U
+        Pix.Box(g, Pix.C(0xDCC6A2), r.X + U, r.Bottom - U - sh, r.Width - 2 * U, sh)
+        if t != "" { NotebookForm.DT(g, t, fBtnS, RectangleT(r.X, r.Y, r.Width, r.Height - sh), NotebookForm.CText, Pix.Mid) }
+    }
+    func SmallBtnOff(_ g: Graphics, _ r: Rectangle, _ t: String) {
+        Pix.Round(g, Pix.C(0xBBA98C), r.X, r.Y, r.Width, r.Height, U)
+        Pix.Box(g, Pix.C(0xE9E0D0), r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U)
+        Pix.Box(g, Pix.C(0xD3C7B2), r.X + U, r.Bottom - U - (Sc(4) - U), r.Width - 2 * U, Sc(4) - U)
+        if t != "" { NotebookForm.DT(g, t, fBtnS, RectangleT(r.X, r.Y, r.Width, r.Height - Sc(3)), Pix.Dim, Pix.Mid) }
+    }
+    // 大按鈕（32 高）：kind 0 一般、1 主要（蜂蜜色）、2 已複製（綠＋勾）、3 不能按
+    func BigBtn(_ g: Graphics, _ r: Rectangle, _ t: String, _ kind: Int, _ hot: Bool) {
+        let edge: Color = kind == 2 ? Pix.C(0x2F6E24) : (kind == 3 ? Pix.C(0xBBA98C) : Pix.Ink)
+        var face: Color = hot ? Pix.C(0xFFF3D6) : NotebookForm.CBtn
+        if kind == 1 { face = hot ? Pix.C(0xFFD36A) : Pix.C(0xF6C453) } else if kind == 2 { face = Pix.C(0xD9F0C4) } else if kind == 3 { face = Pix.C(0xE9E0D0) }
+        let shade: Color = kind == 1 ? Pix.C(0xC8902C) : (kind == 2 ? Pix.C(0xA9CF90) : (kind == 3 ? Pix.C(0xD3C7B2) : Pix.C(0xDCC6A2)))
+        let hi: Color = kind == 1 ? Pix.C(0xFBE7BA) : (kind == 2 ? Pix.C(0xF0F9E8) : Pix.C(0xFFFEF9))
+        Pix.Round(g, edge, r.X, r.Y, r.Width, r.Height, U)
+        Pix.Box(g, face, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U)
+        Pix.Box(g, shade, r.X + U, r.Bottom - U - Sc(4), r.Width - 2 * U, Sc(4))
+        if kind != 3 { Pix.Box(g, hi, r.X + U, r.Y + U, r.Width - 2 * U, U) }
+        let tc: Color = kind == 2 ? Pix.C(0x2B5420) : (kind == 3 ? Pix.Dim : NotebookForm.CText)
+        let tw = TW(t, fBtn)
+        var x = r.X + (r.Width - tw) / 2
+        if kind == 2 { x += (5 * U + Sc(6)) / 2; Pix.Mono(g, Pix.CHECK, Pix.C(0x2F6E24), x - Sc(6) - 5 * U, r.Y + (r.Height - Sc(4)) / 2 - 5 * U / 2, U) }
+        NotebookForm.DT(g, t, fBtn, RectangleT(x, r.Y, tw + 4, r.Height - Sc(4)), tc, Pix.LeftMid)
+    }
+
+    func DrawIcon(_ g: Graphics, _ src: String, _ x: Int, _ y: Int) {
+        let p = Dict<Character, Color>()
+        p["k"] = Pix.Ink
+        var a: [String]
+        switch src {
+        case "claude", "codex": a = NotebookForm.ICLAUDE; p["d"] = Pix.C(0x5A4632); p["g"] = Pix.C(0xF4A06A)
+        case "jira": a = NotebookForm.IJIRA; p["b"] = Pix.C(0x6E9BD8); p["w"] = Pix.C(0xE4EEFA)
+        case "github", "gitlab": a = NotebookForm.IMR; p["p"] = Pix.C(0xA585D4)
+        case "calendar": a = NotebookForm.IMEET; p["r"] = Pix.C(0xE07856); p["w"] = NotebookForm.CPaper
+        case "school": a = NotebookForm.ICLASS; p["g"] = Pix.C(0x6FB25C); p["w"] = NotebookForm.CPaper
+        default: a = NotebookForm.IHW; p["w"] = NotebookForm.CPaper
+        }
+        Pix.Art(g, a, p, x, y, U)
+    }
+
+    // ---- 字 ----
+    final class Run { var S: String; var F: FontT; var C: Color; var Keep = false, KeepNext = false; init(_ s: String, _ f: FontT, _ c: Color) { S = s; F = f; C = c } }   // Keep：結果字不拆開；KeepNext：逗號跟下一個字一起換行
+    let tw = Dict<String, Int>()
+    func TW(_ s: String, _ f: FontT) -> Int {
+        let k = f.Size.ToString() + (f.Bold ? "b" : "r") + "|" + s
+        var v = 0
+        if tw.TryGetValue(k, &v) { return v }
+        if tw.Count > 4000 { tw.Clear() }
+        v = s == "" ? 0 : CInt(Math.Ceiling(NotebookForm.Measure(s, f) - 0.01))
+        tw[k] = v
+        return v
+    }
+    // TextRenderer 預設不管 Graphics 的裁切：捲動的紙上要保留裁切，字才不會畫到紙外面
+    // 字一律用 GDI+ 反鋸齒（AntiAliasGridFit）畫：
+    //   TextRenderer（GDI）畫正黑體粗體 11pt 這種小字會用字型裡內嵌的點陣字，筆畫擠成一團（遠端桌面、截圖都一樣）；
+    //   GDI+ 一定畫外框、灰階反鋸齒，跟系統的字型平滑設定無關，所以螢幕上跟離屏截圖長得一樣。起點對齊整數像素，筆畫才不會糊。
+    // mac: Graphics.DrawString／MeasureString（typographic）＝CoreText，螢幕跟離屏一樣
+    static let SF: StringFormat = MakeSF()
+    static func MakeSF() -> StringFormat {
+        let f = StringFormat.GenericTypographic   // mac: 每次回新的一個（＝C# 的 Clone()）
+        f.FormatFlags = f.FormatFlags.union([StringFormatFlags.MeasureTrailingSpaces, StringFormatFlags.NoWrap, StringFormatFlags.NoClip])
+        return f
+    }
+    static func Px(_ family: String, _ px: Double, _ st: FontStyle) -> FontT { return FontT(family, px, st, GraphicsUnit.Pixel) }
+    static func CellH(_ f: FontT) -> Double {
+        let ff = f.FontFamily
+        return f.Size * Double(ff.GetCellAscent(f.Style) + ff.GetCellDescent(f.Style)) / Double(ff.GetEmHeight(f.Style))
+    }
+    static func DT(_ g: Graphics, _ s: String, _ f: FontT, _ r: Rectangle, _ c: Color, _ fl: TextFormatFlags) {
+        if string.IsNullOrEmpty(s) { return }
+        let w = Measure(s, f), h = CellH(f)
+        var x = Double(r.X), y = Double(r.Y)
+        if fl.contains(TextFormatFlags.HorizontalCenter) { x = Double(r.X) + (Double(r.Width) - w) / 2 }
+        else if fl.contains(TextFormatFlags.Right) { x = Double(r.Right) - w }
+        if fl.contains(TextFormatFlags.VerticalCenter) { y = Double(r.Y) + (Double(r.Height) - h) / 2 }
+        else if fl.contains(TextFormatFlags.Bottom) { y = Double(r.Bottom) - h }
+        Draw(g, s, f, c, x, y)
+    }
+    static func DT(_ g: Graphics, _ s: String, _ f: FontT, _ p: Point, _ c: Color, _ fl: TextFormatFlags) { if !string.IsNullOrEmpty(s) { Draw(g, s, f, c, Double(p.X), Double(p.Y)) } }
+    static func Draw(_ g: Graphics, _ s: String, _ f: FontT, _ c: Color, _ x: Double, _ y: Double) {
+        let was = g.TextRenderingHint
+        g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit
+        do {
+            let b = SolidBrush(c)
+            g.DrawString(s, f, b, Math.Round(x), Math.Round(y), SF)
+            // mac: 不畫第二次（C# 右移 PixText.Heft 再畫一次，補 GDI+ 的細字；CoreText 的粗體本來就夠粗）
+        }
+        g.TextRenderingHint = was
+    }
+    static var measureBmp: Bitmap! = nil
+    static var measureG: Graphics! = nil
+    static func Measure(_ s: String, _ f: FontT) -> Double {
+        if measureG == nil { measureBmp = Bitmap(1, 1); measureG = Graphics.FromImage(measureBmp); measureG.TextRenderingHint = TextRenderingHint.AntiAliasGridFit }
+        // mac: CoreText 量字不算最後的空白（GDI+ 有 MeasureTrailingSpaces）→ 後面補一個字再扣掉
+        if s.hasSuffix(" ") || s.hasSuffix("\u{3000}") {
+            let a = measureG.MeasureString(s + "|", f, PointF.Empty, SF).Width, b = measureG.MeasureString("|", f, PointF.Empty, SF).Width
+            return a - b
+        }
+        return measureG.MeasureString(s, f, PointF.Empty, SF).Width
+    }
+    // 畫的時候用同一個 Graphics 量（螢幕跟離屏點陣圖的字寬可能差一點，不然字跟字之間會空一格）
+    func TWg(_ g: Graphics?, _ s: String, _ f: FontT) -> Int {
+        return TW(s, f)   // GDI+ 的像素字型：量出來跟在哪裡畫無關
+    }
+    func Ellipsis(_ s: String, _ f: FontT, _ w0: Int) -> String {
+        if TW(s, f) <= w0 { return s }
+        var n = s.Length - 1
+        while n > 0 { let t = s.Substring(0, n) + "…"; if TW(t, f) <= w0 { return t }; n -= 1 }
+        return "…"
+    }
+    static func RunsText(_ runs: List<Run>) -> String { let sb = StringBuilder(); for r in runs { sb.Append(r.S) }; return sb.ToString() }
+    func FlowW(_ runs: List<Run>) -> Int { var x = 0; for r in runs { x += TW(r.S, r.F) }; return x }
+
+    // 字的上緣到基準線（GDI 的 cell ascent）
+    let asc = Dict<ObjectIdentifier, Int>()   // mac: C# 用 Font 當 key（參考相等）→ ObjectIdentifier
+    func Asc(_ f: FontT) -> Int {
+        var v = 0
+        if asc.TryGetValue(ObjectIdentifier(f), &v) { return v }
+        let ff = f.FontFamily
+        let px: Double = f.Unit == GraphicsUnit.Pixel ? f.Size : f.SizeInPoints * 96.0 * d / 72.0
+        v = CInt(Math.Round(px * Double(ff.GetCellAscent(f.Style)) / Double(ff.GetEmHeight(f.Style))))
+        asc[ObjectIdentifier(f)] = v
+        return v
+    }
+
+    // 一串不同字型的字照寬度排，超過就換行（中文一個字一個字斷、英文盡量在空白斷）；回傳幾行。g＝null 只量不畫
+    @discardableResult func Flow(_ g: Graphics?, _ runs: List<Run>, _ x0: Int, _ y0: Int, _ w0: Int, _ lineH: Int, _ strike: Bool) -> Int { return Flow(g, runs, x0, y0, w0, lineH, strike, true) }
+    @discardableResult func Flow(_ g: Graphics?, _ runs: List<Run>, _ x0: Int, _ y0: Int, _ w0: Int, _ lineH: Int, _ strike: Bool, _ paint: Bool) -> Int {
+        let mainAsc = runs.Count > 0 ? Asc(runs[0].F) : 0
+        let baseOff = (lineH + mainAsc - CInt(Math.Round(Double(mainAsc) * 0.32))) / 2
+        return FlowCore(g, runs, x0, y0, w0, lineH, strike, 0, baseOff, paint)
+    }
+    func FlowHang(_ g: Graphics?, _ runs: List<Run>, _ x0: Int, _ y0: Int, _ w0: Int, _ lineH: Int, _ hang: Int) -> Int {
+        let mainAsc = runs.Count > 0 ? Asc(runs[0].F) : 0
+        let baseOff = (lineH + mainAsc - CInt(Math.Round(Double(mainAsc) * 0.32))) / 2
+        return FlowCore(g, runs, x0, y0, w0, lineH, false, hang, baseOff, true)
+    }
+    func FlowLines(_ g: Graphics?, _ runs: List<Run>, _ x0: Int, _ y0: Int, _ w0: Int, _ lineH: Int, _ baseline: Int) -> Int {
+        return FlowCore(g, runs, x0, y0, w0, lineH, false, 0, baseline - y0, true)
+    }
+    func FlowCore(_ g: Graphics?, _ runs: List<Run>, _ x0: Int, _ y0: Int, _ w0: Int, _ lineH: Int, _ strike: Bool, _ hang: Int, _ baseOff: Int, _ paint: Bool) -> Int {
+        var x = x0, line = 0
+        var ri = 0
+        while ri < runs.Count {
+            let r = runs[ri]
+            var s = r.S
+            if r.Keep || r.KeepNext {
+                let nextW: Int = r.KeepNext && ri + 1 < runs.Count ? TWg(g, runs[ri + 1].S, runs[ri + 1].F) : 0
+                let need = TWg(g, s, r.F) + nextW
+                if x + need > x0 + w0 && x > x0 + hang && need <= w0 - hang { line += 1; x = x0 + hang }
+            }
+            while s.Length > 0 {
+                let room = x0 + w0 - x
+                var n = Fit(g, s, r.F, room)
+                if n == 0 {
+                    if x == x0 + (line > 0 ? hang : 0) { n = 1 }   // 一個字都放不下：硬放
+                    else { line += 1; x = x0 + hang; if s.StartsWith(" ") { s = s.TrimStart(" ") }; continue }
+                }
+                let part = s.Substring(0, n)
+                let pw = TWg(g, part, r.F)
+                if let gg = g, paint {
+                    let top = y0 + line * lineH + baseOff - Asc(r.F)
+                    NotebookForm.DT(gg, part, r.F, PointT(x, top), r.C, [TextFormatFlags.NoPadding, TextFormatFlags.NoPrefix, TextFormatFlags.SingleLine])
+                    if strike { Pix.Box(gg, r.C, x, y0 + line * lineH + baseOff - CInt(Math.Round(Double(Asc(runs[0].F)) * 0.36)), pw, Sc(2)) }
+                }
+                x += pw
+                s = s.Substring(n)
+                if s.Length > 0 { line += 1; x = x0 + hang; s = s.TrimStart(" ") }
+            }
+            ri += 1
+        }
+        return line + 1
+    }
+    // 放得下幾個字（英文單字不從中間切，除非整個字就比一行長）
+    func Fit(_ g: Graphics?, _ s: String, _ f: FontT, _ room: Int) -> Int {
+        if room <= 0 { return 0 }
+        if TWg(g, s, f) <= room { return s.Length }
+        var lo = 0, hi = s.Length
+        while lo < hi { let mid = (lo + hi + 1) / 2; if TWg(g, s.Substring(0, mid), f) <= room { lo = mid } else { hi = mid - 1 } }
+        if lo > 0 && lo < s.Length && NotebookForm.IsWord(s[lo]) && NotebookForm.IsWord(s[lo - 1]) {
+            var b = lo
+            while b > 0 && NotebookForm.IsWord(s[b - 1]) { b -= 1 }
+            if b > 0 { lo = b }
+        }
+        return lo
+    }
+    static func IsWord(_ c: Character) -> Bool {
+        guard c.unicodeScalars.count == 1, let u = c.unicodeScalars.first, u.value < 128 else { return false }
+        return char.IsLetterOrDigit(c) || c == "." || c == "-" || c == "_" || c == "/" || c == "#" || c == "!"
+    }
+
+    // ================= 測試用：現在畫了什麼 =================
+    // 離屏：沒有 WM_PAINT，要先畫一次才知道東西在哪（點擊、nb-info）
+    func Render() {
+        if Width <= 0 || Height <= 0 { return }
+        let b = Bitmap(Width, Height, PixelFormat.Format24bppRgb)
+        do { let g = Graphics.FromImage(b); OnPaint(PaintEventArgs(g, RectangleT(0, 0, Width, Height))) }
+    }
+    func Info() -> String {
+        Render()
+        let sb = StringBuilder()
+        let sp: String = Spread ? "1" : "0", pv: String = Preview ? "1" : "0", lk: String = Links ? "1" : "0"
+        sb.Append("nb open=1 tab=" + Tab + " spread=" + sp + " preview=" + pv + " kind=" + PvKind)
+        sb.Append(" links=" + lk + " day=" + Nb.Ymd(Day))
+        sb.Append(" x=" + String(Left) + " y=" + String(Top) + " w=" + String(Width) + " h=" + String(Height) + " frame=" + String(Left + OV))
+        sb.Append(" todos=" + String(todos.Count) + " jira=" + String(jira.Count) + " things=" + String(things.Count) + " on=" + String(Nb.OnCount(things)))
+        let cp: String = copied == "" ? "-" : copied, sv: String = savedAt == "" ? "-" : savedAt
+        let ed: String = editThing != "" ? editThing : (editTodo != "" ? editTodo : "-")
+        sb.Append(" copied=" + cp + " saved=" + sv)
+        sb.Append(" edit=" + ed + "\n")
+        for s in Drawn { sb.Append(s + "\n") }
+        for h in hits {
+            if h.Act == "row" { continue }
+            let arg: String = h.Arg == "" ? "-" : h.Arg
+            let geo: String = String(h.R.X + Left) + " " + String(h.R.Y + Top) + " " + String(h.R.Width) + " " + String(h.R.Height)
+            sb.Append("hit " + h.Act + " " + arg + " " + geo + "\n")
+        }
+        for t in todos {
+            let due: String = t.Due == "" ? "-" : t.Due
+            let src: String = t.Src == "" ? "mine" : t.Src
+            sb.Append("todoitem " + t.Id + " " + src + " " + due + " " + t.Created + " " + t.Text + "\n")
+        }
+        sb.Append("notetext " + JavaScriptSerializer().Serialize(note.Text.Replace("\r\n", "\n")) + "\n")
+        return sb.ToString()
+    }
+    // mac: `Type` 要加反引號（Swift 的成員不能直接叫 Type）
+    func `Type`(_ box: String, _ s: String) {
+        if box == "todo" { tbTodo.Text = s }
+        else if box == "done" { tbDone.Text = s }
+        else if box == "edit" { tbEdit.Text = s }
+        else if box == "note" { note.Text = s; noteDirty = true; noteSaveAt = w.Now + 0.7 }   // 沒有 handle 的 RichTextBox 不一定會送 TextChanged
+        Invalidate()
+    }
+}
+
+
+extension World {
+    func NbNow() -> DateTime { return SNow() }
+    // 減少動態：勾掉的那一行留短一點
+    // mac: SystemInformation.UIEffectsEnabled → 輔助使用「減少動態效果」
+    func NbReduced() -> Bool { return NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+
+    // 小屋選單／公仔選單「小本子…」
+    func ShowNotebook() { ShowNotebook("") }
+    func ShowNotebook(_ tab: String) {
+        let fresh = nbForm == nil || nbForm.IsDisposed
+        if fresh {
+            nbForm = NotebookForm(self)
+            let ui = NbUi()
+            var t = ""
+            let okTab = ui.TryGetValue("tab", &t) && (t == "todo" || t == "done" || t == "note")
+            nbForm.Tab = okTab ? t : "done"   // 第一次打開停在今天做了
+            nbForm.LastTab = nbForm.Tab
+            var sp = ""
+            nbForm.Spread = ui.TryGetValue("spread", &sp) && sp == "1"
+        }
+        if tab == "todo" || tab == "done" || tab == "note" { nbForm.Tab = tab; nbForm.LastTab = tab; nbForm.Spread = false }
+        nbForm.Day = NbNow().Date
+        nbForm.Reload()
+        NbPlace(nbForm)
+        nbForm.Show()
+        App.LogAlways("notebook: open tab=" + nbForm.Tab + " spread=" + (nbForm.Spread ? "1" : "0"))
+        if App.Offscreen { return }
+        ActivateForm(nbForm)
+        nbForm.Do("focus", "")
+    }
+
+    // 停在公仔櫃左邊（櫃子收起來：小紙箱左邊），底部離工作列 8px；攤開時往左長
+    func NbPlace(_ f: NotebookForm) {
+        let anchor: Rectangle = shelf == nil ? RectangleT.Empty : (shelf.Collapsed ? shelf.EggScreen() : shelf.Area)
+        let wa: Rectangle = anchor.IsEmpty ? screens[0].WorkingArea : Screen.FromPoint(PointT(anchor.X + anchor.Width / 2, anchor.Y + anchor.Height / 2)).WorkingArea
+        let sz = f.Want
+        let gap = CInt(Math.Round(Double(16 * S) / 4.0)), ov = sz.Width - f.FrameW
+        let right = anchor.IsEmpty ? wa.Right - gap : anchor.X - gap
+        var x = right - sz.Width
+        var y = wa.Bottom - CInt(Math.Round(Double(8 * S) / 4.0)) - sz.Height
+        x = Math.Max(wa.Left - ov, Math.Min(x, wa.Right - sz.Width))
+        y = Math.Max(wa.Top, y)
+        f.Bounds = RectangleT(x, y, sz.Width, sz.Height)
+        f.Invalidate()
+    }
+
+    func NbClosed(_ f: NotebookForm) { if nbForm === f { nbForm = nil } }
+
+    func NbUi() -> Dict<String, String> {
+        let d = Dict<String, String>()
+        for line in Nb.ReadFile(Path.Combine(Nb.Dir(World.DataDir), "ui.txt")).Split("\n") {
+            let i = line.IndexOf("=")
+            if i > 0 { d[line.Substring(0, i).Trim()] = line.Substring(i + 1).Trim() }
+        }
+        return d
+    }
+    func NbSaveUi(_ f: NotebookForm) {
+        let tab: String = f.Spread ? f.LastTab : f.Tab, sp: String = f.Spread ? "1" : "0"
+        Nb.WriteFile(Path.Combine(Nb.Dir(World.DataDir), "ui.txt"), "tab=" + tab + "\nspread=" + sp + "\n")
+    }
+
+    // 複製：真的剪貼簿（離屏測試只記住，不碰測試機的剪貼簿）
+    func NbClipboard(_ s: String) {
+        nbClip = s
+        App.LogAlways("notebook: copied " + String(s.Length) + " chars")
+        if App.Offscreen { return }
+        Clipboard.SetText(s)   // mac: NSPasteboard，換行照 mac 用 \n（C# 換成 \r\n）；不會丟例外
+    }
+
+    // 櫃子裡的公仔冒泡泡（櫃子收起來、或大家都在外面：帶頭那隻）
+    func NbSay(_ s: String) {
+        var p: Pet! = nil
+        if shelf != nil && !shelf.Collapsed && !Single { for x in Pets { if !x.Out { p = x; break } } }
+        if p == nil { p = Lead() }
+        if p == nil { return }
+        nbSaid = s
+        p.Say(s, 3)
+    }
+
+    // ---- 學校行事曆：今天上過的課（從 ICS 算，不寫進 log）----
+    func NbFeedTexts() -> List<KeyValuePair<String, String>> {
+        let l = List<KeyValuePair<String, String>>()
+        if testFeeds.Count > 0 { l.AddRange(testFeeds); return l }
+        var urls = List<String>()
+        lock(schoolUrls) { urls = List<String>(schoolUrls.ToArray()) }
+        for u in urls {
+            if u == workCal { continue }
+            let tx = World.ReadText(World.CacheName(u))
+            if tx != "" { l.Add(KeyValuePair<String, String>(u, tx)) }
+        }
+        return l
+    }
+    func NbSchoolStamp() -> String {
+        if !studyLoaded { LoadStudy() }
+        let mins = CInt((NbNow() - NbNow().Date).TotalMinutes) / 5
+        return String(deadlines.Count) + ":" + String(studyDone.Count) + ":" + String(testFeeds.Count) + ":" + String(mins)
+    }
+    func NbClasses(_ day: DateTime) -> List<NbFact> {
+        let list = List<NbFact>()
+        if !studyLoaded { LoadStudy() }
+        let now = NbNow()
+        let next = day.Date.AddDays(1)
+        let from = World.UnixMs(day.Date), to = World.UnixMs(next < now ? next : now)
+        if to <= from { return list }
+        for kv in NbFeedTexts() {
+            // mac: string.GetHashCode → hashValue（只當這次執行的快取 key）
+            let key = kv.Key + "|" + String(kv.Value.Length) + "|" + String(kv.Value.hashValue)
+            var feed: SchoolFeed? = nil
+            if !nbFeeds.TryGetValue(key, &feed) || feed == nil {
+                feed = School.Feed(kv.Key, kv.Value)   // mac: Swift 的 School.Feed 不丟例外（C# 的 try／catch 記 log 跳過）
+                if nbFeeds.Count > 20 { nbFeeds.Clear() }
+                nbFeeds[key] = feed!
+            }
+            guard let fd = feed else { continue }
+            for o in Ics.Occurrences(fd.Events, from, to) {
+                if o.Start < from || o.Start > to || School.Classify(o.Ev, fd, o.Parent) != "class" { continue }
+                let f = NbFact()
+                let one = Regex.Replace(o.Summary ?? "", #"[\r\n]+"#, " ").Trim()
+                let name = Regex.Replace(one, #"\s*\[([^\]]+)\]$"#, fd.Kind == "canvas" ? "（$1）" : " [$1]")
+                if name == "" { continue }
+                f.Id = "class:" + (o.Uid ?? "") + "@" + String(o.Start); f.Src = "school"; f.Class = true; f.Title = name; f.Project = name
+                f.T = World.FromUnixMs(o.Start); f.End = World.FromUnixMs(o.End); f.HasEnd = o.End > o.Start
+                list.Add(f)
+            }
+        }
+        return list
+    }
+
+    // ---- 待辦：自己寫的＋學校的作業（還沒交、14 天內）；新的作業放最上面（照截止時間）----
+    func NbTodos() -> List<NbTodo> {
+        if !studyLoaded { LoadStudy() }
+        let dir = Nb.Dir(World.DataDir)
+        let list = Nb.LoadTodos(dir)
+        var changed = false
+        var i = list.Count - 1
+        while i >= 0 {
+            if list[i].Src == "school" && studyDone.Contains(list[i].Ref) { list.RemoveAt(i); changed = true }   // 在別的地方標成交了
+            i -= 1
+        }
+        let fresh = List<NbTodo>()
+        for dl in deadlines {
+            let dlId: String = dl.Id ?? ""
+            if studyDone.Contains(dlId) { continue }
+            let dd = World.FromUnixMs(dl.Due)
+            let dv = Nb.DueValue(dd.Date, CInt(dd.TimeOfDay.TotalMinutes))
+            var have = false
+            for t in list { if t.Src == "school" && t.Ref == dlId { have = true; if t.Due != dv { t.Due = dv; changed = true } } }
+            if have { continue }
+            let n = NbTodo()
+            let due = World.FromUnixMs(dl.Due)
+            n.Id = "s" + Math.Abs(_NbNetHash(dlId)).ToString("x"); n.Src = "school"; n.Ref = dlId; n.Text = dl.Title ?? ""; n.Course = dl.Course ?? ""   // mac: string.GetHashCode → _NbNetHash（每次一樣）
+            n.Due = Nb.DueValue(due.Date, CInt(due.TimeOfDay.TotalMinutes)); n.Created = Nb.Ymd(NbNow())
+            fresh.Add(n)
+        }
+        if fresh.Count > 0 { list.InsertRange(0, fresh.ToArray()); changed = true }
+        if changed { Nb.SaveTodos(dir, list) }
+        return list
+    }
+    func NbSaveTodos(_ list: List<NbTodo>) { Nb.SaveTodos(Nb.Dir(World.DataDir), list) }
+
+    // 學校的作業：勾掉＝交了（跟泡泡上點「交了」同一套，VS Code 也會知道）；取消勾＝還沒交
+    func NbSchoolDone(_ id: String, _ done: Bool) {
+        if !studyLoaded { LoadStudy() }
+        if done { MarkDone(id, true); return }
+        studyDone.Remove(id)
+        World.WriteText("study-done.txt", string.Join("\n", studyDone.ToArray()))
+        if testFeeds.Count > 0 { RescanNow() } else { replan = true }
+    }
+    func NbForgetSchool(_ id: String) { if !studyLoaded { LoadStudy() }; MarkDone(id, true) }
+
+    // ---- 離屏截圖 ----
+    func NbSnap(_ g: Graphics) { if nbForm != nil && !nbForm.IsDisposed && nbForm.VVisible { nbForm.PaintTo(g) } }
+
+    // ---- pipe ----
+    func NbMsg(_ c: Client, _ p: [String], _ line: String) -> Bool {
+        if p.count == 0 || !p[0].StartsWith("nb-") { return false }
+        let t = line.Trim()
+        let f: NotebookForm? = nbForm != nil && !nbForm.IsDisposed ? nbForm : nil
+        switch p[0] {
+        case "nb-open": ShowNotebook(p.count >= 2 ? p[1] : "")
+        case "nb-close": if let ff = f { ff.Close() }
+        case "nb-info":
+            let head: String = f != nil ? f!.Info() : "nb open=0\n"
+            let said: String = nbSaid == "" ? "-" : nbSaid
+            World.Send(c, head + "said " + said + "\nend\n")
+        case "nb-clip": World.Send(c, "clip " + JavaScriptSerializer().Serialize(nbClip) + "\nend\n")
+        case "nb-text":
+            if let ff = f { World.Send(c, "text " + JavaScriptSerializer().Serialize(ff.CopyText(p.count >= 2 ? p[1] : "detail")) + "\nend\n") } else { World.Send(c, "text \"\"\nend\n") }
+        case "nb-reload": if let ff = f { ff.Reload() }
+        default:
+            guard let ff = f, App.Offscreen else { break }
+            switch p[0] {
+            case "nb-act": if p.count >= 2 { ff.Do(p[1], p.count >= 3 ? t.Substring(World.NthSpace(t, 2) + 1) : "") }
+            case "nb-click":
+                var x = 0, y = 0
+                if p.count >= 3 && int.TryParse(p[1], &x) && int.TryParse(p[2], &y) { ff.SimHover(PointT(x - ff.Left, y - ff.Top)); ff.SimClick(PointT(x - ff.Left, y - ff.Top)) }
+            case "nb-hover":
+                var x = 0, y = 0
+                if p.count >= 3 && int.TryParse(p[1], &x) && int.TryParse(p[2], &y) { ff.SimHover(PointT(x - ff.Left, y - ff.Top)) }
+            case "nb-hoverthing": ff.HoverThing(p.count >= 2 ? p[1] : "")
+            case "nb-hovertodo": ff.HoverTodo(p.count >= 2 ? p[1] : "")
+            case "nb-type": if p.count >= 2 { ff.`Type`(p[1], p.count >= 3 ? t.Substring(World.NthSpace(t, 2) + 1).Replace("\\n", "\n") : "") }
+            case "nb-key":
+                if p.count >= 2 && p[1] == "alt-up" { ff.Do("move", "up") }
+                else if p.count >= 2 && p[1] == "alt-down" { ff.Do("move", "down") }
+                else if p.count >= 3 { ff.Key(p[1], p[2]) }
+            case "nb-drag": do { var to = 0; if p.count >= 3 && int.TryParse(p[2], &to) { ff.DragTo(p[1], to) } }
+            case "nb-scroll": do { var dy = 0; if p.count >= 3 && int.TryParse(p[2], &dy) { ff.ScrollBy(p[1], dy) } }
+            default: break
+            }
+        }
+        return true
+    }
+}
+
+// ===== 65_work_settings.swift =====
+// ===== 65_work_settings.swift — DeskPals.WorkSettings.cs =====
+// WoWo Pals：「工作設定」視窗（小屋選單 → 工作 → 工作設定…、小本子的「來源」、空白頁的「接上」）。畫面照 v011/work-settings 的 D 版：
+//   打開先看格子（九個來源，每格有狀態和 關｜開），點格子進清單（左邊來源、右邊要填的），左上「全部」或 Esc 回格子；右上可以切格子／清單，記住上次的。
+//   要填東西的來源（Jira、開會、下雨、公司網路、工作日誌資料夾）填好才會開：按「開」先跳到要填的那一格，填好自己開。
+//   GitHub／GitLab 找不到 gh／glab 不能開（寫「找不到 gh」＋怎麼裝）；CI 要先開 GitLab 或 GitHub。
+//   Esc：清單 → 格子；格子 → 關掉（跟取消一樣）。儲存時開著的來源有沒填好的，跳過去標紅，不關。
+// 設定讀寫都走 World 的 WC()／WorkSet()／SetJiraToken()（DeskPals.Work.cs → 62_work.swift）；看的方式記在 work-ui.txt。
+// 離屏測試：pipe「work-settings open|close|save|info|press <id>|type <欄位> <字>|key esc|tab|space」，snap 時畫進虛擬螢幕。
+// 掛在核心的地方：Snap → WorkSnap(g)（41_world_b.swift，CuSnap／NbSnap 後面）；WorkMsg 的 "work-settings" → WorkSettingsMsg（62_work.swift）。
+// mac 的差別（都標了 // mac:）：
+// - 沒有 WSL：清單的 Claude、Codex 那頁不放「別的資料夾」（claude_dir／codex_dir 兩格）；設定值留著不動。
+// - 工作日誌資料夾的提示字用 Mac 的路徑。
+// - C# 的欄位 view 改叫 viewKind（Form shim 已經有 view＝NSView）。
+// - AutoScroll：shim 沒有。自己記捲動位置（AutoScrollPosition 跟 WinForms 一樣是負的），滾輪、拖右邊自己畫的捲軸；
+//   版面、點擊、輸入框的位置照 C# 的算法（Logical()、LayoutBoxes 的 o）。另外離屏測試可用 DESKPALS_TEST_WA_H 假裝工作區比較矮
+//   （mac 沒有 DESKPALS_TEST_DPI 的假 150%／200%）。
+// - ProcessDialogKey → KeyPreview 的 OnKeyDown（shim：輸入框自己的 KeyDown 先、再來是表單的）；ActiveControl = null → makeFirstResponder(nil)。
+// - TextBox：BorderStyle.None → CuMaker.Borderless；TextAlign.Center → NSTextField.alignment；GotFocus、UseSystemPasswordChar → WsTextBox
+//   （08_shim_worksettings.swift）；EM_SETCUEBANNER → PlaceholderText。
+// - FolderBrowserDialog → NSOpenPanel（WsDialogs.PickFolder）。
+// - 沒有「編輯」選單：Cmd+X／C／V／A／Z 在 OnKeyDown 自己送給打字框（WsEditKeys；貼 token 要用）。
+
+import AppKit
+
+
+extension World {
+    // 小屋選單「工作設定…」、小本子的「來源」「接上」、pipe「work-settings open」
+    func ShowWorkSettings() { ShowWorkSettings(nil) }
+    func ShowWorkSettings(_ src: String?) {
+        if workForm == nil || workForm.IsDisposed { workForm = WorkSettingsForm(self) }
+        else { workForm.Reload() }
+        if let s = src { workForm.OpenSource(s) }
+        var wa: Rectangle = App.Offscreen ? screens[0].WorkingArea : Screen.FromPoint(Cursor.Position).WorkingArea
+        // mac: 離屏測試沒有假的 DPI（DESKPALS_TEST_DPI）：DESKPALS_TEST_WA_H 假裝工作區比較矮，測「放不下就捲」
+        if App.Offscreen, let hs = ProcessInfo.processInfo.environment["DESKPALS_TEST_WA_H"], let hh = Int(hs), hh > 0 { wa.Height = Math.Min(wa.Height, hh) }
+        workForm.FitTo(wa)
+        let lx: Int = wa.Left + Math.Max(0, (wa.Width - workForm.Width) / 2)
+        let ly: Int = wa.Top + Math.Max(0, (wa.Height - workForm.Height) / 2)
+        workForm.Location = Point(lx, ly)
+        workForm.Show()
+        let f: WorkSettingsForm = workForm
+        // glab／gh 有沒有裝、登入了沒：打開時重新看一次（背景），看完重畫
+        let job: () -> Void = { self.Try("auth", { self.DetectAuth() }); self.Post { if !f.IsDisposed { f.Invalidate() } } }
+        ThreadPool.QueueUserWorkItem(job)
+        if App.Offscreen { return }
+        ActivateForm(workForm)
+        Later(0.2) { if !f.IsDisposed && f.Visible { self.ActivateForm(f) } }
+    }
+
+    func ToolState(_ tool: String) -> String { return tool == "gh" ? ghState : glabState }
+    func JiraState() -> String { return jiraStatus }
+    func WorkSnap(_ g: Graphics) { if workForm != nil && !workForm.IsDisposed && workForm.VVisible { workForm.PaintTo(g) } }
+
+    // 設定視窗的示範：現在帶頭那隻站好的樣子（用預覽用的 World 畫，不動到桌面上的公仔）
+    func WorkPalPic(_ s: Int) -> Bitmap! {
+        if workPalPic != nil { return workPalPic }
+        // mac: C# 的 try／catch（例外寫 log）：Swift 沒有例外，先看帶頭的在不在
+        let pv = World(s, lineup)
+        let lead: Pet! = Lead()
+        var me: Pet! = lead != nil ? pv.Get(lead.P.Id) : nil
+        if me == nil && pv.Pets.Count > 0 { me = pv.Pets[0] }
+        if me != nil { workPalPic = me.IconPic() }
+        else { App.Log("work settings pal: no pet") }
+        return workPalPic
+    }
+
+    func WorkSaved() {
+        Lead()?.Say("好～工作設定存好了", 2.2)
+    }
+
+    // pipe：work-settings …（open 在 WorkMsg）
+    @discardableResult func WorkSettingsMsg(_ c: Client, _ p: [String], _ line: String) -> Bool {
+        if p.count < 2 { return true }
+        let t = line.Trim()
+        switch p[1] {
+        case "open": ShowWorkSettings(p.count >= 3 ? p[2] : nil); return true
+        default: break
+        }
+        if workForm == nil || workForm.IsDisposed { if p[1] == "info" { World.Send(c, "ws none\nend\n") }; return true }
+        switch p[1] {
+        case "close": workForm.Cancel()
+        case "save": workForm.Save()
+        case "info": World.Send(c, workForm.Info() + "end\n")
+        case "press": if p.count >= 3 { workForm.Press(p[2]) }
+        case "type":
+            if p.count >= 3 {
+                let i3 = World.NthSpace(t, 3)
+                workForm.TestType(p[2], i3 > 0 ? t.Substring(i3 + 1) : "")
+            }
+        case "key": if p.count >= 3 { workForm.TestKey(p[2]) }
+        default: break
+        }
+        return true
+    }
+}
+
+final class WorkSettingsForm: Form {
+    final class Src {
+        let Id: String, Name: String, Short: String, Icon: String, Key: String
+        let Sub: String?
+        let Say: String
+        init(_ id: String, _ name: String, _ sh: String, _ icon: String, _ key: String, _ sub: String?, _ say: String) { Id = id; Name = name; Short = sh; Icon = icon; Key = key; Sub = sub; Say = say }
+    }
+    static let SRC: [Src] = [
+        Src("claude", "Claude Code、Codex", "Claude、Codex", "claude", "ai", "本機的對話會記進小本子", "記進小本子了"),
+        Src("jira", "Jira", "Jira", "jira", "jira", nil, "PBG-2231 解決了"),
+        Src("gitlab", "GitLab", "GitLab", "gitlab", "gitlab", nil, "MR !128 合併了"),
+        Src("github", "GitHub", "GitHub", "github", "github", nil, "PR #17 合併了"),
+        Src("ci", "CI", "CI", "tag", "ci", "推了 tag 就幫你盯", "v0.10.4 的 CI 過了"),
+        Src("meet", "開會", "開會", "meet", "meet", nil, ""),
+        Src("rain", "下雨", "下雨", "rain", "rain", "平日 17:30 看一次", "等下會下雨，帶傘"),
+        Src("net", "公司網路", "公司網路", "net", "vpn", "連不到就提醒 VPN 斷了", "VPN 好像斷了"),
+        Src("worklog", "工作日誌資料夾", "工作日誌資料夾", "folder", "worklog", "今天有新檔就提醒", "今天的工作日誌好了") ]
+    static let FILL: Dict<String, String> = {
+        let d = Dict<String, String>()
+        d["jira"] = "填好這三格就會開始"; d["meet"] = "填好網址就會開始"; d["rain"] = "填好地點就會開始"; d["net"] = "填好主機就會開始"; d["worklog"] = "選好資料夾就會開始"
+        return d
+    }()
+    static let NEED: Dict<String, String> = {
+        let d = Dict<String, String>()
+        d["jira"] = "要填網站、信箱和 token"; d["meet"] = "要填行事曆網址"; d["rain"] = "要填地點"; d["net"] = "要填主機"; d["worklog"] = "要選資料夾"
+        return d
+    }()
+    static let HowGh = "https://cli.github.com/", HowGlab = "https://gitlab.com/gitlab-org/cli#installation", HowJira = "https://id.atlassian.com/manage-profile/security/api-tokens"
+    // mac: SystemInformation.VerticalScrollBarWidth（mac 的捲軸是自己畫的，寬度照 Windows 100% 的 17）
+    static let ScrollBarW = 17
+
+    let w: World
+    let d: Double
+    let U: Int
+    let plateF: FontT, nameF: FontT, tileNameF: FontT, labF: FontT, subF: FontT, btnF: FontT, segF: FontT, boxF: FontT, monoF: FontT
+    var VVisible = false
+    let v = Dict<String, String>()   // 改到一半的設定（儲存才寫回去）
+    let pending = HashSet<String>(), bad = HashSet<String>()
+    var viewKind = "grid", sel = "claude", hoverId = "", focusStop = "", lastOpened = ""   // mac: C# 的 view（shim 的 Form 已經有 view）
+    var advOpen = false, loading = false
+    let hits = Dict<String, Rectangle>()
+    let stops = List<String>()   // Tab 的順序（畫的時候排）
+    let boxes = Dict<String, TextBox>()
+    let shown = HashSet<String>()   // 現在擺出來的輸入框（離屏時視窗沒顯示，TextBox.Visible 永遠是 false）
+    static let Paper = Pix.C(0xFFFDF7), Sub = Pix.C(0x6B4E33), OkC = Pix.C(0x276A1C), BadC = Pix.C(0xB04040), WarnC = Pix.C(0x8A500C), MuteC = Pix.C(0x6E5238), LinkC = Pix.C(0x7A4A22)
+
+    // mac: AutoScroll（WinForms 的 ScrollableControl）：自己記
+    var AutoScroll = false
+    var AutoScrollMinSize = SizeT(0, 0)
+    var scrollY = 0
+    var AutoScrollPosition: Point { return PointT(0, -scrollY) }
+    var dragging = false, dragGrab = 0
+
+    init(_ w: World) {
+        self.w = w
+        d = Double(w.S) / 4.0
+        U = Math.Max(2, CInt(Math.Round(2 * d)))
+        let jh = "Microsoft JhengHei UI"
+        plateF = FontT(jh, 12, FontStyle.Bold)
+        nameF = FontT(jh, 12, FontStyle.Bold)
+        tileNameF = FontT(jh, 11.25, FontStyle.Bold)
+        labF = FontT(jh, 10, FontStyle.Bold)
+        subF = FontT(jh, 8.5, FontStyle.Bold)
+        btnF = FontT(jh, 11, FontStyle.Bold)
+        segF = FontT(jh, 10, FontStyle.Bold)
+        boxF = FontT(jh, 10.5, FontStyle.Regular)
+        monoF = FontT("Consolas", 9.5)
+        super.init()
+        Text = "WoWo Pals・工作設定"
+        FormBorderStyle = FormBorderStyleT.FixedSingle
+        MaximizeBox = false; MinimizeBox = false
+        ShowInTaskbar = true; TopMost = true
+        StartPosition = FormStartPosition.Manual
+        BackColor = Pix.Cream
+        DoubleBuffered = true
+        ClientSize = SizeT(Sc(600), Sc(600))
+        KeyPreview = true
+        let fields: [[String]] = [["jira_site", ""], ["jira_email", ""], ["token", ""], ["meet_url", "mono"], ["meet_before", ""],
+            ["rain_place", ""], ["vpn_host", "mono"], ["worklog_dir", "mono"], ["claude_dir", "mono"], ["codex_dir", "mono"]]
+        for f in fields {
+            let t = WsTextBox()   // mac: GotFocus、UseSystemPasswordChar（08_shim_worksettings.swift）
+            t.BackColor = WorkSettingsForm.Paper; t.ForeColor = Pix.TextC
+            t.Font = f[1] == "mono" ? monoF : boxF
+            t.Visible = false
+            if f[0] == "token" { t.UseSystemPasswordChar = true }
+            let key = f[0]
+            t.TextChanged = { [unowned self, unowned t] in if !self.loading { self.Typed(key, t.Text) } }
+            t.GotFocus = { [unowned self] in self.focusStop = "tb:" + key; self.Invalidate() }
+            boxes[key] = t
+            Controls.Add(t)
+            CuMaker.Borderless(t, WorkSettingsForm.Paper)   // mac: BorderStyle.None
+            if f[0] == "meet_before" { t.tf?.alignment = .center }   // mac: TextAlign = HorizontalAlignment.Center
+        }
+        FormClosing = { [unowned self] (e: FormClosingEventArgs) in self.Remember() }
+        Reload()
+        let ui = World.ReadWorkUi().Split("\n")
+        for l in ui {
+            let kv = l.Trim().Split("=")
+            if kv.count != 2 { continue }
+            if kv[0] == "view" && (kv[1] == "grid" || kv[1] == "list") { viewKind = kv[1] }
+            if kv[0] == "sel" && WorkSettingsForm.Find(kv[1]) != nil { sel = kv[1] }
+        }
+        LayoutBoxes()
+    }
+
+    func Sc(_ x: Int) -> Int { return CInt(Math.Round(Double(x) * d)) }
+
+    // 放不進工作區（1366×768 開 125%、1080p 開 175%…）：視窗變矮、裡面可以捲，儲存和取消一定按得到
+    func FitTo(_ wa: Rectangle) {
+        let chrome = Height - ClientSize.Height, full = Sc(600)
+        if full + chrome <= wa.Height { AutoScroll = false; scrollY = 0; ClientSize = SizeT(full, full) }
+        else {
+            AutoScroll = true
+            AutoScrollMinSize = SizeT(full, full)
+            ClientSize = SizeT(full + WorkSettingsForm.ScrollBarW, Math.Max(Sc(240), wa.Height - chrome))
+            ScrollTo(scrollY)   // mac: 視窗變了，捲動位置夾回範圍內
+        }
+        LayoutBoxes()
+        Invalidate()
+    }
+    func Logical(_ p: Point) -> Point { return AutoScroll ? PointT(p.X - AutoScrollPosition.X, p.Y - AutoScrollPosition.Y) : p }
+    // mac: OnScroll 沒有（捲軸是自己畫的，捲的時候 ScrollTo 自己重畫）
+    override func OnMouseWheel(_ e: MouseEventArgs) {
+        super.OnMouseWheel(e)
+        if AutoScroll { ScrollTo(scrollY - e.Delta / 2) }   // mac: WinForms 的 AutoScroll 自己會捲
+        Invalidate()
+    }
+    static func Find(_ id: String) -> Src! { for s in SRC { if s.Id == id { return s } }; return nil }
+
+    // ---- mac: 自己畫的捲軸（AutoScroll 時在右邊那一條）----
+    func ScrollTo(_ y: Int) {
+        let top = Math.Max(0, AutoScrollMinSize.Height - ClientSize.Height)
+        let ny = Math.Max(0, Math.Min(top, y))
+        if ny == scrollY { return }
+        scrollY = ny
+        LayoutBoxes()
+        Invalidate()
+    }
+    func ThumbRect() -> Rectangle {
+        let full = AutoScrollMinSize.Width, cs = ClientSize
+        let total = Math.Max(1, AutoScrollMinSize.Height)
+        let th = Math.Min(cs.Height, Math.Max(Sc(24), cs.Height * cs.Height / total))
+        let range = Math.Max(1, AutoScrollMinSize.Height - cs.Height)
+        let ty = (cs.Height - th) * scrollY / range
+        return Rectangle(full + 3, ty, Math.Max(2, cs.Width - full - 6), th)
+    }
+    func DragTo(_ y: Int) {
+        let cs = ClientSize
+        let th = ThumbRect().Height
+        let room = Math.Max(1, cs.Height - th)
+        let range = Math.Max(0, AutoScrollMinSize.Height - cs.Height)
+        ScrollTo((y - dragGrab) * range / room)
+    }
+    func PaintScrollBar(_ g: Graphics) {
+        if !AutoScroll { return }
+        let full = AutoScrollMinSize.Width, cs = ClientSize
+        if cs.Width - full <= 0 { return }
+        Pix.Box(g, Pix.C(0xEAD7B4), full, 0, cs.Width - full, cs.Height)
+        Pix.Box(g, Pix.Ink, full, 0, Math.Max(1, U / 2), cs.Height)
+        let r = ThumbRect()
+        Pix.Round(g, Pix.Ink, r.X, r.Y, r.Width, r.Height, Math.Max(1, U / 2))
+        Pix.Box(g, dragging ? Pix.C(0xC8902C) : Pix.C(0xF6C453), r.X + 1, r.Y + 1, r.Width - 2, r.Height - 2)
+    }
+    override func OnMouseDown(_ e: MouseEventArgs) {
+        super.OnMouseDown(e)
+        if AutoScroll && e.Button == MouseButtons.Left && e.X >= AutoScrollMinSize.Width {
+            let r = ThumbRect()
+            dragGrab = r.Contains(e.Location) ? e.Y - r.Y : r.Height / 2
+            dragging = true
+            DragTo(e.Y)
+            Invalidate()
+        }
+    }
+
+    // 從 World 讀回現在的設定（打開視窗時）
+    func Reload() {
+        loading = true
+        for k in World.WorkDefaults { v[k[0]] = w.WC(k[0]) }
+        pending.Clear(); bad.Clear()
+        boxes["jira_site"].Text = v["jira_site"]; boxes["jira_email"].Text = v["jira_email"]; boxes["token"].Text = ""
+        boxes["meet_url"].Text = v["meet_url"]; boxes["meet_before"].Text = v["meet_before"]; boxes["rain_place"].Text = v["rain_place"]
+        boxes["vpn_host"].Text = v["vpn_host"]; boxes["worklog_dir"].Text = v["worklog_dir"]; boxes["claude_dir"].Text = v["claude_dir"]; boxes["codex_dir"].Text = v["codex_dir"]
+        advOpen = v["claude_dir"] != "" || v["codex_dir"] != ""
+        loading = false
+        LayoutBoxes()
+        Invalidate()
+    }
+
+    func Remember() { World.WriteWorkUi("view=" + viewKind + "\nsel=" + sel + "\n") }
+
+    // ================= 規則 =================
+    func On(_ id: String) -> Bool { guard let s = WorkSettingsForm.Find(id) else { return false }; return v[s.Key] == "1" && !Lock(id) && Missing(id).Count == 0 }
+    func Lock(_ id: String) -> Bool { return id == "ci" && v["gitlab"] != "1" && v["github"] != "1" }
+    func Tool(_ id: String) -> String { return id == "github" ? w.ToolState("gh") : (id == "gitlab" ? w.ToolState("glab") : "ok") }
+    func ToolName(_ id: String) -> String { return id == "github" ? "gh" : "glab" }
+
+    // 還缺什麼（欄位名稱；tool＝glab／gh 不能用）
+    func Missing(_ id: String) -> List<String> {
+        let m = List<String>()
+        switch id {
+        case "jira":
+            if v["jira_site"].Trim() == "" { m.Add("jira_site") }
+            if !Regex.IsMatch(v["jira_email"].Trim(), "^[^\\s\\x0B\\x85]+@[^\\s\\x0B\\x85]+$") { m.Add("jira_email") }   // mac: .NET 的 \S（ICU 的 \s 少了 \x0B、\x85）
+            if boxes["token"].Text.Trim() == "" && !w.HasJiraToken() { m.Add("token") }
+        case "meet":
+            if World.WorkUrl(v["meet_url"]) == nil { m.Add("meet_url") }
+            do { var n = 0; if !int.TryParse(v["meet_before"].Trim(), &n) || n < 1 || n > 120 { m.Add("meet_before") } }
+        case "rain": if v["rain_place"].Trim() == "" { m.Add("rain_place") }
+        case "net": if !Regex.IsMatch(v["vpn_host"].Trim(), "^[\\w.-]+(:\\d{1,5})?$") { m.Add("vpn_host") }
+        case "worklog": if v["worklog_dir"].Trim() == "" || !Directory.Exists(v["worklog_dir"].Trim()) { m.Add("worklog_dir") }
+        case "github", "gitlab": do { let ts = Tool(id); if ts == "missing" || ts == "nologin" { m.Add("tool") } }
+        default: break
+        }
+        return m
+    }
+
+    // 一個來源的一句狀態：字、顏色（ok／bad／warn／mute）、有沒有「怎麼裝」連結
+    func StateOf(_ id: String, _ text: inout String, _ kind: inout String, _ link: inout String?) {
+        link = nil
+        if Lock(id) { text = "先打開 GitLab 或 GitHub"; kind = "mute"; return }
+        if id == "gitlab" || id == "github" {
+            let ts = Tool(id), tn = ToolName(id)
+            if ts == "missing" { text = "找不到 " + tn; kind = "bad"; link = id == "github" ? WorkSettingsForm.HowGh : WorkSettingsForm.HowGlab; return }
+            if ts == "nologin" { text = tn + " 還沒登入"; kind = "bad"; link = id == "github" ? WorkSettingsForm.HowGh : WorkSettingsForm.HowGlab; return }
+        }
+        if id == "jira" && On(id) && w.JiraState() == "auth" && boxes["token"].Text.Trim() == "" { text = "連不上，檢查 token"; kind = "bad"; return }
+        if WorkSettingsForm.FILL.ContainsKey(id) && Missing(id).Count > 0 { text = "要先填"; kind = "warn"; return }
+        if On(id) { text = id == "worklog" ? "已選好" : "已接上"; kind = "ok"; return }
+        text = "關著"; kind = "mute"
+    }
+    func KindC(_ k: String) -> Color {
+        if k == "ok" { return WorkSettingsForm.OkC }
+        if k == "bad" { return WorkSettingsForm.BadC }
+        return k == "warn" ? WorkSettingsForm.WarnC : WorkSettingsForm.MuteC
+    }
+
+    // ================= 動作 =================
+    func Typed(_ key: String, _ text: String) {
+        if key != "token" { v[key] = text }
+        if text.Trim() != "" { bad.Remove(key) }
+        // 按過「開」、現在填好了：自己開
+        for id in List<String>(pending.ToArray()) {
+            if Missing(id).Count == 0 { if let s = WorkSettingsForm.Find(id) { v[s.Key] = "1" }; pending.Remove(id) }
+        }
+        Invalidate()
+    }
+
+    func OpenSource(_ id: String) {
+        if WorkSettingsForm.Find(id) == nil { return }
+        sel = id; bad.Clear()
+        SetView("list")
+    }
+
+    func SetView(_ to: String) {
+        viewKind = to
+        Remember()
+        LayoutBoxes()
+        Invalidate()
+    }
+
+    func Toggle(_ id: String) {
+        if Lock(id) { return }
+        guard let s = WorkSettingsForm.Find(id) else { return }   // mac: C# 這裡會丟 NullReferenceException（測試指令打錯 id）
+        if v[s.Key] == "1" || pending.Contains(id) {
+            v[s.Key] = "0"; pending.Remove(id); bad.Clear()
+            Invalidate()
+            return
+        }
+        let m = Missing(id)
+        if m.Count > 0 {
+            // 要先填的：不偷偷打開，先跳過去填（填好自己開）；glab／gh 找不到的開不了
+            if m[0] != "tool" { pending.Add(id) }
+            sel = id; bad.Clear()
+            SetView("list")
+            if m[0] != "tool" { FocusBox(m[0]) }
+            else { focusStop = "howto:" + id }
+            return
+        }
+        v[s.Key] = "1"
+        Invalidate()
+    }
+
+    func FocusBox(_ key: String) {
+        guard let t = boxes.Get(key) else { return }
+        LayoutBoxes()
+        focusStop = "tb:" + key
+        if !App.Offscreen { t.Select(); t.Focus() }
+        Invalidate()
+    }
+
+    func Save() {
+        // 開著的來源（不是只按了開、還在等填的）有沒填好的：跳過去、標紅、不關
+        for s in WorkSettingsForm.SRC {
+            if v[s.Key] != "1" || Lock(s.Id) { continue }
+            let m = Missing(s.Id)
+            m.Remove("tool")
+            if m.Count == 0 { continue }
+            sel = s.Id; bad.Clear(); for k in m { bad.Add(k) }
+            SetView("list")
+            FocusBox(m[0])
+            return
+        }
+        let srcKeys: [String] = ["ai", "jira", "gitlab", "github", "ci", "meet", "rain", "vpn", "worklog"]
+        for k in World.WorkDefaults {
+            let key = k[0]
+            var val = v[key]
+            if srcKeys.contains(key) {
+                let id = WorkSettingsForm.SrcOfKey(key)
+                val = val == "1" && !Lock(id) && Missing(id).Count == 0 ? "1" : "0"
+            }
+            if val.Trim() != w.WC(key) { _ = w.WorkSet(key, val.Trim() == "" ? "-" : val.Trim()) }
+        }
+        if boxes["token"].Text.Trim() != "" { _ = w.SetJiraToken(boxes["token"].Text.Trim()) }
+        App.Log("work settings saved")
+        Remember()
+        w.WorkSaved()
+        Close()
+    }
+    static func SrcOfKey(_ key: String) -> String { for s in SRC { if s.Key == key { return s.Id } }; return key }
+
+    func Cancel() { Remember(); Close() }
+
+    func Esc() {
+        if viewKind == "list" { let back = sel; SetView("grid"); focusStop = "tile:" + back; Invalidate() }
+        else { Cancel() }
+    }
+
+    func OpenLink(_ url: String) {
+        lastOpened = url
+        if App.Offscreen { return }
+        // mac: Process.Start（UseShellExecute → NSWorkspace.open）不丟例外；開不了也不會知道（C# 的 catch 寫 log）
+        let psi = ProcessStartInfo(url)
+        psi.UseShellExecute = true
+        Process.Start(psi)
+    }
+
+    func Press(_ id: String) {
+        var a = id, arg = ""
+        let c = id.IndexOf(Character(":"))
+        if c > 0 { a = id.Substring(0, c); arg = id.Substring(c + 1) }
+        switch a {
+        case "view": SetView(arg)
+        case "all": SetView("grid"); focusStop = "tile:" + sel
+        case "tile": OpenSource(arg)
+        case "tab": sel = arg; bad.Clear(); Remember(); LayoutBoxes(); Invalidate()
+        case "sw": Toggle(arg)
+        case "howto": OpenLink(arg == "github" || arg == "gitlab" ? HowUrl(arg) : WorkSettingsForm.HowJira)
+        case "adv": advOpen = !advOpen; LayoutBoxes(); Invalidate()
+        case "quiet": v["meet_quiet"] = v["meet_quiet"] == "1" ? "0" : "1"; Invalidate()
+        case "pickdir": PickDir()
+        case "save": Save()
+        case "cancel": Cancel()
+        default: break
+        }
+    }
+
+    func PickDir() {
+        if App.Offscreen { return }
+        // mac: FolderBrowserDialog → NSOpenPanel（只選資料夾）
+        let start: String = Directory.Exists(v["worklog_dir"]) ? v["worklog_dir"] : ""
+        if let picked = WsDialogs.PickFolder("工作日誌放在哪個資料夾？", start) { boxes.Get("worklog_dir")?.Text = picked }
+    }
+
+    // ---- 鍵盤：Esc 回上一層；Tab 在按鈕、格子、輸入框之間走；空白鍵／Enter 按下 ----
+    // mac: WinForms 的 ProcessDialogKey → KeyPreview 的 OnKeyDown（打字框自己的 KeyDown 先跑，沒處理才到這裡）
+    override func OnKeyDown(_ e: KeyEventArgs) {
+        // mac: 沒有「編輯」選單：Cmd+X／C／V／A／Z 自己送給打字框（08_shim_worksettings.swift）；其他 Cmd 鍵不當成 Tab／空白鍵
+        if WsEditKeys.Command { if WsEditKeys.Handle() { e.Handled = true }; return }
+        if ProcessDialogKey(e.KeyData) { e.Handled = true; return }
+        super.OnKeyDown(e)
+    }
+    func ProcessDialogKey(_ k: Keys) -> Bool {
+        if k == Keys.Escape { Esc(); return true }
+        if k == Keys.Tab || k == (Keys.Tab | Keys.Shift) { MoveFocus(k == Keys.Tab ? 1 : -1); return true }
+        if (k == Keys.Space || k == Keys.Enter) && focusStop != "" && !focusStop.StartsWith("tb:") { Press(focusStop); return true }
+        return false   // mac: base.ProcessDialogKey(k)＝讓按鍵照常往下（打進輸入框）
+    }
+    func MoveFocus(_ dir: Int) {
+        Relayout()
+        if stops.Count == 0 { return }
+        var i = stops.IndexOf(focusStop)
+        i = i < 0 ? (dir > 0 ? 0 : stops.Count - 1) : (i + dir + stops.Count) % stops.Count
+        focusStop = stops[i]
+        if focusStop.StartsWith("tb:") { if !App.Offscreen { boxes.Get(focusStop.Substring(3))?.Focus() } }
+        else if !App.Offscreen { panel?.makeFirstResponder(nil) }   // mac: ActiveControl = null
+        Invalidate()
+    }
+    func TestKey(_ k: String) {
+        if k == "esc" { Esc() }
+        else if k == "tab" { MoveFocus(1) }
+        else if k == "shifttab" { MoveFocus(-1) }
+        else if k == "space" && focusStop != "" && !focusStop.StartsWith("tb:") { Press(focusStop) }
+    }
+    func TestType(_ key: String, _ text: String) {
+        if let t = boxes.Get(key) { t.Text = text }   // TextChanged → Typed
+    }
+
+    func HitAt(_ p: Point) -> String { for kv in hits { if kv.Value.Contains(p) { return kv.Key } }; return "" }
+    override func OnMouseMove(_ e: MouseEventArgs) {
+        super.OnMouseMove(e)
+        if dragging { DragTo(e.Y); return }   // mac: 拖捲軸
+        let h = HitAt(Logical(e.Location))
+        if h != hoverId { hoverId = h; Cursor = h != "" ? Cursors.Hand : Cursors.Default; Invalidate() }
+    }
+    override func OnMouseLeave(_ e: EventArgs) { super.OnMouseLeave(e); if hoverId != "" { hoverId = ""; Invalidate() } }
+    override func OnMouseUp(_ e: MouseEventArgs) {
+        super.OnMouseUp(e)
+        if dragging { dragging = false; Invalidate(); return }   // mac: 放開捲軸
+        if e.Button != MouseButtons.Left { return }
+        // 開關、連結蓋在格子上面：先看小的
+        var best = ""
+        var area = int.MaxValue
+        let lp = Logical(e.Location)
+        for kv in hits {
+            if kv.Value.Contains(lp) && kv.Value.Width * kv.Value.Height < area { best = kv.Key; area = kv.Value.Width * kv.Value.Height }
+        }
+        if best != "" { focusStop = best; Press(best) }
+    }
+
+    // ---- 離屏測試：不真的顯示，snap 時畫進虛擬螢幕 ----
+    override func SetVisibleCore(_ value: Bool) {
+        if App.Offscreen { VVisible = value; super.SetVisibleCore(false); return }
+        super.SetVisibleCore(value)
+    }
+    func PaintTo(_ g: Graphics) {
+        let cs = ClientSize
+        if cs.Width <= 0 || cs.Height <= 0 { return }
+        let b = Bitmap(cs.Width, cs.Height, PixelFormat.Format24bppRgb)
+        do {
+            let gg = Graphics.FromImage(b)
+            OnPaint(PaintEventArgs(gg, Rectangle(0, 0, cs.Width, cs.Height)))
+            for t in boxes.Values {
+                if !shown.Contains(KeyOf(t)) { continue }
+                do { let bg = SolidBrush(t.BackColor); gg.FillRectangle(bg, t.Bounds) }
+                let s: String = t.UseSystemPasswordChar ? String(repeating: "●", count: t.Text.Length) : t.Text
+                if s == "", let cue = cues.Get(ObjectIdentifier(t)) {
+                    PixText.DrawText(gg, cue, t.Font, t.Bounds, Pix.C(0x866B51), [TextFormatFlags.Left, TextFormatFlags.VerticalCenter, TextFormatFlags.EndEllipsis])
+                    continue
+                }
+                let centered: Bool = t.tf?.alignment == NSTextAlignment.center   // mac: t.TextAlign == HorizontalAlignment.Center
+                let al: TextFormatFlags = centered ? TextFormatFlags.HorizontalCenter : TextFormatFlags.Left
+                PixText.DrawText(gg, s, t.Font, t.Bounds, t.ForeColor, al.union([TextFormatFlags.VerticalCenter, TextFormatFlags.NoPrefix, TextFormatFlags.EndEllipsis]))   // 離屏（含假的 150%）照同一個 DPI 畫
+            }
+        }
+        g.DrawImageUnscaled(b, Left, Top)
+    }
+
+    // 離屏時視窗沒顯示、不會自己重畫：要知道按鈕在哪（Tab 順序、測試）之前先在記憶體裡畫一次
+    func Relayout() {
+        if !App.Offscreen || ClientSize.Width <= 0 || ClientSize.Height <= 0 { return }
+        let b = Bitmap(ClientSize.Width, ClientSize.Height, PixelFormat.Format24bppRgb)
+        let g = Graphics.FromImage(b)
+        OnPaint(PaintEventArgs(g, Rectangle(0, 0, ClientSize.Width, ClientSize.Height)))
+    }
+
+    func Info() -> String {
+        Relayout()
+        let sb = StringBuilder()
+        let focusS: String = focusStop == "" ? "-" : focusStop
+        let linkS: String = lastOpened == "" ? "-" : lastOpened
+        sb.Append("ws view=" + viewKind + " sel=" + sel + " focus=" + focusS)
+        sb.Append(" pending=" + WorkSettingsForm.Join(pending) + " bad=" + WorkSettingsForm.Join(bad))
+        sb.Append(" link=" + linkS + " size=" + String(ClientSize.Width) + "x" + String(ClientSize.Height))
+        sb.Append(" scroll=" + (AutoScroll ? "1" : "0") + " title=" + Text.Replace(" ", "_") + "\n")
+        for s in WorkSettingsForm.SRC {
+            var t = "", k = ""
+            var l: String? = nil
+            StateOf(s.Id, &t, &k, &l)
+            let onS: String = On(s.Id) ? "1" : "0"
+            let lockS: String = Lock(s.Id) ? "1" : "0"
+            sb.Append("src " + s.Id + " want=" + v[s.Key] + " on=" + onS + " lock=" + lockS + " state=" + t.Replace(" ", "_") + " kind=" + k + "\n")
+        }
+        for kv in hits { sb.Append("hit " + kv.Key + " " + String(kv.Value.X) + " " + String(kv.Value.Y) + " " + String(kv.Value.Width) + " " + String(kv.Value.Height) + "\n") }
+        for kv in boxes { if shown.Contains(kv.Key) { sb.Append("tb " + kv.Key + " " + kv.Value.Text.Replace(" ", "_") + "\n") } }
+        sb.Append("lead " + LeadText(sel).Replace(" ", "_") + "\n")
+        return sb.ToString()
+    }
+    static func Join(_ h: HashSet<String>) -> String { return h.Count == 0 ? "-" : string.Join(",", h.ToArray()) }
+
+    // ================= 版面 =================
+    // 100% 時：視窗內 600×600；冠 56；面板 18～582；格子 3×3（172×128）；清單：左邊 178 寬、右邊 366 寬
+    func PaneR() -> Rectangle { return Rectangle(Sc(204), Sc(72), Sc(366), Sc(452)) }
+    func FieldY(_ i: Int) -> Int { return PaneR().Y + Sc(108) + i * Sc(60) }
+    func FieldBox(_ i: Int, _ wd: Int) -> Rectangle { let p = PaneR(); return Rectangle(p.X + Sc(22), FieldY(i) + Sc(20), wd > 0 ? wd : p.Width - Sc(44), Sc(28)) }
+
+    func LayoutBoxes() {
+        for t in boxes.Values { t.Visible = false }
+        shown.Clear()
+        if viewKind != "list" { return }
+        guard let cur = WorkSettingsForm.Find(sel) else { return }
+        let show = v[cur.Key] == "1" || pending.Contains(sel)
+        let l = List<KeyValuePair<String, Rectangle>>()
+        switch sel {
+        case "jira": if show { l.Add(WorkSettingsForm.Kv("jira_site", FieldBox(0, 0))); l.Add(WorkSettingsForm.Kv("jira_email", FieldBox(1, 0))); l.Add(WorkSettingsForm.Kv("token", FieldBox(2, 0))) }
+        case "meet": if show { l.Add(WorkSettingsForm.Kv("meet_url", FieldBox(0, 0))); l.Add(WorkSettingsForm.Kv("meet_before", Rectangle(PaneR().X + Sc(22) + Sc(56), FieldY(1) + Sc(6), Sc(56), Sc(28)))) }
+        case "rain": if show { l.Add(WorkSettingsForm.Kv("rain_place", FieldBox(0, 0))) }
+        case "net": if show { l.Add(WorkSettingsForm.Kv("vpn_host", FieldBox(0, 0))) }
+        case "worklog": if show { var r = FieldBox(0, 0); r.Width -= Sc(88); l.Add(WorkSettingsForm.Kv("worklog_dir", r)) }
+        case "claude": break   // mac: 沒有 WSL：不擺「別的資料夾」的 claude_dir／codex_dir（C#：advOpen 時擺 FieldBox(1)、FieldBox(2)）
+        default: break
+        }
+        for kv in l {
+            guard let t = boxes.Get(kv.Key) else { continue }
+            let r = kv.Value
+            let th = t.PreferredHeight
+            let o: Point = AutoScroll ? AutoScrollPosition : Point.Empty   // 捲過的話，輸入框跟著位移
+            t.Bounds = Rectangle(r.X + 3 * U + o.X, r.Y + Math.Max(U, (r.Height - th) / 2) + o.Y, r.Width - 6 * U, Math.Min(th, r.Height - 2 * U))
+            t.BackColor = bad.Contains(kv.Key) ? Pix.C(0xFDECEA) : WorkSettingsForm.Paper
+            t.tf?.backgroundColor = t.BackColor.ns   // mac: TextBox 的 BackColor 不會自己套到 NSTextField
+            t.Visible = true
+            shown.Add(kv.Key)
+        }
+    }
+    // 輸入框的提示字（灰字，打字就不見）
+    // mac: EM_SETCUEBANNER → NSTextField 的 placeholder（TextBox.PlaceholderText）；Dictionary<TextBox, string> → 用 ObjectIdentifier 當 key
+    let cues = Dict<ObjectIdentifier, String>()
+    func Cue(_ t: TextBox, _ text: String?) {
+        let k = ObjectIdentifier(t)
+        if let was = cues.Get(k), was == (text ?? "") { return }
+        cues[k] = text ?? ""
+        t.PlaceholderText = text ?? ""
+    }
+    func KeyOf(_ t: TextBox) -> String { for kv in boxes { if kv.Value === t { return kv.Key } }; return "" }
+    static func Kv(_ k: String, _ r: Rectangle) -> KeyValuePair<String, Rectangle> { return KeyValuePair<String, Rectangle>(k, r) }
+
+    // ================= 畫 =================
+    func Txt(_ g: Graphics, _ s: String, _ f: FontT, _ r: Rectangle, _ c: Color, _ fl: TextFormatFlags) { PixText.DrawText(g, World.NoEmoji(s), f, r, c, fl.union(TextFormatFlags.NoPrefix)) }
+    func Hit(_ id: String, _ r: Rectangle, _ stop: Bool) { hits[id] = r; if stop { stops.Add(id) } }
+
+    override func OnPaint(_ e: PaintEventArgs) {
+        let g = e.Graphics
+        g.SmoothingMode = SmoothingMode.None
+        hits.Clear(); stops.Clear()
+        if AutoScroll { g.TranslateTransform(Double(AutoScrollPosition.X), Double(AutoScrollPosition.Y)) }   // 螢幕太矮：整個內容一起捲
+        let W0 = Sc(600), H0 = Sc(600), F = 4 * U, crown = Sc(56)
+        Pix.Wood(g, 0, 0, W0, H0, U, false, 23)
+        Pix.Panel(g, F, crown, W0 - 2 * F, H0 - crown - F, U, false)
+        let t = "工作設定"
+        let tw = Pix.TextW(t, plateF)
+        let plw = tw + 14 * U, plh = Sc(34)
+        let pr = Rectangle((W0 - plw) / 2, (crown - plh) / 2 + U / 2, plw, plh)
+        Pix.Plate(g, t, plateF, pr, U)
+        Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.X - 9 * U, pr.Y + plh / 2 - 2 * U, U)
+        Pix.Mono(g, Pix.HEART, Pix.C(0xF27A90), pr.Right + 4 * U, pr.Y + plh / 2 - 2 * U, U)
+        ViewSwitch(g, W0)
+        if viewKind == "grid" { PaintGrid(g) } else { PaintList(g) }
+        let by = H0 - Sc(64), bh = Sc(44)
+        self.Button(g, "cancel", "取消", Rectangle(Sc(30), by, Sc(130), bh), false)
+        self.Button(g, "save", "儲存", Rectangle(W0 - Sc(30) - Sc(160), by, Sc(160), bh), true)
+        for kv in boxes { if shown.Contains(kv.Key) { let i = stops.IndexOf("tbpos:" + kv.Key); if i >= 0 { stops[i] = "tb:" + kv.Key } } }
+        stops.RemoveAll { (s: String) -> Bool in s.StartsWith("tbpos:") }
+        // 鍵盤焦點：虛線框
+        if focusStop != "" && !focusStop.StartsWith("tb:"), let fr = hits.Get(focusStop) {
+            let p = Pen(Pix.Ink, Math.Max(2, U))
+            p.DashStyle = DashStyle.Dash
+            g.DrawRectangle(p, fr.X + 2 * U, fr.Y + 2 * U, fr.Width - 4 * U - 1, fr.Height - 4 * U - 1)   // 鍵盤焦點：往內縮的深木色虛線
+        }
+        // mac: 捲軸（Windows 是系統畫的）
+        if AutoScroll { g.TranslateTransform(Double(-AutoScrollPosition.X), Double(-AutoScrollPosition.Y)); PaintScrollBar(g) }
+    }
+
+    func ViewSwitch(_ g: Graphics, _ W0: Int) {
+        let ids: [String] = ["grid", "list"], names: [String] = ["格子", "清單"]
+        let bw = Sc(64), bh = Sc(26)
+        let x = W0 - Sc(14) - 2 * bw - 3 * U, y = Sc(13)
+        Pix.Round(g, Pix.Ink, x, y, 2 * bw + 3 * U, bh + 2 * U, U)
+        for i in 0..<2 {
+            let r = Rectangle(x + U + i * (bw + U), y + U, bw, bh)
+            let on = viewKind == ids[i], hot = hoverId == "view:" + ids[i]
+            let face: Color = on ? Pix.C(0xF6C453) : (hot ? Pix.C(0xFFF3D6) : Pix.C(0xFFFBF0))
+            Pix.Box(g, face, r.X, r.Y, r.Width, r.Height)
+            if on { Pix.Box(g, Pix.C(0xFBE7BA), r.X, r.Y, r.Width, U); Pix.Box(g, Pix.C(0xC8902C), r.X, r.Bottom - U, r.Width, U) }
+            let art: [String] = i == 0 ? ["##.##", "##.##", ".....", "##.##", "##.##"] : ["#.###", ".....", "#.###", ".....", "#.###"]
+            let aw = 5 * U, txw = Pix.TextW(names[i], segF)
+            let sx = r.X + (r.Width - aw - Sc(6) - txw) / 2
+            Pix.Mono(g, art, Pix.Ink, sx, r.Y + (r.Height - aw) / 2, U)
+            Txt(g, names[i], segF, Rectangle(sx + aw + Sc(6), r.Y, txw + 4, r.Height), on ? Pix.TextC : WorkSettingsForm.Sub, Pix.LeftMid)
+            Hit("view:" + ids[i], r, true)
+        }
+    }
+
+    // ---- 格子：3×3 ----
+    func PaintGrid(_ g: Graphics) {
+        let W0 = Sc(600)
+        Txt(g, "打開的，公仔會提醒你", labF, Rectangle(0, Sc(66), W0, Sc(26)), Pix.C(0x7A4A22), Pix.Mid)
+        let x0 = Sc(30), y0 = Sc(98), tw = Sc(172), th = Sc(132), gx = Sc(12), gy = Sc(8)
+        for i in 0..<WorkSettingsForm.SRC.count {
+            let r = Rectangle(x0 + (i % 3) * (tw + gx), y0 + (i / 3) * (th + gy), tw, th)
+            Tile(g, WorkSettingsForm.SRC[i], r)
+        }
+    }
+
+    func Tile(_ g: Graphics, _ s: Src, _ r: Rectangle) {
+        let on = On(s.Id), lk = Lock(s.Id), hot = hoverId == "tile:" + s.Id
+        let edge: Color = lk ? Pix.Dim : (on ? Pix.C(0x2F6E24) : Pix.Ink)
+        var fill: Color
+        if lk { fill = Pix.C(0xF3EADB) }
+        else if on { fill = hot ? Pix.C(0xDFF0CC) : Pix.C(0xEAF6DC) }
+        else { fill = hot ? Pix.C(0xFFF3D6) : WorkSettingsForm.Paper }
+        let foot: Color = lk ? Pix.C(0xE2D6C0) : (on ? Pix.C(0xBFE0A6) : Pix.C(0xEAD7B4))
+        Pix.Round(g, edge, r.X, r.Y, r.Width, r.Height, U)
+        Pix.Box(g, fill, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U)
+        Pix.Box(g, foot, r.X + U, r.Bottom - 4 * U, r.Width - 2 * U, 3 * U)
+        Hit("tile:" + s.Id, r, true)
+        Pix.Mono(g, ["#..", "##.", "###", "##.", "#.."], Pix.C(0x8A6A4C), r.Right - Sc(16), r.Y + Sc(8), U)
+        // 圖示＋名字（同一行，置中）
+        var art: [String] = []
+        var pal = Dict<Character, Color>()
+        WorkSettingsForm.IconArt(s.Icon, &art, &pal)
+        let iu = Math.Max(2, Sc(4))
+        let iw = art[0].Length * iu, ih = art.count * iu
+        if lk { for ch in pal.Keys { pal[ch] = Pix.Mix(pal[ch], Pix.C(0xF3EADB), 0.55) } }   // 鎖住：圖示變淡
+        Pix.Art(g, art, pal, r.X + (r.Width - iw) / 2, r.Y + Sc(10) + (Sc(32) - ih) / 2, iu)
+        let nm = s.Id == "claude" ? "Claude Code、Codex" : s.Name
+        let nf: FontT = Pix.TextW(nm, tileNameF) > r.Width - Sc(16) ? labF : tileNameF
+        Txt(g, nm, nf, Rectangle(r.X + Sc(4), r.Y + Sc(44), r.Width - Sc(8), Sc(22)), lk ? Pix.C(0x806A50) : Pix.TextC, Pix.Mid)
+        if lk {
+            Txt(g, "先打開", subF, Rectangle(r.X, r.Y + Sc(74), r.Width, Sc(16)), WorkSettingsForm.MuteC, Pix.Mid)
+            Txt(g, "GitLab 或 GitHub", subF, Rectangle(r.X, r.Y + Sc(90), r.Width, Sc(16)), WorkSettingsForm.MuteC, Pix.Mid)
+            return
+        }
+        var st = "", kind = ""
+        var link: String? = nil
+        StateOf(s.Id, &st, &kind, &link)
+        if link != nil {
+            let how = HowText(s.Id)
+            let a = Pix.TextW(st, subF), b = Pix.TextW(how, subF), gap = Sc(8)
+            let sx = r.X + (r.Width - a - gap - b) / 2
+            Txt(g, st, subF, Rectangle(sx, r.Y + Sc(68), a + 4, Sc(18)), KindC(kind), Pix.LeftMid)
+            let lr = Rectangle(sx + a + gap, r.Y + Sc(66), b + 2, Sc(22))
+            Txt(g, how, subF, Rectangle(lr.X, r.Y + Sc(68), b + 4, Sc(18)), WorkSettingsForm.LinkC, Pix.LeftMid)
+            Pix.Box(g, WorkSettingsForm.LinkC, lr.X, r.Y + Sc(68) + Sc(16), b, Math.Max(1, U / 2))
+            Hit("howto:" + s.Id, Rectangle(sx - Sc(4), r.Y + Sc(63), a + gap + b + Sc(8), Sc(28)), true)
+        }
+        else { Txt(g, st, subF, Rectangle(r.X, r.Y + Sc(68), r.Width, Sc(18)), KindC(kind), Pix.Mid) }
+        Seg(g, s.Id, Rectangle(r.X + (r.Width - Sc(84)) / 2, r.Bottom - Sc(44), Sc(84), Sc(30)))
+    }
+
+    // 關｜開
+    func Seg(_ g: Graphics, _ id: String, _ r: Rectangle) {
+        let on = On(id), dis = Lock(id) || Missing(id).Contains("tool"), hot = hoverId == "sw:" + id
+        Pix.Round(g, dis ? Pix.Dim : Pix.Ink, r.X, r.Y, r.Width, r.Height, U)
+        let half = (r.Width - 3 * U) / 2
+        for i in 0..<2 {
+            let c = Rectangle(r.X + U + i * (half + U), r.Y + U, half, r.Height - 2 * U)
+            let pick = (i == 1) == on
+            var face: Color
+            if dis { face = Pix.C(0xF3EADB) }
+            else if pick { face = i == 1 ? Pix.C(0x7CC25F) : Pix.C(0xE2D6C0) }
+            else { face = hot ? Pix.C(0xFFF3D6) : Pix.C(0xFFFBF0) }
+            Pix.Box(g, face, c.X, c.Y, c.Width, c.Height)
+            if pick && !dis {
+                Pix.Box(g, i == 1 ? Pix.C(0xB6E29E) : Pix.C(0xF1E8D8), c.X, c.Y, c.Width, U)
+                Pix.Box(g, i == 1 ? Pix.C(0x4E9A3A) : Pix.C(0xC9B79A), c.X, c.Bottom - U, c.Width, U)
+            }
+            var tc: Color
+            if dis { tc = Pix.C(0x806A50) }
+            else if pick && i == 1 { tc = Pix.C(0x163D10) }
+            else { tc = pick ? Pix.TextC : WorkSettingsForm.Sub }
+            Txt(g, i == 0 ? "關" : "開", segF, c, tc, Pix.Mid)
+        }
+        Hit("sw:" + id, r, true)
+    }
+
+    // ---- 清單：左邊來源、右邊要填的 ----
+    func PaintList(_ g: Graphics) {
+        let p = PaneR()
+        let x = Sc(30), wd = p.X - x + U
+        // 全部
+        let all = Rectangle(x, p.Y, wd - U, Sc(36))
+        Tab(g, all, "all", "全部", nil, false, "")
+        let ty = p.Y + Sc(42), th = Sc(36)
+        for i in 0..<WorkSettingsForm.SRC.count {
+            let s = WorkSettingsForm.SRC[i]
+            let r = Rectangle(x, ty + i * (th + U), wd, th)
+            if s.Id != sel { Tab(g, r, "tab:" + s.Id, s.Short, s.Icon, false, Dot(s.Id)) }
+        }
+        // 右邊的紙（先畫，選到的頁籤蓋上去接起來）
+        Pix.Box(g, Pix.Ink, p.X, p.Y, p.Width, p.Height)
+        Pix.Box(g, WorkSettingsForm.Paper, p.X + U, p.Y + U, p.Width - 2 * U, p.Height - 2 * U)
+        for i in 0..<WorkSettingsForm.SRC.count {
+            let s = WorkSettingsForm.SRC[i]
+            if s.Id == sel { Tab(g, Rectangle(x, ty + i * (th + U), wd, th), "tab:" + s.Id, s.Short, s.Icon, true, Dot(s.Id)) }
+        }
+        if let cur = WorkSettingsForm.Find(sel) { PaintPane(g, cur, p) }
+    }
+
+    func Dot(_ id: String) -> String {
+        guard let s = WorkSettingsForm.Find(id) else { return "" }
+        if pending.Contains(id) { return "warn" }
+        var st = "", kind = ""
+        var link: String? = nil
+        StateOf(id, &st, &kind, &link)
+        if v[s.Key] != "1" || Lock(id) { return kind == "bad" ? "bad" : "" }
+        if kind == "bad" { return "bad" }
+        return kind == "warn" ? "warn" : (On(id) ? "on" : "")
+    }
+
+    func Tab(_ g: Graphics, _ r: Rectangle, _ id: String, _ name: String, _ icon: String?, _ selTab: Bool, _ dot: String) {
+        let hot = hoverId == id
+        if selTab {
+            Pix.Box(g, Pix.Ink, r.X, r.Y, r.Width, r.Height)
+            Pix.Box(g, WorkSettingsForm.Paper, r.X + U, r.Y + U, r.Width, r.Height - 2 * U)
+            Pix.Box(g, Pix.C(0xF6C453), r.X + U, r.Y + U, 2 * U, r.Height - 2 * U)
+        }
+        else {
+            Pix.Box(g, Pix.Ink, r.X, r.Y, r.Width, r.Height)
+            Pix.Box(g, hot ? Pix.C(0xFFF3D6) : Pix.C(0xF3E6CC), r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U)
+            Pix.Box(g, Pix.C(0xE2CFAE), r.X + U, r.Bottom - 2 * U, r.Width - 2 * U, U)
+        }
+        var tx = r.X + Sc(10)
+        if let ic = icon {
+            var art: [String] = []
+            var pal = Dict<Character, Color>()
+            WorkSettingsForm.IconArt(ic, &art, &pal)
+            Pix.Art(g, art, pal, tx, r.Y + (r.Height - art.count * U) / 2, U)
+            tx += art[0].Length * U + Sc(8)
+        }
+        else {
+            Pix.Mono(g, ["##.##", "##.##", ".....", "##.##", "##.##"], Pix.Ink, tx, r.Y + (r.Height - 5 * U) / 2, U)
+            tx += 5 * U + Sc(8)
+        }
+        Txt(g, name, labF, Rectangle(tx, r.Y, r.Right - tx - Sc(20), r.Height), Pix.TextC, Pix.LeftMid)
+        if icon != nil {
+            let ds = 5 * U, dx = r.Right - Sc(14) - ds, dy = r.Y + (r.Height - ds) / 2
+            var dc: Color
+            if dot == "on" { dc = Pix.C(0x5FB04A) }
+            else if dot == "warn" { dc = Pix.C(0xE0A03A) }
+            else { dc = dot == "bad" ? Pix.C(0xC95454) : WorkSettingsForm.Paper }
+            Pix.Round(g, dot == "" ? Pix.C(0x8A6A4C) : Pix.Ink, dx, dy, ds, ds, U)
+            Pix.Box(g, dc, dx + U, dy + U, ds - 2 * U, ds - 2 * U)
+            if dot == "bad" { Pix.Box(g, Color.White, dx + 2 * U, dy + 2 * U, U, U) }
+            if dot == "warn" { Pix.Box(g, Pix.Ink, dx + 2 * U, dy + 2 * U, U, U) }
+        }
+        Hit(id, r, true)
+    }
+
+    func PaintPane(_ g: Graphics, _ s: Src, _ p: Rectangle) {
+        let x = p.X + Sc(22), y = p.Y + Sc(18), right = p.Right - Sc(22)
+        var art: [String] = []
+        var pal = Dict<Character, Color>()
+        WorkSettingsForm.IconArt(s.Icon, &art, &pal)
+        let iu = Math.Max(2, Sc(3))
+        Pix.Art(g, art, pal, x, y + (Sc(30) - art.count * iu) / 2, iu)
+        Txt(g, s.Name, nameF, Rectangle(x + art[0].Length * iu + Sc(10), y, Sc(220), Sc(30)), Pix.TextC, Pix.LeftMid)
+        if !Lock(s.Id) { Seg(g, s.Id, Rectangle(right - Sc(84), y, Sc(84), Sc(30))) }
+        // 一句狀態
+        let ly = p.Y + Sc(58)
+        var st = "", kind = ""
+        var link: String? = nil
+        StateOf(s.Id, &st, &kind, &link)
+        let lead = LeadText(s.Id)
+        var lc: Color
+        if pending.Contains(s.Id) || kind == "warn" { lc = WorkSettingsForm.WarnC }
+        else if kind == "bad" { lc = WorkSettingsForm.BadC }
+        else { lc = kind == "ok" && lead == st ? WorkSettingsForm.OkC : WorkSettingsForm.MuteC }
+        let lw = Pix.TextW(lead, labF)
+        Txt(g, lead, labF, Rectangle(x + Sc(28), ly, lw + 4, Sc(22)), lc, Pix.LeftMid)
+        if link != nil {
+            let how = HowText(s.Id)
+            let b = Pix.TextW(how, labF)
+            let lr = Rectangle(x + Sc(28) + lw + Sc(10), ly, b + 2, Sc(22))
+            Txt(g, how, labF, lr, WorkSettingsForm.LinkC, Pix.LeftMid)
+            Pix.Box(g, WorkSettingsForm.LinkC, lr.X, lr.Y + Sc(19), b, Math.Max(1, U / 2))
+            Hit("howto:" + s.Id, lr, true)
+        }
+        let show = v[s.Key] == "1" || pending.Contains(s.Id)
+        // mac: 沒有 WSL：Claude、Codex 那頁沒有「別的資料夾」，也就不畫分隔的點線（C#：s.Id == "claude" || …）
+        if show && WorkSettingsForm.FILL.ContainsKey(s.Id) {
+            var dx = x
+            while dx + U <= right { Pix.Box(g, Pix.C(0xD8BF94), dx, p.Y + Sc(90), U, U); dx += 3 * U }
+            PaintForm(g, s, p, x, right)
+        }
+        // 提醒會像這樣
+        let sy = p.Bottom - Sc(86)
+        var say: String = s.Say
+        if s.Id == "meet" { let mb = v["meet_before"].Trim(); say = (mb == "" ? "5" : mb) + " 分鐘後開會" }
+        let pic: Bitmap! = w.WorkPalPic(Math.Max(3, CInt(Math.Round(3 * d))))
+        let pw = pic != nil ? pic.Width : 0, ph = pic != nil ? pic.Height : 0
+        let bw = Pix.TextW(say, labF) + Sc(20), bh = Sc(28)
+        let bx = right - pw - Sc(8) - bw
+        var byy = p.Bottom - Sc(6) - ph / 2 - bh / 2 - Sc(4)
+        if pic == nil { byy = sy + Sc(26) }
+        Txt(g, "提醒會像這樣", subF, Rectangle(x, byy, Sc(120), bh), WorkSettingsForm.Sub, Pix.LeftMid)   // 跟泡泡同一行
+        Pix.Round(g, Pix.C(0x7A4A22), bx, byy, bw, bh, U)
+        Pix.Box(g, Color.White, bx + U, byy + U, bw - 2 * U, bh - 2 * U)
+        for i in 0..<4 { Pix.Box(g, Pix.C(0x7A4A22), bx + bw - U + i * U, byy + bh / 2 - (4 - i) * U / 2, U, (4 - i) * U) }
+        Txt(g, say, labF, Rectangle(bx, byy, bw, bh), Pix.TextC, Pix.Mid)
+        if pic != nil { g.DrawImageUnscaled(pic, right - pw, p.Bottom - ph - Sc(6)) }
+    }
+
+    // 沒裝＝怎麼裝；裝了沒登入＝怎麼登入
+    func HowText(_ id: String) -> String { return Tool(id) == "nologin" ? "怎麼登入" : "怎麼裝" }
+    func HowUrl(_ id: String) -> String {
+        let login = Tool(id) == "nologin"
+        if id == "github" { return login ? "https://cli.github.com/manual/gh_auth_login" : WorkSettingsForm.HowGh }
+        return login ? "https://gitlab.com/gitlab-org/cli/-/blob/main/docs/source/auth/login.md" : WorkSettingsForm.HowGlab
+    }
+    // 紅色那格：空的＝要先填；填了但不對＝說哪裡不對
+    func BadText() -> String {
+        for k in bad {
+            guard let t = boxes.Get(k), t.Text.Trim() != "" else { continue }
+            switch k {
+            case "meet_url": return "紅色那格不是網址"
+            case "jira_email": return "紅色那格不是信箱"
+            case "vpn_host": return "紅色那格不是主機名稱"
+            case "worklog_dir": return "紅色那格的資料夾找不到"
+            case "meet_before": return "紅色那格要填 1 到 120"
+            default: break
+            }
+        }
+        return "要先填紅色的格子"
+    }
+
+    func LeadText(_ id: String) -> String {
+        guard let s = WorkSettingsForm.Find(id) else { return "" }
+        var st = "", kind = ""
+        var link: String? = nil
+        StateOf(id, &st, &kind, &link)
+        if pending.Contains(id) && Missing(id).Count > 0 { return bad.Count > 0 ? BadText() : (WorkSettingsForm.FILL.Get(id) ?? "") }
+        if bad.Count > 0 && WorkSettingsForm.FILL.ContainsKey(id) { return BadText() }
+        if link != nil || kind == "bad" { return st }
+        if Lock(id) { return st }
+        if kind == "warn", let need = WorkSettingsForm.NEED.Get(id) { return need }
+        if let sub = s.Sub { return sub }
+        return kind == "ok" ? st : ""
+    }
+
+    func PaintForm(_ g: Graphics, _ s: Src, _ p: Rectangle, _ x: Int, _ right: Int) {
+        switch s.Id {
+        case "claude":
+            // mac: 沒有 WSL：不放「別的資料夾」（C# 在這裡畫展開箭頭、「別的資料夾」連結 Hit("adv")，展開時 Claude／Codex 資料夾兩格）
+            break
+        case "jira":
+            Field(g, 0, "網站", "jira_site", 0, "yourteam.atlassian.net")
+            Field(g, 1, "信箱", "jira_email", 0, "you@yourteam.com")
+            Field(g, 2, "API token", "token", 0, w.HasJiraToken() ? "已經存了，要換才貼" : "貼上 token")
+            do {
+                let ny = FieldY(3) - Sc(4)
+                Txt(g, "token 只存在這台電腦", subF, Rectangle(x, ny, Sc(200), Sc(20)), WorkSettingsForm.Sub, Pix.LeftMid)
+                let how = "去建立 token"
+                let b = Pix.TextW(how, subF)
+                let lr = Rectangle(right - b, ny, b + 2, Sc(22))
+                Txt(g, how, subF, Rectangle(lr.X, ny, b + 4, Sc(20)), WorkSettingsForm.LinkC, Pix.LeftMid)
+                Pix.Box(g, WorkSettingsForm.LinkC, lr.X, ny + Sc(17), b, Math.Max(1, U / 2))
+                Hit("howto:jira", lr, true)
+            }
+        case "meet":
+            Field(g, 0, "行事曆網址", "meet_url", 0, "https:// 或 webcal://")
+            do {
+                let ry = FieldY(1) + Sc(6)
+                Txt(g, "開會前", labF, Rectangle(x, ry, Sc(56), Sc(28)), Pix.TextC, Pix.LeftMid)
+                Frame(g, Rectangle(x + Sc(56), ry, Sc(56), Sc(28)), "meet_before")
+                stops.Add("tbpos:meet_before")
+                Txt(g, "分鐘提醒", labF, Rectangle(x + Sc(122), ry, Sc(100), Sc(28)), Pix.TextC, Pix.LeftMid)
+                let cy = ry + Sc(42), cs = Sc(20)
+                let q = v["meet_quiet"] == "1"
+                Pix.Round(g, Pix.Ink, x, cy, cs, cs, U)
+                Pix.Box(g, q ? Pix.C(0x5FB04A) : WorkSettingsForm.Paper, x + U, cy + U, cs - 2 * U, cs - 2 * U)
+                if q { Pix.Mono(g, Pix.CHECK, Color.White, x + (cs - 5 * U) / 2, cy + (cs - 5 * U) / 2, U) }
+                Txt(g, "開會時自動安靜", labF, Rectangle(x + cs + Sc(10), cy - Sc(2), Sc(160), cs + Sc(4)), Pix.TextC, Pix.LeftMid)
+                Hit("quiet", Rectangle(x, cy, cs + Sc(10) + Pix.TextW("開會時自動安靜", labF), cs), true)
+            }
+        case "rain": Field(g, 0, "地點", "rain_place", 0, "台北 或 25.03,121.56")
+        case "net": Field(g, 0, "主機", "vpn_host", 0, "intranet.example.com")
+        case "worklog":
+            Field(g, 0, "資料夾", "worklog_dir", Sc(88), "/Users/me/Documents/日誌")   // mac: C# 是 C:\Users\me\Documents\日誌
+            do {
+                let fb = FieldBox(0, 0)
+                let br = Rectangle(fb.Right - Sc(80), fb.Y, Sc(80), fb.Height)
+                SmallButton(g, "pickdir", "選資料夾", br)
+            }
+        default: break
+        }
+    }
+
+    // 一格：上面一行字、下面輸入框的像素框（空的時候畫提示字）
+    func Field(_ g: Graphics, _ i: Int, _ label: String, _ key: String, _ cut: Int, _ ph: String) {
+        var r = FieldBox(i, 0)
+        if cut > 0 { r.Width -= cut }
+        Txt(g, label, labF, Rectangle(r.X, FieldY(i) - Sc(2), Sc(200), Sc(20)), bad.Contains(key) ? WorkSettingsForm.BadC : Pix.TextC, Pix.LeftMid)
+        Frame(g, r, key)
+        stops.Add("tbpos:" + key)
+        if let t = boxes.Get(key) { Cue(t, ph) }   // 空的時候的提示字：交給輸入框自己畫（mac: placeholder），離屏時 PaintTo 畫
+    }
+
+    func Frame(_ g: Graphics, _ r: Rectangle, _ key: String) {
+        let isBad = bad.Contains(key), foc = focusStop == "tb:" + key
+        Pix.Round(g, isBad ? WorkSettingsForm.BadC : (foc ? Pix.Ink : Pix.C(0x8A6A4A)), r.X, r.Y, r.Width, r.Height, U)
+        if foc { Pix.Round(g, Pix.Ink, r.X - U, r.Y - U, r.Width + 2 * U, r.Height + 2 * U, U) }
+        Pix.Box(g, isBad ? Pix.C(0xFDECEA) : WorkSettingsForm.Paper, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U)
+        Pix.Box(g, Pix.C(0xEAD7B4), r.X + U, r.Y + U, r.Width - 2 * U, U)
+    }
+
+    func SmallButton(_ g: Graphics, _ id: String, _ text: String, _ r: Rectangle) {
+        let hot = hoverId == id
+        Pix.Round(g, Pix.Ink, r.X, r.Y, r.Width, r.Height, U)
+        Pix.Box(g, hot ? Pix.C(0xFFF3D6) : Pix.C(0xFFFBF0), r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U)
+        Pix.Box(g, Pix.C(0xDCC6A2), r.X + U, r.Bottom - 2 * U, r.Width - 2 * U, U)
+        Txt(g, text, subF, Rectangle(r.X, r.Y, r.Width, r.Height - U), Pix.TextC, Pix.Mid)
+        Hit(id, r, true)
+    }
+
+    func Button(_ g: Graphics, _ id: String, _ text: String, _ r: Rectangle, _ main: Bool) {
+        let hot = hoverId == id
+        var face: Color
+        if main { face = hot ? Pix.C(0xFFD36A) : Pix.C(0xF6C453) }
+        else { face = hot ? Pix.C(0xFFF3D6) : Pix.C(0xFFFBF0) }
+        let shade: Color = main ? Pix.C(0xC8902C) : Pix.C(0xDCC6A2)
+        Pix.Round(g, Pix.Ink, r.X, r.Y, r.Width, r.Height, U)
+        Pix.Box(g, face, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U)
+        Pix.Box(g, shade, r.X + U, r.Bottom - 3 * U, r.Width - 2 * U, 2 * U)
+        Pix.Box(g, Pix.Mix(face, Color.White, 0.6), r.X + 2 * U, r.Y + U, r.Width - 4 * U, U)
+        Txt(g, text, btnF, Rectangle(r.X, r.Y, r.Width, r.Height - 2 * U), Pix.TextC, Pix.Mid)
+        Hit(id, r, true)
+    }
+
+    // ---- 圖示（8×8 以內的像素圖）----
+    static func IconArt(_ n: String, _ art: inout [String], _ pal: inout Dict<Character, Color>) {
+        pal = Dict<Character, Color>()
+        pal["k"] = Pix.Ink
+        switch n {
+        case "claude": art = ["kkkkkkkk", "kddddddk", "kdgddddk", "kddgdddk", "kdgdggdk", "kddddddk", "kkkkkkkk"]; pal["d"] = Pix.C(0x5A4632); pal["g"] = Pix.C(0xF4A06A)
+        case "jira": art = ["kkkkkkkk", "kbbbbbbk", "kbwwwwbk", ".kbbbbk.", "kbwwwbbk", "kbbbbbbk", "kkkkkkkk"]; pal["b"] = Pix.C(0x6E9BD8); pal["w"] = Pix.C(0xE4EEFA)
+        case "gitlab": art = [".k...k.", "kpk.kpk", ".k...k.", ".k..k..", ".k.k...", ".kk....", "kpk....", ".k....."]; pal["p"] = Pix.C(0xE2763A)
+        case "github": art = [".k...k.", "kpk.kpk", ".k...k.", ".k..k..", ".k.k...", ".kk....", "kpk....", ".k....."]; pal["p"] = Pix.C(0x7A8696)
+        case "tag": art = ["kkkkk...", "kyyyyk..", "kywyyyk.", "kyyyyyyk", "kyyyyyk.", "kyyyyk..", "kkkkk..."]; pal["y"] = Pix.C(0xF0C24E); pal["w"] = Pix.C(0xFFF6E4)
+        case "meet": art = [".k...k..", "kkkkkkkk", "krrrrrrk", "kwwwwwwk", "kwkwkwwk", "kwwwwwwk", "kwkwwwwk", "kkkkkkkk"]; pal["r"] = Pix.C(0xE07856); pal["w"] = Pix.C(0xFFFDF7)
+        case "rain": art = ["...kkk..", ".kkwwwk.", "kwwwwwwk", "kwwwwwwk", ".kkkkkk.", ".b..b..b", "b..b..b."]; pal["w"] = Pix.C(0xE9EEF5); pal["b"] = Pix.C(0x4F86C9)
+        case "net": art = ["..k..k..", "..k..k..", ".kkkkkk.", ".kggggk.", ".kggggk.", "..kggk..", "...kk...", "...k...."]; pal["g"] = Pix.C(0x9FC3E6)
+        default: art = ["kkk.....", "kyyk....", "kkkkkkkk", "kyyyyyyk", "kyyyyyyk", "kyyyyyyk", "kkkkkkkk"]; pal["y"] = Pix.C(0xF0C24E)   // folder
+        }
+    }
+}
+
 // ===== 95_standalone.swift =====
-// 95_standalone.swift — 獨立版 Desk Pals.app（不用 VS Code）的開場：只有從 .app 包裡跑的時候才做事，
+// 95_standalone.swift — 獨立版 WoWo Pals.app（0.10 以前叫 Desk Pals.app；不用 VS Code）的開場：只有從 .app 包裡跑的時候才做事，
 // VS Code 擴充套件編出來的那支（desk-pals.sh）、CI 的離屏測試（DESKPALS_OFFSCREEN=1）都不受影響。
 //   ・已經開著：叫它出來打個招呼就結束（不會開兩個）
 //   ・寫 ~/Library/Application Support/DeskPals/standalone.json：VS Code 擴充套件看到就不再自己編一份、不建開機啟動，只負責連上
@@ -28491,6 +34350,7 @@ extension World {
 //     擴充套件那份還開著的話先請它收工，再換這個上來
 //   ・還在「下載項目」／DMG 裡直接打開（App Translocation）：提醒先拖進「應用程式」，這次不設開機啟動
 //   ・在 Finder／Launchpad 再點一次：叫公仔打招呼
+//   ・0.11 改名：同一個資料夾裡舊名字的「Desk Pals.app」（同一個 bundle id）換下來之後丟到垃圾桶（Windows 升級也會拿掉舊名字的捷徑）
 // 由 99_main.swift 在 App.Main() 之前呼叫。
 import AppKit
 import Carbon
@@ -28520,9 +34380,23 @@ enum Standalone {
             _ = Send(sock, "quit")
             WaitUnlocked(sock + ".lock", 10)
         }
+        if !translocated { RetireOldApp(bundle) }
         if translocated { AskToMove() }
         reopen = ReopenHandler(sock)
         NotificationCenter.default.addObserver(forName: NSApplication.didFinishLaunchingNotification, object: nil, queue: .main) { _ in reopen?.Install() }
+    }
+
+    // 0.11：App 改名 WoWo Pals.app（bundle id 不變，開機啟動照舊）。拖進「應用程式」時舊的 Desk Pals.app 不會被蓋掉 → 丟到垃圾桶（還撿得回來）
+    static func RetireOldApp(_ bundle: String) {
+        let old = ((bundle as NSString).deletingLastPathComponent as NSString).appendingPathComponent("Desk Pals.app")
+        if old == bundle || !FileManager.default.fileExists(atPath: old) { return }
+        guard let ob = Bundle(path: old), let oid = ob.bundleIdentifier, oid == Bundle.main.bundleIdentifier else { return }
+        do {
+            try FileManager.default.trashItem(at: URL(fileURLWithPath: old), resultingItemURL: nil)
+            App.Log("standalone: moved the old Desk Pals.app to the Trash")
+        } catch {
+            App.Log("standalone: could not move the old Desk Pals.app to the Trash: " + error.localizedDescription)
+        }
     }
 
     static func WriteMarker(_ bundle: String, _ exe: String) {
@@ -28577,7 +34451,7 @@ enum Standalone {
         app.setActivationPolicy(.accessory)
         app.activate(ignoringOtherApps: true)
         let al = NSAlert()
-        al.messageText = "先把「Desk Pals」拖進「應用程式」資料夾"
+        al.messageText = "先把「WoWo Pals」拖進「應用程式」資料夾"
         al.informativeText = "現在是直接從下載的地方（或磁碟映像檔）打開的：這次也能玩，但開機不會自動出現。\n\n把它拖進「應用程式」資料夾，再從那裡打開一次就好了。"
         al.addButton(withTitle: "好")
         al.runModal()
