@@ -1,0 +1,70 @@
+# 期末考週造型（NT$100）｜meidian（tools/costume.py build 產生，別手改；改 tools/defs.py 再重跑）
+# 座標＝2x 圖的像素（1x 全部除以 2），原點＝公仔原圖左上角；x y＝配件圖「中心」要放的位置；角度順時針；倍率 1＝配件圖原尺寸
+# pad 左 上 右 下：配件最多超出公仔原畫布多少，畫的時候畫布要先加大這麼多
+# piece 名稱 寬 高（2x 圖；檔案在這個資料夾的 <1x|2x>/<名稱>.png，白邊 <名稱>.halo.png 同尺寸）
+# <動作> <配件> <back|front> x y 角度 倍率 左右翻轉(0/1)；一個動作可以有好幾行，照順序畫；沒有任何一行的動作＝不戴
+pad 0 0 0 0
+piece e_band 136 56
+piece e_book 70 68
+piece e_glasses 108 54
+piece e_pencil 46 48
+stand e_band front 148 50 0 1 0
+stand e_glasses front 122 88 0 1 0
+stand e_book front 136 142 -6 1 0
+stand e_pencil front 184 40 0 1 0
+walk1 e_band front 149.1 51.2 2.7 1 0
+walk1 e_glasses front 121.3 88 2.7 1 0
+walk1 e_book front 132.8 142.6 -3.3 1 0
+walk1 e_pencil front 185.5 42.9 2.7 1 0
+walk2 e_band front 150.5 52.6 5.3 1 0
+walk2 e_glasses front 121.1 88 5.3 1 0
+walk2 e_book front 130.1 143 -0.7 1 0
+walk2 e_pencil front 187.3 45.9 5.3 1 0
+jump e_band front 151.5 42.2 2.6 1 0
+jump e_glasses front 123.8 79 2.6 1 0
+jump e_book front 135.4 133.6 -3.4 1 0
+jump e_pencil front 187.9 33.9 2.6 1 0
+sleep e_band front 142.1 72.7 -22.4 1 0
+sleep e_glasses front 132.5 117.7 -22.4 1 0
+sleep e_pencil front 171.6 49.7 -22.4 1 0
+happy e_band front 150 47 0 1 0
+happy e_glasses front 124 85 0 1 0
+happy e_book front 138 139 -6 1 0
+happy e_pencil front 186 37 0 1 0
+held e_band front 158 53.2 2.5 1 0
+held e_glasses front 130.3 90 2.5 1 0
+held e_book front 141.9 144.6 -3.5 1 0
+held e_pencil front 194.4 44.8 2.5 1 0
+sit e_band front 153 57 9 1 0
+sit e_glasses front 121.4 90.5 9 1 0
+sit e_book front 126.7 146 3 1 0
+sit e_pencil front 190.1 52.8 9 1 0
+grab e_band front 167.6 53.1 6.3 1 0
+grab e_glasses front 137.6 88 6.3 1 0
+grab e_pencil front 204.5 47.1 6.3 1 0
+push e_band front 178.5 46.6 -3.3 1 0
+push e_glasses front 154.7 86 -3.3 1 0
+push e_book front 171.8 139.1 -9.3 1 0
+push e_pencil front 213.9 34.5 -3.3 1 0
+cry e_band front 155 44 0 1 0
+cry e_glasses front 129 82 0 1 0
+cry e_pencil front 191 34 0 1 0
+blown e_band front 181.6 64.9 30.5 1 0
+blown e_glasses front 140 84.4 30.5 1 0
+blown e_book front 124.7 138.1 24.5 1 0
+blown e_pencil front 217.7 74.5 30.5 1 0
+sig1 e_band front 153.5 45 0 1 0
+sig1 e_glasses front 127.5 83 0 1 0
+sig1 e_book front 155.5 137 -6 1 0
+sig1 e_pencil front 189.5 35 0 1 0
+sig2 e_band front 146 116 0 1 0
+sig2 e_glasses front 120 154 0 1 0
+sig2 e_pencil front 182 106 0 1 0
+surprised e_band front 150.9 37.1 2.4 1 0
+surprised e_glasses front 123.3 74 2.4 1 0
+surprised e_book front 135 128.5 -3.6 1 0
+surprised e_pencil front 187.3 28.7 2.4 1 0
+pout e_band front 153.2 35.1 1.3 1 0
+pout e_glasses front 126.4 72.5 1.3 1 0
+pout e_book front 139.2 126.8 -4.7 1 0
+pout e_pencil front 189.5 25.9 1.3 1 0

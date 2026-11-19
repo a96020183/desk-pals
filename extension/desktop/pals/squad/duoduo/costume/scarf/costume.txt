@@ -1,0 +1,23 @@
+# 同款小圍巾（常駐，打卡 30 天）｜duoduo（tools/costume.py build 產生，別手改；改 tools/defs.py 再重跑）
+# 座標＝2x 圖的像素（1x 全部除以 2），原點＝公仔原圖左上角；x y＝配件圖「中心」要放的位置；角度順時針；倍率 1＝配件圖原尺寸
+# pad 左 上 右 下：配件最多超出公仔原畫布多少，畫的時候畫布要先加大這麼多
+# piece 名稱 寬 高（2x 圖；檔案在這個資料夾的 <1x|2x>/<名稱>.png，白邊 <名稱>.halo.png 同尺寸）
+# <動作> <配件> <back|front> x y 角度 倍率 左右翻轉(0/1)；一個動作可以有好幾行，照順序畫；沒有任何一行的動作＝不戴
+pad 0 0 0 0
+piece scarf_drape 104 86
+stand scarf_drape front 96.7 153.5 19 1 0
+walk1 scarf_drape front 87.6 143.2 11 1 0
+walk2 scarf_drape front 135.7 135 24 1 0
+jump scarf_drape front 97.4 134.5 19 1 0
+sleep scarf_drape front 98 156.2 19 1 0
+happy scarf_drape front 96.9 154.1 19 1 0
+held scarf_drape front 97.5 125.2 31 1 0
+sit scarf_drape front 95.7 145.1 19 1 0
+grab scarf_drape front 93.9 145.2 19 1 0
+push scarf_drape front 84.9 144.6 19 1 0
+cry scarf_drape front 95.2 145.1 19 1 0
+blown scarf_drape front 83.5 127.3 44 1 0
+sig1 scarf_drape front 108.6 155.5 19 1 0
+sig2 scarf_drape front 134.6 134.9 31 1 0
+surprised scarf_drape front 105.5 121.6 23 1 0
+pout scarf_drape front 97.3 154.2 19 1 0

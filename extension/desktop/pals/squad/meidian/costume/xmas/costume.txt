@@ -1,0 +1,56 @@
+# 聖誕造型（NT$100）｜meidian（tools/costume.py build 產生，別手改；改 tools/defs.py 再重跑）
+# 座標＝2x 圖的像素（1x 全部除以 2），原點＝公仔原圖左上角；x y＝配件圖「中心」要放的位置；角度順時針；倍率 1＝配件圖原尺寸
+# pad 左 上 右 下：配件最多超出公仔原畫布多少，畫的時候畫布要先加大這麼多
+# piece 名稱 寬 高（2x 圖；檔案在這個資料夾的 <1x|2x>/<名稱>.png，白邊 <名稱>.halo.png 同尺寸）
+# <動作> <配件> <back|front> x y 角度 倍率 左右翻轉(0/1)；一個動作可以有好幾行，照順序畫；沒有任何一行的動作＝不戴
+pad 0 18 14 0
+piece x_antlers 104 78
+piece x_lights 136 120
+piece x_sock 52 68
+stand x_antlers front 134 38 0 1 0
+stand x_lights front 134 142 0 1 0
+stand x_sock front 233.3 145.3 -55 1 0
+walk1 x_antlers front 135.6 38.6 2.7 1 0
+walk1 x_lights front 130.8 142.5 2.7 1 0
+walk1 x_sock front 210.1 180.4 10 1 0
+walk2 x_antlers front 137.7 39.3 5.3 1 0
+walk2 x_lights front 128.1 142.9 5.3 1 0
+walk2 x_sock front 202.1 180.4 10 1 0
+jump x_antlers front 138.1 29.6 2.6 1 0
+jump x_lights front 133.4 133.5 2.6 1 0
+jump x_sock front 240 114.8 -70 1 0
+sleep x_antlers front 84 130 -90 1 0
+sleep x_lights front 164.2 163.1 -22.4 1 0
+sleep x_sock front 236.1 116.5 -60 1 0
+happy x_antlers front 136 35 0 1 0
+happy x_lights front 136 139 0 1 0
+happy x_sock front 232.3 138.3 -55 1 0
+held x_antlers front 144.5 40.6 2.5 1 0
+held x_lights front 139.9 144.5 2.5 1 0
+held x_sock front 114 198 90 1 0
+sit x_antlers front 141.1 43 9 1 0
+sit x_lights front 124.7 145.7 9 1 0
+sit x_sock front 222.3 161.3 -20 1 0
+grab x_antlers front 155 39.6 6.3 1 0
+grab x_lights front 143.5 143 6.3 1 0
+grab x_sock front 233.3 133.3 -55 1 0
+push x_antlers front 163.9 35.4 -3.3 1 0
+push x_lights front 169.8 139.2 -3.3 1 0
+push x_sock front 68.3 93.8 -130 1 0
+cry x_antlers front 141 32 0 1 0
+cry x_lights front 141 136 0 1 0
+cry x_sock front 228.4 147.1 -50 1 0
+blown x_antlers front 175.7 47.4 30.5 1 0
+blown x_lights front 122.9 137.1 30.5 1 0
+blown x_sock front 83.3 59.7 -110 1 0
+sig1 x_antlers front 139.5 33 0 1 0
+sig1 x_lights front 139.5 137 0 1 0
+sig2 x_antlers front 88 132 -90 1 0
+sig2 x_lights front 146 164 0 1 0
+sig2 x_sock front 236.5 153.1 -30 1 0
+surprised x_antlers front 137.4 24.6 2.4 1 0
+surprised x_lights front 133 128.5 2.4 1 0
+surprised x_sock front 226.3 138.3 -55 1 0
+pout x_antlers front 139.5 22.8 1.3 1 0
+pout x_lights front 137.2 126.8 1.3 1 0
+pout x_sock front 227.4 115.1 -50 1 0

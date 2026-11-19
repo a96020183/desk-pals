@@ -1,0 +1,27 @@
+# 季節商店的價錢和付款方式（DeskPals.Shop.cs 的 ShopConfig 讀這份；跟其他 pals 檔一起內嵌進 exe）。
+# 一行一個 key=值。網址要 https:// 開頭；沒填＝畫面上那顆按鈕先不出現。改完重編 exe。
+# 季節商品：一樣 NT$100／HK$25（兩櫃都套用）
+price_item_twd=100
+price_item_hkd=25
+# 綠界收款連結（後台「收款連結」，一樣一條）
+ecpay_xmas_costume=
+ecpay_xmas_cabinet=
+ecpay_exam_costume=
+ecpay_exam_cabinet=
+# 請他們喝杯咖啡：一杯 NT$60（約 HK$15），1～3 杯，綠界一杯數一條
+coffee_twd=60
+coffee_hkd=15
+ecpay_coffee_1=
+ecpay_coffee_2=
+ecpay_coffee_3=
+# 香港：FPS 識別碼、收款人名字（顯示給使用者看，付款後把截圖寄到 mail）
+fps_id=
+fps_name=
+mail=a96020183@gmail.com
+# 訂做公仔：原價單隻、雙人；早鳥單隻（前 20 單）；預約表單網址
+custom_one_twd=500
+custom_two_twd=1000
+custom_early_twd=300
+custom_early_hkd=70
+custom_early_slots=20
+custom_form=

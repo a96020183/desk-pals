@@ -146,6 +146,7 @@ namespace DeskPals
         public bool Shadow;          // 腳下畫一層很淡的落地陰影（窩伴小世界：圖沒有白邊，淺色桌布上輪廓偏弱；<資料夾>.txt 的 shadow 1）
         public int BodyTop = -1, BodyH = -1, BodyLeft = -1, BodyW = -1;
         public Dictionary<string, SqLiquid> Liquid;
+        public SqCostume Costume;        // 季節商店／打卡的造型：疊在動作圖上的配件（DeskPals.Shop.cs）
         public double AX { get { return AnchorX >= 0 ? AnchorX : W / 2.0; } }
         public double AY { get { return AnchorY >= 0 ? AnchorY : H; } }
         public bool HasFrame(string k) { return Frames.ContainsKey(k); }
@@ -901,6 +902,8 @@ namespace DeskPals
             int below = (int)Math.Ceiling(s.H - s.AY);   // 腳底以下還有圖（跳的動作線、垂下來的電線）
             mb = Math.Max(2 * R, (ext - s.H) / 2 + 2 * R) + below;
             ch = (int)Math.Ceiling(s.AY) + mt + mb;
+            SqCostume co = s.Costume;   // 造型配件超出動作圖的範圍：畫布四邊加大，才不會切到
+            if (co != null) { cw += 2 * Math.Max(co.PadL, co.PadR); ch += co.PadT + co.PadB; mb += co.PadB; }
             if (cw % 2 == 1) cw++;
         }
 
@@ -990,7 +993,7 @@ namespace DeskPals
                 if (Math.Abs(p.Sx - 1) > 0.001 || Math.Abs(p.Sy - 1) > 0.001) m.Scale((float)p.Sx, (float)p.Sy);
                 float L = s.AnchorX >= 0 ? (float)-s.AnchorX : -(s.W / 2), T = -ay;
                 Bitmap fr;
-                if (p.Frame != null && s.Frames.TryGetValue(p.Frame, out fr)) { if (s.Liquid != null) { Bitmap lq = SqBattery.Frame(s, p.Frame); if (lq != null) fr = lq; } CuPut(cg, m, fr, L, T, 0, 0, 0, 0, 0); return; }
+                if (p.Frame != null && s.Frames.TryGetValue(p.Frame, out fr)) { if (s.Liquid != null) { Bitmap lq = SqBattery.Frame(s, p.Frame); if (lq != null) fr = lq; } if (s.Costume != null) s.Costume.DrawUnder(cg, m, p.Frame, L, T); CuPut(cg, m, fr, L, T, 0, 0, 0, 0, 0); if (s.Costume != null) s.Costume.DrawOver(cg, m, p.Frame, L, T); return; }
                 if (!s.Rig) { Bitmap st = s.Stand; if (s.Liquid != null) { Bitmap lq = SqBattery.Frame(s, "stand"); if (lq != null) st = lq; } CuPut(cg, m, st, L, T, 0, 0, 0, 0, 0); return; }
                 // 腳（踩在地上；抬腳往上、轉繞腳的最上面）
                 if (!p.NoLegs)

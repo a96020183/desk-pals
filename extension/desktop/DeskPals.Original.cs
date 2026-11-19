@@ -1293,7 +1293,7 @@ namespace DeskPals
             if (batForceCharge) { SqBattery.Charging = true; SqBattery.Level = Math.Min(1, SqBattery.Level + dt / 600); }
             else BatTick(dt);
             if (!OrigLineup) return;
-            if (WobanLineup) WbTick(dt);
+            WaterTick(dt);   // 喝水提醒（兩櫃共用，DeskPals.Shop.cs）
             if (LunchState != oLunchSeen)
             {
                 if (LunchState == "eat" && oLunchSeen == "" && OutCount() >= 2) Later(4, delegate { if (scene == null && OrigLineup) OrigScene("lunch"); });

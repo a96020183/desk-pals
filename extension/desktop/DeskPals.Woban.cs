@@ -325,7 +325,7 @@ namespace DeskPals
             return false;
         }
 
-        // 破破：喝水提醒（World.WbTick 定時叫）
+        // 破破：喝水提醒（World.WaterTick 定時叫，DeskPals.Shop.cs）
         public void WbWater()
         {
             WakeIfSleep();
@@ -362,21 +362,6 @@ namespace DeskPals
     // ================= World：喝水提醒、休息由綿綿講、專注由翻翻陪；選單；兩兩串場 =================
     partial class World
     {
-        public const double WbWaterMin = 45;   // 破破：連續用電腦幾分鐘提醒喝一次水（離開電腦就重算）
-        double wbWater;
-
-        void WbTick(double dt)
-        {
-            if (sysIdle) { wbWater = 0; return; }
-            wbWater += dt;
-            if (wbWater < WbWaterMin * 60) return;
-            if (scene != null || Hidden || focusOn || quietOn || !Feat("wb_water")) return;   // 忙的時候先不吵：等一下再講
-            Pet b = Get("bobo");
-            if (b == null || !b.Out || !b.Grounded() || b.InScene) return;
-            wbWater = 0;
-            b.WbWater();
-        }
-
         // 用太久電腦的休息提醒：窩伴小世界由綿綿講（她在外面的話；蓋毯子抱月亮枕），其他櫃照舊
         Pet RestPet()
         {

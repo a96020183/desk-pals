@@ -1,0 +1,53 @@
+# 期末考週造型（NT$100）｜fanfan（tools/costume.py build 產生，別手改；改 tools/defs.py 再重跑）
+# 座標＝2x 圖的像素（1x 全部除以 2），原點＝公仔原圖左上角；x y＝配件圖「中心」要放的位置；角度順時針；倍率 1＝配件圖原尺寸
+# pad 左 上 右 下：配件最多超出公仔原畫布多少，畫的時候畫布要先加大這麼多
+# piece 名稱 寬 高（2x 圖；檔案在這個資料夾的 <1x|2x>/<名稱>.png）
+# <動作> <配件> <back|front> x y 角度 倍率 左右翻轉(0/1)；一個動作可以有好幾行，照順序畫；沒有任何一行的動作＝不戴
+pad 0 0 0 0
+piece e_band_c 134 48
+piece e_book_c 60 64
+piece e_glasses_c 88 40
+stand e_band_c front 145.3 114.7 -2.7 0.84 0
+stand e_glasses_c front 138.6 143 -2.7 1 0
+stand e_book_c front 141 193.9 -8.7 0.9 0
+walk1 e_band_c front 162 115 0 0.84 0
+walk1 e_glasses_c front 154 143 0 1 0
+walk1 e_book_c front 154 194 -6 0.9 0
+walk2 e_band_c front 162 113 0 0.84 0
+walk2 e_glasses_c front 154 141 0 1 0
+walk2 e_book_c front 154 192 -6 0.9 0
+jump e_band_c front 149.1 101.8 -15.3 0.84 0
+jump e_glasses_c front 148.8 130.9 -15.3 1 0
+jump e_book_c front 162.2 180.1 -21.3 0.9 0
+sleep e_band_c front 157 179 0 0.84 0
+sleep e_glasses_c front 149 207 0 1 0
+happy e_band_c front 147 111.4 -4.6 0.84 0
+happy e_glasses_c front 141.2 140 -4.6 1 0
+happy e_book_c front 145.3 190.8 -10.6 0.9 0
+held e_band_c front 145.7 125.4 2.7 0.84 0
+held e_glasses_c front 136.4 153 2.7 1 0
+held e_book_c front 134 203.9 -3.3 0.9 0
+sit e_band_c front 143.7 126 -4 0.84 0
+sit e_glasses_c front 137.7 154.5 -4 1 0
+sit e_book_c front 141.3 205.4 -10 0.9 0
+grab e_band_c front 143.3 123.7 -7.3 0.84 0
+grab e_glasses_c front 138.9 152.5 -7.3 1 0
+push e_band_c front 175.2 124.5 -12.3 0.84 0
+push e_glasses_c front 183.1 151.4 -12.3 1 0
+push e_book_c front 164.7 207.6 -18.3 0.9 0
+cry e_band_c front 140.7 114.8 -6.3 0.84 0
+cry e_glasses_c front 135.8 143.5 -6.3 1 0
+blown e_band_c front 152.6 95 -25.2 0.84 0
+blown e_glasses_c front 157.3 123.7 -25.2 1 0
+blown e_book_c front 179 169.9 -31.2 0.9 0
+sig1 e_band_c front 145.8 129.3 -1.5 0.84 0
+sig1 e_glasses_c front 138.6 157.5 -1.5 1 0
+sig2 e_band_c front 144.2 104.7 -7.5 0.84 0
+sig2 e_glasses_c front 139.9 133.5 -7.5 1 0
+sig2 e_book_c front 146.6 184 -13.5 0.9 0
+surprised e_band_c front 154.7 113.6 -2.9 0.84 0
+surprised e_glasses_c front 148.1 142 -2.9 1 0
+surprised e_book_c front 150.7 192.9 -8.9 0.9 0
+pout e_band_c front 143.9 116 -10.3 0.84 0
+pout e_glasses_c front 141 145 -10.3 1 0
+pout e_book_c front 150.2 195.1 -16.3 0.9 0

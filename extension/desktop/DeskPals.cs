@@ -2986,6 +2986,9 @@ namespace DeskPals
         // 收起來的樣子（mini.txt＋{1x,2x}/mini.png，tools/shelf_art/mini_art.py 產生）：紙箱櫃＝封好的小紙箱、書包小屋＝小書包；圖讀不到就畫以前的像素蛋
         public int MiniLid = 42;                               // 蓋子／提把跟下面的分界（2x 圖的像素）：吞公仔時上面那塊往上掀
         public string MiniName = "小紙箱", Btn = "ink";        // 選單、泡泡裡的叫法；收合鈕的畫風（ink＝白邊黑線貼紙、clay＝黏土）
+        public string Skin = "";                               // 季節商店的櫃子外觀（""＝原本）：換 box.png／mini.png，格子位置不變
+        public bool SkinArt;                                   // 外觀圖讀得到
+        public static Func<string, string> SkinOf;             // 傳 lineup → 要穿的外觀 id（DeskPals.Shop.cs 設）
         public readonly int[][] Cells = {
             new int[] { 248, 106, 178, 508, 282, 107, 144, 477, 586, 614, 344, 603, 288, 620, 98, 20 },
             new int[] { 48, 106, 164, 132, 82, 106, 130, 108, 216, 238, 137, 230, 83, 244, 97, 20 },
@@ -3006,12 +3009,25 @@ namespace DeskPals
                 dirOf[key] = dir;
             }
             ShelfArt k;
-            if (kits.TryGetValue(dir, out k)) return k;
-            k = new ShelfArt();
-            k.Dir = dir;
-            k.Load();
-            kits[dir] = k;
+            if (!kits.TryGetValue(dir, out k))
+            {
+                k = new ShelfArt();
+                k.Dir = dir;
+                k.Load();
+                kits[dir] = k;
+            }
+            k.SetSkin(SkinOf == null ? "" : (SkinOf(key) ?? ""));   // 季節商店選的櫃子外觀（換圖，不改格子位置）
             return k;
+        }
+
+        // 換季節商店的外觀：只換 box.png／mini.png，格子位置不變；圖讀不到就照原本的櫃子（SkinArt false）
+        void SetSkin(string skin)
+        {
+            if (skin == null) skin = "";
+            if (skin == Skin) return;
+            Skin = skin;
+            imgs.Clear();
+            SkinArt = skin != "" && (SqArt.Read(Dir + "/skin/" + skin + "/2x/" + ImageName) != null || SqArt.Read(Dir + "/skin/" + skin + "/1x/" + ImageName) != null);
         }
 
         void Load()
@@ -3055,7 +3071,7 @@ namespace DeskPals
             Bitmap b;
             if (imgs.TryGetValue(key, out b)) return b;
             if (night) { Bitmap d = Mini(r, false); b = d == null ? null : Night(d); }
-            else b = SqArt.Png(Dir + "/" + r + "x/mini.png");
+            else { string sub = SkinArt ? "/skin/" + Skin : ""; b = SqArt.Png(Dir + sub + "/" + r + "x/mini.png"); }
             imgs[key] = b;
             return b;
         }
@@ -3067,7 +3083,7 @@ namespace DeskPals
             Bitmap b;
             if (imgs.TryGetValue(key, out b)) return b;
             if (night) { Bitmap d = Image(r, false); b = d == null ? null : Night(d); }
-            else { b = SqArt.Png(Dir + "/" + r + "x/" + ImageName); if (b == null) App.LogAlways("shelf art missing: " + Dir + "/" + r + "x/" + ImageName); }
+            else { string sub = SkinArt ? "/skin/" + Skin : ""; b = SqArt.Png(Dir + sub + "/" + r + "x/" + ImageName); if (b == null) App.LogAlways("shelf art missing: " + Dir + sub + "/" + r + "x/" + ImageName); }
             imgs[key] = b;
             return b;
         }
@@ -4576,6 +4592,7 @@ namespace DeskPals
                 ReminderTick();
                 TicketTick();
                 StudyTick();          // 讀書小幫手（DeskPals.Study.cs）：學校行事曆、作業死線、考試倒數、熬夜
+                ShopTick();           // 商店：打卡冊蓋章、穿造型／櫃子外觀（DeskPals.Shop.cs）
                 WorkTick();           // 工作來源（DeskPals.Work.cs）：第一次才開背景執行緒
                 MisTick(dt);          // 搗蛋（DeskPals.Mischief.cs）：搶游標、下班清場、購物警察、打字太兇
                 DownloadTick(dt);
@@ -5482,7 +5499,7 @@ namespace DeskPals
                     }
                     break;
                 case "quit": QuitAll(); break;
-                default: if (!MisMsg(c, p, line) && !OrigMsg(c, p, line) && !StatsMsg(c, p, line) && !WorkMsg(c, p, line) && !NbMsg(c, p, line)) StudyMsg(c, p, line); break;   // mischief-…（DeskPals.Mischief.cs）；stats-…（DeskPals.Stats.cs）；work-…（工作來源，DeskPals.Work.cs）；nb-…（小本子，DeskPals.Notebook.cs）；course／exam／study-…（DeskPals.Study.cs）
+                default: if (!MisMsg(c, p, line) && !OrigMsg(c, p, line) && !StatsMsg(c, p, line) && !WorkMsg(c, p, line) && !NbMsg(c, p, line) && !ShopMsg(c, p, line)) StudyMsg(c, p, line); break;   // mischief-…（DeskPals.Mischief.cs）；stats-…（DeskPals.Stats.cs）；work-…（工作來源，DeskPals.Work.cs）；nb-…（小本子，DeskPals.Notebook.cs）；course／exam／study-…（DeskPals.Study.cs）
             }
         }
 
@@ -8071,7 +8088,8 @@ namespace DeskPals
             new string[] { "fireworks", "煙火" },
             new string[] { "chatter", "閒聊泡泡（自己閒晃時講話）" },
             new string[] { "bat_link", "沒電的電量跟工作時間連動" },
-            new string[] { "wb_water", "破破提醒喝水（窩伴小世界）" } };
+            new string[] { "wb_water", "破破提醒喝水（窩伴小世界）" },
+            new string[] { "sq_water", "沒電提醒喝水（續命小隊）" } };
         readonly Dictionary<string, bool> feats = new Dictionary<string, bool>();
         readonly List<string> featSet = new List<string>();   // 自己動過的開關（features.txt 的 set=…，逗號隔開）
         public bool Feat(string key) { bool on; return feats.TryGetValue(key, out on) ? on : !FeatDefaultOff(key); }
@@ -8157,7 +8175,7 @@ namespace DeskPals
         //   工作：下班時間、早上點名、沒電連動、喝水提醒、小幫手（專注／安靜／提醒）
         //   設定：重新設定、讀書小幫手設定（學校行事曆、熬夜）、匿名回報（公開版有 ID 才有）、開機自動出現（Store 版）
         // 每個項目只出現在一個地方；開關（FeatureList）不在 WorkFeats 裡的都算娛樂，新加的開關不會漏掉。收工在最下面。
-        static readonly string[] WorkFeats = { "night", "rollcall", "bat_link", "wb_water" };
+        static readonly string[] WorkFeats = { "night", "rollcall", "bat_link", "wb_water", "sq_water" };
         public void HouseMenu(Point at)
         {
             ContextMenuStrip m = new ContextMenuStrip();
