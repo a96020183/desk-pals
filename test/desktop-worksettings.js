@@ -237,7 +237,10 @@ async function snap(app, name) {
 	await act(app, "work-settings open"); await sleep(1200);
 	await check("重開（150%）：存過的還在，Jira 已接上", async () => {
 		s = await ws(app);
-		assert.equal(s.size, "900x900");
+		// 螢幕夠高就是 900x900；CI 的螢幕比較矮時，視窗會照設計變矮、加捲軸（寬度多一條捲軸）
+		const [w150, h150] = s.size.split("x").map(Number);
+		if (h150 === 900) assert.equal(w150, 900, s.size);
+		else { assert.ok(h150 < 900 && h150 >= 240, s.size); assert.equal(s.scroll, "1", s.size); assert.ok(w150 >= 900 && w150 <= 930, s.size); }
 		assert.equal(s.src.jira.on, 1); assert.equal(s.src.meet.on, 1); assert.equal(s.src.gitlab.on, 1); assert.equal(s.src.worklog.on, 1);
 	});
 	await act(app, "work-settings press view:grid");
