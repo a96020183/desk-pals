@@ -8413,6 +8413,7 @@ namespace DeskPals
         bool anyCheck, up;
         Point anchor;
         public bool Done, Armed;
+        int shownAt;   // Popup 的時間：剛開的那一下 Windows 可能先送一個「失去焦點」，那個不算
 
         public PixelMenu(World w, ContextMenuStrip menu, string title, bool house) : base(false)
         {
@@ -8426,14 +8427,20 @@ namespace DeskPals
             small = new Font("Microsoft JhengHei UI", 8.5f, FontStyle.Bold);
             titleFont = new Font("Microsoft JhengHei UI", house ? 11f : 10f, FontStyle.Bold);
             KeyPreview = true;
-            Deactivate += delegate { CloseMenu(); };
+            // 我們是背景程式：Show() 的當下還拿不到前景，Windows 會馬上送一個 Deactivate，選單一開就關（右鍵看起來沒反應）。
+            // 剛開的 400ms 內的 Deactivate 不理；點選單外面由 MenuWatch 收、Esc 由 OnKeyDown 收
+            Deactivate += delegate
+            {
+                if (unchecked(Environment.TickCount - shownAt) < 400) { App.LogAlways("menu: early deactivate ignored"); return; }
+                CloseMenu();
+            };
         }
 
         // 跟其他小視窗不一樣：要能變成前景（收 Esc、失去焦點時關掉）
         protected override bool ShowWithoutActivation { get { return false; } }
         protected override CreateParams CreateParams { get { CreateParams cp = base.CreateParams; cp.ExStyle &= ~0x08000000; return cp; } }
 
-        public void Popup(Point at) { anchor = at; Reflow(true); Show(); }
+        public void Popup(Point at) { anchor = at; Reflow(true); shownAt = Environment.TickCount; Show(); }
 
         void BuildRows()
         {
