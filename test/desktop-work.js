@@ -163,7 +163,7 @@ async function launch(name, iso) {
 		DESKPALS_FAKE_CLI: path.join(__dirname, "fixtures", "fake-cli.js"), FAKE_CLI_STATE: stateFile, FAKE_CLI_LOG: cliLog,
 		DESKPALS_FAKE_WEB: `http://127.0.0.1:${port}`,
 	});
-	if (!win) env.TMPDIR = tmp;   // mac: 暫存資料夾看 TMPDIR（Path.GetTempPath＝NSTemporaryDirectory）
+	if (!win) env.TMPDIR = tmp;   // mac: 暫存資料夾看 TMPDIR（Path.GetTempPath 跟 .NET 一樣先看 TMPDIR）
 	if (iso) { delete env.CLAUDE_CONFIG_DIR; delete env.CODEX_HOME; delete env.DESKPALS_DOWNLOADS_DIR; }
 	if (iso === "no-data-dir") delete env.DESKPALS_DATA_DIR;   // 連資料資料夾都沒指定   // 沒設：桌面版自己決定看哪裡（離屏時不能是你的家目錄）
 	const args = cmd.map((x) => x.replace(/\{ep\}/g, ep));

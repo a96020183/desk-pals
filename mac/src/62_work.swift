@@ -671,12 +671,12 @@ extension World {
         var rc = Cli.Run("glab", ["auth", "status"], 30000, &o, &e)
         for m in World.GlabLogin.Matches(o + "\n" + e) { if !hosts.Contains(m.Groups[1].Value) { hosts.Add(m.Groups[1].Value) } }
         lock(glabHosts) { glabHosts.Clear(); glabHosts.AddRange(hosts) }
-        let glabMissing = (rc == -1 && !Cli.Available("glab")) || rc == 9009
+        let glabMissing = (rc == -1 && !Cli.Available("glab")) || rc == 9009 || rc == 127   // mac: 127＝找不到指令（Unix 的結束碼只有 8 位元，9009 會變 49）
         glabState = glabMissing ? "missing" : (hosts.Count > 0 ? "ok" : "nologin")
         rc = Cli.Run("gh", ["auth", "status"], 30000, &o, &e)
         let g = World.GhLogin.Match(o + "\n" + e)
         ghUser = g.Success ? g.Groups[2].Value.Trim("(", ")") : ""
-        let ghMissing = (rc == -1 && !Cli.Available("gh")) || rc == 9009
+        let ghMissing = (rc == -1 && !Cli.Available("gh")) || rc == 9009 || rc == 127   // mac: 同上
         ghState = ghMissing ? "missing" : (ghUser != "" ? "ok" : "nologin")
         App.Log("work auth: glab=" + glabState + " (" + String(hosts.Count) + " host) gh=" + ghState)
     }
