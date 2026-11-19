@@ -141,6 +141,17 @@ namespace DeskPals
         }
         public static bool Exists(string palId, string costume) { string d = Dir(palId, costume); return d != null && SqArt.Read(d + "/costume.txt") != null; }
 
+        // 這隻公仔有美術的造型 id（pals/<lu>/<pal>/costume/<id>/costume.txt 存在的）：讓造型清單能自己發現新造型
+        public static List<string> ListIds(string palId)
+        {
+            List<string> o = new List<string>();
+            SqLineup q = SqArt.LineupOf(palId);
+            if (q == null) return o;
+            string parent = q.Dir + "/" + palId + "/costume";
+            foreach (string id in SqArt.SubDirs(parent)) if (SqArt.Read(parent + "/" + id + "/costume.txt") != null) o.Add(id);
+            return o;
+        }
+
         // r＝1（1x）或 2（2x）。讀不到（還沒有圖）＝null，公仔照原本的樣子
         public static SqCostume Load(string palId, string costume, int r)
         {
@@ -256,11 +267,13 @@ namespace DeskPals
     static class ShopConfig
     {
         static Dictionary<string, string> v;
+        static List<string> order;          // key 的出現順序（Dictionary 不保證順序，清單要照設定檔排）
         public static string Source = "";
         public static Dictionary<string, string> All()
         {
             if (v != null) return v;
             v = new Dictionary<string, string>();
+            order = new List<string>();
             string f = App.Offscreen ? Environment.GetEnvironmentVariable("DESKPALS_SHOP_FILE") : null;
             byte[] b = null;
             if (!string.IsNullOrEmpty(f)) { try { b = File.ReadAllBytes(f); Source = "file"; } catch { b = null; } }
@@ -272,12 +285,85 @@ namespace DeskPals
                 if (t == "" || t.StartsWith("#")) continue;
                 int eq = t.IndexOf('=');
                 if (eq <= 0) continue;
-                v[t.Substring(0, eq).Trim()] = t.Substring(eq + 1).Trim();
+                string key = t.Substring(0, eq).Trim();
+                if (!v.ContainsKey(key)) order.Add(key);
+                v[key] = t.Substring(eq + 1).Trim();
             }
             return v;
         }
         public static string Get(string key) { string s; return All().TryGetValue(key, out s) ? s : ""; }
-        public static void Reload() { v = null; }
+        public static void Reload() { v = null; rewards = null; sellables = null; }
+
+        // ========= 資料驅動的清單：打卡獎勵階梯、季節商店賣的（都可以只改 pals/shop.txt／丟美術，不用改程式）=========
+        // 打卡獎勵：`reward.<天數> = <造型 id> <顯示名>`（例 `reward.90 = pajama 睡衣`）。沒設定時用內建的 scarf 30／grad 60。
+        // 季節商品：`costume.<id>` 或 `cabinet.<id> = <顯示名> | <兌換碼項目> | <NT 價> | <HK 價>`（後三項可省；兌換碼項目省略＝<id>-<kind>）。
+        public class Reward { public int Days; public string Id = ""; public string Name = ""; }
+        public class Sellable { public string Kind = "", Id = "", Name = "", CodeItem = "", Twd = "", Hkd = ""; }
+        static List<Reward> rewards;
+        static List<Sellable> sellables;
+
+        public static List<Reward> Rewards()
+        {
+            if (rewards != null) return rewards;
+            All();
+            List<Reward> l = new List<Reward>();
+            foreach (string k in order)
+            {
+                if (!k.StartsWith("reward.")) continue;
+                int days;
+                if (!int.TryParse(k.Substring(7), out days) || days <= 0) continue;
+                string[] a = v[k].Split(new char[] { ' ', '\t' }, 2, StringSplitOptions.RemoveEmptyEntries);
+                if (a.Length == 0 || a[0] == "") continue;
+                Reward r = new Reward();
+                r.Days = days; r.Id = a[0].Trim(); r.Name = a.Length > 1 ? a[1].Trim() : a[0].Trim();
+                l.Add(r);
+            }
+            if (l.Count == 0)   // 內建預設（設定檔沒寫時）
+            {
+                l.Add(MkReward(30, "scarf", "同款小圍巾"));
+                l.Add(MkReward(60, "grad", "畢業帽"));
+            }
+            l.Sort(delegate(Reward x, Reward y) { return x.Days.CompareTo(y.Days); });
+            rewards = l;
+            return l;
+        }
+        static Reward MkReward(int d, string id, string nm) { Reward r = new Reward(); r.Days = d; r.Id = id; r.Name = nm; return r; }
+
+        public static List<Sellable> Sellables()
+        {
+            if (sellables != null) return sellables;
+            All();
+            List<Sellable> l = new List<Sellable>();
+            foreach (string k in order)
+            {
+                string kind = k.StartsWith("costume.") ? "costume" : (k.StartsWith("cabinet.") ? "cabinet" : null);
+                if (kind == null) continue;
+                string id = k.Substring(kind.Length + 1).Trim();
+                if (id == "") continue;
+                string[] f = v[k].Split('|');
+                Sellable s = new Sellable();
+                s.Kind = kind; s.Id = id;
+                s.Name = f.Length > 0 && f[0].Trim() != "" ? f[0].Trim() : id;
+                s.CodeItem = f.Length > 1 && f[1].Trim() != "" ? f[1].Trim() : id + "-" + kind;
+                s.Twd = f.Length > 2 ? f[2].Trim() : "";
+                s.Hkd = f.Length > 3 ? f[3].Trim() : "";
+                l.Add(s);
+            }
+            if (l.Count == 0)   // 內建預設
+            {
+                l.Add(MkSell("costume", "xmas", "聖誕造型", "xmas-costume"));
+                l.Add(MkSell("cabinet", "xmas", "聖誕", "xmas-cabinet"));
+                l.Add(MkSell("costume", "exam", "期末考造型", "exam-costume"));
+                l.Add(MkSell("cabinet", "exam", "期末考", "exam-cabinet"));
+            }
+            sellables = l;
+            return l;
+        }
+        static Sellable MkSell(string kind, string id, string nm, string code) { Sellable s = new Sellable(); s.Kind = kind; s.Id = id; s.Name = nm; s.CodeItem = code; return s; }
+
+        public static Reward RewardFor(string costumeId) { foreach (Reward r in Rewards()) if (r.Id == costumeId) return r; return null; }
+        public static Sellable SellFor(string kind, string id) { foreach (Sellable s in Sellables()) if (s.Kind == kind && s.Id == id) return s; return null; }
+        public static int LastRewardDays() { List<Reward> r = Rewards(); return r.Count == 0 ? 60 : r[r.Count - 1].Days; }
 
         // 要開的網址：<項目>（xmas-costume…）、coffee-1～3、custom（訂做公仔的預約表單）。沒填＝""（畫面上那顆按鈕先不顯示）
         public static string Link(string what)
@@ -378,38 +464,73 @@ namespace DeskPals
             WearApply();
         }
 
+        // 下一階還差幾個章的里程碑（沒有更高的＝0）
+        public int NextReward(int n) { foreach (ShopConfig.Reward r in ShopConfig.Rewards()) if (r.Days > n) return r.Days; return 0; }
+
         void StampSay(int n)
         {
-            string s = n == StampGoal ? "第 30 個章，小圍巾是你的了" : (n == StampGoal2 ? "第 60 個章，畢業帽是你的了" : (n < StampGoal ? "今天的章蓋好了 " + n + "／" + StampGoal : "今天的章蓋好了，第 " + n + " 個"));
+            string s = null;
+            foreach (ShopConfig.Reward r in ShopConfig.Rewards()) if (r.Days == n) { s = "第 " + n + " 個章，" + r.Name + "是你的了"; break; }
+            if (s == null) { int next = NextReward(n); s = next > 0 ? "今天的章蓋好了 " + n + "／" + next : "今天的章蓋好了，第 " + n + " 個"; }
             shopSaid = s;
             if (Hidden || Pets.Count == 0) return;
             Lead().Say(s, 3.2);
         }
 
         // ---------------- 穿什麼（每一櫃各自記）----------------
-        public static readonly string[] Costumes = { "", StampCostume, StampCostume2, "xmas", "exam" };   // ""＝不穿
-        public static readonly string[] Skins = { "", "xmas", "exam" };                   // ""＝原本的櫃子
         readonly Dictionary<string, string> wear = new Dictionary<string, string>();
         string wearSig = "";
 
+        // 這一櫃能選的造型／櫃子外觀（資料驅動）：""（不穿）＋打卡獎勵（含美術未到的）＋季節商店賣的＋有美術但沒列到的。照設定順序、去重。
+        public List<string> CostumeIds()
+        {
+            List<string> o = new List<string>(); o.Add("");
+            foreach (ShopConfig.Reward r in ShopConfig.Rewards()) if (!o.Contains(r.Id)) o.Add(r.Id);
+            foreach (ShopConfig.Sellable s in ShopConfig.Sellables()) if (s.Kind == "costume" && !o.Contains(s.Id)) o.Add(s.Id);
+            foreach (string id in SqCostume.ListIds(PreviewPalId())) if (!o.Contains(id)) o.Add(id);
+            return o;
+        }
+        public List<string> SkinIds()
+        {
+            List<string> o = new List<string>(); o.Add("");
+            foreach (ShopConfig.Sellable s in ShopConfig.Sellables()) if (s.Kind == "cabinet" && !o.Contains(s.Id)) o.Add(s.Id);
+            foreach (string id in SkinArtIds()) if (!o.Contains(id)) o.Add(id);
+            return o;
+        }
+        // 這一櫃有美術的櫃子外觀 id（shelf/skin/<id>/<r>x/box.png 存在的）
+        public List<string> SkinArtIds()
+        {
+            List<string> o = new List<string>();
+            SqLineup q = SqArt.Lineup(lineup);
+            string dir = q != null && SqArt.Read(q.Dir + "/shelf/shelf.txt") != null ? q.Dir + "/shelf" : "shelf";
+            foreach (string id in SqArt.SubDirs(dir + "/skin")) if (SqArt.Read(dir + "/skin/" + id + "/2x/box.png") != null || SqArt.Read(dir + "/skin/" + id + "/1x/box.png") != null) o.Add(id);
+            return o;
+        }
+        // 造型是「即將推出」：是已知項目（打卡獎勵或季節商品）但美術還沒到
+        public bool CostumeSoon(string palId, string id)
+        {
+            if (string.IsNullOrEmpty(id) || SqCostume.Exists(palId, id)) return false;
+            return ShopConfig.RewardFor(id) != null || ShopConfig.SellFor("costume", id) != null;
+        }
+
         public string WearOf(string kind, string lu) { if (!shopLoaded) ShopLoad(); string s; return wear.TryGetValue(kind + "." + lu, out s) && CanWear(kind, s) ? s : ""; }
 
-        // 有沒有：小圍巾＝打卡集滿；聖誕、考試週＝兌換過那一樣
+        // 有沒有：打卡獎勵＝章數到了；季節商品＝兌換過那個項目；都不是但有美術＝當免費可穿（丟美術即可）
         public bool CanWear(string kind, string id)
         {
             if (string.IsNullOrEmpty(id)) return true;
-            if (kind == "costume" && id == StampCostume) return StampCount >= StampGoal;
-            if (kind == "costume" && id == StampCostume2) return StampCount >= StampGoal2;
-            if (kind == "costume" && (id == "xmas" || id == "exam")) return Owns(id + "-costume");
-            if (kind == "cabinet" && (id == "xmas" || id == "exam")) return Owns(id + "-cabinet");
-            return false;
+            if (kind == "costume") { ShopConfig.Reward r = ShopConfig.RewardFor(id); if (r != null) return StampCount >= r.Days; }
+            ShopConfig.Sellable s = ShopConfig.SellFor(kind, id);
+            if (s != null) return Owns(s.CodeItem);
+            if (kind == "costume") return SqCostume.Exists(PreviewPalId(), id);
+            return SkinArtIds().Contains(id);
         }
 
         // locked＝還沒有（畫面要打開商店／打卡冊）
         public string SetWear(string kind, string id)
         {
             if (kind != "costume" && kind != "cabinet") return "bad";
-            if (Array.IndexOf(kind == "costume" ? Costumes : Skins, id) < 0) return "bad";
+            if (!(kind == "costume" ? CostumeIds() : SkinIds()).Contains(id)) return "bad";
             if (!CanWear(kind, id)) return "locked";
             wear[kind + "." + lineup] = id;
             StringBuilder b = new StringBuilder();

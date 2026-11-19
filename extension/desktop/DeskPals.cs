@@ -5139,6 +5139,7 @@ namespace DeskPals
             }
             m.Items.Add(p.P.Name + " 的好感度 ♥", null, delegate { p.ShowBond(); });
             CuPetMenu(p, m);
+            if (p.P.Orig) m.Items.Add("造型與櫃子…", null, delegate { ShowCostumePicker(); });   // 圖片公仔：換造型／櫃子外觀（DeskPals.ShopUI.cs）
             m.Items.Add(new ToolStripSeparator());
             ToolStripMenuItem help = new ToolStripMenuItem("小幫手（專注、安靜、提醒）");
             AddHelpers(help.DropDownItems);
@@ -5499,7 +5500,7 @@ namespace DeskPals
                     }
                     break;
                 case "quit": QuitAll(); break;
-                default: if (!MisMsg(c, p, line) && !OrigMsg(c, p, line) && !StatsMsg(c, p, line) && !WorkMsg(c, p, line) && !NbMsg(c, p, line) && !ShopMsg(c, p, line)) StudyMsg(c, p, line); break;   // mischief-…（DeskPals.Mischief.cs）；stats-…（DeskPals.Stats.cs）；work-…（工作來源，DeskPals.Work.cs）；nb-…（小本子，DeskPals.Notebook.cs）；course／exam／study-…（DeskPals.Study.cs）
+                default: if (!MisMsg(c, p, line) && !OrigMsg(c, p, line) && !StatsMsg(c, p, line) && !WorkMsg(c, p, line) && !NbMsg(c, p, line) && !ShopMsg(c, p, line) && !ShopUIMsg(c, p, line)) StudyMsg(c, p, line); break;   // mischief-…（DeskPals.Mischief.cs）；stats-…（DeskPals.Stats.cs）；work-…（工作來源，DeskPals.Work.cs）；nb-…（小本子，DeskPals.Notebook.cs）；course／exam／study-…（DeskPals.Study.cs）
             }
         }
 
@@ -6446,6 +6447,7 @@ namespace DeskPals
                 CuSnap(g);
                 NbSnap(g);   // 小本子（DeskPals.Notebook.cs）
                 WorkSnap(g);   // 工作設定（DeskPals.WorkSettings.cs）
+                ShopUISnap(g);   // 商店四視窗：打卡冊、季節商店、輸入解鎖碼、造型（DeskPals.ShopUI.cs）
                 if (pmenu != null && pmenu.VVisible) pmenu.PaintTo(g);
                 // 游標位置（只畫一個小十字，方便看）
                 Point c = Cursor.Position;
@@ -8196,6 +8198,10 @@ namespace DeskPals
             }
             mine.DropDownItems.Add(sw);
             CuHouseMenu(mine.DropDownItems);   // 做公仔、我的公仔、我的櫃放誰、匯入、分享短片（DeskPals.Custom.cs）
+            mine.DropDownItems.Add(new ToolStripSeparator());
+            mine.DropDownItems.Add("打卡冊…", null, delegate { ShowCheckin(); });   // 打卡冊（DeskPals.ShopUI.cs）
+            if (OrigLineup) mine.DropDownItems.Add("造型與櫃子…", null, delegate { ShowCostumePicker(); });   // 圖片公仔櫃才有（DeskPals.ShopUI.cs）
+            mine.DropDownItems.Add("季節商店…", null, delegate { ShowShop(); });   // 季節商店（DeskPals.ShopUI.cs）
             mine.DropDownItems.Add("躲起來（Ctrl+Alt+S）", null, delegate { ToggleHide(); });
             m.Items.Add(mine);
 
@@ -8216,6 +8222,7 @@ namespace DeskPals
             ToolStripMenuItem set = new ToolStripMenuItem("設定");
             set.DropDownItems.Add("重新設定…", null, delegate { ShowSetup(false); });
             set.DropDownItems.Add("讀書小幫手設定（學校行事曆、熬夜）…", null, delegate { ShowStudySettings(); });
+            set.DropDownItems.Add("輸入解鎖碼…", null, delegate { ShowCodeEntry(); });   // 季節商店的解鎖碼（DeskPals.ShopUI.cs）
             StatsHouseMenu(set.DropDownItems);   // 匿名回報的開關（公開版、有 ID 才有；DeskPals.Stats.cs）
             StartupHouseMenu(set.DropDownItems);   // 開機自動出現（只有 Microsoft Store 版）
             set.DropDownItems.Add("使用說明（網頁）…", null, delegate { OpenGuide(); });
