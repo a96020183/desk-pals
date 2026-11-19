@@ -407,7 +407,6 @@ namespace DeskPals
         {
             if (editThing == "" && editTodo == "") return;
             string th = editThing, td = editTodo, s = tbEdit.Text.Trim();
-            App.LogAlways("notebook: end edit thing=" + th + " todo=" + td + " save=" + save + " text=" + s);
             editThing = ""; editTodo = "";
             tbEdit.Visible = false;
             if (!save) { Invalidate(); return; }
