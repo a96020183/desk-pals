@@ -802,6 +802,18 @@ jobs:
           $env:STORE_FAKE_PACKAGED = "1"
           node test/desktop-store.js desk-pals-store-exe "$env:RUNNER_TEMP\dps-exe" exe-shots\store public win-exe -- $exe --pipe "{ep}"
           if ($LASTEXITCODE -ne 0) { throw "store test failed (exe)" }
+      # 小本子（待辦／今天做了／筆記）：假的 log、學校 ICS、假時鐘（study-clock），跟現在幾點、時區無關。剪貼簿不碰真的（nb-clip）
+      - name: Notebook test on DeskPals.exe (public + personal; copy text, merge, todos, school, notes, spread, empty states)
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force exe-shots\notebook | Out-Null
+          $pub = (Resolve-Path dist\DeskPals.exe).Path
+          node test/desktop-notebook.js desk-pals-nb "$env:RUNNER_TEMP\dp-nb-pub" exe-shots\notebook -- $pub --pipe "{ep}" --pet duoduo --lineup original
+          if ($LASTEXITCODE -ne 0) { throw "notebook test failed (public exe)" }
+          $per = (Resolve-Path dist-personal\DeskPals-personal.exe).Path
+          $env:NB_SHOTS = "0"
+          node test/desktop-notebook.js desk-pals-nbp "$env:RUNNER_TEMP\dp-nb-per" "$env:RUNNER_TEMP\dp-nb-per-shots" -- $per --pipe "{ep}" --pet duoduo --lineup original
+          if ($LASTEXITCODE -ne 0) { throw "notebook test failed (personal exe)" }
       - name: Smoke-test personal DeskPals-personal.exe (offscreen, all lineups)
         shell: powershell
         run: |
@@ -854,6 +866,7 @@ jobs:
             exe-shots/store/*.png
             exe-shots/shelf/*.png
             exe-shots/woban-*/*.png
+            exe-shots/notebook/*.png
       # 個人版的測試結果（含同人角色的截圖）：只給自己看，不會附到 Release
       - uses: actions/upload-artifact@v4
         if: always()

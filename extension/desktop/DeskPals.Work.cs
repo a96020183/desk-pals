@@ -54,6 +54,7 @@ namespace DeskPals
         public string Id, Src, Project, Title, Status, Ref, Url, Key;
         public DateTime T, End = DateTime.MinValue;
         public int Ok = -1;   // -1＝null、0＝false、1＝true
+        public bool Retried;  // src=ci：第一次沒過、重跑才過（SPEC 2b 小本子的約定），只有 true 才寫
     }
 
     static class NoteLog
@@ -75,6 +76,7 @@ namespace DeskPals
             Field(sb, "src", e.Src); Field(sb, "project", e.Project); Field(sb, "title", e.Title); Field(sb, "status", e.Status);
             sb.Append(",\"ok\":").Append(e.Ok < 0 ? "null" : (e.Ok > 0 ? "true" : "false"));
             Field(sb, "ref", e.Ref); Field(sb, "url", e.Url); Field(sb, "key", e.Key);
+            if (e.Retried) sb.Append(",\"retried\":true");
             return sb.Append('}').ToString();
         }
         static void Field(StringBuilder sb, string k, string v) { if (string.IsNullOrEmpty(v)) return; sb.Append(",\"").Append(k).Append("\":"); Q(sb, v); }
@@ -995,7 +997,7 @@ namespace DeskPals
 
         // ================= 盯 CI：從 glab／gh 看到你推了 tag（哪個終端機、哪台電腦推的都算）→ 查 pipeline／workflow 直到跑完 =================
         // 為什麼用「你自己的動態」找：不用設定資料夾、不用在 VS Code 推，只看你真的推過的 repo；GitHub 的動態偶爾會晚一兩分鐘。
-        class CiWatch { public string Kind, Host, Pid, Repo, Name, Tag, Url, Last = ""; public DateTime Pushed, NextAt, Until; public int Misses; public bool Announced; }
+        class CiWatch { public string Kind, Host, Pid, Repo, Name, Tag, Url, Last = ""; public DateTime Pushed, NextAt, Until; public int Misses; public bool Announced, Failed; }
         readonly List<CiWatch> ciWatches = new List<CiWatch>();
 
         void CiCandidate(string kind, string host, string pid, string repo, string name, string tag, DateTime pushed)
@@ -1048,19 +1050,31 @@ namespace DeskPals
                 {
                     w.Url = url;
                     string where = Regex.IsMatch(w.Tag, "Production", RegexOptions.IgnoreCase) ? "正式機" : (Regex.IsMatch(w.Tag, "Development", RegexOptions.IgnoreCase) ? "測試機" : "");
-                    if (status == "success")
-                    { WNotify("ci-ok", url, w.Name + " " + w.Tag + " " + where + "部署成功！"); CiLog(w, "CI 過了", 1, true); end = true; }
-                    else if (status == "failed" || status == "canceled" || status == "cancelled")
-                    { WNotify("ci-fail", url, w.Name + " " + w.Tag + " " + where + "部署失敗（" + status + "），點我看 pipeline"); CiLog(w, "CI 沒過", 0, true); end = true; }
-                    else if (!w.Announced)
-                    { w.Announced = true; WNotify("ci-run", url, w.Name + " " + w.Tag + " " + where + "CI 開始跑了，好了叫你"); CiLog(w, "CI 跑起來了", -1, false); }
+                    bool failed = status == "failed" || status == "canceled" || status == "cancelled";
+                    string now = status == "success" ? "success" : (failed ? "failed" : "running");
+                    if (now != w.Last)
+                    {
+                        w.Last = now;
+                        if (now == "success")
+                        { WNotify("ci-ok", url, w.Name + " " + w.Tag + " " + where + "部署成功！"); CiLog(w, "CI 過了", 1, true, w.Failed); end = true; }
+                        else if (failed)
+                        {
+                            // 沒過：先講，再多看 3 小時（重跑 pipeline／re-run workflow 之後過了，小本子要寫「第一次沒過，重跑過了」）
+                            WNotify("ci-fail", url, w.Name + " " + w.Tag + " " + where + "部署失敗（" + status + "），點我看 pipeline"); CiLog(w, "CI 沒過", 0, true, false);
+                            w.Failed = true; w.Until = DateTime.Now.AddHours(3);
+                        }
+                        else if (!w.Announced && !w.Failed)   // 重跑中不另外講，過了或又沒過才講
+                        { w.Announced = true; WNotify("ci-run", url, w.Name + " " + w.Tag + " " + where + "CI 開始跑了，好了叫你"); CiLog(w, "CI 跑起來了", -1, false, false); }
+                    }
+                    if (w.Failed && !end) w.NextAt = DateTime.Now.AddSeconds(60);   // 等重跑：慢慢看就好
                 }
                 if (end) lock (ciWatches) ciWatches.Remove(w);
             }
         }
-        void CiLog(CiWatch w, string status, int ok, bool done)
+        void CiLog(CiWatch w, string status, int ok, bool done, bool retried)
         {
             NoteEntry e = new NoteEntry();
+            e.Retried = retried;
             e.Id = "ci:" + w.Repo + ":" + w.Tag; e.T = w.Pushed; if (done) e.End = WNow();
             e.Src = "ci"; e.Project = w.Name; e.Title = "發 " + w.Tag; e.Status = status; e.Ok = ok; e.Ref = w.Tag; e.Url = w.Url; e.Key = w.Repo;
             NoteLog.Write(e);
@@ -1499,6 +1513,23 @@ namespace DeskPals
         public void ShowWorkSettings()
         {
             App.Log("work settings: dialog not built yet");
+            NbSay("工作設定還在做，快好了");   // 畫面還在挑版（v011\work-settings）；做好就換成真的視窗
+        }
+
+        // 小本子（DeskPals.Notebook.cs）用的兩個接點（v011 SPEC 2b）：「來源」按鈕、空白頁的「接上」
+        public void OpenWorkSettings() { ShowWorkSettings(); }
+
+        // 空白頁那張清單：這個來源接上了沒（claude｜school｜calendar｜github｜gitlab｜jira）
+        public bool WorkSourceOn(string key)
+        {
+            switch (key)
+            {
+                case "claude": return WOn("ai");
+                case "school": if (!studyLoaded) LoadStudy(); return haveSchool;
+                case "calendar": return WorkOwns("meet");
+                case "github": case "gitlab": case "jira": return WorkOwns(key);
+            }
+            return false;
         }
 
         // ================= pipe =================
