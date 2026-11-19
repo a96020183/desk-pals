@@ -232,6 +232,8 @@ namespace DeskPals
         List<int[]> ShareFrames(List<Pal> cast, int W0, int H0, int fps, int n, out string caption)
         {
             World pw = new World(S, Pal.Fallback);
+            bool bdayClip = SeasonNow == "birthday";   // 生日：短片拍成生日版（捧蛋糕、戴派對帽、灑彩帶），所以驚喜能被錄下來分享
+            if (bdayClip) { pw.SeasonNow = "birthday"; pw.BdayHatOn = true; }
             List<Pet> pets = new List<Pet>();
             int seed = 11;
             foreach (Pal p in cast) pets.Add(new Pet(pw, p, S, seed++));
@@ -239,7 +241,7 @@ namespace DeskPals
             Pet heroPet = pets[0];
             caption = null;
             foreach (Pet p in pets) if (p.P.Cu) { caption = p.ShareLine("x_share"); break; }
-            if (string.IsNullOrEmpty(caption)) caption = "我的桌面公仔在螢幕上陪我上班 ✨ #我的桌面公仔 #WoWoPals";
+            if (string.IsNullOrEmpty(caption)) caption = bdayClip ? "生日快樂！我的桌面公仔一起幫我慶生 🎂 #我的桌面公仔 #WoWoPals" : "我的桌面公仔在螢幕上陪我上班 ✨ #我的桌面公仔 #WoWoPals";
             string hi = NoEmoji(heroPet.ShareLine("hi"));
             int ps = cast.Count == 1 ? 13 : (cast.Count == 2 ? 11 : (cast.Count == 3 ? 9 : 7));
             List<int[]> frames = new List<int[]>();
@@ -254,6 +256,7 @@ namespace DeskPals
                     using (Graphics g = Graphics.FromImage(fr))
                     {
                         g.DrawImageUnscaled(bg, 0, 0);
+                        if (bdayClip) ShareConfetti(g, W0, H0, t, ps);   // 生日：灑彩帶
                         g.SmoothingMode = SmoothingMode.AntiAlias;
                         for (int j = 0; j < pets.Count; j++)
                         {
@@ -301,6 +304,23 @@ namespace DeskPals
                 }
             }
             return frames;
+        }
+
+        // 生日：短片裡飄落的彩帶（固定亂數，每格位置連續）
+        static readonly int[] ConfettiCols = { 0xFF5A5A, 0xFFD84A, 0x5AD1FF, 0xFF8FD8, 0x8CFF8C, 0xFFA64A };
+        static void ShareConfetti(Graphics g, int W0, int H0, double t, int ps)
+        {
+            Random r = new Random(23);
+            int sz = Math.Max(4, ps);
+            for (int i = 0; i < 48; i++)
+            {
+                double x0 = r.NextDouble() * W0, speed = (0.35 + r.NextDouble() * 0.5) * H0;
+                double sway = Math.Sin(t * (1.5 + r.NextDouble()) + i) * sz * 2;
+                double y = ((r.NextDouble() * H0) + t * speed) % (H0 + sz) - sz;
+                int x = (int)(x0 + sway);
+                using (SolidBrush b = new SolidBrush(Pix.C(ConfettiCols[i % ConfettiCols.Length])))
+                    g.FillRectangle(b, x, (int)y, sz, (i % 2 == 0) ? sz : sz / 2);
+            }
         }
 
         static void ShareHeart(Graphics g, double cx, double cy, int u, int alpha)

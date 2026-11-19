@@ -494,8 +494,9 @@ class Desktop {
 		const cfg = vscode.workspace.getConfiguration("deskPals");
 		// 櫃子以桌面版為準：連上時桌面版會回「lineup <櫃>」，設定跟著它（VS Code 這邊改設定才送 lineup 過去）
 		this.send(`config ${cfg.get("restMinutes", 50)} ${cfg.get("idleMinutes", 5)}`);
+		// 生日：有設才送（空白不送，才不會把桌面版第一次設定精靈設的生日洗掉）。要清除請在桌面版設定留空
 		const bd = String(cfg.get("birthday", "") || "").trim();
-		this.send(`birthday ${/^\d{2}-\d{2}$/.test(bd) ? bd : ""}`);
+		if (/^\d{2}-\d{2}$/.test(bd)) this.send(`birthday ${bd}`);
 		const host = String(cfg.get("companyHost", "") || "").trim();
 		if (/^[\w.-]+$/.test(host)) this.send(`config-host ${host}`);
 		if (this.onConfig) this.onConfig();   // 讀書小幫手（practical.js）：熬夜／考試設定、學校行事曆的作業

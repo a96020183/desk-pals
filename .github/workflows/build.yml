@@ -607,6 +607,41 @@ jobs:
           $env:SQUAD_LEGACY = "1"
           node test/desktop-squad.js desk-pals-squad (Resolve-Path public-ps1-shots\squad).Path $env:DESKPALS_DATA_DIR
           if ($LASTEXITCODE -ne 0) { throw "squad test failed" }
+      # 生日大驚喜（公開版，desk-pals.ps1）：假時鐘 DESKPALS_FAKE_NOW 設成生日當天／非當天／留空，各開一個離屏實例：
+      #   setup＝第一次設定有生日欄位、打字會存；day＝Season()=birthday、自動播一次、點蛋糕／act bday／選單都能重播；nonday／blank＝不觸發
+      - name: Birthday test (fake clock; setup field, celebration replay, non-birthday + blank; public, desk-pals.ps1)
+        shell: powershell
+        run: |
+          $ps1 = (Resolve-Path "build\public\extension\desktop\desk-pals.ps1").Path
+          $runs = @(
+            @{ m = "setup";  now = "2026-05-20 10:00:00"; bd = "" },
+            @{ m = "day";    now = "2026-03-15 10:00:00"; bd = "03-15" },
+            @{ m = "nonday"; now = "2026-05-20 10:00:00"; bd = "03-15" },
+            @{ m = "blank";  now = "2026-03-15 10:00:00"; bd = "" }
+          )
+          New-Item -ItemType Directory -Force public-ps1-shots\birthday | Out-Null
+          foreach ($v in $runs) {
+            $env:DESKPALS_OFFSCREEN = "1"; $env:DESKPALS_ISOLATED = "1"
+            $env:DESKPALS_DATA_DIR = "$env:RUNNER_TEMP\dp-bday-" + $v.m
+            if (Test-Path $env:DESKPALS_DATA_DIR) { Remove-Item -Recurse -Force $env:DESKPALS_DATA_DIR }
+            New-Item -ItemType Directory -Force $env:DESKPALS_DATA_DIR | Out-Null
+            if ($v.m -ne "setup") {
+              Set-Content "$env:DESKPALS_DATA_DIR\profile.txt" "done" -NoNewline
+              Set-Content "$env:DESKPALS_DATA_DIR\mode.txt" "shelf" -NoNewline
+              Set-Content "$env:DESKPALS_DATA_DIR\lineup.txt" "original" -NoNewline
+            }
+            if ($v.bd -ne "") { Set-Content "$env:DESKPALS_DATA_DIR\birthday.txt" $v.bd -NoNewline }
+            $env:DESKPALS_FAKE_NOW = $v.now
+            $env:BDAY_MODE = $v.m
+            $pipe = "desk-pals-bday-" + $v.m
+            Start-Process powershell.exe -ArgumentList "-NoProfile -File `"$ps1`" -PipeName $pipe -Pet duoduo -Lineup original"
+            node .github/ping.js $pipe
+            if ($LASTEXITCODE -ne 0) { throw ("desktop did not start (bday " + $v.m + ")") }
+            node test/desktop-birthday.js $pipe (Resolve-Path public-ps1-shots\birthday).Path $env:DESKPALS_DATA_DIR
+            $rc = $LASTEXITCODE
+            node .github/ping.js $pipe quit | Out-Null
+            if ($rc -ne 0) { throw ("birthday test failed (" + $v.m + ")") }
+          }
       # 紙箱櫃（pals/shelf）：公開版續命小隊＋個人版皮克敏（大格休息花）。圖讀得到、三隻在格子裡、名牌、第 4 格入口、晚上、外出中、點格子、收合鈕
       - name: Shelf test (public original + personal pikmin, desk-pals.ps1)
         shell: powershell
