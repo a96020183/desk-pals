@@ -4575,6 +4575,7 @@ namespace DeskPals
                 ReminderTick();
                 TicketTick();
                 StudyTick();          // 讀書小幫手（DeskPals.Study.cs）：學校行事曆、作業死線、考試倒數、熬夜
+                WorkTick();           // 工作來源（DeskPals.Work.cs）：第一次才開背景執行緒
                 MisTick(dt);          // 搗蛋（DeskPals.Mischief.cs）：搶游標、下班清場、購物警察、打字太兇
                 DownloadTick(dt);
                 ExpireNotice();
@@ -5374,7 +5375,7 @@ namespace DeskPals
             List<Pet> outs = OutPets();
             switch (p[0])
             {
-                case "hello": CuHello(c); if (active != null) Send(c, "active " + active.P.Id + "\n"); Send(c, "lineup " + lineup + "\n"); break;   // 櫃子以桌面版為準（第一次設定在桌面做）
+                case "hello": CuHello(c); if (active != null) Send(c, "active " + active.P.Id + "\n"); Send(c, "lineup " + lineup + "\n"); WorkHello(c); break;   // 櫃子以桌面版為準（第一次設定在桌面做）；工作來源：桌面版在管哪些（DeskPals.Work.cs）
                 case "custom": CuMsg(c, line); break;   // 自己做的公仔（DeskPals.Custom*.cs）
                 case "save":
                     Count("saves");
@@ -5437,7 +5438,7 @@ namespace DeskPals
                 case "mode-info": Send(c, "mode " + (Single ? "single" : "shelf") + " " + (Single ? SinglePet() : "-") + " collapsed=" + (shelf != null && shelf.Collapsed ? 1 : 0) + " profile=" + (File.Exists(FilePath("profile.txt")) ? 1 : 0) + " hint=" + (ReadText("egg-hint.txt") == "" ? 0 : 1) + "\nend\n"); break;   // 測試用（test/desktop-egg.js）
                 case "setup-info": Send(c, (setupForm != null && !setupForm.IsDisposed && (setupForm.VVisible || setupForm.Visible) ? setupForm.Info() : "setup none\n") + "end\n"); break;   // 測試用（test/desktop-woban.js）：設定視窗現在有哪些按鈕
                 case "notify":
-                    if (p.Length >= 4)
+                    if (p.Length >= 4 && !WorkDropsNotify(p[1]))   // 工作來源：桌面版已經在管的不講兩次（DeskPals.Work.cs）
                     {
                         // 文字可以有空白：取第三個空白之後全部
                         string t = line.Trim();
@@ -5465,7 +5466,7 @@ namespace DeskPals
                     }
                     break;
                 case "lineup": SwitchLineup(p.Length >= 2 ? p[1] : "", p.Length >= 3 ? p[2] : ""); Send(c, "lineup " + lineup + "\n"); break;   // 回報現在是哪一櫃（VS Code 用來判斷桌面版是不是舊版）
-                case "config-host": companyHost = p.Length >= 2 ? p[1].Trim() : ""; break;
+                case "config-host": if (!WorkOwns("vpn")) companyHost = p.Length >= 2 ? p[1].Trim() : ""; break;   // 工作來源：桌面版有設公司主機就用桌面版的
                 case "snap": if (p.Length >= 2) Snap(p[1], ParseRect(p, 2)); Send(c, "snapped\n"); break;
                 case "snaps":
                     {
@@ -5479,7 +5480,7 @@ namespace DeskPals
                     }
                     break;
                 case "quit": QuitAll(); break;
-                default: if (!MisMsg(c, p, line) && !OrigMsg(c, p, line) && !StatsMsg(c, p, line)) StudyMsg(c, p, line); break;   // mischief-…（DeskPals.Mischief.cs）；stats-…（DeskPals.Stats.cs）；course／exam／study-…（DeskPals.Study.cs）
+                default: if (!MisMsg(c, p, line) && !OrigMsg(c, p, line) && !StatsMsg(c, p, line) && !WorkMsg(c, p, line)) StudyMsg(c, p, line); break;   // mischief-…（DeskPals.Mischief.cs）；stats-…（DeskPals.Stats.cs）；course／exam／study-…（DeskPals.Study.cs）
             }
         }
 
@@ -5642,13 +5643,19 @@ namespace DeskPals
             Post(delegate { OnStuck(sr, k2, t2, ti, min); });
         }
 
+        // 工作來源：預設的 ~/.claude 加上「別的資料夾」（WSL）都看（DeskPals.Work.cs 的 WorkClaudeRoots）
         void ClaudeWatchOnce(JavaScriptSerializer js)
         {
-            string root = ClaudeProjectsDir();
-            if (!Directory.Exists(root)) { busyClaude = 0; return; }
+            int busy = 0;
+            foreach (string root in WorkClaudeRoots()) busy += ClaudeWatchRoot(js, root);
+            busyClaude = busy;
+        }
+
+        int ClaudeWatchRoot(JavaScriptSerializer js, string root)
+        {
             DateTime now = DateTime.UtcNow;
             HashSet<string> seen = new HashSet<string>();
-            bool anyClaude = Process.GetProcessesByName("claude").Length > 0 || Process.GetProcessesByName("node").Length > 0;
+            bool anyClaude = Process.GetProcessesByName("claude").Length > 0 || Process.GetProcessesByName("node").Length > 0 || WorkWslAlive("claude_dir");
             int busy = 0;
             foreach (string pdir in Directory.GetDirectories(root))
                 foreach (FileInfo fi in new DirectoryInfo(pdir).EnumerateFiles("*.jsonl"))
@@ -5666,10 +5673,10 @@ namespace DeskPals
                     if (anyClaude && (kind == "model" || kind == "tool") && (now - act).TotalMinutes < 10) busy++;
                     StuckCheck(key, "Claude", act, kind, tool, title, anyClaude);
                 }
-            busyClaude = busy;
             List<string> gone = new List<string>();
             foreach (string kk in stuck.Keys) if (!seen.Contains(kk) && kk.StartsWith(root, StringComparison.OrdinalIgnoreCase)) gone.Add(kk);
             foreach (string kk in gone) stuck.Remove(kk);
+            return busy;
         }
 
         // 讀對話紀錄最後一段，找最後一筆主對話：回傳 idle／model／tool（null＝看不出來）
@@ -5842,17 +5849,18 @@ namespace DeskPals
 
         void CodexWatchOnce(bool relist)
         {
-            string root = CodexSessionsDir();
-            if (!Directory.Exists(root)) { busyCodex = 0; return; }
+            List<string> roots = WorkCodexRoots();   // 工作來源：預設的 ~/.codex 加上「別的資料夾」（WSL）
+            if (roots.Count == 0) { busyCodex = 0; return; }
             DateTime now = DateTime.UtcNow;
             if (relist)
             {
                 List<string> files = new List<string>();
-                foreach (FileInfo fi in new DirectoryInfo(root).EnumerateFiles("rollout-*.jsonl", SearchOption.AllDirectories))
-                    if ((now - fi.LastWriteTimeUtc).TotalMinutes <= 40) files.Add(fi.FullName);
+                foreach (string root in roots)
+                    foreach (FileInfo fi in new DirectoryInfo(root).EnumerateFiles("rollout-*.jsonl", SearchOption.AllDirectories))
+                        if ((now - fi.LastWriteTimeUtc).TotalMinutes <= 40) files.Add(fi.FullName);
                 codexFiles = files;
             }
-            bool anyCodex = Process.GetProcessesByName("codex").Length > 0 || Process.GetProcessesByName("node").Length > 0;
+            bool anyCodex = Process.GetProcessesByName("codex").Length > 0 || Process.GetProcessesByName("node").Length > 0 || WorkWslAlive("codex_dir");
             int busy = 0;
             foreach (string f in codexFiles)
             {
@@ -7068,7 +7076,7 @@ namespace DeskPals
                             string host = companyHost;
                             if (host != "")
                             {
-                                bool ok = TcpOk(host, 443) || TcpOk(host, 80);
+                                bool ok = VpnReachable(host);   // 工作來源：host 或 host:port
                                 if (!ok) { if (vpnDownSince == DateTime.MaxValue) vpnDownSince = now; } else vpnDownSince = DateTime.MaxValue;
                                 if (vpnDownSince != DateTime.MaxValue && (now - vpnDownSince).TotalSeconds > 30 && HealthReady("vpn"))
                                 { string h2 = host; Post(delegate { OnNotify("vpn", "-", h2 + " 連不到"); }); }

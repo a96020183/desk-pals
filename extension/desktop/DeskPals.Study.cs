@@ -833,8 +833,8 @@ namespace DeskPals
                 {
                     List<string> urls;
                     lock (schoolUrls) urls = new List<string>(schoolUrls);
-                    string skip = workCal;
-                    urls.RemoveAll(delegate(string u) { return u == skip; });   // 跟 VS Code 開會提醒同一份：不要提醒兩次
+                    string skip = workCal, skip2 = WorkMeetUrl();
+                    urls.RemoveAll(delegate(string u) { return u == skip || u == skip2; });   // 跟開會提醒（VS Code 或桌面版的工作設定）同一份：不要提醒兩次
                     bool doFetch = fetchNow || DateTime.Now >= nextFetch;
                     if (urls.Count > 0 && !App.Offscreen && doFetch)
                     {
@@ -1016,7 +1016,7 @@ namespace DeskPals
                 planFired.Add(it.Key);
                 if (now - it.At > (it.Kind.EndsWith("-now") ? 5 : 3) * 60000L) continue;   // 電腦睡著錯過太久的就不補
                 App.Log("school " + it.Kind + ": " + it.Text);
-                if (it.Kind == "class-now") Count("classes");
+                if (it.Kind == "class-now") { Count("classes"); WorkLogClass(it); }   // 工作來源：上課也寫進小本子（DeskPals.Work.cs）
                 OnNotify(it.Kind, it.Url != "" ? it.Url : "-", it.Text);
                 int q = it.QuietMin;
                 if (q > 0) Later(10, delegate { StartQuiet(q); });   // 等「上課了」那則講完再安靜（不然馬上被「我安靜待著」蓋掉）
