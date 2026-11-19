@@ -4,6 +4,7 @@
 //   * 字型換成整數像素大小（點數 × 螢幕 DPI ÷ 72，四捨五入），量跟畫用同一個字型、同一個 StringFormat，所以量出來多寬就畫多寬；
 //   * 每一行的起點對齊整數像素，筆畫才不會糊；
 //   * GDI+ 畫不出 BMP 以外的 emoji（🍅 👍 會變方框）：那幾個字（代理字組、變體選擇符、ZWJ）改用 TextRenderer 跟 Segoe UI Emoji 畫，寬度也照它量。
+//   * 每一段字畫兩次（第二次往右 0.5px，Heft）：粗細跟 mockup 一樣。
 // 用法跟 TextRenderer 一樣：PixText.DrawText(g, 字, 字型, 方框或起點, 顏色, TextFormatFlags)、PixText.MeasureText(字, 字型[, 大小, 旗標])。
 //   支援的旗標：HorizontalCenter／Right、VerticalCenter／Bottom、WordBreak（中文一個字一個字斷、英文在空白斷）、EndEllipsis、SingleLine；
 //   其他（NoPadding、NoPrefix…）當作有設。不裁切（跟 NoClipping 一樣），EndEllipsis 會先把字剪短。
@@ -19,6 +20,10 @@ namespace DeskPals
 
     static class PixText
     {
+        // 字重：GDI+ 畫正黑體粗體 11～15px 偏細（比 mockup 的 CSS 700＋text-shadow .6px 細），同一串字往右 0.5px 再畫一次。
+        // 比較圖在 v011\legibility-menu\weight：B 這種的墨量最接近 mockup、又不糊（不對格的 AntiAlias 會糊、描邊會黏在一起）
+        public const float Heft = 0.5f;
+
         static readonly StringFormat SF = MakeSF();
         static StringFormat MakeSF()
         {
@@ -214,6 +219,7 @@ namespace DeskPals
                             else
                             {
                                 g.DrawString(run.Key, px, b, cx, cy, SF);
+                                g.DrawString(run.Key, px, b, cx + Heft, cy, SF);   // 再畫一次、往右 0.5px：跟 mockup 的粗細一樣（weight\compare）
                                 cx = (float)Math.Round(cx + RunW(run.Key, px, false));
                             }
                         }

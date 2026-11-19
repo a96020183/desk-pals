@@ -1619,7 +1619,11 @@ namespace DeskPals
         {
             TextRenderingHint was = g.TextRenderingHint;
             g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-            using (SolidBrush b = new SolidBrush(c)) g.DrawString(s, f, b, (float)Math.Round(x), (float)Math.Round(y), SF);
+            using (SolidBrush b = new SolidBrush(c))
+            {
+                g.DrawString(s, f, b, (float)Math.Round(x), (float)Math.Round(y), SF);
+                g.DrawString(s, f, b, (float)Math.Round(x) + PixText.Heft, (float)Math.Round(y), SF);   // 粗細跟 mockup 一樣（DeskPals.PixText.cs）
+            }
             g.TextRenderingHint = was;
         }
         static Bitmap measureBmp;
