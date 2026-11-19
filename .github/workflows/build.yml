@@ -888,15 +888,22 @@ jobs:
           if [ "$TAG" != "v$VER" ]; then echo "tag $TAG does not match extension/package.json version $VER"; exit 1; fi
           ls -la out
           cat > notes.md <<EOF
-          ## 公仔櫃 Desk Pals $VER
+          ## WoWo Pals（窩窩公仔櫃）$VER
 
-          | 檔案 | 給誰 |
-          |---|---|
-          | \`DeskPals-Setup-$VER.exe\` | Windows 10／11（不用 VS Code）。還沒簽章：SmartScreen 擋下來時按「其他資訊」→「仍要執行」 |
-          | \`DeskPals-$VER.dmg\` | macOS 13（Ventura）以後（Apple 晶片、Intel 都可以）。還沒公證：第一次打開請看 DMG 裡的說明 |
-          | \`desk-pals-$VER-win32-x64.vsix\` | VS Code 擴充套件，Windows（ARM 的電腦用 \`-win32-arm64\`）。附桌面版 DeskPals.exe |
-          | \`desk-pals-$VER.vsix\` | VS Code 擴充套件，macOS（通用版；Windows 請用上面那個） |
-          | \`DeskPals-$VER.msix\` | 給 Microsoft Store 上架用（未簽章，不能直接安裝） |
+          把可愛的小公仔放上你的桌面。挑一個下載就好：
+
+          ### 有在用 VS Code（推薦工程師）
+          下載 \`desk-pals-$VER-win32-x64.vsix\`（Windows；ARM 電腦用 \`-win32-arm64\`）或 \`desk-pals-$VER.vsix\`（macOS）。
+          安裝：VS Code 左邊「延伸模組」→ 右上角「⋯」→「從 VSIX 安裝…」→ 選剛下載的檔案。裝好後公仔會出現在整個螢幕上。
+          比桌面版多：Claude／Codex 卡住或做完提醒、推 tag 後盯 CI（GitLab 或公開的 GitHub repo）、Jira 新單、GitLab 待辦、開會和下雨提醒（Ctrl+Shift+P 輸入「公仔櫃」看全部指令）。
+
+          ### 不用 VS Code
+          - Windows 10／11：\`DeskPals-Setup-$VER.exe\`。還沒有數位簽章，Windows 跳出「Windows 已保護您的電腦」時按「其他資訊」→「仍要執行」。
+          - macOS 13（Ventura）以後：\`DeskPals-$VER.dmg\`（Apple 晶片、Intel 都可以）。第一次打開請看 DMG 裡的說明。
+
+          怎麼用：右鍵點櫃子打開選單；選單「設定 → 使用說明」有完整說明。隱私權政策：https://a96020183.github.io/wowo-pals/privacy.html
+
+          \`DeskPals-$VER.msix\` 是上架 Microsoft Store 用的（未簽章，不能直接安裝），不用下載。
 
           EOF
-          gh release create "$TAG" out/* --title "公仔櫃 Desk Pals $VER" --notes-file notes.md --generate-notes
+          gh release create "$TAG" out/* --title "WoWo Pals $VER" --notes-file notes.md --generate-notes

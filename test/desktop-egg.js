@@ -232,7 +232,7 @@ const field = (line, k) => (new RegExp(`\\b${k}=(\\S*)`).exec(line) || [])[1];
 			for (const t of ["串門子劇情", "午餐變身", "閒聊泡泡", "煙火", "搗蛋"]) assert.ok(seen["娛樂"].some((k) => k.startsWith(t)), "娛樂少了 " + t + ": " + seen["娛樂"]);
 			for (const t of ["下班時間", "早上點名", "小幫手"]) assert.ok(seen["工作"].some((k) => k.startsWith(t)), "工作少了 " + t + ": " + seen["工作"]);
 			for (const t of ["換一櫃", "做一隻自己的公仔", "匯入朋友的公仔", "做分享短片", "躲起來"]) assert.ok(seen["我的公仔"].some((k) => k.startsWith(t)), "我的公仔少了 " + t + ": " + seen["我的公仔"]);
-			for (const t of ["重新設定", "讀書小幫手設定"]) assert.ok(seen["設定"].some((k) => k.startsWith(t)), "設定少了 " + t + ": " + seen["設定"]);
+			for (const t of ["重新設定", "讀書小幫手設定", "使用說明"]) assert.ok(seen["設定"].some((k) => k.startsWith(t)), "設定少了 " + t + ": " + seen["設定"]);
 		});
 		await check("每個項目只出現在一個地方", () => {
 			const all = [...top, ...cats.flatMap((c) => seen[c])];

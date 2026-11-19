@@ -141,6 +141,7 @@ extension World {
         setm.DropDownItems.Add("讀書小幫手設定（學校行事曆、熬夜）…", nil, { self.ShowStudySettings() })
         StatsHouseMenu(setm.DropDownItems)   // 匿名回報的開關（公開版、有 ID 才有；61_stats.swift）
         // mac: C# 這裡還有 StartupHouseMenu（Microsoft Store 版的開機啟動），Mac 沒有
+        setm.DropDownItems.Add("使用說明（網頁）…", nil, { _ = Process.Start("https://a96020183.github.io/wowo-pals/guide.html") })   // 跟 C# World.GuideUrl 同一個網址
         m.Items.Add(setm)
 
         m.Items.Add(ToolStripSeparator())
