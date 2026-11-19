@@ -202,3 +202,11 @@
 每次推送都會在雲端的 Windows 和 Mac 上各編譯、試跑一次（都用不顯示畫面的離屏模式），也會打包獨立版並實際安裝、升級、解除安裝測一次；推 `v<版號>` 的 tag 會自動建 GitHub Release，附上公開版的安裝程式、DMG、vsix、MSIX（個人版只留在那次建置的 `personal-*` artifact）。
 
 **改程式時（公開版）**：粉絲角色的資料、動作、串場放在 `extension/desktop/DeskPals.Fan.cs`、`DeskPals.Pikmin.cs`、`mac/src/58_fan.swift`、`50_pikmin.swift`，公開版整個檔案不帶。共用程式碼裡碰到粉絲角色的地方（`Is("po")`、`case "spidey":`、台詞表、側邊欄的像素圖…）用 `// <fan>`…`// </fan>` 或行尾 `//@fan` 標起來，公開版要換成別的寫法的那一行寫成 `// <public> …`（標記本身是註解，個人版完全不受影響）。`python -I tools/variant.py public` 產生公開版（`build/public/extension`）並掃一遍；`python3 mac/assemble.py --public` 產生公開版的 `DeskPals.swift`。CI 會編譯、試跑兩個版本。
+
+## 授權
+
+本專案為 **TapAble 的專有軟體（proprietary），不是開源軟體**。版權所有 © 2026 TapAble，保留一切權利。
+
+授權只允許你安裝並自行使用本軟體；**不得**複製、散布、轉售、修改、反編譯或還原工程（除非當地法律另有強制規定）。原始碼即使在公開的倉庫看得到，也不代表授予任何複製、使用、修改或散布的權利。完整條款見 [LICENSE](LICENSE)。
+
+（「續命小隊」「窩伴小世界」等原創角色與程式碼皆屬 TapAble；個人版另含的粉絲角色只供個人非商業用途，版權仍屬各角色的版權方。）

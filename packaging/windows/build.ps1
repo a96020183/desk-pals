@@ -17,17 +17,26 @@
 # MSIX 的身分（Partner Center 給的）：環境變數 MSIX_IDENTITY_NAME、MSIX_PUBLISHER、MSIX_PUBLISHER_DISPLAY_NAME；沒設＝佔位值（只能拿來檢查，不能上架）。
 # 匿名回報（只有公開版）：環境變數 GA4_MEASUREMENT_ID、GA4_API_SECRET（CI 的 repo variable／secret）→ tools/variant.py 寫成 pals\ga4.txt，
 #   跟其他 pals 檔一起內嵌進 exe（MSIX、安裝程式都是同一支 exe）。沒設＝這一版不回報（程式裡沒有寫死任何 ID）。
+#
+# 混淆（只在你要的時候做；預設關，所以平常開發、CI 測試用的是沒混淆的乾淨 exe）：加 -Obfuscate（或設環境變數 DESKPALS_OBFUSCATE=1）
+#   就會在編完 exe 後、簽章前用 Obfuscar 把方法／型別名稱打亂，讓隨手反編譯看到的是亂碼。需要先裝 Obfuscar（見下）；找不到會直接失敗。
+#   Obfuscar 預設保留 property／field／event 名稱（JavaScriptSerializer 的 JSON 對應靠名字）、DllImport 進入點（P/Invoke），
+#   但混淆有可能打到反射，**上版前務必把整套測試跑過**（build.yml 的 exe 測試）。裝法：
+#     有 .NET SDK：dotnet tool install --global Obfuscar.GlobalTool   （之後 obfuscar 就在 PATH）
+#     沒有 SDK：到 nuget.org 下載 Obfuscar 套件，解出 tools\Obfuscar.Console.exe，設環境變數 OBFUSCAR_EXE 指它。
 param(
     [string[]]$Steps = @(),
     [string]$OutDir = "dist",
     [ValidateSet("public", "personal")][string]$Variant = "public",
-    [switch]$Strict
+    [switch]$Strict,
+    [switch]$Obfuscate
 )
 $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 Set-Location $Root
 $Steps = @($Steps | ForEach-Object { $_ -split "," } | Where-Object { $_ })
 $Personal = $Variant -eq "personal"
+$DoObfuscate = [bool]$Obfuscate -or ($env:DESKPALS_OBFUSCATE -and $env:DESKPALS_OBFUSCATE -ne "0")
 if ($Steps.Count -eq 0) { $Steps = if ($Personal) { @("exe", "installer") } else { @("exe", "installer", "msix") } }
 $Suffix = if ($Personal) { "-personal" } else { "" }
 $Build = Join-Path $Root $(if ($Personal) { "build\win-personal" } else { "build\win" })
@@ -66,6 +75,54 @@ function Sign-File([string]$file) {
     & $SignTool sign /fd sha256 /f $env:DESKPALS_SIGN_PFX /p $env:DESKPALS_SIGN_PASSWORD /tr http://timestamp.digicert.com /td sha256 /d "WoWo Pals" $file
     if ($LASTEXITCODE -ne 0) { throw "signtool failed on $file" }
     Write-Host "signed $file"
+}
+
+# 混淆（opt-in）：用 Obfuscar 把方法／型別名稱打亂。保留 property／field／event 名稱（JSON 對應）與 DllImport 進入點。
+function Find-Obfuscar {
+    if ($env:OBFUSCAR_EXE -and (Test-Path $env:OBFUSCAR_EXE)) { return $env:OBFUSCAR_EXE }
+    foreach ($n in @("Obfuscar.Console.exe", "obfuscar", "Obfuscar.exe")) {
+        $c = Get-Command $n -ErrorAction SilentlyContinue
+        if ($c) { return $c.Source }
+    }
+    return $null
+}
+function Invoke-Obfuscation([string]$exe, [string]$build) {
+    $tool = Find-Obfuscar
+    if (-not $tool) {
+        throw @"
+-Obfuscate was requested but Obfuscar was not found. Install one of:
+  * .NET SDK then: dotnet tool install --global Obfuscar.GlobalTool   (puts 'obfuscar' on PATH)
+  * or download the Obfuscar package from nuget.org, extract tools\Obfuscar.Console.exe, and set OBFUSCAR_EXE to it.
+"@
+    }
+    $obfOut = Join-Path $build "obf"
+    if (Test-Path $obfOut) { Remove-Item $obfOut -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $obfOut | Out-Null
+    $proj = Join-Path $build "Obfuscar.xml"
+    $xml = @"
+<?xml version='1.0'?>
+<Obfuscator>
+  <Var name="InPath" value="$build" />
+  <Var name="OutPath" value="$obfOut" />
+  <Var name="KeepPublicApi" value="false" />
+  <Var name="HidePrivateApi" value="true" />
+  <Var name="RenameProperties" value="false" />
+  <Var name="RenameFields" value="false" />
+  <Var name="RenameEvents" value="false" />
+  <Var name="ReuseNames" value="true" />
+  <Module file="`$(InPath)\$(Split-Path $exe -Leaf)" />
+</Obfuscator>
+"@
+    [System.IO.File]::WriteAllText($proj, $xml, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "obfuscating with $tool"
+    & $tool $proj
+    if ($LASTEXITCODE -ne 0) { throw "Obfuscar failed" }
+    $obfExe = Join-Path $obfOut (Split-Path $exe -Leaf)
+    if (-not (Test-Path $obfExe)) { throw "Obfuscar produced no output at $obfExe" }
+    $bytes = [System.IO.File]::ReadAllBytes($obfExe)
+    if ($bytes.Length -lt 2 -or $bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { throw "obfuscated output is not an exe" }
+    Copy-Item $obfExe $exe -Force
+    Write-Host ("obfuscated {0} ({1:N0} bytes)" -f $exe, (Get-Item $exe).Length)
 }
 
 # ---------- 圖示 ----------
@@ -139,6 +196,10 @@ using System.Reflection;
     & $csc @cscArgs
     if ($LASTEXITCODE -ne 0) { throw "csc failed" }
     Guard @($Exe, (Join-Path $Build "DeskPals.all.cs"))
+    if ($DoObfuscate) {
+        Invoke-Obfuscation $Exe $Build   # 編完、簽章前打亂名稱（opt-in；預設關，CI 測試用乾淨 exe）
+        Guard @($Exe)                     # 混淆後的 exe 再掃一次同人字眼
+    }
     Sign-File $Exe
     Copy-Item $Exe (Join-Path $Out "DeskPals$Suffix.exe") -Force
     Write-Host ("built {0} ({1:N0} bytes)" -f $Exe, (Get-Item $Exe).Length)

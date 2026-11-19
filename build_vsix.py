@@ -7,7 +7,11 @@
                                               → Windows 專用的 vsix（desk-pals-<版號>-<平台>[-personal].vsix）：附上編好的 DeskPals.exe
                                                 （packaging/windows/build.ps1 編的；公開版給公開版的 exe、個人版給個人版的），
                                                 擴充套件就直接執行它，不再用 PowerShell 即時編譯。一次只打一種版本（--public 或 --personal）。
-                                                沒有 --target＝通用版（Mac 用；不帶 exe，在 Windows 上會退回 desk-pals.ps1）。
+                                                這種 vsix 不帶任何 C# 原始碼：desktop/*.cs 和只拿來即時編譯的 desk-pals.ps1 都排除
+                                                （跑的是附上的 exe，不會用到；保護原始碼）。沒有 --target＝通用版（Mac 用）。
+      … --mac-bin <DeskPals>                  → 通用版（Mac）的 vsix 附上編好的 macOS 執行檔（packaging/mac/build_app.sh 的 universal binary），
+                                                擴充套件就直接跑它，不再用 swiftc 即時編譯；這種 vsix 不帶 DeskPals.swift 原始碼。
+                                                只配通用版（不要跟 --target 一起用）；Windows 上（沒有這支 Mac binary）照舊退回 desk-pals.ps1。
 公開版是 tools/variant.py 從原始碼減掉同人角色產生的（build/public/extension），打包前、打包後都會掃一次同人字眼，有就失敗。
 公開版的匿名回報 ID：有設環境變數 GA4_MEASUREMENT_ID＋GA4_API_SECRET 就由 variant.build_public 寫進 desktop/pals/ga4.txt 一起打包
 （VS Code 擴充套件會把 pals 複製到桌面版旁邊；win32 版附的 exe 本身也內嵌了）；沒設＝這個 vsix 不回報。個人版不帶。
@@ -27,7 +31,13 @@ WIN_TARGETS = {"win32-x64", "win32-arm64"}   # exe 是 AnyCPU，兩個平台同�
 MAC_ONLY = {"desktop/DeskPals.swift", "desktop/desk-pals.sh"}   # Windows 專用的 vsix 不帶
 
 
-def pack(ext, out, target=None, exe=None):
+def _win_exe_skip(rel):
+    """附了 DeskPals.exe 的 Windows 專用 vsix：跑的是 exe，不帶任何 C# 原始碼。
+    desktop/*.cs 和只拿來即時編譯的 desk-pals.ps1 都排除（保護原始碼；Mac 用的 .swift／.sh 已在 MAC_ONLY）。"""
+    return rel == "desktop/desk-pals.ps1" or (rel.startswith("desktop/") and rel.endswith(".cs"))
+
+
+def pack(ext, out, target=None, exe=None, mac_bin=None):
     pkg = json.load(open(os.path.join(ext, "package.json"), encoding="utf-8"))
     ver = pkg["version"]
     content_types = (
@@ -72,6 +82,10 @@ def pack(ext, out, target=None, exe=None):
                 rel = os.path.relpath(full, ext).replace(os.sep, "/")
                 if target and rel in MAC_ONLY:
                     continue
+                if target and exe and _win_exe_skip(rel):
+                    continue
+                if mac_bin and rel == "desktop/DeskPals.swift":
+                    continue   # 通用版附了編好的 Mac binary：不帶 .swift 原始碼
                 arc = "extension/" + rel
                 if f.endswith(".sh"):
                     info = zipfile.ZipInfo(arc)
@@ -82,6 +96,11 @@ def pack(ext, out, target=None, exe=None):
                     z.write(full, arc)
         if exe:
             z.write(exe, "extension/desktop/DeskPals.exe")
+        if mac_bin:
+            info = zipfile.ZipInfo("extension/desktop/DeskPals")   # 編好的 macOS 執行檔，要保留執行權限
+            info.external_attr = 0o755 << 16
+            info.compress_type = zipfile.ZIP_DEFLATED
+            z.writestr(info, open(mac_bin, "rb").read())
     print(out)
     for n in zipfile.ZipFile(out).namelist():
         print("  ", n)
@@ -97,6 +116,7 @@ def main(argv):
     out_dir = argv[argv.index("--out") + 1] if "--out" in argv else os.path.join(ROOT, "dist")
     targets = [t for t in argv[argv.index("--target") + 1].split(",") if t] if "--target" in argv else [None]
     exe = argv[argv.index("--exe") + 1] if "--exe" in argv else None
+    mac_bin = argv[argv.index("--mac-bin") + 1] if "--mac-bin" in argv else None
     for t in targets:
         if t is not None and t not in WIN_TARGETS:
             sys.exit(f"--target {t}: only {', '.join(sorted(WIN_TARGETS))} (Mac uses the universal vsix)")
@@ -107,6 +127,12 @@ def main(argv):
             sys.exit("--target: build one variant at a time (--public with the public exe, --personal with the personal exe)")
     elif exe:
         sys.exit("--exe needs --target win32-x64[,win32-arm64]")
+    if mac_bin:
+        if targets != [None]:
+            sys.exit("--mac-bin is for the universal (macOS) vsix; don't combine it with --target")
+        data = open(mac_bin, "rb").read()
+        if not data or data[:2] == b"MZ":
+            sys.exit(f"{mac_bin} is not a macOS binary (build it with packaging/mac/build_app.sh)")
     if exe:
         data = open(exe, "rb").read()
         if data[:2] != b"MZ":
@@ -121,13 +147,13 @@ def main(argv):
     if want_pub:
         ext = variant.build_public(os.path.join(ROOT, "build", "public", "extension"))
         for t in targets:
-            vsix = pack(ext, os.path.join(out_dir, name(t, "")), t, exe)
+            vsix = pack(ext, os.path.join(out_dir, name(t, "")), t, exe, mac_bin if t is None else None)
             if not variant.guard([vsix]):
                 os.remove(vsix)
                 sys.exit("public vsix has fan content (see above) — not written")
     if want_per:
         for t in targets:
-            pack(os.path.join(ROOT, "extension"), os.path.join(out_dir, name(t, "-personal")), t, exe)
+            pack(os.path.join(ROOT, "extension"), os.path.join(out_dir, name(t, "-personal")), t, exe, mac_bin if t is None else None)
 
 
 if __name__ == "__main__":
