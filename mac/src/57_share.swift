@@ -154,7 +154,7 @@ extension World {
     // 選單：做分享短片（存到 圖片\Desk Pals、說明文字放進剪貼簿、打開資料夾）
     func ShareClip(_ who: Pet!) {
         if sharing2 { return }
-        let dir = App.Offscreen ? Path.Combine(World.DataDir, "share") : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Desk Pals")
+        let dir = App.Offscreen ? Path.Combine(World.DataDir, "share") : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "WoWo Pals")
         ShareClipTo(dir, who)
     }
 
@@ -211,7 +211,7 @@ extension World {
             // mac: explorer /select → Finder 選取
             NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
         }
-        l.Say("短片做好了！存在「圖片/Desk Pals」，說明文字也複製好了，直接貼上就能分享 🎬", 5)   // mac: 路徑分隔用 /
+        l.Say("短片做好了！存在「圖片/WoWo Pals」，說明文字也複製好了，直接貼上就能分享 🎬", 5)   // mac: 路徑分隔用 /
     }
 
     // 畫每一格：可愛的小桌面背景＋公仔照劇本動
@@ -224,7 +224,7 @@ extension World {
         let heroPet: Pet = pets[0]
         caption = nil
         for p in pets { if p.P.Cu { caption = p.ShareLine("x_share"); break } }
-        if string.IsNullOrEmpty(caption) { caption = "我的桌面公仔在螢幕上陪我上班 ✨ #我的桌面公仔 #DeskPals" }
+        if string.IsNullOrEmpty(caption) { caption = "我的桌面公仔在螢幕上陪我上班 ✨ #我的桌面公仔 #WoWoPals" }
         let hi = World.NoEmoji(heroPet.ShareLine("hi"))
         let ps = cast.Count == 1 ? 13 : (cast.Count == 2 ? 11 : (cast.Count == 3 ? 9 : 7))
         let frames = List<[Int]>()
@@ -360,7 +360,7 @@ extension World {
         // 浮水印
         do {
             let f = FontT("Microsoft JhengHei UI", 16, FontStyle.Bold, GraphicsUnit.Pixel)
-            let s = "Desk Pals"
+            let s = "WoWo Pals"
             let ts = TextRenderer.MeasureText(s, f, SizeT(4000, 400), TextFormatFlags.NoPadding)
             let tx = W0 - ts.Width - 18, ty = H0 - ts.Height - 14
             TextRenderer.DrawText(g, s, f, Point(tx + 1, ty + 1), Pix.C(0x7A4A28), TextFormatFlags.NoPadding)
@@ -382,7 +382,7 @@ extension World {
         if m == nil { return }
         if App.Offscreen { App.Log("custom: export dialog skipped (offscreen)"); return }
         // mac: SaveFileDialog → NSSavePanel
-        guard let file = CuDialogs.Save("匯出「" + m.Name + "」", CuMeta.CleanName(m.Name) + ".deskpal", ["deskpal"], Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)) else { return }
+        guard let file = CuDialogs.Save("匯出「" + m.Name + "」", CuMeta.CleanName(m.Name) + ".deskpal", ["deskpal"], World.UserFolder(Environment.SpecialFolder.DesktopDirectory, "", "Desktop")) else { return }
         if CuExport(id, file) { Lead().Say("匯出好了！把「" + Path.GetFileName(file) + "」傳給朋友，他在小屋按「匯入朋友的公仔」就能養 🧸", 5) }
     }
 
@@ -395,7 +395,7 @@ extension World {
             guard let meta = try JavaScriptSerializer().DeserializeObject(m.ToJson()) as? Dict<String, Any> else { return false }
             meta.Remove("id"); meta.Remove("created")
             let d = Dict<String, Any>()
-            d["deskpal"] = 1; d["app"] = "Desk Pals"; d["meta"] = meta; d["source"] = Data(src).base64EncodedString()   // Convert.ToBase64String
+            d["deskpal"] = 1; d["app"] = "WoWo Pals"; d["meta"] = meta; d["source"] = Data(src).base64EncodedString()   // Convert.ToBase64String
             let js = JavaScriptSerializer(); js.MaxJsonLength = int.MaxValue
             try File.WriteAllText(path, js.Serialize(d), UTF8Encoding(false))
             App.Log("custom exported " + id + " -> " + path)
@@ -407,7 +407,7 @@ extension World {
     func CuImportDialog(_ first: Bool) {
         if App.Offscreen { App.Log("custom: import dialog skipped (offscreen)"); if first { ShowSetup(true) }; return }
         // mac: OpenFileDialog → NSOpenPanel（只列 .deskpal）
-        guard let file = CuDialogs.Open("匯入朋友的公仔", ["deskpal"], Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)) else { if first { ShowSetup(true) }; return }
+        guard let file = CuDialogs.Open("匯入朋友的公仔", ["deskpal"], World.UserFolder(Environment.SpecialFolder.DesktopDirectory, "", "Desktop")) else { if first { ShowSetup(true) }; return }
         CuImportFile(file, first)
     }
 
@@ -435,7 +435,7 @@ extension World {
                 var ver: Any? = nil, mo: Any? = nil, so: Any? = nil
                 var isPal = false   // C#：d == null || !TryGetValue || Convert.ToInt32(ver) != 1（短路：前面不成立才轉）
                 if d != nil && d!.TryGetValue("deskpal", &ver) { isPal = try World.CuToInt32(ver) == 1 }
-                if !isPal { err = "這不是 Desk Pals 的公仔檔" }
+                if !isPal { err = "這不是 WoWo Pals 的公仔檔" }
                 else if !d!.TryGetValue("meta", &mo) || !(mo is Dict<String, Any>) || !d!.TryGetValue("source", &so) || !(so is String) { err = "公仔檔缺東西（可能壞掉了）" }
                 else {
                     let m: CuMeta = CuMeta.FromDict(mo as! Dict<String, Any>)

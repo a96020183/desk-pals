@@ -330,7 +330,7 @@ class CuMaker: Form {
     func PickImage(_ sheet: Bool) {
         if App.Offscreen { App.Log("custom: file dialog skipped (offscreen)"); return }
         // mac: OpenFileDialog（圖片（PNG、JPG、GIF、BMP））→ NSOpenPanel
-        let file = CuDialogs.Open(sheet ? "選畫好的動作表" : "選一張照片或圖片", ["png", "jpg", "jpeg", "gif", "bmp"], Environment.GetFolderPath(Environment.SpecialFolder.MyPictures))
+        let file = CuDialogs.Open(sheet ? "選畫好的動作表" : "選一張照片或圖片", ["png", "jpg", "jpeg", "gif", "bmp"], World.UserFolder(Environment.SpecialFolder.MyPictures, "", "Pictures"))
         if file != nil { LoadImage(file!, sheet) }
     }
 
@@ -531,6 +531,10 @@ class CuMaker: Form {
         Pix.Art(g, CuMaker.CAT, pal, r.X + (r.Width - aw) / 2, r.Y + Sc(22), c)
         TextRenderer.DrawText(g, "把照片拖進來，或點這裡選一張", bigF, Rectangle(r.X, r.Y + Sc(22) + CuMaker.CAT.count * c + Sc(10), r.Width, Sc(28)), Pix.TextC, Pix.Mid)
         TextRenderer.DrawText(g, "PNG・JPG・GIF・BMP 都可以", subF, Rectangle(r.X, r.Y + Sc(22) + CuMaker.CAT.count * c + Sc(40), r.Width, Sc(20)), Pix.C(0x9A6338), Pix.Mid)
+        // 使用者指定的原字（v011 SPEC §4），不要改字
+        let artH: Int = CuMaker.CAT.count * c
+        TextRenderer.DrawText(g, CuMaker.CopyrightNote, subF, Rectangle(r.X, r.Y + Sc(22) + artH + Sc(62), r.Width, Sc(20)), Pix.C(0xB04040), Pix.Mid)
+        if PhotoNoAlpha() { TextRenderer.DrawText(g, CuMaker.PortraitTip, subF, Rectangle(r.X, r.Y + Sc(22) + artH + Sc(82), r.Width, Sc(20)), Pix.C(0x9A6338), Pix.Mid) }   // 選過一張沒透明的照片
         // 小技巧
         let tip = Rectangle(r.X, r.Bottom + Sc(14), r.Width, Sc(78))
         Pix.Round(g, Pix.C(0xE6D3B0), tip.X, tip.Y, tip.Width, tip.Height, U)
@@ -543,6 +547,10 @@ class CuMaker: Form {
         let tb: Btn! = Find("template")
         if tb != nil { TextRenderer.DrawText(g, "進階：自己畫每個動作（動作表）、或匯入朋友傳來的公仔", smallF, Rectangle(r.X, tb.R.Y - Sc(22), r.Width, Sc(18)), Pix.C(0x9A6338), Pix.LeftMid) }
     }
+
+    static let CopyrightNote = "千萬不要使用有版權的照片"
+    func PhotoNoAlpha() -> Bool { return spr != nil && !meta.Sheet && !srcAlpha }
+    static let PortraitTip = "人像照先在手機去背，用胸口以上的最可愛"
 
     static let CAT: [String] = [
         "..kk..........kk..",
@@ -622,6 +630,8 @@ class CuMaker: Form {
         }
         Section(g, "修一下（在左邊的圖上塗）", r.X, r.Y + Sc(92))
         Section(g, "風格", r.X, r.Y + Sc(204))
+        // 沒有透明的照片（人像照直接去背常常不乾淨，人像測試 v011\humantest）：提醒先在手機去背
+        if PhotoNoAlpha() { TextRenderer.DrawText(g, CuMaker.PortraitTip, subF, Rectangle(r.X, r.Y + Sc(346), r.Width, Sc(36)), Pix.C(0x9A6338), [TextFormatFlags.Left, TextFormatFlags.Top, TextFormatFlags.WordBreak]) }
         // 實際大小預覽（桌面上就是這麼大）：左邊圖的右下角一小格
         if spr != nil {
             let mw = Sc(120), mh = Sc(104)
@@ -851,7 +861,7 @@ extension World {
     func CuSaveTemplateDialog() {
         if App.Offscreen { App.Log("custom: template dialog skipped (offscreen)"); return }
         // mac: SaveFileDialog（PNG 圖片）→ NSSavePanel
-        guard let file = CuDialogs.Save("存動作表範本", "DeskPals動作表範本.png", ["png"], Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)) else { return }
+        guard let file = CuDialogs.Save("存動作表範本", "DeskPals動作表範本.png", ["png"], World.UserFolder(Environment.SpecialFolder.DesktopDirectory, "", "Desktop")) else { return }
         World.CuSaveTemplate(file)
         Lead().Say("範本存好了：每一格畫一個動作，畫好再按「上傳畫好的動作表」🎨", 4)
     }

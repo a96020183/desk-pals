@@ -1,4 +1,4 @@
-// 95_standalone.swift — 獨立版 Desk Pals.app（不用 VS Code）的開場：只有從 .app 包裡跑的時候才做事，
+// 95_standalone.swift — 獨立版 WoWo Pals.app（0.10 以前叫 Desk Pals.app；不用 VS Code）的開場：只有從 .app 包裡跑的時候才做事，
 // VS Code 擴充套件編出來的那支（desk-pals.sh）、CI 的離屏測試（DESKPALS_OFFSCREEN=1）都不受影響。
 //   ・已經開著：叫它出來打個招呼就結束（不會開兩個）
 //   ・寫 ~/Library/Application Support/DeskPals/standalone.json：VS Code 擴充套件看到就不再自己編一份、不建開機啟動，只負責連上
@@ -6,6 +6,7 @@
 //     擴充套件那份還開著的話先請它收工，再換這個上來
 //   ・還在「下載項目」／DMG 裡直接打開（App Translocation）：提醒先拖進「應用程式」，這次不設開機啟動
 //   ・在 Finder／Launchpad 再點一次：叫公仔打招呼
+//   ・0.11 改名：同一個資料夾裡舊名字的「Desk Pals.app」（同一個 bundle id）換下來之後丟到垃圾桶（Windows 升級也會拿掉舊名字的捷徑）
 // 由 99_main.swift 在 App.Main() 之前呼叫。
 import AppKit
 import Carbon
@@ -35,9 +36,23 @@ enum Standalone {
             _ = Send(sock, "quit")
             WaitUnlocked(sock + ".lock", 10)
         }
+        if !translocated { RetireOldApp(bundle) }
         if translocated { AskToMove() }
         reopen = ReopenHandler(sock)
         NotificationCenter.default.addObserver(forName: NSApplication.didFinishLaunchingNotification, object: nil, queue: .main) { _ in reopen?.Install() }
+    }
+
+    // 0.11：App 改名 WoWo Pals.app（bundle id 不變，開機啟動照舊）。拖進「應用程式」時舊的 Desk Pals.app 不會被蓋掉 → 丟到垃圾桶（還撿得回來）
+    static func RetireOldApp(_ bundle: String) {
+        let old = ((bundle as NSString).deletingLastPathComponent as NSString).appendingPathComponent("Desk Pals.app")
+        if old == bundle || !FileManager.default.fileExists(atPath: old) { return }
+        guard let ob = Bundle(path: old), let oid = ob.bundleIdentifier, oid == Bundle.main.bundleIdentifier else { return }
+        do {
+            try FileManager.default.trashItem(at: URL(fileURLWithPath: old), resultingItemURL: nil)
+            App.Log("standalone: moved the old Desk Pals.app to the Trash")
+        } catch {
+            App.Log("standalone: could not move the old Desk Pals.app to the Trash: " + error.localizedDescription)
+        }
     }
 
     static func WriteMarker(_ bundle: String, _ exe: String) {
@@ -92,7 +107,7 @@ enum Standalone {
         app.setActivationPolicy(.accessory)
         app.activate(ignoringOtherApps: true)
         let al = NSAlert()
-        al.messageText = "先把「Desk Pals」拖進「應用程式」資料夾"
+        al.messageText = "先把「WoWo Pals」拖進「應用程式」資料夾"
         al.informativeText = "現在是直接從下載的地方（或磁碟映像檔）打開的：這次也能玩，但開機不會自動出現。\n\n把它拖進「應用程式」資料夾，再從那裡打開一次就好了。"
         al.addButton(withTitle: "好")
         al.runModal()
