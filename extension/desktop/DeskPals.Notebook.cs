@@ -324,7 +324,7 @@ namespace DeskPals
                 case "next": if (!IsToday) GoDay(Day.AddDays(1)); return;
                 case "today": GoDay(w.NbNow().Date); return;
                 case "sources": w.OpenWorkSettings(); return;
-                case "connect": w.OpenWorkSettings(); return;
+                case "connect": w.OpenWorkSettings(arg); return;   // 直接打開那個來源（學校行事曆＝讀書小幫手設定）
                 case "pv": Preview = !Preview; if (!Spread) Tab = "done"; break;
                 case "kind": PvKind = arg == "simple" ? "simple" : "detail"; Preview = true; break;
                 case "links": Links = !Links; break;

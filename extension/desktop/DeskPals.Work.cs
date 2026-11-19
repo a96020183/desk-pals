@@ -1519,6 +1519,12 @@ namespace DeskPals
 
         // 小本子（DeskPals.Notebook.cs）用的兩個接點（v011 SPEC 2b）：「來源」按鈕、空白頁的「接上」
         public void OpenWorkSettings() { ShowWorkSettings(); }
+        // 空白頁的「接上」：直接打開那個來源（calendar＝開會；school 在讀書小幫手設定）
+        public void OpenWorkSettings(string key)
+        {
+            if (key == "school") { ShowStudySettings(); return; }
+            ShowWorkSettings(key == "calendar" ? "meet" : key);
+        }
 
         // 空白頁那張清單：這個來源接上了沒（claude｜school｜calendar｜github｜gitlab｜jira）
         public bool WorkSourceOn(string key)

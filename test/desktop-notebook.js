@@ -655,7 +655,11 @@ const STU_SIMPLE = `・上課：資料結構
 		});
 		await snap(app, "empty-done");
 		await click(app, "connect", "jira");
-		await check("「接上」打開工作設定（work-sources 提供 OpenWorkSettings）", async () => { o = await info(app); assert.ok(o.said && o.said !== "-"); });
+		await check("「接上」打開工作設定，直接在 Jira 那一頁（work-sources 的 OpenWorkSettings）", async () => {
+			const d = await app.block("work-settings info");
+			assert.match(d, /^ws view=list sel=jira /m, d.slice(0, 200));
+			app.send("work-settings close"); await sleep(300);
+		});
 		await click(app, "tab", "todo");
 		o = await info(app);
 		await check("待辦空白：「還沒有待辦」＋輸入框", () => assert.ok(o.has("empty todo")));
