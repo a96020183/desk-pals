@@ -189,12 +189,49 @@ namespace DeskPals
                 sl.SetArguments(args);
                 sl.SetWorkingDirectory(Path.GetDirectoryName(exe));
                 sl.SetIconLocation(exe, 0);
-                sl.SetDescription("公仔櫃 Desk Pals（整個螢幕的像素公仔）");
+                sl.SetDescription("WoWo Pals（整個螢幕的像素公仔）");
                 pf.Save(lnk, true);
                 if (!File.Exists(lnk)) { App.Log("autostart: saved but the shortcut is not there: " + lnk); return false; }
+                RemoveOldName(lnk);
                 return true;
             }
             catch (Exception ex) { App.Log("autostart: " + Why(ex)); return false; }
+            finally { if (o != null) Marshal.FinalReleaseComObject(o); }
+        }
+
+        // 0.11 改名：開機捷徑從「公仔櫃 Desk Pals.lnk」改叫「WoWo Pals.lnk」。新的建好以後，同一個資料夾裡自家的舊名字捷徑拿掉（別人的不動）
+        public const string OldLnkName = "公仔櫃 Desk Pals.lnk";
+        static void RemoveOldName(string lnk)
+        {
+            try
+            {
+                string old = Path.Combine(Path.GetDirectoryName(lnk), OldLnkName);
+                if (string.Equals(old, lnk, StringComparison.OrdinalIgnoreCase) || !File.Exists(old)) return;
+                if (!Ours(old)) { App.Log("autostart: old-name shortcut is not ours, left alone"); return; }
+                File.Delete(old);
+                App.Log("autostart: removed the old-name shortcut");
+            }
+            catch (Exception ex) { App.Log("autostart: old-name shortcut: " + Why(ex)); }
+        }
+
+        // 捷徑指著自家的嗎：DeskPals.exe，或 powershell.exe ＋ desk-pals.ps1（舊的 VS Code 擴充套件）。全程 Unicode（中文檔名在英文 Windows 也讀得到）
+        public static bool Ours(string lnk)
+        {
+            object o = null;
+            try
+            {
+                o = new ShellLink();
+                ((System.Runtime.InteropServices.ComTypes.IPersistFile)o).Load(lnk, 0);
+                IShellLinkW sl = (IShellLinkW)o;
+                StringBuilder sb = new StringBuilder(1024);
+                sl.GetPath(sb, sb.Capacity, IntPtr.Zero, 0x4);
+                string exe = Path.GetFileName(sb.ToString());
+                sb = new StringBuilder(1024);
+                sl.GetArguments(sb, sb.Capacity);
+                if (string.Equals(exe, "DeskPals.exe", StringComparison.OrdinalIgnoreCase)) return true;
+                return string.Equals(exe, "powershell.exe", StringComparison.OrdinalIgnoreCase) && sb.ToString().IndexOf("desk-pals.ps1", StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+            catch (Exception ex) { App.Log("autostart: read " + Why(ex)); return false; }
             finally { if (o != null) Marshal.FinalReleaseComObject(o); }
         }
 
@@ -262,10 +299,11 @@ namespace DeskPals
                     string from = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, f), to = Path.Combine(World.DataDir, f);
                     if (File.Exists(from) && (!File.Exists(to) || File.ReadAllText(to) != File.ReadAllText(from))) File.Copy(from, to, true);
                 }
-                string lnk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup), "公仔櫃 Desk Pals.lnk");
-                if (File.Exists(lnk))
+                foreach (string name in new string[] { "WoWo Pals.lnk", Autostart.OldLnkName })   // 現在的名字、0.10.x 以前的名字
                 {
-                    if (OurShortcut(lnk))
+                    string lnk = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Startup), name);
+                    if (!File.Exists(lnk)) continue;
+                    if (Autostart.Ours(lnk))
                     {
                         File.Delete(lnk);
                         App.Log("msix: removed our old startup shortcut (StartupTask takes over)");
@@ -277,28 +315,6 @@ namespace DeskPals
             catch (Exception ex) { App.Log("msix setup: " + ex.Message); }
         }
 
-        // 捷徑指著自家的嗎：DeskPals.exe（安裝程式版、VS Code 擴充套件放的那支），或 powershell.exe ＋ desk-pals.ps1（舊的 VS Code 擴充套件）
-        static bool OurShortcut(string lnk)
-        {
-            try
-            {
-                Type t = Type.GetTypeFromProgID("WScript.Shell");
-                object sh = Activator.CreateInstance(t);
-                try
-                {
-                    object s = t.InvokeMember("CreateShortcut", BindingFlags.InvokeMethod, null, sh, new object[] { lnk });
-                    Type st = s.GetType();
-                    string target = (string)st.InvokeMember("TargetPath", BindingFlags.GetProperty, null, s, null) ?? "";
-                    string args = (string)st.InvokeMember("Arguments", BindingFlags.GetProperty, null, s, null) ?? "";
-                    Marshal.FinalReleaseComObject(s);
-                    string exe = Path.GetFileName(target);
-                    if (string.Equals(exe, "DeskPals.exe", StringComparison.OrdinalIgnoreCase)) return true;
-                    return string.Equals(exe, "powershell.exe", StringComparison.OrdinalIgnoreCase) && args.IndexOf("desk-pals.ps1", StringComparison.OrdinalIgnoreCase) >= 0;
-                }
-                finally { Marshal.FinalReleaseComObject(sh); }
-            }
-            catch (Exception ex) { App.Log("msix: read shortcut " + ex.Message); return false; }
-        }
 
 #if !NO_WINRT
         // ---- StartupTask（WinRT，Windows 內建）：都在背景執行緒做，不卡畫面 ----

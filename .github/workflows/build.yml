@@ -5,6 +5,12 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      # 測試絕不讀 runner 家目錄的 Claude／Codex 對話：整個 job 都指到空資料夾（桌面版離屏時本來就不看家目錄，這裡再保險一次）
+      - name: Empty Claude / Codex folders for every test
+        run: |
+          mkdir -p "$RUNNER_TEMP/no-claude" "$RUNNER_TEMP/no-codex"
+          echo "CLAUDE_CONFIG_DIR=$RUNNER_TEMP/no-claude" >> "$GITHUB_ENV"
+          echo "CODEX_HOME=$RUNNER_TEMP/no-codex" >> "$GITHUB_ENV"
       - name: DeskPals.swift is up to date with mac/src
         run: |
           python3 mac/assemble.py
@@ -319,7 +325,22 @@ jobs:
           mkdir -p public-shots/egg
           node test/desktop-egg.js "$RUNNER_TEMP/dpe" "$RUNNER_TEMP/dpe-pub" public-shots/egg -- build/public/extension/desktop/DeskPals {ep} duoduo original
           node test/desktop-egg.js "$RUNNER_TEMP/dpep" "$RUNNER_TEMP/dpe-per" "$RUNNER_TEMP/dpe-per-shots" -- extension/desktop/DeskPals {ep} duoduo original
-      # ---------- standalone Desk Pals.app / DMG ----------
+      # ---------- 0.11 工作來源、工作設定、小本子（跟 Windows 同三支測試；假的 Jira／行事曆／天氣、假的 glab／gh、不連網路；Jira token 在測試專用的鑰匙圈項目）----------
+      - name: Work sources + work settings + notebook tests (public + personal; TZ=Asia/Taipei like the Windows runner)
+        env:
+          TZ: Asia/Taipei
+        run: |
+          mkdir -p public-shots/work public-shots/work-settings public-shots/notebook
+          RC=0
+          node test/desktop-work.js "$RUNNER_TEMP/dpw" "$RUNNER_TEMP/dpw-pub" public-shots/work -- build/public/extension/desktop/DeskPals {ep} "" "" || { echo "::error::work sources test failed (public)"; RC=1; }
+          node test/desktop-work.js "$RUNNER_TEMP/dpwp" "$RUNNER_TEMP/dpw-per" "$RUNNER_TEMP/dpw-per-shots" -- extension/desktop/DeskPals {ep} "" "" || { echo "::error::work sources test failed (personal)"; RC=1; }
+          node test/desktop-worksettings.js "$RUNNER_TEMP/dpws" "$RUNNER_TEMP/dpws-pub" public-shots/work-settings -- build/public/extension/desktop/DeskPals {ep} duoduo original || { echo "::error::work settings test failed (public)"; RC=1; }
+          node test/desktop-worksettings.js "$RUNNER_TEMP/dpwsp" "$RUNNER_TEMP/dpws-per" "$RUNNER_TEMP/dpws-per-shots" -- extension/desktop/DeskPals {ep} duoduo original || { echo "::error::work settings test failed (personal)"; RC=1; }
+          node test/desktop-notebook.js "$RUNNER_TEMP/dpn" "$RUNNER_TEMP/dp-nb-pub" public-shots/notebook -- build/public/extension/desktop/DeskPals {ep} duoduo original || { echo "::error::notebook test failed (public)"; RC=1; }
+          NB_SHOTS=0 node test/desktop-notebook.js "$RUNNER_TEMP/dpnp" "$RUNNER_TEMP/dp-nb-per" "$RUNNER_TEMP/dp-nb-per-shots" -- extension/desktop/DeskPals {ep} duoduo original || { echo "::error::notebook test failed (personal)"; RC=1; }
+          tail -n 80 "$HOME/Library/Logs/desk-pals.log" || true
+          exit $RC
+      # ---------- standalone WoWo Pals.app / DMG ----------
       - name: Developer ID certificate (only if the secrets exist)
         env:
           MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
@@ -338,7 +359,7 @@ jobs:
           [ -n "$ID" ] || { echo "no 'Developer ID Application' identity in the .p12"; exit 1; }
           echo "MAC_SIGN_IDENTITY=$ID" >> "$GITHUB_ENV"
           rm -f "$RUNNER_TEMP/cert.p12"
-      - name: Build Desk Pals.app + DMG
+      - name: Build WoWo Pals.app + DMG
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -361,10 +382,10 @@ jobs:
           ls -la "$MNT"
           python3 -I tools/variant.py guard "$MNT"   # 公開版 DMG：裡面（執行檔、資源、說明）不能有同人字眼
           test -L "$MNT/Applications"
-          codesign --verify --strict --verbose=2 "$MNT/Desk Pals.app"
-          rm -rf "$RUNNER_TEMP/apps" && mkdir -p "$RUNNER_TEMP/apps" && cp -R "$MNT/Desk Pals.app" "$RUNNER_TEMP/apps/"
+          codesign --verify --strict --verbose=2 "$MNT/WoWo Pals.app"
+          rm -rf "$RUNNER_TEMP/apps" && mkdir -p "$RUNNER_TEMP/apps" && cp -R "$MNT/WoWo Pals.app" "$RUNNER_TEMP/apps/"
           hdiutil detach "$MNT"
-          APP="$RUNNER_TEMP/apps/Desk Pals.app"
+          APP="$RUNNER_TEMP/apps/WoWo Pals.app"
           BIN="$APP/Contents/MacOS/DeskPals"
           lipo -archs "$BIN" | grep -q arm64 && lipo -archs "$BIN" | grep -q x86_64
           plutil -p "$APP/Contents/Info.plist"
@@ -382,7 +403,7 @@ jobs:
       - name: Standalone app takes over from the extension (marker, LaunchAgent, single instance)
         run: |
           set -e
-          APP="$RUNNER_TEMP/apps/Desk Pals.app"
+          APP="$RUNNER_TEMP/apps/WoWo Pals.app"
           BIN="$APP/Contents/MacOS/DeskPals"
           HOME_DIR="$HOME/Library/Application Support/DeskPals"
           SOCK="$HOME_DIR/desk-pals.sock"
@@ -457,6 +478,12 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      # 測試絕不讀 runner 家目錄的 Claude／Codex 對話：整個 job 都指到空資料夾（桌面版離屏時本來就不看家目錄，這裡再保險一次）
+      - name: Empty Claude / Codex folders for every test
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\no-claude", "$env:RUNNER_TEMP\no-codex" | Out-Null
+          [IO.File]::AppendAllText($env:GITHUB_ENV, "CLAUDE_CONFIG_DIR=$env:RUNNER_TEMP\no-claude`nCODEX_HOME=$env:RUNNER_TEMP\no-codex`n")   # 不帶 BOM
       - name: Compile personal DeskPals (same as desk-pals.ps1)
         shell: powershell
         run: |
@@ -507,7 +534,7 @@ jobs:
       - name: Mischief tests (public + personal, offscreen, fake side effects) + VS Code settings unit test + line keys
         shell: powershell
         run: |
-          node --test test/mischief.test.js test/lines.test.js
+          node --test test/mischief.test.js test/lines.test.js test/work-own.test.js
           if ($LASTEXITCODE -ne 0) { throw "mischief unit test failed" }
           $runs = @(@{ n = "pub"; ps1 = "build\public\extension\desktop\desk-pals.ps1"; out = "public-ps1-shots\mischief" }, @{ n = "per"; ps1 = "extension\desktop\desk-pals.ps1"; out = "ps1-shots\mischief" })
           foreach ($v in $runs) {
@@ -723,6 +750,22 @@ jobs:
           $log = Get-Content "$env:TEMP\desk-pals.log" -Encoding UTF8
           $log | Select-Object -Last 30
           if (-not ($log | Select-String "exe .* STA")) { throw "exe main thread is not STA (clipboard would fail)" }
+      # 工作來源（DeskPals.Work.cs）：假的 Jira／天氣／行事曆（本機 HTTP）、假的 glab／gh（test/fixtures/fake-cli.js）、假的 Claude／Codex 對話；
+      # 全部預設關、DPAPI、小本子紀錄格式、不重複通知、設定重開還在、改名 WoWo Pals。不連網路；有時間的都用假時鐘
+      - name: Work sources test on DeskPals.exe (public + personal; fake endpoints and CLIs, no network)
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force exe-shots\work | Out-Null
+          node test/desktop-work.js desk-pals-work "$env:RUNNER_TEMP\dpw-pub" exe-shots\work -- dist\DeskPals.exe --pipe "{ep}"
+          if ($LASTEXITCODE -ne 0) { throw "work sources test failed (public)" }
+          node test/desktop-work.js desk-pals-workp "$env:RUNNER_TEMP\dpw-per" "$env:RUNNER_TEMP\dpw-per-shots" -- dist-personal\DeskPals-personal.exe --pipe "{ep}"
+          if ($LASTEXITCODE -ne 0) { throw "work sources test failed (personal)" }
+          # 工作設定視窗（D 版）：格子／清單、按開先跳去填、儲存標紅、Esc 一層一層退、記住怎麼看、150%、螢幕太矮會捲
+          New-Item -ItemType Directory -Force exe-shots\work-settings | Out-Null
+          node test/desktop-worksettings.js desk-pals-ws "$env:RUNNER_TEMP\dpws-pub" exe-shots\work-settings -- dist\DeskPals.exe --pipe "{ep}" --pet duoduo --lineup original
+          if ($LASTEXITCODE -ne 0) { throw "work settings test failed (public)" }
+          node test/desktop-worksettings.js desk-pals-wsp "$env:RUNNER_TEMP\dpws-per" "$env:RUNNER_TEMP\dpws-per-shots" -- dist-personal\DeskPals-personal.exe --pipe "{ep}" --pet duoduo --lineup original
+          if ($LASTEXITCODE -ne 0) { throw "work settings test failed (personal)" }
       # exe 旁邊沒有 pals 資料夾：紙箱櫃的圖要從內嵌的資源讀
       - name: Shelf test on public DeskPals.exe (shelf art from embedded resources)
         shell: powershell
@@ -780,6 +823,18 @@ jobs:
           $env:STORE_FAKE_PACKAGED = "1"
           node test/desktop-store.js desk-pals-store-exe "$env:RUNNER_TEMP\dps-exe" exe-shots\store public win-exe -- $exe --pipe "{ep}"
           if ($LASTEXITCODE -ne 0) { throw "store test failed (exe)" }
+      # 小本子（待辦／今天做了／筆記）：假的 log、學校 ICS、假時鐘（study-clock），跟現在幾點、時區無關。剪貼簿不碰真的（nb-clip）
+      - name: Notebook test on DeskPals.exe (public + personal; copy text, merge, todos, school, notes, spread, empty states)
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force exe-shots\notebook | Out-Null
+          $pub = (Resolve-Path dist\DeskPals.exe).Path
+          node test/desktop-notebook.js desk-pals-nb "$env:RUNNER_TEMP\dp-nb-pub" exe-shots\notebook -- $pub --pipe "{ep}" --pet duoduo --lineup original
+          if ($LASTEXITCODE -ne 0) { throw "notebook test failed (public exe)" }
+          $per = (Resolve-Path dist-personal\DeskPals-personal.exe).Path
+          $env:NB_SHOTS = "0"
+          node test/desktop-notebook.js desk-pals-nbp "$env:RUNNER_TEMP\dp-nb-per" "$env:RUNNER_TEMP\dp-nb-per-shots" -- $per --pipe "{ep}" --pet duoduo --lineup original
+          if ($LASTEXITCODE -ne 0) { throw "notebook test failed (personal exe)" }
       - name: Smoke-test personal DeskPals-personal.exe (offscreen, all lineups)
         shell: powershell
         run: |
@@ -793,11 +848,24 @@ jobs:
           Start-Sleep -Seconds 3
           if (-not (Test-Path personal-exe-shots\shot-teletubbies.png)) { throw "no snapshot" }
           if (-not $a.HasExited) { throw "exe did not quit" }
-      - name: Installer end-to-end (install over the extension's copy, upgrade, uninstall)
+      - name: Installer end-to-end (install over the extension's copy, upgrade from 0.10.4 with the rename, uninstall)
         shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $setup = (Get-ChildItem dist\DeskPals-Setup-*.exe).FullName
-          powershell -NoProfile -ExecutionPolicy Bypass -File .github\test-installer.ps1 -Setup $setup
+          # 0.11 改名：先真的裝 0.10.4（舊名字的捷徑），再升級（拿不到就只測擴充套件留下的舊名字捷徑）
+          $old = Join-Path $env:RUNNER_TEMP "old-setup"
+          # 沒有 v0.10.4 的 Release 時 gh 會寫 stderr，PowerShell 5.1 會把它當成錯誤：先關掉、只看有沒有拿到檔
+          $eap = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+          try { & gh release download v0.10.4 --repo $env:GITHUB_REPOSITORY --pattern "DeskPals-Setup-0.10.4.exe" --dir $old 2>&1 | Out-Null } catch { "no v0.10.4 release: " + $_.Exception.Message }
+          $ErrorActionPreference = $eap; $global:LASTEXITCODE = 0
+          $oldSetup = Join-Path $old "DeskPals-Setup-0.10.4.exe"
+          if (-not (Test-Path $oldSetup)) { $oldSetup = "" }
+          # 空字串經過 powershell -File 會變成「沒給值」：沒有舊安裝檔就不傳 -OldSetup
+          $instArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ".github\test-installer.ps1", "-Setup", $setup)
+          if ($oldSetup) { $instArgs += @("-OldSetup", $oldSetup) }
+          & powershell @instArgs
           if ($LASTEXITCODE -ne 0) { throw "installer test failed" }
       # 上面的安裝程式、獨立版都是真的裝在 runner 上（全新安裝）：不能留下舊名字的資料夾、開機捷徑、紀錄檔
       - name: Real fresh install left nothing with the old name
@@ -832,6 +900,7 @@ jobs:
             exe-shots/store/*.png
             exe-shots/shelf/*.png
             exe-shots/woban-*/*.png
+            exe-shots/notebook/*.png
       # 個人版的測試結果（含同人角色的截圖）：只給自己看，不會附到 Release
       - uses: actions/upload-artifact@v4
         if: always()

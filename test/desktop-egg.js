@@ -33,7 +33,7 @@ let n = 0;
 async function launch(name, data) {
 	const ep = win ? `${epBase}-${name}-${++n}` : `${epBase}-${name}-${++n}.sock`;
 	const target = win ? "\\\\.\\pipe\\" + ep : ep;
-	const env = Object.assign({}, process.env, { DESKPALS_OFFSCREEN: "1", DESKPALS_ISOLATED: "1", DESKPALS_DATA_DIR: data });
+	const env = Object.assign({}, process.env, { DESKPALS_OFFSCREEN: "1", DESKPALS_ISOLATED: "1", DESKPALS_DATA_DIR: data, CLAUDE_CONFIG_DIR: path.join(data, "no-claude"), CODEX_HOME: path.join(data, "no-codex") });   // 不讀你真的 Claude／Codex 對話
 	if (win && process.env.EGG_PRIVATE_TEMP === "1") { env.TEMP = env.TMP = path.join(work, "tmp"); fs.mkdirSync(env.TEMP, { recursive: true }); }   // 本機跑：紀錄寫到自己的資料夾
 	const args = cmd.map((a) => a.replace(/\{ep\}/g, ep));
 	const child = cp.spawn(args[0], args.slice(1), { env, stdio: "ignore", windowsHide: true });

@@ -8,6 +8,15 @@ const https = require("https");
 const cp = require("child_process");
 
 const cfg = () => vscode.workspace.getConfiguration("deskPals");
+
+// 桌面版（0.11 起）自己在管的工作來源：連上時它送「work-own jira,gitlab,…」。它在管的，這邊就不查、不通知（不會講兩次）
+let workOwn = new Set();
+const owned = (src) => workOwn.has(src);
+function parseWorkOwn(line) {
+	const m = /^work-own (\S+)$/.exec(String(line || "").trim());
+	if (!m) return null;
+	return new Set(m[1] === "-" ? [] : m[1].split(",").filter(Boolean));
+}
 const clean = (s) => String(s || "").replace(/[\r\n]+/g, " ").trim();
 
 function setup(context, desktop) {
@@ -20,6 +29,15 @@ function setup(context, desktop) {
 	const rain = weather(context, notify);
 	const gl = gitlabTodos(context, notify);
 	subs.push({ dispose: () => { cal.stop(); jira.stop(); wl.stop(); rain.stop(); gl.stop(); } });
+	const prevLine = desktop.onLine;
+	desktop.onLine = (line) => {
+		if (prevLine) prevLine(line);
+		const set = parseWorkOwn(line);
+		if (!set) return;
+		const was = [...workOwn].sort().join(","), now = [...set].sort().join(",");
+		workOwn = set;
+		if (was !== now) cal.restart();   // 開會：桌面版接手就把排好的提醒拿掉；交回來就重排
+	};
 	subs.push(vscode.workspace.onDidChangeConfiguration((e) => {
 		if (e.affectsConfiguration("deskPals.calendarIcsUrl") || e.affectsConfiguration("deskPals.meetingRemindMinutes")) cal.restart();
 		if (e.affectsConfiguration("deskPals.jira")) jira.restart();
@@ -82,7 +100,7 @@ function terminal(context, desktop, notify) {
 				if (/--tags|--follow-tags|refs\/tags\//.test(cmd) || m) {
 					const env = /Production/i.test(cmd) ? "prod" : /Development/i.test(cmd) ? "dev" : "other";
 					desktop.send(`tag ${m ? m[1] : "tag"} ${env}`);
-					if (m && cwd) watchCi(desktop, cwd, m[1], env);
+					if (m && cwd && !owned("ci")) watchCi(desktop, cwd, m[1], env);   // 桌面版有開「盯 CI」就交給它
 				}
 				return;
 			}
@@ -117,6 +135,7 @@ function calendar(notify, desktop) {
 	let poll, timers = [], fired = new Set();
 	const stop = () => { clearInterval(poll); timers.forEach(clearTimeout); timers = []; };
 	const load = async () => {
+		if (owned("meet")) { timers.forEach(clearTimeout); timers = []; return; }
 		const url = String(cfg().get("calendarIcsUrl", "") || "").trim();
 		if (!/^https:\/\//i.test(url)) return;
 		let text;
@@ -413,6 +432,7 @@ function jiraWatch(context, notify) {
 	};
 
 	const check = async () => {
+		if (owned("jira")) return;
 		const cr = await jiraCreds(context);
 		if (!cr) return;
 		const c = Object.assign({}, cr, { host: cr.site.replace(/^https?:\/\//, "").replace(/\/.*$/, "") });
@@ -444,6 +464,7 @@ function worklog(context, notify) {
 	let timer;
 	const stop = () => clearInterval(timer);
 	const check = () => {
+		if (owned("worklog")) return;
 		const dir = String(cfg().get("worklogDir", "") || "").trim();
 		if (!dir || !fs.existsSync(dir)) return;
 		const key = "worklogSeen:" + dir;
@@ -502,6 +523,7 @@ function weather(context, notify) {
 		}
 	};
 	const check = async (force) => {
+		if (owned("rain")) return;
 		const d = new Date(), wd = d.getDay(), hm = d.getHours() * 60 + d.getMinutes();
 		if (!force && (wd === 0 || wd === 6 || hm < 17 * 60 + 30 || hm > 19 * 60)) return;
 		const k = "rain:" + d.toDateString();
@@ -582,6 +604,7 @@ function gitlabTodos(context, notify) {
 		});
 	});
 	const check = async () => {
+		if (owned("gitlab")) return;
 		const hosts = cfg().get("gitlabHosts", []) || [];
 		for (const host of hosts) {
 			const list = await run(host);
@@ -819,4 +842,4 @@ async function schoolSetupCmd() {
 	vscode.window.showInformationMessage(`🎒 加好了（共 ${now.length} 個學校行事曆）。上課前會提醒你，作業截止前 3 天、1 天、3 小時、1 小時也會叫你。`);
 }
 
-module.exports = { setup, parseIcs, occurrences, parseWhen, parseTicketTime, rainText, rainFromWttr, rainFromMetno, schoolUrls, hhmmOk, studySetLines, mischiefSetLines, batterySetLines };
+module.exports = { setup, parseWorkOwn, parseIcs, occurrences, parseWhen, parseTicketTime, rainText, rainFromWttr, rainFromMetno, schoolUrls, hhmmOk, studySetLines, mischiefSetLines, batterySetLines };

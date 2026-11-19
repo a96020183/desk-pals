@@ -21,7 +21,7 @@ const Module = require("module");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const read = (f, enc) => { try { return fs.readFileSync(f, enc); } catch (e) { return null; } };
-const LNK = "公仔櫃 Desk Pals.lnk";
+const LNK = "WoWo Pals.lnk", OLD_LNK = "公仔櫃 Desk Pals.lnk";   // 0.11 改名：開機捷徑換新名字，舊名字的要拿掉
 
 // ---------------------------------------------------------------- 子程序：一段「VS Code 開著」
 
@@ -81,7 +81,7 @@ function envFor(W, pipe) {
 	const e = Object.assign({}, process.env, {
 		LOCALAPPDATA: path.join(W, "local"), APPDATA: path.join(W, "roaming"), USERPROFILE: path.join(W, "home"), HOME: path.join(W, "home"),
 		TEMP: path.join(W, "tmp"), TMP: path.join(W, "tmp"), CLAUDE_CONFIG_DIR: path.join(W, "home", ".claude"), CODEX_HOME: path.join(W, "home", ".codex"),
-		DESKPALS_OFFSCREEN: "1", DESKPALS_ISOLATED: "1", DESKPALS_DATA_DIR: path.join(W, "local", "DeskPals"), DESKPALS_PIPE: pipe,
+		DESKPALS_OFFSCREEN: "1", DESKPALS_ISOLATED: "1", DESKPALS_DATA_DIR: path.join(W, "local", "DeskPals"), DESKPALS_PIPE: pipe, CLAUDE_CONFIG_DIR: path.join(W, "no-claude"), CODEX_HOME: path.join(W, "no-codex"),
 	});
 	for (const d of ["local", "roaming", "home", "tmp"]) fs.mkdirSync(path.join(W, d), { recursive: true });
 	return e;
@@ -187,8 +187,9 @@ async function main() {
 		copyDir(path.join(src, "pals"), path.join(home, "pals"));
 		const data = { "profile.txt": "done", "mode.txt": "shelf", "lineup.txt": "original", "bond-duoduo.txt": "7", "keep-me.txt": "使用者的資料" };
 		for (const [f, v] of Object.entries(data)) fs.writeFileSync(path.join(home, f), v);
-		oldLnk(lnk, path.join(home, "desk-pals.ps1"), pipe);
-		check(/powershell\.exe$/i.test(lnkInfo(lnk).target || ""), "old startup shortcut points to powershell.exe");
+		const oldName = path.join(startupDir(W), OLD_LNK);   // 舊版擴充套件建的：舊名字、指著 powershell.exe
+		oldLnk(oldName, path.join(home, "desk-pals.ps1"), pipe);
+		check(/powershell\.exe$/i.test(lnkInfo(oldName).target || ""), "old startup shortcut (old name) points to powershell.exe");
 		const old = cp.spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", path.join(home, "desk-pals.ps1"), "-PipeName", pipe], { env, stdio: "ignore", windowsHide: true });
 		mine.add(old.pid);
 		check(await waitPipe(pipe, 180000), "old PowerShell version is up (pid " + old.pid + ")");
@@ -213,6 +214,7 @@ async function main() {
 		check(new RegExp("exe \\S+ replace pipe=" + pipe).test(lg), "desk-pals.log: exe started in replace mode");
 		const li = lnkInfo(lnk);
 		check(path.resolve(li.target || "x") === exe && li.args === "--pipe " + pipe, "startup shortcut now points to the exe (" + li.target + " " + li.args + ")");
+		check(!fs.existsSync(oldName), "old-name startup shortcut removed (" + OLD_LNK + " → " + LNK + ")");
 		check(fs.readdirSync(startupDir(W)).length === 1, "still one startup shortcut");
 		autostartUnicode(exe, W, pipe);
 		for (const [f, v] of Object.entries(data)) if (f !== "lineup.txt") check(read(path.join(home, f), "utf8") === v, "data untouched: " + f);
@@ -290,7 +292,7 @@ async function main() {
 		const lg = read(log, "utf8");
 		if (lg) console.log("---- desk-pals.log (last lines)\n" + lg.trim().split("\n").slice(-15).join("\n"));
 		// 台詞 key 對不起來、圖讀不到：都算失敗（log 是這個測試自己的 TEMP，只有這次的）
-		const bad = (lg || "").split("\n").filter((l) => /missing line|art missing|lineups\.txt missing|autostart: (?!new |\S+ -> )/.test(l));
+		const bad = (lg || "").split("\n").filter((l) => /missing line|art missing|lineups\.txt missing|autostart: (?!new |\S+ -> |removed the old-name shortcut)/.test(l));
 		check(!bad.length, "desk-pals.log has no missing lines / missing art / autostart errors" + (bad.length ? "\n       " + bad.slice(0, 8).join("\n       ") : ""));
 	}
 	console.log(problems ? `ext-exe: ${problems} problem(s)` : "ext-exe: all ok");

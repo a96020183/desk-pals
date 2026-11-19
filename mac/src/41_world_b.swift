@@ -29,13 +29,13 @@ extension World {
 
     static func ClaudeProjectsDir() -> String {
         var cfg = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR")
-        if string.IsNullOrEmpty(cfg) { cfg = Path.Combine(NSHomeDirectory(), ".claude") }
+        if string.IsNullOrEmpty(cfg) { cfg = World.AiHomeDefault(".claude") }   // 離屏（測試）時是資料資料夾裡的空資料夾（62_work.swift）
         return Path.Combine(cfg!, "projects")
     }
 
     static func CodexSessionsDir() -> String {
         var home = Environment.GetEnvironmentVariable("CODEX_HOME")
-        if string.IsNullOrEmpty(home) { home = Path.Combine(NSHomeDirectory(), ".codex") }
+        if string.IsNullOrEmpty(home) { home = World.AiHomeDefault(".codex") }   // 離屏（測試）時是資料資料夾裡的空資料夾（62_work.swift）
         return Path.Combine(home!, "sessions")
     }
 
@@ -78,13 +78,18 @@ extension World {
         Post { [self] in OnStuck(sr, k2!, t2, ti, min) }
     }
 
+    // 工作來源：預設的 ~/.claude 加上「別的資料夾」都看（62_work.swift 的 WorkClaudeRoots）
     func ClaudeWatchOnce(_ js: JavaScriptSerializer) throws {
-        let root = World.ClaudeProjectsDir()
-        if !Directory.Exists(root) { busyClaude = 0; return }
+        var busy = 0
+        for root in WorkClaudeRoots() { busy += ClaudeWatchRoot(js, root) }
+        busyClaude = busy
+    }
+
+    func ClaudeWatchRoot(_ js: JavaScriptSerializer, _ root: String) -> Int {
         let now = DateTime.UtcNow
         let seen = HashSet<String>()
         // mac: Claude Code 在 mac 上是 claude（原生執行檔）或 node 行程，名字跟 Windows 一樣
-        let anyClaude = Process.GetProcessesByName("claude").Length > 0 || Process.GetProcessesByName("node").Length > 0
+        let anyClaude = Process.GetProcessesByName("claude").Length > 0 || Process.GetProcessesByName("node").Length > 0 || WorkWslAlive("claude_dir")
         var busy = 0
         for pdir in World.WatchDirs(root) {
             for fi in World.WatchFiles(pdir, ".jsonl", nil, false) {
@@ -105,10 +110,10 @@ extension World {
                 StuckCheck(key, "Claude", act, kind, tool, title, anyClaude)
             }
         }
-        busyClaude = busy
         let gone = List<String>()
         for kk in stuck.Keys { if !seen.Contains(kk) && kk.lowercased().hasPrefix(root.lowercased()) { gone.Add(kk) } }
         for kk in gone { stuck.Remove(kk) }
+        return busy
     }
 
     // mac: DirectoryInfo／FileInfo 的替代（直接用 FileManager）
@@ -301,18 +306,20 @@ extension World {
     }
 
     func CodexWatchOnce(_ relist: Bool) throws {
-        let root = World.CodexSessionsDir()
-        if !Directory.Exists(root) { busyCodex = 0; return }
+        let roots = WorkCodexRoots()   // 工作來源：預設的 ~/.codex 加上「別的資料夾」
+        if roots.Count == 0 { busyCodex = 0; return }
         let now = DateTime.UtcNow
         if relist {
             let files = List<String>()
-            for fi in World.WatchFiles(root, ".jsonl", "rollout-", true) {
-                if (now - World.WatchMtime(fi)).TotalMinutes <= 40 { files.Add(fi) }
+            for root in roots {
+                for fi in World.WatchFiles(root, ".jsonl", "rollout-", true) {
+                    if (now - World.WatchMtime(fi)).TotalMinutes <= 40 { files.Add(fi) }
+                }
             }
             codexFiles = files
         }
         // mac: Codex CLI 是 codex（原生）或 node 行程
-        let anyCodex = Process.GetProcessesByName("codex").Length > 0 || Process.GetProcessesByName("node").Length > 0
+        let anyCodex = Process.GetProcessesByName("codex").Length > 0 || Process.GetProcessesByName("node").Length > 0 || WorkWslAlive("codex_dir")
         var busy = 0
         for f in codexFiles {
             if !FileManager.default.fileExists(atPath: f) { continue }
@@ -862,6 +869,8 @@ extension World {
         MisSnapAsk(g)   // 搗蛋第一次打開的說明（公開版）
         StudySnap(g)
         CuSnap(g)
+        NbSnap(g)   // 小本子（64_notebook.swift）
+        WorkSnap(g)   // 工作設定（65_work_settings.swift）
         if pmenu != nil && pmenu.VVisible { pmenu.PaintTo(g) }
         // 游標位置（只畫一個小十字，方便看）
         let c = World.CursorPos()

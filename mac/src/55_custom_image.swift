@@ -329,7 +329,8 @@ enum CuImg {
         return keep
     }
 
-    // 只留最大的那塊（和夠大的旁支，例如分開的耳朵、尾巴）
+    // 只留主角那塊（和夠大的旁支，例如分開的耳朵、尾巴）。
+    // 主角＝包住畫面中央的那塊（夠大的話）；中央沒有才用最大的那塊。背景很亂的照片，最大的那塊常常是背景（人像測試 v011\humantest）
     static func KeepMain(_ px: inout [Int], _ w: Int, _ h: Int) {
         let n = w * h
         var lab = [Int](repeating: 0, count: n)
@@ -358,6 +359,15 @@ enum CuImg {
         var big = 0
         for i in 1..<sizes.count { big = Math.Max(big, sizes[i]) }
         if big == 0 { return }
+        var main = CuImg.CentreLabel(lab, w, h)
+        if main > 0 && sizes[main] * 20 >= big { big = sizes[main] }   // 中央那塊至少有最大那塊的 5%：當主角
+        else { main = 0 }
+        var keep = [Bool](repeating: false, count: sizes.count)
+        for i in 1..<sizes.count {
+            let enough: Bool = sizes[i] * 8 >= big
+            let notBigger: Bool = main == 0 || i == main || sizes[i] <= sizes[main]
+            keep[i] = enough && notBigger   // 比主角還大的（背景）不留
+        }
         for i in 0..<n {
             let a = (px[i] >> 24) & 255
             if a == 0 { continue }
@@ -373,7 +383,7 @@ enum CuImg {
                         let xx = x + dx, yy = y + dy
                         if !(xx < 0 || yy < 0 || xx >= w || yy >= h) {
                             let ll = lab[yy * w + xx]
-                            if ll != 0 && sizes[ll] * 8 >= big { near = true }
+                            if ll != 0 && keep[ll] { near = true }
                         }
                         dx += 1
                     }
@@ -381,8 +391,25 @@ enum CuImg {
                 }
                 if !near { px[i] = 0 }
             }
-            else if sizes[l] * 8 < big { px[i] = 0 }
+            else if !keep[l] { px[i] = 0 }
         }
+    }
+
+    // 畫面中央（往外一圈一圈找，最多找到短邊的 1/6）碰到的第一塊；0＝沒有
+    static func CentreLabel(_ lab: [Int], _ w: Int, _ h: Int) -> Int {
+        let cx = w / 2, cy = h / 2, max = Math.Max(1, Math.Min(w, h) / 6)
+        for r in 0...max {
+            for dy in -r...r {
+                for dx in -r...r {
+                    if Math.Max(Math.Abs(dx), Math.Abs(dy)) != r { continue }
+                    let x = cx + dx, y = cy + dy
+                    if x < 0 || y < 0 || x >= w || y >= h { continue }
+                    let l = lab[y * w + x]
+                    if l != 0 { return l }
+                }
+            }
+        }
+        return 0
     }
 
     // 筆刷：擦掉／補回（座標都是 0～1；補回＝原圖的顏色）
@@ -645,7 +672,19 @@ enum CuImg {
         }
         // 脖子
         neck = 0.42; var neckOk = false
-        let y0 = CInt(Double(h) * 0.22), y1 = CInt(Double(h) * 0.6)
+        let tall = h > 2 * w   // 全身照這種瘦長的：頭在很上面（人像測試：22–60% 會找到腰）
+        var y0 = CInt(Double(h) * (tall ? 0.08 : 0.22))
+        let y1 = CInt(Double(h) * (tall ? 0.30 : 0.6))
+        if tall {
+            // 頭頂也很窄：從頭最寬的那列以下才開始找脖子
+            var top = 0
+            while top < h - 1 && width[top] == 0 { top += 1 }
+            var hy = top, hw = -1
+            let headEnd = top + CInt(Double(h) * 0.09)
+            var yh = top
+            while yh <= headEnd && yh < h { if width[yh] > hw { hw = width[yh]; hy = yh }; yh += 1 }   // 頭大約佔全身 12%：頂端往下 9% 內最寬的＝臉
+            y0 = Math.Max(y0, hy + 1)
+        }
         var best = -1; var bv = 1e9
         var y = y0
         while y <= y1 && y < h {
@@ -686,6 +725,13 @@ enum CuImg {
         if Double(run) >= Math.Max(2.0, Double(h) * 0.07) {
             let hp = 1 - (Double(run) + 0.5) / Double(h)
             if hp > neck + 0.12 && hp < 0.95 { hip = hp; hipOk = true }
+        }
+        if !hipOk {
+            var widest = 0, bottom = 0
+            for y2 in 0..<h { widest = Math.Max(widest, width[y2]) }
+            var yb = h - 1
+            while yb >= 0 && bottom == 0 { bottom = width[yb]; yb -= 1 }
+            if widest > 0 && Double(bottom) >= Double(widest) * 0.85 { hip = 0.97 }   // 半身照：整塊都是身體，腳只留最下面一點點
         }
         if hip < neck + 0.15 { hip = Math.Min(0.92, neck + 0.3) }
         confident = hipOk && neckOk || (hipOk && Double(run) >= Double(h) * 0.12)

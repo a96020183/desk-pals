@@ -1813,7 +1813,12 @@ enum Path {
     }
     static func Combine(_ a: String, _ b: String, _ c: String) -> String { return Combine(Combine(a, b), c) }
     static func Combine(_ a: String, _ b: String, _ c: String, _ d: String) -> String { return Combine(Combine(Combine(a, b), c), d) }
-    static func GetTempPath() -> String { let t = NSTemporaryDirectory(); return t.hasSuffix("/") ? t : t + "/" }
+    // .NET on Unix: $TMPDIR first (NSTemporaryDirectory() ignores a TMPDIR set by the parent process)
+    static func GetTempPath() -> String {
+        let e = ProcessInfo.processInfo.environment["TMPDIR"] ?? ""
+        let t = e.isEmpty ? NSTemporaryDirectory() : e
+        return t.hasSuffix("/") ? t : t + "/"
+    }
     static func GetTempFileName() -> String {
         let p = Combine(GetTempPath(), "tmp" + String(UInt32.random(in: 0...0xFFFFF), radix: 16).uppercased() + ".tmp")
         FileManager.default.createFile(atPath: p, contents: nil)

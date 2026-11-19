@@ -346,15 +346,15 @@ namespace DeskPals
             string t = "搗蛋說明";
             int tw = Pix.TextW(t, titleF), plw = tw + 14 * U, plh = Sc(34);
             Pix.Plate(g, t, titleF, new Rectangle((W0 - plw) / 2, (crown - plh) / 2 + U / 2, plw, plh), U);
-            TextRenderer.DrawText(g, "打開「" + name + "」？", qF, new Rectangle(0, Sc(72), W0, Sc(32)), Pix.TextC, Pix.Mid);
+            PixText.DrawText(g, "打開「" + name + "」？", qF, new Rectangle(0, Sc(72), W0, Sc(32)), Pix.TextC, Pix.Mid);
             int y = Sc(116);
             foreach (string[] part in parts)
             {
                 int hw = Pix.TextW(part[0], headF) + Sc(20);
                 Pix.Round(g, Pix.C(0x8A5A2A), Sc(34), y, hw, Sc(26), U);
                 Pix.Box(g, Pix.C(0xF6C453), Sc(34) + U, y + U, hw - 2 * U, Sc(26) - 2 * U);
-                TextRenderer.DrawText(g, part[0], headF, new Rectangle(Sc(34), y, hw, Sc(26)), Pix.TextC, Pix.Mid);
-                TextRenderer.DrawText(g, part[1], bodyF, new Rectangle(Sc(38), y + Sc(32), W0 - Sc(76), Sc(66)), Pix.TextC, TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+                PixText.DrawText(g, part[0], headF, new Rectangle(Sc(34), y, hw, Sc(26)), Pix.TextC, Pix.Mid);
+                PixText.DrawText(g, part[1], bodyF, new Rectangle(Sc(38), y + Sc(32), W0 - Sc(76), Sc(66)), Pix.TextC, TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
                 y += Sc(104);
             }
             DrawButton(g, noR, "先不要", false, hoverId == "no");
@@ -370,7 +370,7 @@ namespace DeskPals
             Pix.Box(g, face, r.X + U, r.Y + U, r.Width - 2 * U, r.Height - 2 * U);
             Pix.Box(g, shade, r.X + U, r.Bottom - 3 * U, r.Width - 2 * U, 2 * U);
             Pix.Box(g, Pix.Mix(face, Color.White, 0.6), r.X + 2 * U, r.Y + U, r.Width - 4 * U, U);
-            TextRenderer.DrawText(g, text, btnF, new Rectangle(r.X, r.Y, r.Width, r.Height - 2 * U), Pix.TextC, Pix.Mid);
+            PixText.DrawText(g, text, btnF, new Rectangle(r.X, r.Y, r.Width, r.Height - 2 * U), Pix.TextC, Pix.Mid);
         }
     }
 
@@ -964,7 +964,7 @@ namespace DeskPals
                 case "mis_clear":
                     return new string[][] {
                         new string[] { "會做什麼", "平日 18:00 以後（一天一次），公仔把你最前面的幾個視窗（最多 3 個）縮小到工作列，演一段「推出螢幕」。動畫會在記憶體裡擷取那幾個視窗的畫面。" },
-                        new string[] { "怎麼叫回來", "點公仔或泡泡，或小屋選單「把推走的視窗叫回來」，一鍵全部回來；關掉 Desk Pals 前也會先全部叫回來。" },
+                        new string[] { "怎麼叫回來", "點公仔或泡泡，或小屋選單「把推走的視窗叫回來」，一鍵全部回來；關掉 WoWo Pals 前也會先全部叫回來。" },
                         new string[] { "不會做的事", "不會關閉任何視窗或程式；擷取的畫面不存檔、不傳出去，演完就丟掉。" } };
                 case "mis_shop":
                     return new string[][] {

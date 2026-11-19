@@ -167,7 +167,7 @@ namespace DeskPals
         public void ShareClip(Pet who)
         {
             if (sharing2) return;
-            string dir = App.Offscreen ? Path.Combine(DataDir, "share") : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Desk Pals");
+            string dir = App.Offscreen ? Path.Combine(DataDir, "share") : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "WoWo Pals");
             ShareClipTo(dir, who);
         }
 
@@ -225,7 +225,7 @@ namespace DeskPals
                 catch (Exception ex) { App.Log("share clipboard: " + ex.Message); }
                 try { Process.Start("explorer.exe", "/select,\"" + path + "\""); } catch { }
             }
-            l.Say("短片做好了！存在「圖片\\Desk Pals」，說明文字也複製好了，直接貼上就能分享 🎬", 5);
+            l.Say("短片做好了！存在「圖片\\WoWo Pals」，說明文字也複製好了，直接貼上就能分享 🎬", 5);
         }
 
         // 畫每一格：可愛的小桌面背景＋公仔照劇本動
@@ -239,7 +239,7 @@ namespace DeskPals
             Pet heroPet = pets[0];
             caption = null;
             foreach (Pet p in pets) if (p.P.Cu) { caption = p.ShareLine("x_share"); break; }
-            if (string.IsNullOrEmpty(caption)) caption = "我的桌面公仔在螢幕上陪我上班 ✨ #我的桌面公仔 #DeskPals";
+            if (string.IsNullOrEmpty(caption)) caption = "我的桌面公仔在螢幕上陪我上班 ✨ #我的桌面公仔 #WoWoPals";
             string hi = NoEmoji(heroPet.ShareLine("hi"));
             int ps = cast.Count == 1 ? 13 : (cast.Count == 2 ? 11 : (cast.Count == 3 ? 9 : 7));
             List<int[]> frames = new List<int[]>();
@@ -325,7 +325,7 @@ namespace DeskPals
         // 像素風泡泡（跟桌面上的一樣：切角方框＋往下的小尾巴）
         static void ShareBubble(Graphics g, string s, Font f, double cx, double bottom, int W0, Color accent)
         {
-            Size ts = TextRenderer.MeasureText(s, f, new Size(4000, 400), TextFormatFlags.NoPadding);
+            Size ts = PixText.MeasureText(s, f, new Size(4000, 400), TextFormatFlags.NoPadding);
             int w = ts.Width + 28, h = ts.Height + 18;
             int x = (int)Math.Max(10, Math.Min(W0 - w - 10, cx - w / 2.0)), y = (int)(bottom - h - 8);
             using (SolidBrush lb = new SolidBrush(accent))
@@ -338,7 +338,7 @@ namespace DeskPals
                 for (int i = 0; i < 9; i++) g.FillRectangle(lb, tx - 9 + i, y + h - 1 + i, 18 - 2 * i, 1);
                 for (int i = 0; i < 7; i++) g.FillRectangle(fill, tx - 7 + i, y + h - 3 + i, 14 - 2 * i, 1);
             }
-            TextRenderer.DrawText(g, s, f, new Rectangle(x, y, w, h), Color.FromArgb(0x2A, 0x2F, 0x45), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            PixText.DrawText(g, s, f, new Rectangle(x, y, w, h), Color.FromArgb(0x2A, 0x2F, 0x45), TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         }
 
         // 背景：一面淡淡的牆（色帶）、窗戶、小星星、木頭桌面、右下角浮水印
@@ -379,11 +379,11 @@ namespace DeskPals
                 // 浮水印
                 using (Font f = new Font("Microsoft JhengHei UI", 16f, FontStyle.Bold, GraphicsUnit.Pixel))
                 {
-                    string s = "Desk Pals";
-                    Size ts = TextRenderer.MeasureText(s, f, new Size(4000, 400), TextFormatFlags.NoPadding);
+                    string s = "WoWo Pals";
+                    Size ts = PixText.MeasureText(s, f, new Size(4000, 400), TextFormatFlags.NoPadding);
                     int tx = W0 - ts.Width - 18, ty = H0 - ts.Height - 14;
-                    TextRenderer.DrawText(g, s, f, new Point(tx + 1, ty + 1), Pix.C(0x7A4A28), TextFormatFlags.NoPadding);
-                    TextRenderer.DrawText(g, s, f, new Point(tx, ty), Pix.C(0xFFF6E4), TextFormatFlags.NoPadding);
+                    PixText.DrawText(g, s, f, new Point(tx + 1, ty + 1), Pix.C(0x7A4A28), TextFormatFlags.NoPadding);
+                    PixText.DrawText(g, s, f, new Point(tx, ty), Pix.C(0xFFF6E4), TextFormatFlags.NoPadding);
                     using (SolidBrush hb = new SolidBrush(Pix.C(0xF27A90)))
                     {
                         string[] h = { ".#.#.", "#####", ".###.", "..#.." };
@@ -405,9 +405,9 @@ namespace DeskPals
             using (SaveFileDialog dlg = new SaveFileDialog())
             {
                 dlg.Title = "匯出「" + m.Name + "」";
-                dlg.Filter = "Desk Pals 公仔|*.deskpal";
+                dlg.Filter = "WoWo Pals 公仔|*.deskpal";
                 dlg.FileName = CuMeta.CleanName(m.Name) + ".deskpal";
-                dlg.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+                dlg.InitialDirectory = World.UserFolder(Environment.SpecialFolder.DesktopDirectory, "", "Desktop");
                 if (dlg.ShowDialog() != DialogResult.OK) return;
                 if (CuExport(id, dlg.FileName)) Lead().Say("匯出好了！把「" + Path.GetFileName(dlg.FileName) + "」傳給朋友，他在小屋按「匯入朋友的公仔」就能養 🧸", 5);
             }
@@ -424,7 +424,7 @@ namespace DeskPals
                 if (meta == null) return false;
                 meta.Remove("id"); meta.Remove("created");
                 Dictionary<string, object> d = new Dictionary<string, object>();
-                d["deskpal"] = 1; d["app"] = "Desk Pals"; d["meta"] = meta; d["source"] = Convert.ToBase64String(src);
+                d["deskpal"] = 1; d["app"] = "WoWo Pals"; d["meta"] = meta; d["source"] = Convert.ToBase64String(src);
                 JavaScriptSerializer js = new JavaScriptSerializer(); js.MaxJsonLength = int.MaxValue;
                 File.WriteAllText(path, js.Serialize(d), new UTF8Encoding(false));
                 App.Log("custom exported " + id + " -> " + path);
@@ -439,8 +439,8 @@ namespace DeskPals
             using (OpenFileDialog dlg = new OpenFileDialog())
             {
                 dlg.Title = "匯入朋友的公仔";
-                dlg.Filter = "Desk Pals 公仔|*.deskpal|所有檔案|*.*";
-                dlg.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+                dlg.Filter = "WoWo Pals 公仔|*.deskpal|所有檔案|*.*";
+                dlg.InitialDirectory = World.UserFolder(Environment.SpecialFolder.DesktopDirectory, "", "Desktop");
                 if (dlg.ShowDialog() != DialogResult.OK) { if (first) ShowSetup(true); return; }
                 CuImportFile(dlg.FileName, first);
             }
@@ -460,7 +460,7 @@ namespace DeskPals
                     JavaScriptSerializer js = new JavaScriptSerializer(); js.MaxJsonLength = (int)MaxPalFile * 2;
                     Dictionary<string, object> d = js.DeserializeObject(File.ReadAllText(path, Encoding.UTF8)) as Dictionary<string, object>;
                     object ver, mo, so;
-                    if (d == null || !d.TryGetValue("deskpal", out ver) || Convert.ToInt32(ver) != 1) err = "這不是 Desk Pals 的公仔檔";
+                    if (d == null || !d.TryGetValue("deskpal", out ver) || Convert.ToInt32(ver) != 1) err = "這不是 WoWo Pals 的公仔檔";
                     else if (!d.TryGetValue("meta", out mo) || !(mo is Dictionary<string, object>) || !d.TryGetValue("source", out so) || !(so is string)) err = "公仔檔缺東西（可能壞掉了）";
                     else
                     {

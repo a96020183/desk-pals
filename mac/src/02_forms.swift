@@ -590,6 +590,16 @@ class Control {
     func _childAdded(_ c: Control) { }
     func _hostView() -> NSView? { return _nsView }
     func _create() { }   // child controls build their NSView lazily (when added to a form)
+    /// 0.11：這個控制項是不是現在打字的地方（TextBox＝它的 field editor；別的打字框 shim 可以覆寫）
+    func _ownsResponder(_ r: NSResponder) -> Bool { return false }
+    /// 找現在打字的那個控制項（往子控制項一層一層找）
+    static func _keyOwner(_ root: Control, _ r: NSResponder) -> Control? {
+        for c in root.Controls {
+            if c._ownsResponder(r) { return c }
+            if let d = _keyOwner(c, r) { return d }
+        }
+        return nil
+    }
 }
 typealias MouseButtonsT = MouseButtons
 
@@ -608,6 +618,12 @@ final class FormPanel: NSPanel {
             if let tv = firstResponder as? NSTextView, tv.hasMarkedText() { composing = true }
             if !composing {
                 let kc = Keys.FromEvent(event)
+                // 0.11：打字框自己的 KeyDown（C# 的 box.KeyDown += …）先拿到；Handled／SuppressKeyPress 就不再往下
+                if let r = firstResponder, let c = Control._keyOwner(f, r) {
+                    let e = KeyEventArgs(kc | Keys.ModsFrom(event.modifierFlags))
+                    c.OnKeyDown(e)
+                    if e.Handled { return }
+                }
                 if f.KeyPreview {
                     let e = KeyEventArgs(kc | Keys.ModsFrom(event.modifierFlags))
                     f.OnKeyDown(e)
@@ -1136,6 +1152,7 @@ class TextBox: Control {
     func SelectAll() { tf?.currentEditor()?.selectAll(nil) }
     func Clear() { Text = "" }
     override var Focused: Bool { guard let t = tf, let ed = t.currentEditor() else { return false }; return t.window?.firstResponder === ed }
+    override func _ownsResponder(_ r: NSResponder) -> Bool { guard let t = tf else { return false }; if r === t { return true }; if let ed = t.currentEditor() { return r === ed }; return false }
 }
 
 final class FlatButtonAppearance {

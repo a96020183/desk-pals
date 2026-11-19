@@ -90,7 +90,7 @@ function sendLine(where, line) {
 	}
 
 	const env = Object.assign({}, process.env, {
-		DESKPALS_OFFSCREEN: "1", DESKPALS_ISOLATED: "1", DESKPALS_DATA_DIR: data,
+		DESKPALS_OFFSCREEN: "1", DESKPALS_ISOLATED: "1", DESKPALS_DATA_DIR: data, CLAUDE_CONFIG_DIR: path.join(data, "no-claude"), CODEX_HOME: path.join(data, "no-codex"),
 		DESKPALS_LEGACY_DIR: legacy, DESKPALS_AUTOSTART_DIR: autostart,
 	});
 	if (win && oldPipe && oldPipe !== "-") env.DESKPALS_LEGACY_PIPE = oldPipe;

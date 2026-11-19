@@ -290,12 +290,12 @@ namespace DeskPals
         public Size Measure(string s, bool a, int th, string h)
         {
             if (s != text || a != alert || th != theme || h != hint) { text = s; alert = a; theme = th; hint = h; Invalidate(); }
-            Size ts = TextRenderer.MeasureText(s, font, new Size(4000, 400), TextFormatFlags.NoPadding);
+            Size ts = PixText.MeasureText(s, font, new Size(4000, 400), TextFormatFlags.NoPadding);
             hintH = 0;
             int wd = ts.Width;
             if (!string.IsNullOrEmpty(h))
             {
-                Size hs = TextRenderer.MeasureText(h, hintFont, new Size(4000, 400), TextFormatFlags.NoPadding);
+                Size hs = PixText.MeasureText(h, hintFont, new Size(4000, 400), TextFormatFlags.NoPadding);
                 hintH = hs.Height + 2; wd = Math.Max(wd, hs.Width + hs.Height + 2);
             }
             return new Size(wd + 22, ts.Height + hintH + 12 + 7);
@@ -355,15 +355,15 @@ namespace DeskPals
                 for (int i = 0; i < 5; i++) g.FillRectangle(fill, cx - 5 + i, h - 2 + i, 10 - 2 * i, 1);
             }
             if (text.IndexOf('\n') >= 0)
-                TextRenderer.DrawText(g, text, font, new Rectangle(0, 6, w, h - hintH - 6), fg, TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding);
+                PixText.DrawText(g, text, font, new Rectangle(0, 6, w, h - hintH - 6), fg, TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPadding);
             else
-                TextRenderer.DrawText(g, text, font, new Rectangle(0, 0, w, h - hintH), fg,
+                PixText.DrawText(g, text, font, new Rectangle(0, 0, w, h - hintH), fg,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             if (hintH > 0)
             {
                 // 小小的「↗」連結圖示（自己畫，不靠 emoji 字型）＋提示字
                 Color hc = theme == 0 ? Color.FromArgb(0x3D, 0x7B, 0xD9) : Color.FromArgb(0x9F, 0xC8, 0xFF);
-                Size hs = TextRenderer.MeasureText(hint, hintFont, new Size(4000, 400), TextFormatFlags.NoPadding);
+                Size hs = PixText.MeasureText(hint, hintFont, new Size(4000, 400), TextFormatFlags.NoPadding);
                 int ic = Math.Max(7, hs.Height - 4), tw = ic + 4 + hs.Width, x0 = (w - tw) / 2, y0 = h - hintH - 5 + (hintH - ic) / 2;
                 using (Pen p = new Pen(hc, Math.Max(1.4f, ic / 6f)))
                 {
@@ -372,7 +372,7 @@ namespace DeskPals
                     g.DrawLine(p, x0 + ic / 2, y0, x0 + ic, y0);
                     g.DrawLine(p, x0 + ic, y0, x0 + ic, y0 + ic / 2);
                 }
-                TextRenderer.DrawText(g, hint, hintFont, new Point(x0 + ic + 4, h - hintH - 5 + (hintH - hs.Height) / 2), hc, TextFormatFlags.NoPadding);
+                PixText.DrawText(g, hint, hintFont, new Point(x0 + ic + 4, h - hintH - 5 + (hintH - hs.Height) / 2), hc, TextFormatFlags.NoPadding);
             }
         }
     }
@@ -4109,6 +4109,7 @@ namespace DeskPals
         static string DataDirInit()
         {
             string d = Environment.GetEnvironmentVariable("DESKPALS_DATA_DIR");
+            if (string.IsNullOrEmpty(d) && App.Offscreen) d = Path.Combine(Path.GetTempPath(), "DeskPals-offscreen");   // 離屏（測試）沒指定：不用你真的資料
             if (string.IsNullOrEmpty(d)) d = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DeskPals");
             return d;
         }
@@ -4167,7 +4168,7 @@ namespace DeskPals
             defaultPet = DefaultPetFor(pet);
             ShowInTaskbar = false;
             float dpi = 96;
-            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) dpi = g.DpiX;
+            using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) dpi = PixText.TestDpi(g.DpiX);   // 測試：DESKPALS_TEST_DPI（只在離屏）
             S = Math.Max(3, (int)Math.Round(4 * dpi / 96.0));
             k = S / 3.0;
             int seed = Environment.TickCount;
@@ -4575,6 +4576,7 @@ namespace DeskPals
                 ReminderTick();
                 TicketTick();
                 StudyTick();          // 讀書小幫手（DeskPals.Study.cs）：學校行事曆、作業死線、考試倒數、熬夜
+                WorkTick();           // 工作來源（DeskPals.Work.cs）：第一次才開背景執行緒
                 MisTick(dt);          // 搗蛋（DeskPals.Mischief.cs）：搶游標、下班清場、購物警察、打字太兇
                 DownloadTick(dt);
                 ExpireNotice();
@@ -5124,6 +5126,7 @@ namespace DeskPals
             ToolStripMenuItem help = new ToolStripMenuItem("小幫手（專注、安靜、提醒）");
             AddHelpers(help.DropDownItems);
             m.Items.Add(help);
+            m.Items.Add("小本子…", null, delegate { ShowNotebook(); });   // 小本子（DeskPals.Notebook.cs）
             m.Items.Add("公仔小屋（開關、設定）…", null, delegate { HouseMenu(); });
             m.Items.Add(new ToolStripSeparator());
             m.Items.Add(new ToolStripLabel(Single ? "我的公仔" : "公仔們"));
@@ -5158,7 +5161,7 @@ namespace DeskPals
             m.Items.Add(Single ? "回" + MiniName + "裡待著" : "回櫃子裡待著", null, delegate { p.StowToShelf(true); });
             m.Items.Add("躲起來（Ctrl+Alt+S）", null, delegate { ToggleHide(); });
             m.Items.Add(new ToolStripSeparator());
-            m.Items.Add("收工（關掉 Desk Pals）", null, delegate { QuitAll(); });
+            m.Items.Add("收工（關掉 WoWo Pals）", null, delegate { QuitAll(); });
         }
 
         // 專注、安靜、提醒、搶票、今天的小結（公仔、櫃子、小屋的選單都有）
@@ -5298,7 +5301,7 @@ namespace DeskPals
             m.Items.Add("公仔小屋（開關、設定）…", null, delegate { HouseMenu(); });
             m.Items.Add("躲起來（Ctrl+Alt+S）", null, delegate { ToggleHide(); });
             m.Items.Add(new ToolStripSeparator());
-            m.Items.Add("收工（關掉 Desk Pals）", null, delegate { QuitAll(); });
+            m.Items.Add("收工（關掉 WoWo Pals）", null, delegate { QuitAll(); });
             ShowMenu(m, p != null ? p.P.Name : "公仔櫃", false);
         }
 
@@ -5374,7 +5377,7 @@ namespace DeskPals
             List<Pet> outs = OutPets();
             switch (p[0])
             {
-                case "hello": CuHello(c); if (active != null) Send(c, "active " + active.P.Id + "\n"); Send(c, "lineup " + lineup + "\n"); break;   // 櫃子以桌面版為準（第一次設定在桌面做）
+                case "hello": CuHello(c); if (active != null) Send(c, "active " + active.P.Id + "\n"); Send(c, "lineup " + lineup + "\n"); WorkHello(c); break;   // 櫃子以桌面版為準（第一次設定在桌面做）；工作來源：桌面版在管哪些（DeskPals.Work.cs）
                 case "custom": CuMsg(c, line); break;   // 自己做的公仔（DeskPals.Custom*.cs）
                 case "save":
                     Count("saves");
@@ -5437,7 +5440,7 @@ namespace DeskPals
                 case "mode-info": Send(c, "mode " + (Single ? "single" : "shelf") + " " + (Single ? SinglePet() : "-") + " collapsed=" + (shelf != null && shelf.Collapsed ? 1 : 0) + " profile=" + (File.Exists(FilePath("profile.txt")) ? 1 : 0) + " hint=" + (ReadText("egg-hint.txt") == "" ? 0 : 1) + "\nend\n"); break;   // 測試用（test/desktop-egg.js）
                 case "setup-info": Send(c, (setupForm != null && !setupForm.IsDisposed && (setupForm.VVisible || setupForm.Visible) ? setupForm.Info() : "setup none\n") + "end\n"); break;   // 測試用（test/desktop-woban.js）：設定視窗現在有哪些按鈕
                 case "notify":
-                    if (p.Length >= 4)
+                    if (p.Length >= 4 && !WorkDropsNotify(p[1]))   // 工作來源：桌面版已經在管的不講兩次（DeskPals.Work.cs）
                     {
                         // 文字可以有空白：取第三個空白之後全部
                         string t = line.Trim();
@@ -5465,7 +5468,7 @@ namespace DeskPals
                     }
                     break;
                 case "lineup": SwitchLineup(p.Length >= 2 ? p[1] : "", p.Length >= 3 ? p[2] : ""); Send(c, "lineup " + lineup + "\n"); break;   // 回報現在是哪一櫃（VS Code 用來判斷桌面版是不是舊版）
-                case "config-host": companyHost = p.Length >= 2 ? p[1].Trim() : ""; break;
+                case "config-host": if (!WorkOwns("vpn")) companyHost = p.Length >= 2 ? p[1].Trim() : ""; break;   // 工作來源：桌面版有設公司主機就用桌面版的
                 case "snap": if (p.Length >= 2) Snap(p[1], ParseRect(p, 2)); Send(c, "snapped\n"); break;
                 case "snaps":
                     {
@@ -5479,7 +5482,7 @@ namespace DeskPals
                     }
                     break;
                 case "quit": QuitAll(); break;
-                default: if (!MisMsg(c, p, line) && !OrigMsg(c, p, line) && !StatsMsg(c, p, line)) StudyMsg(c, p, line); break;   // mischief-…（DeskPals.Mischief.cs）；stats-…（DeskPals.Stats.cs）；course／exam／study-…（DeskPals.Study.cs）
+                default: if (!MisMsg(c, p, line) && !OrigMsg(c, p, line) && !StatsMsg(c, p, line) && !WorkMsg(c, p, line) && !NbMsg(c, p, line)) StudyMsg(c, p, line); break;   // mischief-…（DeskPals.Mischief.cs）；stats-…（DeskPals.Stats.cs）；work-…（工作來源，DeskPals.Work.cs）；nb-…（小本子，DeskPals.Notebook.cs）；course／exam／study-…（DeskPals.Study.cs）
             }
         }
 
@@ -5590,14 +5593,14 @@ namespace DeskPals
         static string ClaudeProjectsDir()
         {
             string cfg = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR");
-            if (string.IsNullOrEmpty(cfg)) cfg = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude");
+            if (string.IsNullOrEmpty(cfg)) cfg = AiHomeDefault(".claude");   // 離屏（測試）時是資料資料夾裡的空資料夾（DeskPals.Work.cs）
             return Path.Combine(cfg, "projects");
         }
 
         static string CodexSessionsDir()
         {
             string home = Environment.GetEnvironmentVariable("CODEX_HOME");
-            if (string.IsNullOrEmpty(home)) home = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex");
+            if (string.IsNullOrEmpty(home)) home = AiHomeDefault(".codex");   // 離屏（測試）時是資料資料夾裡的空資料夾（DeskPals.Work.cs）
             return Path.Combine(home, "sessions");
         }
 
@@ -5642,13 +5645,19 @@ namespace DeskPals
             Post(delegate { OnStuck(sr, k2, t2, ti, min); });
         }
 
+        // 工作來源：預設的 ~/.claude 加上「別的資料夾」（WSL）都看（DeskPals.Work.cs 的 WorkClaudeRoots）
         void ClaudeWatchOnce(JavaScriptSerializer js)
         {
-            string root = ClaudeProjectsDir();
-            if (!Directory.Exists(root)) { busyClaude = 0; return; }
+            int busy = 0;
+            foreach (string root in WorkClaudeRoots()) busy += ClaudeWatchRoot(js, root);
+            busyClaude = busy;
+        }
+
+        int ClaudeWatchRoot(JavaScriptSerializer js, string root)
+        {
             DateTime now = DateTime.UtcNow;
             HashSet<string> seen = new HashSet<string>();
-            bool anyClaude = Process.GetProcessesByName("claude").Length > 0 || Process.GetProcessesByName("node").Length > 0;
+            bool anyClaude = Process.GetProcessesByName("claude").Length > 0 || Process.GetProcessesByName("node").Length > 0 || WorkWslAlive("claude_dir");
             int busy = 0;
             foreach (string pdir in Directory.GetDirectories(root))
                 foreach (FileInfo fi in new DirectoryInfo(pdir).EnumerateFiles("*.jsonl"))
@@ -5666,10 +5675,10 @@ namespace DeskPals
                     if (anyClaude && (kind == "model" || kind == "tool") && (now - act).TotalMinutes < 10) busy++;
                     StuckCheck(key, "Claude", act, kind, tool, title, anyClaude);
                 }
-            busyClaude = busy;
             List<string> gone = new List<string>();
             foreach (string kk in stuck.Keys) if (!seen.Contains(kk) && kk.StartsWith(root, StringComparison.OrdinalIgnoreCase)) gone.Add(kk);
             foreach (string kk in gone) stuck.Remove(kk);
+            return busy;
         }
 
         // 讀對話紀錄最後一段，找最後一筆主對話：回傳 idle／model／tool（null＝看不出來）
@@ -5842,17 +5851,18 @@ namespace DeskPals
 
         void CodexWatchOnce(bool relist)
         {
-            string root = CodexSessionsDir();
-            if (!Directory.Exists(root)) { busyCodex = 0; return; }
+            List<string> roots = WorkCodexRoots();   // 工作來源：預設的 ~/.codex 加上「別的資料夾」（WSL）
+            if (roots.Count == 0) { busyCodex = 0; return; }
             DateTime now = DateTime.UtcNow;
             if (relist)
             {
                 List<string> files = new List<string>();
-                foreach (FileInfo fi in new DirectoryInfo(root).EnumerateFiles("rollout-*.jsonl", SearchOption.AllDirectories))
-                    if ((now - fi.LastWriteTimeUtc).TotalMinutes <= 40) files.Add(fi.FullName);
+                foreach (string root in roots)
+                    foreach (FileInfo fi in new DirectoryInfo(root).EnumerateFiles("rollout-*.jsonl", SearchOption.AllDirectories))
+                        if ((now - fi.LastWriteTimeUtc).TotalMinutes <= 40) files.Add(fi.FullName);
                 codexFiles = files;
             }
-            bool anyCodex = Process.GetProcessesByName("codex").Length > 0 || Process.GetProcessesByName("node").Length > 0;
+            bool anyCodex = Process.GetProcessesByName("codex").Length > 0 || Process.GetProcessesByName("node").Length > 0 || WorkWslAlive("codex_dir");
             int busy = 0;
             foreach (string f in codexFiles)
             {
@@ -6417,6 +6427,8 @@ namespace DeskPals
                 MisSnapAsk(g);   // 搗蛋第一次打開的說明（公開版）
                 StudySnap(g);
                 CuSnap(g);
+                NbSnap(g);   // 小本子（DeskPals.Notebook.cs）
+                WorkSnap(g);   // 工作設定（DeskPals.WorkSettings.cs）
                 if (pmenu != null && pmenu.VVisible) pmenu.PaintTo(g);
                 // 游標位置（只畫一個小十字，方便看）
                 Point c = Cursor.Position;
@@ -7068,7 +7080,7 @@ namespace DeskPals
                             string host = companyHost;
                             if (host != "")
                             {
-                                bool ok = TcpOk(host, 443) || TcpOk(host, 80);
+                                bool ok = VpnReachable(host);   // 工作來源：host 或 host:port
                                 if (!ok) { if (vpnDownSince == DateTime.MaxValue) vpnDownSince = now; } else vpnDownSince = DateTime.MaxValue;
                                 if (vpnDownSince != DateTime.MaxValue && (now - vpnDownSince).TotalSeconds > 30 && HealthReady("vpn"))
                                 { string h2 = host; Post(delegate { OnNotify("vpn", "-", h2 + " 連不到"); }); }
@@ -7142,7 +7154,7 @@ namespace DeskPals
         {
             try
             {
-                string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+                string dir = DownloadsDir();   // 離屏（測試）不看真的下載資料夾（DeskPals.Work.cs）
                 if (!Directory.Exists(dir)) return;
                 dlWatch = new FileSystemWatcher(dir);
                 dlWatch.IncludeSubdirectories = false;
@@ -8175,6 +8187,8 @@ namespace DeskPals
             m.Items.Add(fun);
 
             ToolStripMenuItem work = new ToolStripMenuItem("工作");
+            work.DropDownItems.Add("小本子…", null, delegate { ShowNotebook(); });   // 小本子：待辦、今天做了、筆記（DeskPals.Notebook.cs）
+            work.DropDownItems.Add("工作設定…", null, delegate { ShowWorkSettings(); });   // 工作來源：Jira、GitLab、GitHub、CI、開會…（DeskPals.WorkSettings.cs）
             foreach (string[] f in FeatureList) if (Array.IndexOf(WorkFeats, f[0]) >= 0) work.DropDownItems.Add(FeatItem(f[0], f[1]));
             ToolStripMenuItem help = new ToolStripMenuItem("小幫手（專注、安靜、提醒）");
             AddHelpers(help.DropDownItems);
@@ -8190,7 +8204,7 @@ namespace DeskPals
             m.Items.Add(set);
 
             m.Items.Add(new ToolStripSeparator());
-            m.Items.Add("收工（關掉 Desk Pals）", null, delegate { QuitAll(); });
+            m.Items.Add("收工（關掉 WoWo Pals）", null, delegate { QuitAll(); });
             ShowMenu(m, "公仔小屋", true, at);
         }
 
@@ -8397,9 +8411,9 @@ namespace DeskPals
             Box(g, C(0xC08A2C), r.X + 2 * u, r.Bottom - 2 * u, r.Width - 4 * u, u);
             Box(g, C(0x8A5A2A), r.X + 2 * u, r.Y + r.Height / 2 - u / 2, u, u);
             Box(g, C(0x8A5A2A), r.Right - 3 * u, r.Y + r.Height / 2 - u / 2, u, u);
-            TextRenderer.DrawText(g, s, f, new Rectangle(r.X, r.Y, r.Width, r.Height - u / 2), TextC, Mid);
+            PixText.DrawText(g, s, f, new Rectangle(r.X, r.Y, r.Width, r.Height - u / 2), TextC, Mid);
         }
-        public static int TextW(string s, Font f) { return TextRenderer.MeasureText(s, f, new Size(4000, 400), TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix).Width; }
+        public static int TextW(string s, Font f) { return PixText.MeasureText(s, f, new Size(4000, 400), TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix).Width; }
     }
 
     // ================= 像素選單（取代原生右鍵選單）=================
@@ -8662,7 +8676,7 @@ namespace DeskPals
                 string s = RowText(r);
                 int cy = r.Y + r.H / 2, tw = Pix.TextW(s, small);
                 Pix.Box(g, Pix.Gold, x + U, cy - U - U / 2, U, 3 * U); Pix.Box(g, Pix.Gold, x, cy - U / 2, 3 * U, U);   // 小星星
-                TextRenderer.DrawText(g, s, small, new Rectangle(x + 4 * U, r.Y, tw + 4, r.H), night ? Pix.C(0x8A5A2A) : Pix.C(0x9A6338), Pix.LeftMid);
+                PixText.DrawText(g, s, small, new Rectangle(x + 4 * U, r.Y, tw + 4, r.H), night ? Pix.C(0x8A5A2A) : Pix.C(0x9A6338), Pix.LeftMid);
                 for (int sx = x + 6 * U + tw; sx + U <= right; sx += 2 * U) Pix.Box(g, Pix.C(0xE4D0AC), sx, cy, U, U);
                 return;
             }
@@ -8689,7 +8703,7 @@ namespace DeskPals
                 }
                 tx += 9 * U;
             }
-            TextRenderer.DrawText(g, RowText(r), font, new Rectangle(tx, r.Y, Math.Max(1, right - tx), r.H), en ? Pix.TextC : Pix.Dim, Pix.LeftMid);
+            PixText.DrawText(g, RowText(r), font, new Rectangle(tx, r.Y, Math.Max(1, right - tx), r.H), en ? Pix.TextC : Pix.Dim, Pix.LeftMid);
             if (r.Sub) PaintArrow(g, right - 2 * U, r.Y + r.H / 2, opened.Contains(r.It), hot ? Pix.C(0x8A5A2A) : Pix.C(0xB08A5A));
             else if (hot) Pix.Mono(g, Pix.HEART, Pix.C(0xE8607A), right - 5 * U, r.Y + r.H / 2 - 2 * U, U);
         }
@@ -8744,10 +8758,10 @@ namespace DeskPals
             {
                 Rectangle tr = new Rectangle(0, smokeH + roofH * 2 / 5, W0, roofH * 3 / 5 - U);
                 Color sh = night ? Pix.C(0x3A1A12) : Pix.C(0x5E2418);
-                TextRenderer.DrawText(g, title, titleFont, new Rectangle(tr.X + 1, tr.Y + 1, tr.Width, tr.Height), sh, Pix.Mid);
-                TextRenderer.DrawText(g, title, titleFont, new Rectangle(tr.X - 1, tr.Y + 1, tr.Width, tr.Height), sh, Pix.Mid);
-                TextRenderer.DrawText(g, title, titleFont, new Rectangle(tr.X, tr.Y + 2, tr.Width, tr.Height), sh, Pix.Mid);
-                TextRenderer.DrawText(g, title, titleFont, tr, Pix.C(0xFFF3DA), Pix.Mid);
+                PixText.DrawText(g, title, titleFont, new Rectangle(tr.X + 1, tr.Y + 1, tr.Width, tr.Height), sh, Pix.Mid);
+                PixText.DrawText(g, title, titleFont, new Rectangle(tr.X - 1, tr.Y + 1, tr.Width, tr.Height), sh, Pix.Mid);
+                PixText.DrawText(g, title, titleFont, new Rectangle(tr.X, tr.Y + 2, tr.Width, tr.Height), sh, Pix.Mid);
+                PixText.DrawText(g, title, titleFont, tr, Pix.C(0xFFF3DA), Pix.Mid);
             }
             // 窗戶（白天淡藍、晚上亮黃燈）＋花台
             int ww = 7 * U, wy = H0 - botH + 5 * U;
@@ -9061,18 +9075,18 @@ namespace DeskPals
             Steps(g, W0, Sc(68));
             string q = step == 0 ? "選你的公仔" : "怎麼擺？";
             string hint = step == 0 ? "兩櫃原創公仔選一櫃，或用自己的照片做一隻（之後在小屋、選單都能換櫃）" : (mode == "single" ? "選一隻，他會住在右下角的" + ShelfArt.For(lu).MiniName + "裡" : "公仔櫃放在右下角，點格子就叫他們出來");
-            TextRenderer.DrawText(g, q, qF, new Rectangle(0, Sc(100), W0, Sc(30)), Pix.TextC, Pix.Mid);
-            TextRenderer.DrawText(g, hint, subF, new Rectangle(0, Sc(130), W0, Sc(18)), Pix.C(0x9A6338), Pix.Mid);
+            PixText.DrawText(g, q, qF, new Rectangle(0, Sc(100), W0, Sc(30)), Pix.TextC, Pix.Mid);
+            PixText.DrawText(g, hint, subF, new Rectangle(0, Sc(130), W0, Sc(18)), Pix.C(0x9A6338), Pix.Mid);
             if (step == 0)
             {
                 Btn mk = Find("make");
-                if (mk != null && MoreLineups().Length > 0) TextRenderer.DrawText(g, "其他櫃：", btnF, new Rectangle(Sc(32), mk.R.Bottom + Sc(6), Sc(300), Sc(26)), Pix.TextC, Pix.LeftMid);
-                if (statsNote) TextRenderer.DrawText(g, StatsLine, subF, new Rectangle(Sc(30), H0 - Sc(64) - Sc(28), W0 - Sc(60), Sc(22)), Pix.C(0x6A5A48), Pix.Mid);
+                if (mk != null && MoreLineups().Length > 0) PixText.DrawText(g, "其他櫃：", btnF, new Rectangle(Sc(32), mk.R.Bottom + Sc(6), Sc(300), Sc(26)), Pix.TextC, Pix.LeftMid);
+                if (statsNote) PixText.DrawText(g, StatsLine, subF, new Rectangle(Sc(30), H0 - Sc(64) - Sc(28), W0 - Sc(60), Sc(22)), Pix.C(0x6A5A48), Pix.Mid);
             }
             if (step == 1 && mode == "single")
             {
                 Btn first2 = Find("mode:shelf");
-                if (first2 != null) TextRenderer.DrawText(g, "選哪一隻？", btnF, new Rectangle(0, first2.R.Bottom + Sc(6), W0, Sc(26)), Pix.TextC, Pix.Mid);
+                if (first2 != null) PixText.DrawText(g, "選哪一隻？", btnF, new Rectangle(0, first2.R.Bottom + Sc(6), W0, Sc(26)), Pix.TextC, Pix.Mid);
             }
             foreach (Btn b in btns) DrawBtn(g, b);
         }
@@ -9091,7 +9105,7 @@ namespace DeskPals
                 string s = (i + 1) + ". " + names[i];
                 int sw = Pix.TextW(s, subF), cx = x + (pw - sw) / 2;
                 if (i < step) { cx += 3 * U; Pix.Mono(g, Pix.CHECK, Pix.C(0x3F8A30), cx - 7 * U, y + ph / 2 - 3 * U, U); }
-                TextRenderer.DrawText(g, s, subF, new Rectangle(cx, y, sw + 4, ph), i <= step ? Pix.TextC : Pix.Dim, Pix.LeftMid);
+                PixText.DrawText(g, s, subF, new Rectangle(cx, y, sw + 4, ph), i <= step ? Pix.TextC : Pix.Dim, Pix.LeftMid);
             }
         }
 
@@ -9106,7 +9120,7 @@ namespace DeskPals
                 Pix.Round(g, Pix.Ink, bx, by2, s, s, U);
                 Pix.Box(g, b.On ? Pix.C(0x5FB04A) : (hot ? Pix.C(0xFFF3D6) : Pix.C(0xFFFDF7)), bx + U, by2 + U, s - 2 * U, s - 2 * U);
                 if (b.On) Pix.Mono(g, Pix.CHECK, Color.White, bx + 2 * U, by2 + 2 * U, U);
-                TextRenderer.DrawText(g, b.Text, btnF, new Rectangle(bx + s + Sc(10), r.Y, r.Right - bx - s - Sc(10), r.Height), Pix.TextC, Pix.LeftMid);
+                PixText.DrawText(g, b.Text, btnF, new Rectangle(bx + s + Sc(10), r.Y, r.Right - bx - s - Sc(10), r.Height), Pix.TextC, Pix.LeftMid);
                 return;
             }
             if (b.Kind >= 2)
@@ -9122,8 +9136,8 @@ namespace DeskPals
                 int tw = Pix.TextW(b.Text, bf), ax = 7 * U, tx = r.X + (r.Width - tw - (b.Id == "back" || b.Id == "next" ? ax : 0)) / 2, cy = r.Y + (r.Height - 2 * U) / 2;
                 Color tc = b.Enabled ? Pix.TextC : Pix.Dim;
                 if (b.Id == "back") { Arrow(g, tx + U, cy, -1, tc); tx += ax; }
-                TextRenderer.DrawText(g, b.Text, bf, new Rectangle(tx, r.Y, tw + 4, r.Height - 2 * U), tc, Pix.LeftMid);
-                if (b.Id == "next" && step < 1) Arrow(g, tx + tw + 2 * U, cy, 1, tc);
+                PixText.DrawText(g, b.Text, bf, new Rectangle(tx, r.Y, tw + 4, r.Height - 2 * U), tc, Pix.LeftMid);
+                if (b.Id == "next" && step < 1) Arrow(g, tx + tw + 3 * U, cy, 1, tc);
                 return;
             }
             // 卡片：底下一層影子；選到的是金色粗框、右上角綠色勾勾；「做一隻自己的」是暖黃色的主打卡
@@ -9166,8 +9180,8 @@ namespace DeskPals
             int c = Math.Max(2, Math.Min(Sc(5), (r.Height - Sc(18)) / MAKE.Length)), aw = MAKE[0].Length * c, ah = MAKE.Length * c, ix = r.X + Sc(16);
             Pix.Art(g, MAKE, pal, ix, r.Y + (r.Height - ah) / 2, c);
             int tx = ix + aw + Sc(14);
-            TextRenderer.DrawText(g, b.Text, bigF, new Rectangle(tx, r.Y + Sc(8), r.Right - tx - Sc(12), Sc(26)), Pix.TextC, Pix.LeftMid);
-            TextRenderer.DrawText(g, b.Sub, subF, new Rectangle(tx, r.Y + Sc(34), r.Right - tx - Sc(12), r.Height - Sc(38)), Pix.C(0x9A6338), TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+            PixText.DrawText(g, b.Text, bigF, new Rectangle(tx, r.Y + Sc(8), r.Right - tx - Sc(12), Sc(26)), Pix.TextC, Pix.LeftMid);
+            PixText.DrawText(g, b.Sub, subF, new Rectangle(tx, r.Y + Sc(34), r.Right - tx - Sc(12), r.Height - Sc(38)), Pix.C(0x9A6338), TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
         }
 
         void DrawShelfCard(Graphics g, Btn b, string id)
@@ -9185,9 +9199,9 @@ namespace DeskPals
                 g.InterpolationMode = im;
                 textY = r.Y + Sc(14) + ph;
             }
-            TextRenderer.DrawText(g, b.Text, bigF, new Rectangle(r.X, textY, r.Width, Sc(30)), Pix.TextC, Pix.Mid);
-            TextRenderer.DrawText(g, b.Sub, subF, new Rectangle(r.X + Sc(6), textY + Sc(28), r.Width - Sc(12), Sc(38)), Pix.C(0x9A6338), TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);   // 四櫃並排時名單換行，不要被切掉
-            if (b.Note != null) TextRenderer.DrawText(g, b.Note, subF, new Rectangle(r.X + Sc(10), textY + Sc(48), r.Width - Sc(20), r.Bottom - textY - Sc(52)), Pix.C(0x6A5A48), TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);   // 兩櫃主打：一句介紹
+            PixText.DrawText(g, b.Text, bigF, new Rectangle(r.X, textY, r.Width, Sc(30)), Pix.TextC, Pix.Mid);
+            PixText.DrawText(g, b.Sub, subF, new Rectangle(r.X + Sc(6), textY + Sc(28), r.Width - Sc(12), Sc(38)), Pix.C(0x9A6338), TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);   // 四櫃並排時名單換行，不要被切掉
+            if (b.Note != null) PixText.DrawText(g, b.Note, subF, new Rectangle(r.X + Sc(10), textY + Sc(48), r.Width - Sc(20), r.Bottom - textY - Sc(52)), Pix.C(0x6A5A48), TextFormatFlags.HorizontalCenter | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);   // 兩櫃主打：一句介紹
         }
 
         void DrawModeCard(Graphics g, Btn b)
@@ -9224,8 +9238,8 @@ namespace DeskPals
                 Pix.Art(g, ShelfForm.EGG, pal, ix + (iconW - ew) / 2, r.Y + (r.Height - eh) / 2, c);
             }
             int tx = ix + iconW + Sc(8);
-            TextRenderer.DrawText(g, b.Text, bigF, new Rectangle(tx, r.Y + r.Height / 2 - Sc(30), r.Right - tx - Sc(8), Sc(30)), Pix.TextC, Pix.LeftMid);
-            TextRenderer.DrawText(g, b.Sub, subF, new Rectangle(tx, r.Y + r.Height / 2 + Sc(2), r.Right - tx - Sc(8), Sc(40)), Pix.C(0x9A6338), TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+            PixText.DrawText(g, b.Text, bigF, new Rectangle(tx, r.Y + r.Height / 2 - Sc(30), r.Right - tx - Sc(8), Sc(30)), Pix.TextC, Pix.LeftMid);
+            PixText.DrawText(g, b.Sub, subF, new Rectangle(tx, r.Y + r.Height / 2 + Sc(2), r.Right - tx - Sc(8), Sc(40)), Pix.C(0x9A6338), TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
         }
 
         void DrawPetCard(Graphics g, Btn b)
@@ -9239,7 +9253,7 @@ namespace DeskPals
                 if (pw > r.Width - Sc(8)) { pw = r.Width - Sc(8); ph = pic.Height * pw / pic.Width; }
                 g.DrawImage(pic, r.X + (r.Width - pw) / 2, r.Y + Sc(6) + (avail - ph), pw, ph);
             }
-            TextRenderer.DrawText(g, b.Text, btnF, new Rectangle(r.X, r.Bottom - nameH - Sc(4), r.Width, nameH), Pix.TextC, Pix.Mid | TextFormatFlags.EndEllipsis);
+            PixText.DrawText(g, b.Text, btnF, new Rectangle(r.X, r.Bottom - nameH - Sc(4), r.Width, nameH), Pix.TextC, Pix.Mid | TextFormatFlags.EndEllipsis);
         }
     }
 }
