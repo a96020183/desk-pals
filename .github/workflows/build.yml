@@ -373,6 +373,16 @@ jobs:
           "$RUNNER_TEMP/venv/bin/pip" install --quiet pillow
           [ -n "$MAC_BUNDLE_ID" ] || unset MAC_BUNDLE_ID
           PYTHON="$RUNNER_TEMP/venv/bin/python" packaging/mac/build_app.sh dist
+      # 公開版的通用版（macOS）vsix：附上 build_app.sh 剛編好的 universal binary（build/mac/DeskPals），不帶 DeskPals.swift 原始碼；
+      # 擴充套件裝了之後直接跑這支 binary，不再在使用者電腦上 swiftc 即時編譯。Windows 專用的 win32 vsix 在 windows job 打。
+      - name: Build the macOS (universal) vsix with the bundled compiled binary (no Swift source)
+        env:
+          GA4_MEASUREMENT_ID: ${{ vars.GA4_MEASUREMENT_ID }}
+          GA4_API_SECRET: ${{ secrets.GA4_API_SECRET }}
+        run: |
+          test -f build/mac/DeskPals || { echo "no compiled macOS binary at build/mac/DeskPals"; exit 1; }
+          python3 -I build_vsix.py --public --mac-bin build/mac/DeskPals --out dist
+          ls -l dist/desk-pals-*.vsix
       - name: Check the DMG and smoke-test the bundled universal binary
         run: |
           set -e
@@ -472,7 +482,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: desk-pals-mac
-          path: dist/DeskPals-*.dmg
+          path: |
+            dist/DeskPals-*.dmg
+            dist/desk-pals-*.vsix
 
   windows:
     runs-on: windows-latest
@@ -694,14 +706,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "build.ps1 (personal) failed" }
           if ($pfx) { Remove-Item $pfx }
           Get-ChildItem dist, dist-personal | Format-Table Directory, Name, Length
-      # vsix 要在 exe 編好之後才打：通用版（Mac 用，不帶 exe）＋ Windows 專用版（TargetPlatform win32-x64／arm64，附剛編好的 DeskPals.exe：
-      # 公開版附公開版的 exe、個人版附個人版的；擴充套件直接執行它，不再用 PowerShell 即時編譯）
-      - name: Build vsix (universal + win32 with the bundled DeskPals.exe; public → dist, personal → dist-personal)
+      # vsix 要在 exe 編好之後才打：Windows 專用版（TargetPlatform win32-x64／arm64，附剛編好的 DeskPals.exe：公開版附公開版的 exe、個人版附個人版的；
+      # 擴充套件直接執行它，不再用 PowerShell 即時編譯，且這種 vsix 不帶任何 C# 原始碼）。
+      # 公開版的通用版（macOS）vsix 改在 mac job 打（要附編好的 macOS binary，不帶 .swift 原始碼）；個人版的通用版（自己用）還是帶原始碼在這裡打。
+      - name: Build vsix (win32 with the bundled DeskPals.exe; public → dist, personal → dist-personal; personal universal too)
         env:
           GA4_MEASUREMENT_ID: ${{ vars.GA4_MEASUREMENT_ID }}
           GA4_API_SECRET: ${{ secrets.GA4_API_SECRET }}
         run: |
-          python -I build_vsix.py --public
           python -I build_vsix.py --public --target win32-x64,win32-arm64 --exe dist/DeskPals.exe
           python -I build_vsix.py --personal --out dist-personal
           python -I build_vsix.py --personal --target win32-x64 --exe dist-personal/DeskPals-personal.exe --out dist-personal

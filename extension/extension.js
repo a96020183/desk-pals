@@ -570,6 +570,8 @@ class Desktop {
 		const src = path.join(this.context.extensionPath, "desktop");
 		fs.mkdirSync(this.home, { recursive: true });
 		const sa = this.standalone();
+		// Mac：vsix 附了編好的 DeskPals（universal binary）就直接帶過去跑，不帶 .swift、不在使用者電腦上 swiftc 即時編譯
+		const macBin = process.platform === "darwin" && fs.existsSync(path.join(src, "DeskPals"));
 		// Windows 有附 exe：只放 exe（＋hooks／CI 小腳本）；放不上去（例如被防毒軟體拿走）才退回 PowerShell 版
 		let fresh = false;
 		this.useExe = false;
@@ -580,6 +582,8 @@ class Desktop {
 		const files = sa || this.useExe ? ["claude-hook.js", "ci-watch.js"]   // 獨立版：只放 hooks／CI 用的小腳本，桌面版本體和開機啟動都交給它
 			: this.win
 			? fs.readdirSync(src).filter((f) => /^DeskPals(\.[A-Za-z]+)?\.cs$/.test(f)).concat(["desk-pals.ps1", "claude-hook.js", "ci-watch.js"])
+			: macBin
+			? ["DeskPals", this.sh, "claude-hook.js", "ci-watch.js"]   // 附了編好的 binary：帶 binary，不帶 .swift
 			: ["DeskPals.swift", this.sh, "claude-hook.js", "ci-watch.js"];
 		const copy = (f, dir) => {
 			const from = path.join(src, f), to = path.join(dir, f);
@@ -600,7 +604,10 @@ class Desktop {
 			}
 		};
 		try { fs.mkdirSync(path.join(this.home, "pals"), { recursive: true }); copyDir("pals"); } catch (e) { console.error("deskpals pals", e); }
-		if (process.platform === "darwin") fs.chmodSync(path.join(this.home, this.sh), 0o755);
+		if (process.platform === "darwin") {
+			fs.chmodSync(path.join(this.home, this.sh), 0o755);
+			if (macBin) { try { fs.chmodSync(path.join(this.home, "DeskPals"), 0o755); } catch (e) { console.error("deskpals mac binary chmod", e); } }
+		}
 		this.installAutostart();
 		return false;
 	}

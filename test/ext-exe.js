@@ -182,8 +182,11 @@ async function main() {
 		// ---------- 一、PowerShell 版 → exe 版 ----------
 		console.log("== 1. upgrade from the PowerShell version (old one running)");
 		const src = path.join(extDir, "desktop");
+		// win32 vsix 已不帶 C# 原始碼（desktop/*.cs、desk-pals.ps1）；要擺一份「舊的 PowerShell 版安裝」就從 repo 的桌面原始碼補
+		const legacySrc = fs.existsSync(path.join(src, "desk-pals.ps1")) ? src : path.join(__dirname, "..", "extension", "desktop");
 		fs.mkdirSync(home, { recursive: true });
-		for (const f of fs.readdirSync(src)) if (/^DeskPals(\.[A-Za-z]+)?\.cs$/.test(f) || f === "desk-pals.ps1" || f === "claude-hook.js" || f === "ci-watch.js") fs.copyFileSync(path.join(src, f), path.join(home, f));
+		for (const f of fs.readdirSync(src)) if (f === "claude-hook.js" || f === "ci-watch.js") fs.copyFileSync(path.join(src, f), path.join(home, f));
+		for (const f of fs.readdirSync(legacySrc)) if (/^DeskPals(\.[A-Za-z]+)?\.cs$/.test(f) || f === "desk-pals.ps1") fs.copyFileSync(path.join(legacySrc, f), path.join(home, f));
 		copyDir(path.join(src, "pals"), path.join(home, "pals"));
 		const data = { "profile.txt": "done", "mode.txt": "shelf", "lineup.txt": "original", "bond-duoduo.txt": "7", "keep-me.txt": "使用者的資料" };
 		for (const [f, v] of Object.entries(data)) fs.writeFileSync(path.join(home, f), v);
@@ -256,6 +259,13 @@ async function main() {
 		const env4 = envFor(W4, pipe4);
 		const ext4 = path.join(W, "ext4");
 		copyDir(extDir, ext4);
+		// 附了 exe 的 win32 vsix 已不帶 C# 原始碼（desktop/*.cs、desk-pals.ps1，見 build_vsix.py）；
+		// 「從原始碼跑、退回 desk-pals.ps1」是通用版 vsix 在 Windows 上走的路，用 repo 的原始碼重建來驗這條退路
+		const srcDesk = path.join(__dirname, "..", "extension", "desktop");
+		const ext4Desk = path.join(ext4, "desktop");
+		if (!fs.existsSync(path.join(ext4Desk, "desk-pals.ps1")) && fs.existsSync(srcDesk)) {
+			for (const f of fs.readdirSync(srcDesk)) if (/^DeskPals(\.[A-Za-z]+)?\.cs$/.test(f) || f === "desk-pals.ps1") fs.copyFileSync(path.join(srcDesk, f), path.join(ext4Desk, f));
+		}
 		fs.unlinkSync(path.join(ext4, "desktop", "DeskPals.exe"));
 		const s4 = runSession(ext4, env4);
 		check(s4.connected && !s4.useExe, "connected through desk-pals.ps1");
