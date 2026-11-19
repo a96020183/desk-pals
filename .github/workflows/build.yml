@@ -847,7 +847,10 @@ jobs:
           $ErrorActionPreference = $eap; $global:LASTEXITCODE = 0
           $oldSetup = Join-Path $old "DeskPals-Setup-0.10.4.exe"
           if (-not (Test-Path $oldSetup)) { $oldSetup = "" }
-          powershell -NoProfile -ExecutionPolicy Bypass -File .github\test-installer.ps1 -Setup $setup -OldSetup "$oldSetup"
+          # 空字串經過 powershell -File 會變成「沒給值」：沒有舊安裝檔就不傳 -OldSetup
+          $instArgs = @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ".github\test-installer.ps1", "-Setup", $setup)
+          if ($oldSetup) { $instArgs += @("-OldSetup", $oldSetup) }
+          & powershell @instArgs
           if ($LASTEXITCODE -ne 0) { throw "installer test failed" }
       # 上面的安裝程式、獨立版都是真的裝在 runner 上（全新安裝）：不能留下舊名字的資料夾、開機捷徑、紀錄檔
       - name: Real fresh install left nothing with the old name
